@@ -44,6 +44,26 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Context_estimate_counts_only_the_selected_bounded_source_files()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "src"));
+        File.WriteAllText(Path.Combine(_root, "src", "a.cs"), new string('a', 40));
+        File.WriteAllText(Path.Combine(_root, "src", "b.cs"), new string('b', 120));
+
+        var estimate = Service.EstimateContextTokens([Path.Combine("src", "a.cs")]);
+
+        Assert.Equal(16, estimate); // (40 file bytes + 8 path characters + 16 framing characters) / 4.
+    }
+
+    [Fact]
+    public void Context_estimate_excludes_secret_files_even_when_selected()
+    {
+        File.WriteAllText(Path.Combine(_root, ".env"), "API_KEY=secret-value");
+
+        Assert.Equal(0, Service.EstimateContextTokens([".env"]));
+    }
+
+    [Fact]
     public async Task Reads_files_and_creates_a_recoverable_checkpoint_before_replacement()
     {
         var relative = "Program.cs";

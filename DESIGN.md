@@ -24,7 +24,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Dark/light appearance with persistent preference | Done |
 | Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
 | Per-conversation context size | Choices from Model default through model's configured max, sent as Ollama `num_ctx` |
-| Context use visibility | Last request's prompt/history token count from Ollama and selected context limit |
+| Context use visibility | Last request's prompt/history token count from Ollama and selected context limit; bounded source-context estimate shown before sending |
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and title search | Done |
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
@@ -58,7 +58,8 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - [x] Project instructions persisted locally and applied to project conversations; chat context uses the same safe file boundary. Reusable context files and user-selected source lists remain.
 - [x] Deliberately select project-relative files for chat context; if none are selected, use the existing bounded safe excerpt.
 - [x] Project file browser with filtering, safe read-only previews, and direct add-to-context; richer tree navigation and file diffs remain.
-- Context-budget display, exclusions, and relevant-file search so large repositories fit smaller local context windows.
+- [x] Approximate source-context token count versus the selected model context limit, with tooltip distinguishing it from Ollama's actual prompt count.
+- Configurable project exclusions and relevant-file search so large repositories fit smaller local context windows.
 - Attach text files, images, and PDFs when the selected local model supports them; clearly show unsupported inputs.
 
 ### 2. Coding agent and review loop — in progress

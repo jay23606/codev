@@ -1179,7 +1179,7 @@ public partial class MainWindow : Window
     private async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken, IReadOnlyList<string>? selectedFiles = null)
     {
         var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { ".cs", ".xaml", ".csproj", ".sln", ".md", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets" };
+        { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
         var fileService = new WorkspaceFileService(root);
         var output = new StringBuilder("Selected project files (limited read-only excerpts):\n");
         var count = 0;
@@ -1260,6 +1260,7 @@ public partial class MainWindow : Window
         var maxContext = MaxContextForModel(model);
         if (_active.NumCtx > maxContext) _active.NumCtx = 0;
         RefreshContextPicker(_active);
+        UpdateContextBudgetLabel(_active);
         _ = SaveAsync();
     }
 
@@ -1267,6 +1268,7 @@ public partial class MainWindow : Window
     {
         if (_updatingContext || _active is null || ContextPicker.SelectedValue is not int context) return;
         _active.NumCtx = context;
+        UpdateContextBudgetLabel(_active);
         _ = SaveAsync();
     }
 
@@ -1375,6 +1377,30 @@ public partial class MainWindow : Window
         ContextLabel.ToolTip = conversation.ProjectPath is null
             ? null
             : conversation.ProjectPath + (conversation.ContextFiles.Count == 0 ? "\nUsing bounded source excerpts" : "\n" + string.Join("\n", conversation.ContextFiles));
+        UpdateContextBudgetLabel(conversation);
+    }
+
+    private void UpdateContextBudgetLabel(Conversation conversation)
+    {
+        if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !Directory.Exists(conversation.ProjectPath))
+        {
+            ContextEstimateLabel.Text = "";
+            ContextEstimateLabel.ToolTip = null;
+            return;
+        }
+
+        try
+        {
+            var estimate = new WorkspaceFileService(conversation.ProjectPath).EstimateContextTokens(conversation.ContextFiles);
+            var limit = conversation.NumCtx > 0 ? conversation.NumCtx : MaxContextForModel(conversation.Model);
+            ContextEstimateLabel.Text = $"≈{FormatTokenCount(estimate)} files / {FormatContextLimit(limit)}";
+            ContextEstimateLabel.ToolTip = "Approximate tokens in the bounded project source excerpts only. This excludes chat history and instructions; Ollama's reported prompt count above includes the full request.";
+        }
+        catch (Exception ex)
+        {
+            ContextEstimateLabel.Text = "";
+            ContextEstimateLabel.ToolTip = "Could not estimate project context: " + ex.Message;
+        }
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)

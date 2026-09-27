@@ -96,6 +96,33 @@ public sealed class WorkspaceFileService
         return results;
     }
 
+    /// <summary>Estimates source-file tokens using bounded sizes; it does not include chat history or prompt instructions.</summary>
+    public int EstimateContextTokens(IReadOnlyList<string>? selectedFiles = null)
+    {
+        const int maxFiles = 24;
+        const int maxChars = 32_000;
+        const int maxFileChars = 2_400;
+        var files = selectedFiles is { Count: > 0 } ? selectedFiles : ListFiles(maxEntries: 300);
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
+        var estimatedChars = 0;
+        var fileCount = 0;
+        foreach (var relative in files)
+        {
+            if (fileCount >= maxFiles || estimatedChars >= maxChars) break;
+            if (!allowed.Contains(Path.GetExtension(relative))) continue;
+            try
+            {
+                var info = new FileInfo(ResolvePath(relative));
+                if (!info.Exists) continue;
+                estimatedChars = Math.Min(maxChars, estimatedChars + Math.Min(maxFileChars, (int)Math.Min(int.MaxValue, info.Length)) + relative.Length + 16);
+                fileCount++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        }
+        return (estimatedChars + 3) / 4;
+    }
+
     public async Task<string> ReadFileAsync(string relativePath, CancellationToken cancellationToken = default)
     {
         return (await ReadFileSnapshotAsync(relativePath, cancellationToken)).Content;
