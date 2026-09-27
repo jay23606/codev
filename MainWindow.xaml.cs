@@ -381,8 +381,11 @@ public partial class MainWindow : Window
             openItem.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = project.Path, UseShellExecute = true });
             var instructionsItem = new MenuItem { Header = "Edit project instructions…" };
             instructionsItem.Click += async (_, _) => await EditProjectInstructionsAsync(project);
+            var browseItem = new MenuItem { Header = "Browse project files…" };
+            browseItem.Click += (_, _) => BrowseProjectFiles(project);
             menu.Items.Add(pinItem);
             menu.Items.Add(instructionsItem);
+            menu.Items.Add(browseItem);
             menu.Items.Add(openItem);
             button.ContextMenu = menu;
         }
@@ -459,6 +462,67 @@ public partial class MainWindow : Window
         Grid.SetRow(buttons, 2); layout.Children.Add(buttons);
         editor.Content = layout;
         if (editor.ShowDialog() == true) await SaveProjectsAsync();
+    }
+
+    private void BrowseProjectFiles(WorkspaceProject project)
+    {
+        try
+        {
+            var service = new WorkspaceFileService(project.Path);
+            var files = service.ListFiles(maxEntries: 500).ToArray();
+            var dialog = new Window
+            {
+                Title = $"Files · {project.Name}", Width = 980, Height = 660,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+                Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+                ResizeMode = ResizeMode.CanResize
+            };
+            var layout = new Grid { Margin = new Thickness(16) };
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+            header.Children.Add(new TextBlock { Text = project.Path, FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 0, 7) });
+            var search = new TextBox { ToolTip = "Filter project files", Padding = new Thickness(8, 6, 8, 6), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1) };
+            header.Children.Add(search);
+            Grid.SetColumnSpan(header, 2); layout.Children.Add(header);
+            var fileList = new ListBox { ItemsSource = files, Background = ThemeBrush("MainSurfaceAltBrush"), Foreground = ThemeBrush("MainTextBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(4) };
+            Grid.SetRow(fileList, 1); layout.Children.Add(fileList);
+            var preview = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Consolas"), FontSize = 12, Padding = new Thickness(10), Margin = new Thickness(12, 0, 0, 0), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), BorderThickness = new Thickness(1), ToolTip = "Read-only file preview" };
+            Grid.SetRow(preview, 1); Grid.SetColumn(preview, 1); layout.Children.Add(preview);
+            search.TextChanged += (_, _) => fileList.ItemsSource = files.Where(path => path.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+            fileList.SelectionChanged += async (_, _) =>
+            {
+                if (fileList.SelectedItem is not string selected) { preview.Clear(); return; }
+                try { preview.Text = await service.ReadFileAsync(selected); }
+                catch (Exception ex) { preview.Text = $"Could not preview this file.\n\n{ex.Message}"; }
+            };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            var add = new Button { Content = "Add selected to chat context", Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0), IsEnabled = false };
+            add.Click += async (_, _) =>
+            {
+                if (fileList.SelectedItem is not string selected || _active is null || !SameWorkspace(_active.ProjectPath, project.Path))
+                {
+                    MessageBox.Show(dialog, "Open a conversation in this project before adding context files.", "Project conversation required", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                if (!_active.ContextFiles.Contains(selected, StringComparer.OrdinalIgnoreCase)) _active.ContextFiles.Add(selected);
+                UpdateContextLabel(_active);
+                await SaveAsync();
+            };
+            fileList.SelectionChanged += (_, _) => add.IsEnabled = fileList.SelectedItem is string;
+            var close = new Button { Content = "Close", Padding = new Thickness(13, 7, 13, 7), IsCancel = true };
+            buttons.Children.Add(add); buttons.Children.Add(close);
+            Grid.SetRow(buttons, 2); Grid.SetColumnSpan(buttons, 2); layout.Children.Add(buttons);
+            dialog.Content = layout;
+            dialog.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not browse this project folder.\n\n{ex.Message}", "Project files", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void FillConversationList(ItemsControl list, IEnumerable<Conversation> conversations)
