@@ -34,7 +34,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, and current agent tool status implemented; richer plans, resume, and retry remain |
 | Truly parallel agents, tabs, and isolated worktrees | Not implemented |
 | Git status, branch, staging, and review workflow | Not implemented |
-| Markdown/code rendering, attachments, and session export | Not implemented |
+| Markdown/code rendering, attachments, and session export | Basic Markdown and fenced code rendering with clickable web links and one-click code copying; file/image/PDF attachments and export pending |
 | Skills, MCP tools, recurring tasks, and notifications | Not implemented |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
@@ -84,7 +84,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 5. Everyday assistant usability
 
-- Markdown, syntax-highlighted code, tables, and copy-code controls.
+- [x] Markdown headings, emphasis, lists, quotes, inline code, safe clickable HTTP(S) links, and fenced code blocks with Copy; syntax highlighting and tables remain.
 - [x] Read-only Plan mode, stop generation while keeping partial response, plus visible current agent-tool status. Retry, regenerate, edit/resend a prompt, and branch from an earlier turn remain.
 - [x] Core shortcuts: Ctrl+N new conversation, Ctrl+F search, F2 rename, Esc stop. Accessible focus order, adjustable text size, and broader shortcut customization remain.
 - [x] Conversation rename, archive, restore, and explicit permanent delete from the archive view; export/import and local backup controls remain.

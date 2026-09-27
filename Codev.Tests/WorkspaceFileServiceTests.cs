@@ -1,4 +1,8 @@
 using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Media;
 
 namespace Codev.Tests;
 
@@ -120,6 +124,41 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         var outside = Path.Combine(_root, "outside.bak");
         await File.WriteAllTextAsync(outside, "not a checkpoint");
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service.ReadCheckpointAsync("Program.cs", Guid.NewGuid(), outside));
+    }
+
+    [Fact]
+    public void Renders_markdown_fences_and_copy_control_as_separate_blocks()
+    {
+        var hasHeading = false;
+        var hasCopy = false;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var rendered = MarkdownRenderer.Render("# Heading\n\n`inline`\n\n```js\nconst x = 1;\n```", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral);
+                hasHeading = rendered.Children.OfType<TextBlock>().Any(block => block.Inlines.OfType<Run>().Any(run => run.Text.Contains("Heading", StringComparison.Ordinal)));
+                hasCopy = rendered.Children.OfType<Border>().Any(border => FindChild<Button>(border)?.Content?.ToString() == "Copy");
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start(); thread.Join();
+        if (failure is not null) throw failure;
+        Assert.True(hasHeading);
+        Assert.True(hasCopy);
+    }
+
+    private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match) return match;
+            var nested = FindChild<T>(child);
+            if (nested is not null) return nested;
+        }
+        return null;
     }
 
     [Fact]

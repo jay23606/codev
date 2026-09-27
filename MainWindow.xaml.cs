@@ -274,7 +274,9 @@ public partial class MainWindow : Window
         {
             var message = conversation.Messages[messageIndex];
             var isUser = message.Role == "user";
-            var body = new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 23, Foreground = ThemeBrush("MessageTextBrush") };
+            FrameworkElement body = isUser
+                ? new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 23, Foreground = ThemeBrush("MessageTextBrush") }
+                : MarkdownRenderer.Render(message.Content, ThemeBrush("MessageTextBrush"), ThemeBrush("MutedTextBrush"), ThemeBrush("MessageBubbleBrush"), ThemeBrush("WelcomeAccentBrush"));
             var content = new StackPanel();
             content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
