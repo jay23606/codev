@@ -25,6 +25,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and title search | Done |
+| Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
 | Choose a project folder and include bounded source/config excerpts | Safe, bounded excerpts; Code task mode can list/read/search supported text files |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and safe project context implemented; reusable knowledge files pending |
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
@@ -86,7 +87,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - Markdown, syntax-highlighted code, tables, and copy-code controls.
 - [x] Read-only Plan mode, stop generation while keeping partial response, plus visible current agent-tool status. Retry, regenerate, edit/resend a prompt, and branch from an earlier turn remain.
 - Keyboard shortcuts, accessible focus order, adjustable text size, and clear empty/loading/error states.
-- Conversation rename, archive, restore, export/import, and local backup controls.
+- [x] Conversation rename, archive, restore, and explicit permanent delete from the archive view; export/import and local backup controls remain.
 - Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
 
 ### 6. Extensibility and automation

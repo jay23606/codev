@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private bool _loadingModel;
     private bool _codeTaskMode;
     private bool _planMode;
+    private bool _showArchived;
     private Guid? _codeTaskConversationId;
     private bool _isDarkTheme = true;
 
@@ -283,7 +284,7 @@ public partial class MainWindow : Window
     private void RefreshConversationLists()
     {
         FillProjectsList();
-        var inWorkspace = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path));
+        var inWorkspace = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path) && c.IsArchived == _showArchived);
         FillConversationList(PinnedList, inWorkspace.Where(c => c.IsPinned).OrderByDescending(c => c.UpdatedAt));
         var search = SearchBox.Text?.Trim();
         var recent = inWorkspace.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt);
@@ -341,8 +342,10 @@ public partial class MainWindow : Window
     {
         _activeProject = project;
         if (project is not null) project.LastOpenedAt = DateTimeOffset.Now;
+        _showArchived = false;
+        ArchiveViewButton.Content = "◷  Show archived";
         RefreshConversationLists();
-        var latest = _conversations.Where(c => SameWorkspace(c.ProjectPath, project?.Path)).OrderByDescending(c => c.UpdatedAt).FirstOrDefault();
+        var latest = _conversations.Where(c => !c.IsArchived && SameWorkspace(c.ProjectPath, project?.Path)).OrderByDescending(c => c.UpdatedAt).FirstOrDefault();
         if (latest is not null) SelectConversation(latest);
         else
         {
@@ -422,11 +425,107 @@ public partial class MainWindow : Window
             var menu = new ContextMenu();
             var pin = new MenuItem { Header = item.IsPinned ? "Unpin conversation" : "Pin conversation" };
             pin.Click += (_, _) => { item.IsPinned = !item.IsPinned; RefreshConversationLists(); _ = SaveAsync(); };
+            var rename = new MenuItem { Header = "Rename…" };
+            rename.Click += async (_, _) => await RenameConversationAsync(item);
+            var archive = new MenuItem { Header = item.IsArchived ? "Restore to conversations" : "Archive conversation" };
+            archive.Click += async (_, _) => await SetConversationArchivedAsync(item, !item.IsArchived);
             menu.Items.Add(pin);
+            menu.Items.Add(rename);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(archive);
+            if (item.IsArchived)
+            {
+                var delete = new MenuItem { Header = "Delete permanently…" };
+                delete.Click += async (_, _) => await DeleteConversationAsync(item);
+                menu.Items.Add(delete);
+            }
             button.ContextMenu = menu;
             list.Items.Add(button);
         }
         if (list.Items.Count == 0) list.Items.Add(new TextBlock { Text = "Nothing here yet", FontSize = 11, Foreground = ThemeBrush("SidebarMutedBrush"), Margin = new Thickness(12, 3, 0, 3) });
+    }
+
+    private void ToggleArchiveView_Click(object sender, RoutedEventArgs e)
+    {
+        var nextViewIsArchived = !_showArchived;
+        var available = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path) && c.IsArchived == nextViewIsArchived).ToList();
+        if (available.Count == 0)
+        {
+            MessageBox.Show(this, nextViewIsArchived ? "There are no archived conversations in this project." : "There are no active conversations in this project.", "Conversations", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _showArchived = nextViewIsArchived;
+        ArchiveViewButton.Content = _showArchived ? "←  Show active chats" : "◷  Show archived";
+        SelectConversation(available.OrderByDescending(c => c.UpdatedAt).First());
+    }
+
+    private async Task RenameConversationAsync(Conversation conversation)
+    {
+        var dialog = new Window { Title = "Rename conversation", Width = 460, Height = 170, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.NoResize };
+        var layout = new DockPanel { Margin = new Thickness(18) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Cancel", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var save = new Button { Content = "Save name", Padding = new Thickness(12, 6, 12, 6), IsDefault = true };
+        buttons.Children.Add(cancel); buttons.Children.Add(save); DockPanel.SetDock(buttons, Dock.Bottom); layout.Children.Add(buttons);
+        var input = new TextBox { Text = conversation.Title, Margin = new Thickness(0, 0, 0, 12), Padding = new Thickness(9, 7, 9, 7), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), VerticalContentAlignment = VerticalAlignment.Center };
+        layout.Children.Add(input);
+        save.Click += (_, _) => { if (string.IsNullOrWhiteSpace(input.Text)) return; conversation.Title = input.Text.Trim(); dialog.DialogResult = true; dialog.Close(); };
+        dialog.Content = layout;
+        if (dialog.ShowDialog() == true)
+        {
+            if (ReferenceEquals(_active, conversation)) ConversationTitle.Text = conversation.Title;
+            conversation.UpdatedAt = DateTimeOffset.Now;
+            RefreshConversationLists();
+            await SaveAsync();
+        }
+    }
+
+    private async Task SetConversationArchivedAsync(Conversation conversation, bool archived)
+    {
+        conversation.IsArchived = archived;
+        conversation.UpdatedAt = DateTimeOffset.Now;
+        if (ReferenceEquals(_active, conversation))
+        {
+            if (!archived && _showArchived)
+            {
+                _showArchived = false;
+                ArchiveViewButton.Content = "◷  Show archived";
+            }
+            var next = _conversations.Where(c => !ReferenceEquals(c, conversation) && SameWorkspace(c.ProjectPath, _activeProject?.Path) && c.IsArchived == _showArchived).OrderByDescending(c => c.UpdatedAt).FirstOrDefault();
+            if (next is not null) SelectConversation(next);
+            else if (archived)
+            {
+                _showArchived = false;
+                ArchiveViewButton.Content = "◷  Show archived";
+                NewChat_Click(this, new RoutedEventArgs());
+            }
+            else SelectConversation(conversation);
+        }
+        RefreshConversationLists();
+        await SaveAsync();
+    }
+
+    private async Task DeleteConversationAsync(Conversation conversation)
+    {
+        var answer = MessageBox.Show(this, $"Permanently delete ‘{conversation.Title}’, its history, and its local file checkpoints?", "Delete conversation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+        var wasActive = ReferenceEquals(_active, conversation);
+        _conversations.Remove(conversation);
+        var checkpointDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversation.Id.ToString("N"));
+        try { if (Directory.Exists(checkpointDirectory)) Directory.Delete(checkpointDirectory, recursive: true); } catch { }
+        if (wasActive)
+        {
+            var next = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path) && c.IsArchived == _showArchived).OrderByDescending(c => c.UpdatedAt).FirstOrDefault();
+            if (next is not null) SelectConversation(next);
+            else
+            {
+                _showArchived = false;
+                ArchiveViewButton.Content = "◷  Show archived";
+                NewChat_Click(this, new RoutedEventArgs());
+            }
+        }
+        RefreshConversationLists();
+        await SaveAsync();
     }
 
     private async void Send_Click(object sender, RoutedEventArgs e)
@@ -928,6 +1027,7 @@ public sealed class Conversation
     public string Title { get; set; } = "";
     public string Model { get; set; } = "devstral-small-2-64k";
     public bool IsPinned { get; set; }
+    public bool IsArchived { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public string? ProjectPath { get; set; }
     public List<ChatMessage> Messages { get; set; } = [];
