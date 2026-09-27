@@ -781,6 +781,11 @@ public partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(line)) continue;
             using var json = JsonDocument.Parse(line);
             if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
+            if (json.RootElement.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
+            {
+                conversation.LastPromptTokens = promptTokens;
+                UpdateContextUsage(conversation);
+            }
             if (json.RootElement.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var chunk))
             {
                 output.Append(chunk.GetString());
@@ -812,6 +817,11 @@ public partial class MainWindow : Window
             response.EnsureSuccessStatusCode();
             using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
             if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
+            if (json.RootElement.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
+            {
+                conversation.LastPromptTokens = promptTokens;
+                UpdateContextUsage(conversation);
+            }
             var message = json.RootElement.GetProperty("message");
             var text = message.TryGetProperty("content", out var contentElement) ? contentElement.GetString() ?? "" : "";
             var calls = message.TryGetProperty("tool_calls", out var callsElement) && callsElement.ValueKind == JsonValueKind.Array
@@ -1140,6 +1150,7 @@ public partial class MainWindow : Window
         ContextPicker.SelectedValue = conversation?.NumCtx ?? 0;
         if (ContextPicker.SelectedValue is null) ContextPicker.SelectedValue = 0;
         _updatingContext = false;
+        if (conversation is not null) UpdateContextUsage(conversation);
     }
 
     private int MaxContextForModel(string model)
@@ -1148,6 +1159,19 @@ public partial class MainWindow : Window
         if (option?.DisplayName.StartsWith("Qwen3-Coder-Next", StringComparison.Ordinal) == true || IsSameModel(RemoveLatestTag(model), "qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l", "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L")) return 24_576;
         return 65_536;
     }
+
+    private void UpdateContextUsage(Conversation conversation)
+    {
+        if (!ReferenceEquals(_active, conversation)) return;
+        var limit = conversation.NumCtx > 0 ? conversation.NumCtx : MaxContextForModel(conversation.Model);
+        ContextUsageLabel.Text = conversation.LastPromptTokens > 0 ? $"{FormatTokenCount(conversation.LastPromptTokens)} / {FormatContextLimit(limit)}" : "";
+        ContextUsageLabel.ToolTip = conversation.LastPromptTokens > 0
+            ? "Latest prompt and conversation history token count reported by Ollama. The denominator is the selected request context size."
+            : "Ollama reports context use after the first response.";
+    }
+
+    private static string FormatTokenCount(int tokens) => tokens >= 1000 ? $"{tokens / 1000d:0.#}k" : tokens.ToString();
+    private static string FormatContextLimit(int tokens) => $"{tokens / 1024d:0.#}K";
 
     private void SearchFocus_Click(object sender, RoutedEventArgs e)
     {
@@ -1260,6 +1284,7 @@ public sealed class Conversation
     public string Title { get; set; } = "";
     public string Model { get; set; } = "devstral-small-2-64k";
     public int NumCtx { get; set; }
+    public int LastPromptTokens { get; set; }
     public bool IsPinned { get; set; }
     public bool IsArchived { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;

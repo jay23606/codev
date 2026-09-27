@@ -24,6 +24,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Dark/light appearance with persistent preference | Done |
 | Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
 | Per-conversation context size | Choices from Model default through model's configured max, sent as Ollama `num_ctx` |
+| Context use visibility | Last request's prompt/history token count from Ollama and selected context limit |
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and title search | Done |
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
