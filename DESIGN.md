@@ -25,7 +25,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and title search | Done |
-| Choose a project folder and include bounded source/config excerpts | Basic read-only context only |
+| Choose a project folder and include bounded source/config excerpts | Safe, bounded excerpts; Code task mode can list/read/search supported text files |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and safe project context implemented; reusable knowledge files pending |
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed replacement of existing files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |

@@ -123,15 +123,18 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
-    public void Hides_secret_files_from_both_path_resolution_and_project_listing()
+    public async Task Hides_secret_and_binary_files_from_agent_access_and_project_listing()
     {
         File.WriteAllText(Path.Combine(_root, ".env"), "TOKEN=do-not-read");
         File.WriteAllText(Path.Combine(_root, "app.cs"), "class App {}");
+        File.WriteAllBytes(Path.Combine(_root, "diagram.png"), [0, 1, 2, 3]);
         var service = Service;
 
         Assert.Throws<UnauthorizedAccessException>(() => service.ResolvePath(".env"));
         Assert.Contains("app.cs", service.ListFiles());
         Assert.DoesNotContain(".env", service.ListFiles());
+        Assert.DoesNotContain("diagram.png", service.ListFiles());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ReadFileAsync("diagram.png"));
     }
 
     [Fact]
