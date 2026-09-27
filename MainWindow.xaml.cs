@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _requestCancellation;
     private bool _loadingModel;
     private bool _codeTaskMode;
+    private bool _planMode;
     private Guid? _codeTaskConversationId;
     private bool _isDarkTheme = true;
 
@@ -242,9 +243,9 @@ public partial class MainWindow : Window
     {
         _active = conversation;
         _codeTaskMode = false;
+        _planMode = false;
         _codeTaskConversationId = null;
-        CodeTaskButton.Content = "◇  Code task";
-        CodeTaskButton.Background = ThemeBrush("SecondaryButtonBrush");
+        UpdateModeButtons();
         _activeProject = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
         UpdateChangesButton(conversation);
         if (_activeProject is not null) _activeProject.LastOpenedAt = DateTimeOffset.Now;
@@ -452,12 +453,29 @@ public partial class MainWindow : Window
             return;
         }
         _codeTaskMode = !_codeTaskMode;
+        _planMode = false;
         _codeTaskConversationId = _codeTaskMode ? _active?.Id : null;
+        UpdateModeButtons();
+    }
+
+    private void TogglePlanMode_Click(object sender, RoutedEventArgs e)
+    {
+        _planMode = !_planMode;
+        _codeTaskMode = false;
+        _codeTaskConversationId = null;
+        UpdateModeButtons();
+    }
+
+    private void UpdateModeButtons()
+    {
+        PlanModeButton.Content = _planMode ? "◆  Plan on" : "◇  Plan";
+        PlanModeButton.Background = _planMode ? ThemeBrush("AgentModeOnBrush") : ThemeBrush("SecondaryButtonBrush");
+        PlanModeButton.ToolTip = _planMode ? "Plan mode is read-only; no file or command tools are available." : "Ask for a read-only implementation plan.";
         CodeTaskButton.Content = _codeTaskMode ? "◆  Code task on" : "◇  Code task";
         CodeTaskButton.Background = _codeTaskMode ? ThemeBrush("AgentModeOnBrush") : ThemeBrush("SecondaryButtonBrush");
         CodeTaskButton.ToolTip = _codeTaskMode
-            ? "Code task mode is on: project file tools are available; every file replacement needs your approval."
-            : "Chat mode is read-only. Enable Code task for reviewed project file changes.";
+            ? "Code task mode is on: project file tools are available; every change and command needs your approval."
+            : "Chat mode is read-only. Enable Code task for reviewed project changes.";
     }
 
     private async Task SendPromptAsync()
@@ -484,16 +502,19 @@ public partial class MainWindow : Window
         SendButton.Content = "■";
         SendButton.IsEnabled = true;
         SendButton.ToolTip = "Stop generation";
-        AgentStatusLabel.Text = _codeTaskMode ? "Code task · Thinking…" : "Generating locally…";
+        AgentStatusLabel.Text = _codeTaskMode ? "Code task · Thinking…" : _planMode ? "Planning locally…" : "Generating locally…";
         await SaveAsync();
 
         try
         {
             var history = conversation.Messages.Take(conversation.Messages.Count - 1).Select(m => new OllamaMessage(m.Role, m.Content)).ToList();
             var isCodeTask = _codeTaskMode && _codeTaskConversationId == conversation.Id;
+            var isPlanMode = _planMode;
             var system = isCodeTask
                 ? "You are Codev, a concise local coding agent. Work only within the selected project. Inspect before editing. Use the provided tools instead of claiming actions. Every file replacement and shell command requires user approval. Never represent tool output as successful unless its result confirms success."
-                : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
+                : isPlanMode
+                    ? "You are Codev in read-only Plan mode. Give a concise, ordered implementation plan with key files, risks, and checks. Do not edit files, run commands, or claim that any work has been done. Ask a short clarifying question only if a missing detail blocks a useful plan."
+                    : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
             if (_activeProject is not null && !string.IsNullOrWhiteSpace(_activeProject.Instructions))
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + _activeProject.Instructions;
             if (!string.IsNullOrWhiteSpace(conversation.ProjectPath) && !isCodeTask)

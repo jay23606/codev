@@ -30,7 +30,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
-| Plan/progress view and stop/resume/retry controls | Stop generation and current agent tool status implemented; plan, resume, and retry remain |
+| Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, and current agent tool status implemented; richer plans, resume, and retry remain |
 | Truly parallel agents, tabs, and isolated worktrees | Not implemented |
 | Git status, branch, staging, and review workflow | Not implemented |
 | Markdown/code rendering, attachments, and session export | Not implemented |
@@ -58,7 +58,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 2. Coding agent and review loop — in progress
 
-- Separate **Chat** and **Code task** modes; plan-first option for larger tasks.
+- Separate **Chat**, read-only **Plan**, and **Code task** modes; plan-first workflows for larger tasks.
 - [x] Explicit Code task mode with bounded agent tools for listing, reading, searching, and proposing new or updated supported text files.
 - [x] Review proposed whole-file replacements side by side; approve or reject before applying.
 - [x] Local checkpoints before edits and deletes; per-conversation changed-file list and restore, including undo/redo of file creation or deletion. Unified diff and richer history browsing remain.
@@ -84,7 +84,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 ### 5. Everyday assistant usability
 
 - Markdown, syntax-highlighted code, tables, and copy-code controls.
-- [x] Stop generation while keeping any partial response, plus visible current agent-tool status. Retry, regenerate, edit/resend a prompt, and branch from an earlier turn remain.
+- [x] Read-only Plan mode, stop generation while keeping partial response, plus visible current agent-tool status. Retry, regenerate, edit/resend a prompt, and branch from an earlier turn remain.
 - Keyboard shortcuts, accessible focus order, adjustable text size, and clear empty/loading/error states.
 - Conversation rename, archive, restore, export/import, and local backup controls.
 - Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
