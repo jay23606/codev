@@ -8,4 +8,10 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Remove="Codev.Tests\**\*.cs" />
+    <Page Remove="Codev.Tests\**\*.xaml" />
+    <ApplicationDefinition Remove="Codev.Tests\**\*.xaml" />
+  </ItemGroup>
+
 </Project>

@@ -26,9 +26,9 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and title search | Done |
 | Choose a project folder and include bounded source/config excerpts | Basic read-only context only |
-| Project list, project-specific instructions, and reusable knowledge | Not implemented |
-| Agent reads/searches files on request and edits files | Not implemented |
-| Diff review, approve/reject, checkpoints, and undo | Not implemented |
+| Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and safe project context implemented; reusable knowledge files pending |
+| Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed replacement of existing files |
+| Diff review, approve/reject, checkpoints, and undo | Before/after review and automatic per-file checkpoints implemented; unified diff/history restore pending |
 | Terminal commands, tests, and build output | Not implemented |
 | Plan/progress view and stop/resume/retry controls | Not implemented |
 | Truly parallel agents, tabs, and isolated worktrees | Not implemented |
@@ -47,21 +47,21 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - Dark default and light theme, with the selection stored locally.
 - Explicit folder selection and bounded read-only project excerpts sent to the local Ollama endpoint.
 
-### 1. Projects and context
+### 1. Projects and context — in progress
 
-- Project/workspace switcher with recent and pinned projects; each workspace maps to a chosen local folder.
-- Multiple conversations belonging to each project, plus ungrouped quick chats.
-- Project instructions and reusable context files, with visible source lists and opt-in inclusion.
+- [x] Project/workspace switcher with recent and pinned projects; each workspace maps to a chosen local folder.
+- [x] Multiple conversations belonging to each project, plus ungrouped quick chats.
+- [x] Project instructions persisted locally and applied to project conversations; chat context uses the same safe file boundary. Reusable context files and user-selected source lists remain.
 - File explorer, file preview, and deliberate file/context selection instead of sending a blind folder snapshot.
 - Context-budget display, exclusions, and relevant-file search so large repositories fit smaller local context windows.
 - Attach text files, images, and PDFs when the selected local model supports them; clearly show unsupported inputs.
 
-### 2. Coding agent and review loop
+### 2. Coding agent and review loop — in progress
 
 - Separate **Chat** and **Code task** modes; plan-first option for larger tasks.
-- Agent tools for listing, reading, and searching project files, followed by proposed file edits.
-- Review every proposed change in a unified or side-by-side diff; approve, reject, or edit before applying.
-- Local checkpoints before writes, per-task change history, restore/undo, and a clear changed-files view.
+- [x] Explicit Code task mode with bounded agent tools for listing, reading, and searching project files, followed by proposed file edits.
+- [x] Review proposed whole-file replacements side by side; approve or reject before applying.
+- [x] Local checkpoints before writes; per-task change history, restore/undo, and a changed-files view remain.
 - Build/test/lint commands run in the selected project, with progress, captured output, stop, retry, and final verification summary.
 - Command permission choices with a safe default, explicit asks for elevated actions, and bounded filesystem/network access. Never silently claim an edit, test, or command succeeded.
 

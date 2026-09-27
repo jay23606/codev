@@ -9,10 +9,12 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with quick choices for the three models in the original setup
 - Streaming responses from Ollama
+- Project switcher with pinned projects, project-specific instructions, and conversations scoped to each project
 - Optional project-folder context: selected source/config files are read locally and sent to the local Ollama server as bounded context
+- Explicit Code task mode with project-scoped list/read/search tools and approval-gated replacement of existing files; writes create a local recovery checkpoint
 - Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json`
 
-This preview does not edit project files, run commands, or provide an IDE. Those are planned for later milestones with explicit review and approval before changes are applied.
+Code task mode can edit existing project files only after showing a before/after review and receiving approval. It does not run terminal commands or create new files yet. Ordinary chat remains read-only.
 
 ## Run
 
@@ -40,7 +42,7 @@ Legacy Ollama tags for the same weights are recognized and shown under the same 
 
 ## Privacy
 
-Prompts and project excerpts are sent only to the configured local Ollama endpoint. Attaching a project folder reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, and `.git`. No files are changed by this preview.
+Prompts and project excerpts are sent only to the configured local Ollama endpoint. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first. Symbolic links and junctions are excluded.
 
 ## Design
 

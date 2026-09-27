@@ -37,6 +37,7 @@
         <SolidColorBrush x:Key="ComboHoverBrush" Color="#383A35"/>
         <SolidColorBrush x:Key="ComboSelectedBrush" Color="#48443F"/>
         <SolidColorBrush x:Key="ComboSelectedTextBrush" Color="#F4F1EA"/>
+        <SolidColorBrush x:Key="AgentModeOnBrush" Color="#44352F"/>
         <SolidColorBrush x:Key="Accent" Color="#D97757"/>
         <Style x:Key="SidebarButton" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}"/><Setter Property="Background" Value="Transparent"/>
@@ -63,6 +64,7 @@
                     </Grid>
                     <Button x:Name="NewChatButton" Style="{StaticResource SidebarButton}" Click="NewChat_Click" Background="{DynamicResource SidebarNewButtonBrush}" Foreground="{DynamicResource SidebarNewButtonTextBrush}" Margin="0,0,0,6"><StackPanel Orientation="Horizontal"><TextBlock Text="＋" FontSize="17" Margin="0,-2,10,0"/><TextBlock Text="New conversation" VerticalAlignment="Center"/></StackPanel></Button>
                     <Button Style="{StaticResource SidebarButton}" Click="SearchFocus_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="⌕" FontSize="19" Margin="0,-3,10,0"/><TextBlock Text="Search conversations" VerticalAlignment="Center"/></StackPanel></Button>
+                    <Button Style="{StaticResource SidebarButton}" Click="OpenProject_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="▣" FontSize="15" Margin="1,0,12,0"/><TextBlock Text="Open project folder" VerticalAlignment="Center"/></StackPanel></Button>
                         <Border Height="1" Background="{DynamicResource SidebarBorderBrush}" Margin="8,13,8,14"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Bottom">
@@ -75,6 +77,8 @@
                 </StackPanel>
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
+                        <TextBlock Text="PROJECTS" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,1,0,8"/>
+                        <ItemsControl x:Name="ProjectsList"/>
                         <TextBlock Text="PINNED" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,1,0,8"/>
                         <ItemsControl x:Name="PinnedList"/>
                         <TextBlock Text="RECENTS" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,18,0,8"/>
@@ -113,14 +117,14 @@
                     <ItemsControl x:Name="MessagesList" Grid.Column="1" Margin="0,28,0,35"/>
                 </Grid>
             </ScrollViewer>
-            <Border Grid.Row="2" Background="{DynamicResource AppBackgroundBrush}" Padding="0,8,0,18">
+        <Border Grid.Row="2" Background="{DynamicResource AppBackgroundBrush}" Padding="0,8,0,18">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="7*"/><ColumnDefinition Width="1.5*"/></Grid.ColumnDefinitions>
                   <StackPanel Grid.Column="1" HorizontalAlignment="Stretch">
                     <Border Background="{DynamicResource ComposerBrush}" BorderBrush="{DynamicResource ComposerBorderBrush}" BorderThickness="1" CornerRadius="13" Padding="15,12,12,8">
                         <Grid><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <TextBox x:Name="PromptBox" MinHeight="52" MaxHeight="180" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontSize="14" KeyDown="PromptBox_KeyDown" ToolTip="Message Codev…"/>
                             <Grid Grid.Row="1" Margin="0,9,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Button Content="＋  Add context" Style="{StaticResource SoftButton}" Padding="9,6" Click="AddContext_Click"/><TextBlock x:Name="ContextLabel" Text="No project attached" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="10,0,0,0"/></StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Button Content="＋  Add context" Style="{StaticResource SoftButton}" Padding="9,6" Click="AddContext_Click"/><TextBlock x:Name="ContextLabel" Text="No project attached" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="10,0,0,0"/><Button x:Name="CodeTaskButton" Content="◇  Code task" Style="{StaticResource SoftButton}" Padding="9,6" Margin="12,0,0,0" Click="ToggleCodeTask_Click" ToolTip="Code task mode allows project-scoped file inspection and reviewed edits"/></StackPanel>
                                 <Button x:Name="SendButton" Grid.Column="1" Content="↑" Width="34" Height="32" FontSize="18" FontWeight="SemiBold" Foreground="White" Background="#D97757" BorderThickness="0" Cursor="Hand" Click="Send_Click" ToolTip="Send message (Enter)"><Button.Template><ControlTemplate TargetType="Button"><Border x:Name="btn" Background="{TemplateBinding Background}" CornerRadius="9"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="btn" Property="Background" Value="#C66649"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
                             </Grid>
                         </Grid>

@@ -18,22 +18,29 @@ public partial class MainWindow : Window
     private static readonly HttpClient Http = new() { BaseAddress = new Uri("http://127.0.0.1:11434/"), Timeout = Timeout.InfiniteTimeSpan };
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Conversation> _conversations = [];
+    private readonly ObservableCollection<WorkspaceProject> _projects = [];
     private readonly List<ModelOption> _models = [];
     private Conversation? _active;
+    private WorkspaceProject? _activeProject;
     private string? _projectPath;
     private CancellationTokenSource? _requestCancellation;
     private bool _loadingModel;
+    private bool _codeTaskMode;
+    private Guid? _codeTaskConversationId;
     private bool _isDarkTheme = true;
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
     private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
+    private static string ProjectsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "projects.json");
 
     public MainWindow()
     {
         InitializeComponent();
         LoadThemePreference();
         ApplyTheme();
+        LoadProjects();
         LoadConversations();
+        foreach (var path in _conversations.Select(c => c.ProjectPath).Where(p => !string.IsNullOrWhiteSpace(p))) EnsureProject(path!);
         RefreshConversationLists();
         if (_conversations.Count > 0) SelectConversation(_conversations.OrderByDescending(c => c.UpdatedAt).First());
         Loaded += async (_, _) => await LoadModelsAsync();
@@ -115,6 +122,45 @@ public partial class MainWindow : Window
         catch (Exception ex) { ConnectionLabel.Text = $"History could not be loaded: {ex.Message}"; }
     }
 
+    private void LoadProjects()
+    {
+        try
+        {
+            if (!File.Exists(ProjectsPath)) return;
+            var saved = JsonSerializer.Deserialize<List<WorkspaceProject>>(File.ReadAllText(ProjectsPath), JsonOptions);
+            if (saved is null) return;
+            foreach (var project in saved.Where(p => !string.IsNullOrWhiteSpace(p.Path)).OrderByDescending(p => p.LastOpenedAt)) _projects.Add(project);
+        }
+        catch (Exception ex) { ConnectionLabel.Text = $"Project list could not be loaded: {ex.Message}"; }
+    }
+
+    private async Task SaveProjectsAsync()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ProjectsPath)!);
+            await File.WriteAllTextAsync(ProjectsPath, JsonSerializer.Serialize(_projects, JsonOptions));
+        }
+        catch (Exception ex) { ConnectionLabel.Text = $"Projects could not be saved: {ex.Message}"; }
+    }
+
+    private WorkspaceProject EnsureProject(string path)
+    {
+        var normalized = Path.GetFullPath(path);
+        var existing = _projects.FirstOrDefault(p => SamePath(p.Path, normalized));
+        if (existing is not null) return existing;
+        var project = new WorkspaceProject { Name = new DirectoryInfo(normalized).Name, Path = normalized, LastOpenedAt = DateTimeOffset.Now };
+        _projects.Add(project);
+        _ = SaveProjectsAsync();
+        return project;
+    }
+
+    private static bool SamePath(string left, string right)
+    {
+        try { return string.Equals(Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase); }
+        catch { return string.Equals(left, right, StringComparison.OrdinalIgnoreCase); }
+    }
+
     private async Task SaveAsync()
     {
         try
@@ -183,7 +229,8 @@ public partial class MainWindow : Window
     private void NewChat_Click(object sender, RoutedEventArgs e)
     {
         var model = ModelPicker.SelectedValue as string ?? "devstral-small-2-64k";
-        var conversation = new Conversation { Model = model, UpdatedAt = DateTimeOffset.Now };
+        var projectPath = _activeProject?.Path ?? _active?.ProjectPath;
+        var conversation = new Conversation { Model = model, ProjectPath = projectPath, UpdatedAt = DateTimeOffset.Now };
         _conversations.Insert(0, conversation);
         SelectConversation(conversation);
         RefreshConversationLists();
@@ -194,6 +241,12 @@ public partial class MainWindow : Window
     private void SelectConversation(Conversation conversation)
     {
         _active = conversation;
+        _codeTaskMode = false;
+        _codeTaskConversationId = null;
+        CodeTaskButton.Content = "◇  Code task";
+        CodeTaskButton.Background = ThemeBrush("SecondaryButtonBrush");
+        _activeProject = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
+        if (_activeProject is not null) _activeProject.LastOpenedAt = DateTimeOffset.Now;
         ConversationTitle.Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
         PinButton.Content = conversation.IsPinned ? "★  Pinned" : "☆  Pin";
         _loadingModel = true;
@@ -205,6 +258,7 @@ public partial class MainWindow : Window
         RefreshConversationLists();
         _projectPath = conversation.ProjectPath;
         ContextLabel.Text = _projectPath is null ? "No project attached" : Path.GetFileName(_projectPath);
+        ContextLabel.ToolTip = _projectPath;
     }
 
     private void RenderMessages()
@@ -226,11 +280,129 @@ public partial class MainWindow : Window
 
     private void RefreshConversationLists()
     {
-        FillConversationList(PinnedList, _conversations.Where(c => c.IsPinned).OrderByDescending(c => c.UpdatedAt));
+        FillProjectsList();
+        var inWorkspace = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path));
+        FillConversationList(PinnedList, inWorkspace.Where(c => c.IsPinned).OrderByDescending(c => c.UpdatedAt));
         var search = SearchBox.Text?.Trim();
-        var recent = _conversations.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt);
+        var recent = inWorkspace.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt);
         if (!string.IsNullOrWhiteSpace(search)) recent = recent.Where(c => c.Title.Contains(search, StringComparison.OrdinalIgnoreCase)).OrderByDescending(c => c.UpdatedAt);
         FillConversationList(RecentList, recent);
+    }
+
+    private static bool SameWorkspace(string? conversationPath, string? workspacePath) =>
+        conversationPath is null ? workspacePath is null : workspacePath is not null && SamePath(conversationPath, workspacePath);
+
+    private void FillProjectsList()
+    {
+        ProjectsList.Items.Clear();
+        AddProjectButton("All chats", null, _activeProject is null);
+        foreach (var project in _projects.OrderByDescending(p => p.IsPinned).ThenByDescending(p => p.LastOpenedAt))
+            AddProjectButton(project.Name, project, ReferenceEquals(project, _activeProject));
+    }
+
+    private void AddProjectButton(string title, WorkspaceProject? project, bool isSelected)
+    {
+        var prefix = project?.IsPinned == true ? "★  " : "";
+        var button = new Button
+        {
+            Style = (Style)FindResource("SidebarButton"), Tag = project,
+            Padding = new Thickness(11, 7, 7, 7), Margin = new Thickness(0, 1, 0, 1),
+            Background = isSelected ? ThemeBrush("SidebarActiveBrush") : Brushes.Transparent,
+            ToolTip = project?.Path ?? "Conversations without a project"
+        };
+        var row = new DockPanel();
+        row.Children.Add(new TextBlock
+        {
+            Text = prefix + title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188,
+            FontSize = 12, Foreground = ThemeBrush("SidebarTextBrush"), VerticalAlignment = VerticalAlignment.Center
+        });
+        button.Content = row;
+        button.Click += (_, _) => OpenWorkspace(project);
+        if (project is not null)
+        {
+            var menu = new ContextMenu();
+            var pinItem = new MenuItem { Header = project.IsPinned ? "Unpin project" : "Pin project" };
+            pinItem.Click += async (_, _) => { project.IsPinned = !project.IsPinned; RefreshConversationLists(); await SaveProjectsAsync(); };
+            var openItem = new MenuItem { Header = "Open folder in File Explorer" };
+            openItem.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = project.Path, UseShellExecute = true });
+            var instructionsItem = new MenuItem { Header = "Edit project instructions…" };
+            instructionsItem.Click += async (_, _) => await EditProjectInstructionsAsync(project);
+            menu.Items.Add(pinItem);
+            menu.Items.Add(instructionsItem);
+            menu.Items.Add(openItem);
+            button.ContextMenu = menu;
+        }
+        ProjectsList.Items.Add(button);
+    }
+
+    private void OpenWorkspace(WorkspaceProject? project)
+    {
+        _activeProject = project;
+        if (project is not null) project.LastOpenedAt = DateTimeOffset.Now;
+        RefreshConversationLists();
+        var latest = _conversations.Where(c => SameWorkspace(c.ProjectPath, project?.Path)).OrderByDescending(c => c.UpdatedAt).FirstOrDefault();
+        if (latest is not null) SelectConversation(latest);
+        else
+        {
+            var conversation = new Conversation
+            {
+                Model = ModelPicker.SelectedValue as string ?? "devstral-small-2-64k",
+                ProjectPath = project?.Path,
+                UpdatedAt = DateTimeOffset.Now
+            };
+            _conversations.Insert(0, conversation);
+            SelectConversation(conversation);
+            _ = SaveAsync();
+        }
+        _ = SaveProjectsAsync();
+    }
+
+    private void OpenProject_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Open a project folder", Multiselect = false };
+        if (dialog.ShowDialog(this) == true)
+        {
+            var project = EnsureProject(dialog.FolderName);
+            OpenWorkspace(project);
+        }
+    }
+
+    private async Task EditProjectInstructionsAsync(WorkspaceProject project)
+    {
+        var editor = new Window
+        {
+            Title = $"Instructions · {project.Name}", Width = 560, Height = 440,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var help = new TextBlock
+        {
+            Text = "These instructions are added to every conversation in this project. Keep them specific to its language, conventions, and test commands.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
+        };
+        layout.Children.Add(help);
+        var input = new TextBox
+        {
+            Text = project.Instructions, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontSize = 13,
+            Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"),
+            BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1),
+            Padding = new Thickness(10), MinHeight = 200
+        };
+        Grid.SetRow(input, 1); layout.Children.Add(input);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+        var cancel = new Button { Content = "Cancel", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var save = new Button { Content = "Save instructions", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        save.Click += (_, _) => { project.Instructions = input.Text.Trim(); editor.DialogResult = true; editor.Close(); };
+        buttons.Children.Add(cancel); buttons.Children.Add(save);
+        Grid.SetRow(buttons, 2); layout.Children.Add(buttons);
+        editor.Content = layout;
+        if (editor.ShowDialog() == true) await SaveProjectsAsync();
     }
 
     private void FillConversationList(ItemsControl list, IEnumerable<Conversation> conversations)
@@ -256,6 +428,27 @@ public partial class MainWindow : Window
     }
 
     private async void Send_Click(object sender, RoutedEventArgs e) => await SendPromptAsync();
+
+    private void ToggleCodeTask_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_codeTaskMode && string.IsNullOrWhiteSpace(_active?.ProjectPath))
+        {
+            MessageBox.Show(this, "Open or attach a project folder before starting a code task.", "Project required", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (_codeTaskMode && _codeTaskConversationId != _active?.Id)
+        {
+            MessageBox.Show(this, "Code task mode is enabled for a different conversation. Turn it off, then enable it for this project conversation.", "Code task mode", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _codeTaskMode = !_codeTaskMode;
+        _codeTaskConversationId = _codeTaskMode ? _active?.Id : null;
+        CodeTaskButton.Content = _codeTaskMode ? "◆  Code task on" : "◇  Code task";
+        CodeTaskButton.Background = _codeTaskMode ? ThemeBrush("AgentModeOnBrush") : ThemeBrush("SecondaryButtonBrush");
+        CodeTaskButton.ToolTip = _codeTaskMode
+            ? "Code task mode is on: project file tools are available; every file replacement needs your approval."
+            : "Chat mode is read-only. Enable Code task for reviewed project file changes.";
+    }
 
     private async Task SendPromptAsync()
     {
@@ -284,35 +477,30 @@ public partial class MainWindow : Window
         try
         {
             var history = conversation.Messages.Take(conversation.Messages.Count - 1).Select(m => new OllamaMessage(m.Role, m.Content)).ToList();
-            var system = "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this chat-only preview has no file editing or command execution yet.";
-            if (!string.IsNullOrWhiteSpace(conversation.ProjectPath))
+            var isCodeTask = _codeTaskMode && _codeTaskConversationId == conversation.Id;
+            var system = isCodeTask
+                ? "You are Codev, a concise local coding agent. Work only within the selected project. Inspect before editing. Use the provided tools instead of claiming actions. Every write requires user review and approval. Do not run shell commands; that capability is not available yet."
+                : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
+            if (_activeProject is not null && !string.IsNullOrWhiteSpace(_activeProject.Instructions))
+                system += "\n\nProject-specific instructions (apply within this workspace):\n" + _activeProject.Instructions;
+            if (!string.IsNullOrWhiteSpace(conversation.ProjectPath) && !isCodeTask)
             {
                 system += "\n\nThe user attached this local project folder: " + conversation.ProjectPath + ". Here are selected source files from that folder, included as read-only context. Do not claim to have changed them.";
                 system += "\n\n" + await CollectProjectContextAsync(conversation.ProjectPath, _requestCancellation.Token);
             }
             history.Insert(0, new OllamaMessage("system", system));
-            using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(new { model = conversation.Model, messages = history, stream = true }) };
-            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, _requestCancellation.Token);
-            response.EnsureSuccessStatusCode();
-            await using var stream = await response.Content.ReadAsStreamAsync(_requestCancellation.Token);
-            using var reader = new StreamReader(stream);
-            var output = new StringBuilder();
-            while (await reader.ReadLineAsync(_requestCancellation.Token) is { } line)
+            if (isCodeTask)
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                using var json = JsonDocument.Parse(line);
-                if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
-                if (json.RootElement.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var chunk))
-                {
-                    output.Append(chunk.GetString());
-                    conversation.Messages[^1] = new ChatMessage("assistant", output.ToString());
-                    if (ReferenceEquals(_active, conversation)) RenderMessages();
-                }
+                var service = new WorkspaceFileService(conversation.ProjectPath!);
+                await RunAgentTurnAsync(conversation, history, service, _requestCancellation.Token);
             }
-            if (output.Length == 0) conversation.Messages[^1] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
+            else
+                await RunChatTurnAsync(conversation, history, _requestCancellation.Token);
+            if (conversation.Messages[^1].Content.Length == 0)
+                conversation.Messages[^1] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
         }
         catch (OperationCanceledException) { conversation.Messages[^1] = new ChatMessage("assistant", "Generation stopped."); }
-        catch (Exception ex) { conversation.Messages[^1] = new ChatMessage("assistant", $"Could not reach the selected Ollama model.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed."); }
+        catch (Exception ex) { conversation.Messages[^1] = new ChatMessage("assistant", $"Could not complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed."); }
         finally
         {
             conversation.UpdatedAt = DateTimeOffset.Now;
@@ -326,18 +514,149 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task RunChatTurnAsync(Conversation conversation, List<OllamaMessage> history, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(new { model = conversation.Model, messages = history, stream = true }) };
+        using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+        var output = new StringBuilder();
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            using var json = JsonDocument.Parse(line);
+            if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
+            if (json.RootElement.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var chunk))
+            {
+                output.Append(chunk.GetString());
+                conversation.Messages[^1] = new ChatMessage("assistant", output.ToString());
+                if (ReferenceEquals(_active, conversation)) RenderMessages();
+            }
+        }
+    }
+
+    private async Task RunAgentTurnAsync(Conversation conversation, List<OllamaMessage> history, WorkspaceFileService service, CancellationToken cancellationToken)
+    {
+        var tools = new object[]
+        {
+            Tool("list_files", "List project files; pass a project-relative directory or an empty string for the root.", new { relative_directory = new { type = "string" } }, ["relative_directory"]),
+            Tool("read_file", "Read a UTF-8 text file from the selected project.", new { relative_path = new { type = "string" } }, ["relative_path"]),
+            Tool("search_files", "Search supported source files for a literal string.", new { query = new { type = "string" } }, ["query"]),
+            Tool("write_file", "Propose the complete replacement contents of one existing project file. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"])
+        };
+        for (var round = 0; round < 8; round++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
+            {
+                Content = JsonContent.Create(new { model = conversation.Model, messages = history, tools, stream = false })
+            };
+            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
+            var message = json.RootElement.GetProperty("message");
+            var text = message.TryGetProperty("content", out var contentElement) ? contentElement.GetString() ?? "" : "";
+            var calls = message.TryGetProperty("tool_calls", out var callsElement) && callsElement.ValueKind == JsonValueKind.Array
+                ? callsElement.EnumerateArray().ToList() : [];
+            if (calls.Count == 0)
+            {
+                conversation.Messages[^1] = new ChatMessage("assistant", text);
+                RenderAgentTranscript(conversation);
+                return;
+            }
+
+            history.Add(new OllamaMessage("assistant", text, calls.Select(call => JsonSerializer.Deserialize<JsonElement>(call.GetRawText())).ToList()));
+            var assistantText = new StringBuilder(text);
+            foreach (var call in calls)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var function = call.GetProperty("function");
+                var name = function.GetProperty("name").GetString() ?? "";
+                var arguments = function.TryGetProperty("arguments", out var args) ? args : default;
+                var result = await ExecuteAgentToolAsync(name, arguments, service, conversation.Id, cancellationToken);
+                history.Add(new OllamaMessage("tool", result, null, name));
+                assistantText.Append("\n\n").Append("Tool ").Append(name).Append(": ").Append(result.Length > 1400 ? result[..1400] + "… [truncated in transcript]" : result);
+            }
+            conversation.Messages[^1] = new ChatMessage("assistant", assistantText.ToString());
+            RenderAgentTranscript(conversation);
+        }
+        throw new InvalidOperationException("The agent reached the eight-step tool limit. Send a follow-up to continue.");
+    }
+
+    private async Task<string> ExecuteAgentToolAsync(string name, JsonElement arguments, WorkspaceFileService service, Guid conversationId, CancellationToken cancellationToken)
+    {
+        string Arg(string key) => arguments.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
+        try
+        {
+            return name switch
+            {
+                "list_files" => string.Join("\n", service.ListFiles(Arg("relative_directory"), 160)),
+                "read_file" => await service.ReadFileAsync(Arg("relative_path"), cancellationToken),
+                "search_files" => string.Join("\n", await service.SearchFilesAsync(Arg("query"), cancellationToken)),
+                "write_file" => await ReviewAndWriteFileAsync(Arg("relative_path"), Arg("content"), service, conversationId, cancellationToken),
+                _ => "Error: tool is not available."
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return "Error: " + ex.Message; }
+    }
+
+    private async Task<string> ReviewAndWriteFileAsync(string relativePath, string proposed, WorkspaceFileService service, Guid conversationId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) return "Error: a project-relative path is required.";
+        if (!File.Exists(service.ResolvePath(relativePath))) return "Rejected: creating new files is not available yet; propose a change to an existing file.";
+        var current = await service.ReadFileAsync(relativePath, cancellationToken);
+        if (!ShowFileReview(relativePath, current, proposed)) return "Rejected by user; the file was left unchanged.";
+        var checkpoint = await service.CreateCheckpointAsync(relativePath, conversationId, cancellationToken);
+        await service.WriteFileAtomicAsync(relativePath, proposed, cancellationToken);
+        return $"Approved and applied. Original backed up at {checkpoint ?? "(new file)"}.";
+    }
+
+    private bool ShowFileReview(string relativePath, string before, string after)
+    {
+        var dialog = new Window { Title = $"Review change · {relativePath}", Width = 940, Height = 660, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize };
+        var layout = new Grid { Margin = new Thickness(16) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.ColumnDefinitions.Add(new ColumnDefinition()); layout.ColumnDefinitions.Add(new ColumnDefinition());
+        var note = new TextBlock { Text = "Review both versions. Approving replaces the existing file; a local checkpoint is saved first.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12) };
+        Grid.SetColumnSpan(note, 2); layout.Children.Add(note);
+        TextBox ReviewBox(string value) => new() { Text = value, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(8) };
+        var oldBox = ReviewBox(before); var newBox = ReviewBox(after);
+        Grid.SetRow(oldBox, 1); Grid.SetColumn(oldBox, 0); Grid.SetRow(newBox, 1); Grid.SetColumn(newBox, 1); layout.Children.Add(oldBox); layout.Children.Add(newBox);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var reject = new Button { Content = "Keep unchanged", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var approve = new Button { Content = "Approve & apply", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        approve.Click += (_, _) => { dialog.DialogResult = true; dialog.Close(); };
+        buttons.Children.Add(reject); buttons.Children.Add(approve); Grid.SetRow(buttons, 2); Grid.SetColumnSpan(buttons, 2); layout.Children.Add(buttons);
+        dialog.Content = layout;
+        return dialog.ShowDialog() == true;
+    }
+
+    private static object Tool(string name, string description, object properties, string[] required) => new
+    {
+        type = "function",
+        function = new { name, description, parameters = new { type = "object", properties, required } }
+    };
+
+    private void RenderAgentTranscript(Conversation conversation)
+    {
+        if (ReferenceEquals(_active, conversation)) RenderMessages();
+    }
+
     private static string MakeTitle(string prompt)
     {
         var oneLine = string.Join(' ', prompt.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         return oneLine.Length > 36 ? oneLine[..33] + "…" : oneLine;
     }
 
-    private static async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken)
+    private async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken)
     {
         var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { ".cs", ".xaml", ".csproj", ".sln", ".md", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets" };
-        var ignoredDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "dist", "build", "coverage" };
+        var fileService = new WorkspaceFileService(root);
         var output = new StringBuilder("Selected project files (limited read-only excerpts):\n");
         var count = 0;
         const int maxFiles = 24;
@@ -345,37 +664,20 @@ public partial class MainWindow : Window
         const int maxFileChars = 2400;
         try
         {
-            var pending = new Stack<string>();
-            pending.Push(root);
-            while (pending.Count > 0 && count < maxFiles && output.Length < maxChars)
+            foreach (var relative in fileService.ListFiles(maxEntries: 300))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var dir = pending.Pop();
-                IEnumerable<string> children;
-                try { children = Directory.EnumerateFileSystemEntries(dir); }
-                catch { continue; }
-                foreach (var path in children)
+                if (!allowedExtensions.Contains(Path.GetExtension(relative))) continue;
+                try
                 {
-                    if (Directory.Exists(path))
-                    {
-                        if (!ignoredDirectories.Contains(Path.GetFileName(path))) pending.Push(path);
-                        continue;
-                    }
-                    if (!allowedExtensions.Contains(Path.GetExtension(path))) continue;
-                    try
-                    {
-                        var info = new FileInfo(path);
-                        if (info.Length > 500_000) continue;
-                        var content = await File.ReadAllTextAsync(path, cancellationToken);
-                        if (content.Length > maxFileChars) content = content[..maxFileChars] + "\n… [excerpt truncated]";
-                        var relative = Path.GetRelativePath(root, path);
-                        output.Append("\n--- ").Append(relative).AppendLine(" ---\n").AppendLine(content);
-                        count++;
-                        if (count >= maxFiles || output.Length >= maxChars) break;
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch { }
+                    var content = await fileService.ReadFileAsync(relative, cancellationToken);
+                    if (content.Length > maxFileChars) content = content[..maxFileChars] + "\n… [excerpt truncated]";
+                    output.Append("\n--- ").Append(relative).AppendLine(" ---\n").AppendLine(content);
+                    count++;
+                    if (count >= maxFiles || output.Length >= maxChars) break;
                 }
+                catch (OperationCanceledException) { throw; }
+                catch { }
             }
             if (count == 0) output.Append("No supported text source files were found. Ask the user to paste relevant code if needed.");
             else output.Append("\n[Context is limited to ").Append(count).AppendLine(" source files. Ask for specific files if you need more detail.]");
@@ -426,9 +728,11 @@ public partial class MainWindow : Window
         var dialog = new OpenFolderDialog { Title = "Choose a project folder", Multiselect = false };
         if (dialog.ShowDialog(this) != true) return;
         _projectPath = dialog.FolderName;
+        _activeProject = EnsureProject(_projectPath);
         if (_active is not null) { _active.ProjectPath = _projectPath; _ = SaveAsync(); }
         ContextLabel.Text = Path.GetFileName(_projectPath);
         ContextLabel.ToolTip = _projectPath;
+        RefreshConversationLists();
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -454,7 +758,11 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private sealed record OllamaMessage([property: JsonPropertyName("role")] string Role, [property: JsonPropertyName("content")] string Content);
+    private sealed record OllamaMessage(
+        [property: JsonPropertyName("role")] string Role,
+        [property: JsonPropertyName("content")] string Content,
+        [property: JsonPropertyName("tool_calls")] List<JsonElement>? ToolCalls = null,
+        [property: JsonPropertyName("name")] string? Name = null);
     private sealed record UiSettings(string Theme);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
@@ -473,3 +781,13 @@ public sealed class Conversation
 }
 
 public sealed record ChatMessage(string Role, string Content);
+
+public sealed class WorkspaceProject
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "Project";
+    public string Path { get; set; } = "";
+    public bool IsPinned { get; set; }
+    public string Instructions { get; set; } = "";
+    public DateTimeOffset LastOpenedAt { get; set; } = DateTimeOffset.Now;
+}
