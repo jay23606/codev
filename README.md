@@ -29,13 +29,13 @@ dotnet publish .\Codev.csproj -c Release -r win-x64 --self-contained true
 
 ## Local models
 
-Codev discovers installed models from Ollama and includes shortcuts for:
+Codev discovers installed models from Ollama and shows the supported coding models below when installed. Duplicate tags and source repository names for the same weights are hidden from the picker:
 
 - `devstral-small-2-64k`
 - `qwen3-coder-next-q2-24k`
 - `qwen3-coder:30b`
 
-If one is missing, it remains visible in the selector but is marked as not installed.
+Legacy Ollama tags for the same weights are recognized and shown under the same friendly model name.
 
 ## Privacy
 

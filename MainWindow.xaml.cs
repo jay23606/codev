@@ -63,57 +63,54 @@ public partial class MainWindow : Window
         {
             var response = await Http.GetFromJsonAsync<TagsResponse>("api/tags");
             _models.Clear();
-            foreach (var model in response?.Models ?? [])
-                _models.Add(new ModelOption(model.Name, FriendlyName(model.Name)));
-
-            foreach (var expected in new[] { "devstral-small-2-64k", "qwen3-coder-next-q2-24k", "qwen3-coder:30b" })
-                if (!HasModel(expected))
-                    _models.Add(new ModelOption(expected, FriendlyName(expected) + " (not installed)"));
+            var installed = response?.Models ?? [];
+            AddKnownModel(installed, "devstral-small-2-64k", "Devstral Small 2 · Q4 · 64K",
+                "devstral-small-2-64k", "devstral-small-2:q4_k_m",
+                "hf.co/bartowski/mistralai_Devstral-Small-2-24B-Instruct-2512-GGUF:Q4_K_M");
+            AddKnownModel(installed, "qwen3-coder-next-q2-24k", "Qwen3-Coder-Next · Q2 · 24K",
+                "qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l",
+                "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L");
+            AddKnownModel(installed, "qwen3-coder:30b", "Qwen3-Coder 30B · Q4 · 64K", "qwen3-coder:30b");
 
             _loadingModel = true;
             ModelPicker.ItemsSource = _models;
-            if (ModelPicker.SelectedValue is null)
+            if (_models.Count > 0)
             {
                 var wanted = _active?.Model ?? "devstral-small-2-64k";
-                ModelPicker.SelectedValue = ResolveInstalledModel(wanted)?.Name ?? _models.FirstOrDefault(m => !m.DisplayName.Contains("not installed"))?.Name;
+                ModelPicker.SelectedValue = FindModelOption(wanted)?.Name ?? _models[0].Name;
             }
             _loadingModel = false;
-            ConnectionLabel.Text = $"Ollama · {_models.Count(m => !m.DisplayName.Contains("not installed"))} models";
+            ConnectionLabel.Text = _models.Count == 0 ? "No supported local models found" : $"Ollama · {_models.Count} coding models";
         }
         catch
         {
             _loadingModel = true;
             _models.Clear();
-            _models.AddRange(new[]
-            {
-                new ModelOption("devstral-small-2-64k", "Devstral Small 2 · Q4 · 64K"),
-                new ModelOption("qwen3-coder-next-q2-24k", "Qwen3-Coder-Next · Q2 · 24K"),
-                new ModelOption("qwen3-coder:30b", "Qwen3-Coder 30B · Q4 · 64K")
-            });
             ModelPicker.ItemsSource = _models;
-            ModelPicker.SelectedValue = _active?.Model ?? "devstral-small-2-64k";
             _loadingModel = false;
             ConnectionLabel.Text = "Ollama is not reachable";
         }
     }
 
-    private static string FriendlyName(string name)
+    private void AddKnownModel(List<TagModel> installed, string preferredName, string displayName, params string[] aliases)
     {
-        var known = name.ToLowerInvariant().Replace(":latest", "") switch
-        {
-            "devstral-small-2-64k" or "devstral-small-2:q4_k_m" => "Devstral Small 2 · Q4 · 64K",
-            "qwen3-coder-next-q2-24k" or "qwen3-coder-next:q2_k_l" => "Qwen3-Coder-Next · Q2 · 24K",
-            "qwen3-coder:30b" => "Qwen3-Coder 30B · Q4 · 64K",
-            _ => name
-        };
-        return known;
+        var names = aliases.Append(preferredName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var actual = installed.FirstOrDefault(m => names.Contains(m.Name) || names.Contains(RemoveLatestTag(m.Name)));
+        if (actual is not null) _models.Add(new ModelOption(actual.Name, displayName));
     }
 
-    private bool HasModel(string expected) => ResolveInstalledModel(expected) is not null;
+    private ModelOption? FindModelOption(string modelName)
+    {
+        var normalized = RemoveLatestTag(modelName);
+        return _models.FirstOrDefault(m => m.Name.Equals(modelName, StringComparison.OrdinalIgnoreCase) || RemoveLatestTag(m.Name).Equals(normalized, StringComparison.OrdinalIgnoreCase)) ??
+            (IsSameModel(normalized, "devstral-small-2-64k", "devstral-small-2:q4_k_m", "hf.co/bartowski/mistralai_Devstral-Small-2-24B-Instruct-2512-GGUF:Q4_K_M") ? _models.FirstOrDefault(m => m.DisplayName.StartsWith("Devstral Small 2", StringComparison.Ordinal)) : null) ??
+            (IsSameModel(normalized, "qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l", "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L") ? _models.FirstOrDefault(m => m.DisplayName.StartsWith("Qwen3-Coder-Next", StringComparison.Ordinal)) : null) ??
+            (normalized.Equals("qwen3-coder:30b", StringComparison.OrdinalIgnoreCase) ? _models.FirstOrDefault(m => m.DisplayName.StartsWith("Qwen3-Coder 30B", StringComparison.Ordinal)) : null);
+    }
 
-    private ModelOption? ResolveInstalledModel(string expected) =>
-        _models.FirstOrDefault(m => m.Name.Equals(expected, StringComparison.OrdinalIgnoreCase)) ??
-        (!expected.Contains(':') ? _models.FirstOrDefault(m => m.Name.Equals(expected + ":latest", StringComparison.OrdinalIgnoreCase)) : null);
+    private static bool IsSameModel(string name, params string[] aliases) => aliases.Any(a => RemoveLatestTag(a).Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;
 
     private void NewChat_Click(object sender, RoutedEventArgs e)
     {
@@ -132,7 +129,7 @@ public partial class MainWindow : Window
         ConversationTitle.Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
         PinButton.Content = conversation.IsPinned ? "★  Pinned" : "☆  Pin";
         _loadingModel = true;
-        ModelPicker.SelectedValue = ResolveInstalledModel(conversation.Model)?.Name ?? conversation.Model;
+        ModelPicker.SelectedValue = FindModelOption(conversation.Model)?.Name;
         if (ModelPicker.SelectedValue is null && _models.Count > 0) ModelPicker.SelectedIndex = 0;
         _loadingModel = false;
         WelcomePanel.Visibility = conversation.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
