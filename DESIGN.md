@@ -23,6 +23,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Standalone Windows desktop app, no editor dependency | Done |
 | Dark/light appearance with persistent preference | Done |
 | Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
+| Per-conversation context size | Choices from Model default through model's configured max, sent as Ollama `num_ctx` |
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and title search | Done |
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |

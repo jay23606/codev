@@ -20,11 +20,13 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<Conversation> _conversations = [];
     private readonly ObservableCollection<WorkspaceProject> _projects = [];
     private readonly List<ModelOption> _models = [];
+    private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
     private Conversation? _active;
     private WorkspaceProject? _activeProject;
     private string? _projectPath;
     private CancellationTokenSource? _requestCancellation;
     private bool _loadingModel;
+    private bool _updatingContext;
     private bool _codeTaskMode;
     private bool _planMode;
     private bool _showArchived;
@@ -208,6 +210,7 @@ public partial class MainWindow : Window
                 ModelPicker.SelectedValue = FindModelOption(wanted)?.Name ?? _models[0].Name;
             }
             _loadingModel = false;
+            RefreshContextPicker(_active);
             ConnectionLabel.Text = _models.Count == 0 ? "No supported local models found" : $"Ollama · {_models.Count} coding models";
         }
         catch
@@ -216,6 +219,7 @@ public partial class MainWindow : Window
             _models.Clear();
             ModelPicker.ItemsSource = _models;
             _loadingModel = false;
+            RefreshContextPicker(_active);
             ConnectionLabel.Text = "Ollama is not reachable";
         }
     }
@@ -268,6 +272,7 @@ public partial class MainWindow : Window
         ModelPicker.SelectedValue = FindModelOption(conversation.Model)?.Name;
         if (ModelPicker.SelectedValue is null && _models.Count > 0) ModelPicker.SelectedIndex = 0;
         _loadingModel = false;
+        RefreshContextPicker(conversation);
         WelcomePanel.Visibility = conversation.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         RenderMessages();
         RefreshConversationLists();
@@ -701,7 +706,7 @@ public partial class MainWindow : Window
 
     private async Task RunChatTurnAsync(Conversation conversation, List<OllamaMessage> history, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(new { model = conversation.Model, messages = history, stream = true }) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(BuildChatPayload(conversation, history, stream: true)) };
         using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -737,7 +742,7 @@ public partial class MainWindow : Window
             cancellationToken.ThrowIfCancellationRequested();
             using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
             {
-                Content = JsonContent.Create(new { model = conversation.Model, messages = history, tools, stream = false })
+                Content = JsonContent.Create(BuildChatPayload(conversation, history, stream: false, tools))
             };
             using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -772,6 +777,19 @@ public partial class MainWindow : Window
             RenderAgentTranscript(conversation);
         }
         throw new InvalidOperationException("The agent reached the eight-step tool limit. Send a follow-up to continue.");
+    }
+
+    private static Dictionary<string, object> BuildChatPayload(Conversation conversation, List<OllamaMessage> messages, bool stream, object[]? tools = null)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["model"] = conversation.Model,
+            ["messages"] = messages,
+            ["stream"] = stream
+        };
+        if (tools is not null) payload["tools"] = tools;
+        if (conversation.NumCtx > 0) payload["options"] = new OllamaOptions(conversation.NumCtx);
+        return payload;
     }
 
     private async Task<string> ExecuteAgentToolAsync(string name, JsonElement arguments, WorkspaceFileService service, Conversation conversation, CancellationToken cancellationToken)
@@ -1031,7 +1049,40 @@ public partial class MainWindow : Window
     {
         if (_loadingModel || _active is null || ModelPicker.SelectedValue is not string model) return;
         _active.Model = model;
+        var maxContext = MaxContextForModel(model);
+        if (_active.NumCtx > maxContext) _active.NumCtx = 0;
+        RefreshContextPicker(_active);
         _ = SaveAsync();
+    }
+
+    private void ContextPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingContext || _active is null || ContextPicker.SelectedValue is not int context) return;
+        _active.NumCtx = context;
+        _ = SaveAsync();
+    }
+
+    private void RefreshContextPicker(Conversation? conversation)
+    {
+        _updatingContext = true;
+        var model = conversation?.Model ?? ModelPicker.SelectedValue as string ?? "devstral-small-2-64k";
+        var max = MaxContextForModel(model);
+        if (conversation is not null && conversation.NumCtx > max)
+        {
+            conversation.NumCtx = 0;
+            _ = SaveAsync();
+        }
+        ContextPicker.ItemsSource = _contextSizes.Where(option => option.Value == 0 || option.Value <= max).ToList();
+        ContextPicker.SelectedValue = conversation?.NumCtx ?? 0;
+        if (ContextPicker.SelectedValue is null) ContextPicker.SelectedValue = 0;
+        _updatingContext = false;
+    }
+
+    private int MaxContextForModel(string model)
+    {
+        var option = FindModelOption(model);
+        if (option?.DisplayName.StartsWith("Qwen3-Coder-Next", StringComparison.Ordinal) == true || IsSameModel(RemoveLatestTag(model), "qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l", "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L")) return 24_576;
+        return 65_536;
     }
 
     private void SearchFocus_Click(object sender, RoutedEventArgs e)
@@ -1131,10 +1182,12 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("content")] string Content,
         [property: JsonPropertyName("tool_calls")] List<JsonElement>? ToolCalls = null,
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
+    private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
     private sealed record UiSettings(string Theme);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);
+    private sealed record ContextOption(int Value, string DisplayName);
 }
 
 public sealed class Conversation
@@ -1142,6 +1195,7 @@ public sealed class Conversation
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = "";
     public string Model { get; set; } = "devstral-small-2-64k";
+    public int NumCtx { get; set; }
     public bool IsPinned { get; set; }
     public bool IsArchived { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
