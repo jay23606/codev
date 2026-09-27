@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 
@@ -1133,11 +1134,57 @@ public partial class MainWindow : Window
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.ColumnDefinitions.Add(new ColumnDefinition()); layout.ColumnDefinitions.Add(new ColumnDefinition());
-        var note = new TextBlock { Text = isNewFile ? "No file exists at this path. Approving creates it in the selected project folder." : "Review both versions. Approving applies the reviewed state; a local checkpoint is saved first when a file exists.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12) };
-        Grid.SetColumnSpan(note, 2); layout.Children.Add(note);
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 12), LastChildFill = true };
+        var viewButtons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 0) };
+        var sideBySideButton = new Button { Content = "Side by side", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(10, 6, 10, 6), Margin = new Thickness(0, 0, 5, 0) };
+        var unifiedButton = new Button { Content = "Unified diff", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(10, 6, 10, 6) };
+        DockPanel.SetDock(viewButtons, Dock.Right);
+        viewButtons.Children.Add(sideBySideButton); viewButtons.Children.Add(unifiedButton);
+        header.Children.Add(viewButtons);
+        var note = new TextBlock { Text = isNewFile ? "No file exists at this path. Approving creates it in the selected project folder." : "Review the proposed state. Approving applies it after saving a local checkpoint.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), VerticalAlignment = VerticalAlignment.Center };
+        header.Children.Add(note);
+        Grid.SetColumnSpan(header, 2); layout.Children.Add(header);
         TextBox ReviewBox(string value) => new() { Text = value, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(8) };
-        var oldBox = ReviewBox(before); var newBox = ReviewBox(after);
-        Grid.SetRow(oldBox, 1); Grid.SetColumn(oldBox, 0); Grid.SetRow(newBox, 1); Grid.SetColumn(newBox, 1); layout.Children.Add(oldBox); layout.Children.Add(newBox);
+        var oldBox = ReviewBox(isNewFile ? "" : before); var newBox = ReviewBox(after);
+        var sideBySide = new Grid();
+        sideBySide.ColumnDefinitions.Add(new ColumnDefinition()); sideBySide.ColumnDefinitions.Add(new ColumnDefinition());
+        Grid.SetColumn(oldBox, 0); Grid.SetColumn(newBox, 1); sideBySide.Children.Add(oldBox); sideBySide.Children.Add(newBox);
+        var diffDocument = new FlowDocument { PagePadding = new Thickness(8), FontFamily = new FontFamily("Consolas"), FontSize = 12 };
+        var diffBox = new RichTextBox { IsReadOnly = true, IsDocumentEnabled = true, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, Background = ThemeBrush("ComposerBrush"), Foreground = ThemeBrush("InputTextBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Document = diffDocument, Visibility = Visibility.Collapsed };
+        var diffBefore = isNewFile ? "" : before;
+        var diffLines = UnifiedDiff.Compare(diffBefore, after);
+        var formattedDiff = UnifiedDiff.Format(relativePath, diffBefore, after).Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        foreach (var heading in formattedDiff.Take(3))
+            diffDocument.Blocks.Add(new Paragraph(new Run(heading)) { Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 3) });
+        var hasChanges = diffLines.Any(line => line.Kind != UnifiedDiffLineKind.Context);
+        if (hasChanges)
+        {
+            foreach (var line in diffLines)
+            {
+                var prefix = line.Kind switch { UnifiedDiffLineKind.Added => "+", UnifiedDiffLineKind.Removed => "-", _ => " " };
+                var paragraph = new Paragraph { Margin = new Thickness(0) };
+                var brush = line.Kind switch
+                {
+                    UnifiedDiffLineKind.Added => new SolidColorBrush(Color.FromRgb(129, 199, 132)),
+                    UnifiedDiffLineKind.Removed => new SolidColorBrush(Color.FromRgb(239, 154, 154)),
+                    _ => ThemeBrush("InputTextBrush")
+                };
+                paragraph.Inlines.Add(new Run(prefix + line.Text) { Foreground = brush });
+                diffDocument.Blocks.Add(paragraph);
+            }
+        }
+        void SetReviewView(bool unified)
+        {
+            sideBySide.Visibility = unified ? Visibility.Collapsed : Visibility.Visible;
+            diffBox.Visibility = unified ? Visibility.Visible : Visibility.Collapsed;
+            sideBySideButton.Background = unified ? ThemeBrush("SecondaryButtonBrush") : ThemeBrush("WelcomeAccentBackgroundBrush");
+            unifiedButton.Background = unified ? ThemeBrush("WelcomeAccentBackgroundBrush") : ThemeBrush("SecondaryButtonBrush");
+        }
+        sideBySideButton.Click += (_, _) => SetReviewView(false);
+        unifiedButton.Click += (_, _) => SetReviewView(true);
+        SetReviewView(false);
+        Grid.SetRow(sideBySide, 1); Grid.SetColumnSpan(sideBySide, 2); layout.Children.Add(sideBySide);
+        Grid.SetRow(diffBox, 1); Grid.SetColumnSpan(diffBox, 2); layout.Children.Add(diffBox);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         var reject = new Button { Content = "Keep unchanged", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
         var approve = new Button { Content = isNewFile ? "Approve & create" : "Approve & apply", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
