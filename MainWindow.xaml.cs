@@ -76,7 +76,8 @@ public partial class MainWindow : Window
                 ["SecondaryButtonBrush"] = "#383A35", ["SecondaryButtonHoverBrush"] = "#444640", ["SecondaryButtonTextBrush"] = "#E0E1DB",
                 ["InputTextBrush"] = "#ECECE6", ["MessageBubbleBrush"] = "#343530", ["MessageTextBrush"] = "#E4E5DF",
                 ["UserLabelBrush"] = "#D29A7F", ["AssistantLabelBrush"] = "#A2A49C", ["WelcomeAccentBackgroundBrush"] = "#44352F",
-                ["WelcomeAccentBrush"] = "#E18A6A"
+                ["WelcomeAccentBrush"] = "#E18A6A", ["ComboPopupBrush"] = "#2B2C29", ["ComboHoverBrush"] = "#383A35",
+                ["ComboSelectedBrush"] = "#48443F", ["ComboSelectedTextBrush"] = "#F4F1EA"
             }
             : new Dictionary<string, string>
             {
@@ -89,7 +90,8 @@ public partial class MainWindow : Window
                 ["SecondaryButtonBrush"] = "#EEEFEA", ["SecondaryButtonHoverBrush"] = "#E4E5DF", ["SecondaryButtonTextBrush"] = "#41433E",
                 ["InputTextBrush"] = "#272925", ["MessageBubbleBrush"] = "#EFEEE8", ["MessageTextBrush"] = "#2A2B27",
                 ["UserLabelBrush"] = "#9A6A55", ["AssistantLabelBrush"] = "#7D8077", ["WelcomeAccentBackgroundBrush"] = "#F3E3DC",
-                ["WelcomeAccentBrush"] = "#C66F53"
+                ["WelcomeAccentBrush"] = "#C66F53", ["ComboPopupBrush"] = "#FFFFFF", ["ComboHoverBrush"] = "#F0F1EC",
+                ["ComboSelectedBrush"] = "#F4E1D8", ["ComboSelectedTextBrush"] = "#45352F"
             };
 
         foreach (var (key, value) in palette)
