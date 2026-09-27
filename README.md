@@ -4,7 +4,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 
 ## First preview
 
-- A chat-first, dark-sidebar/light-canvas desktop layout
+- A chat-first desktop layout, with dark mode as the default and light mode available
 - Independent persistent conversations, search, and pinning
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with quick choices for the three models in the original setup

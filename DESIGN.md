@@ -1,38 +1,124 @@
-# Codev design
+# Codev design and roadmap
 
 ## Product direction
 
-Codev is a calm, standalone coding workspace inspired by the conversational clarity of Claude, the project-aware agent workflow of Codex, and the model flexibility of OpenCode. It has its own Windows interface and connects to the user's local Ollama service.
+Codev is a standalone Windows coding workspace for local models. It takes inspiration from the clear conversation experience of Claude Desktop and the project/thread, coding-agent, and review workflows of Codex, while keeping inference on the user's Ollama installation. It does not depend on VS Code.
 
-The app should make many parallel lines of work feel organized: conversations are independent, searchable, persistent, and pinnable. Projects and their conversation history should stay easy to return to without turning the UI into an IDE full of panels.
+The goal is to make project work feel organized and reviewable: each task has its own conversation and working state; the agent can inspect a chosen project, propose changes, run approved checks, and show exactly what happened; the user remains in control of file changes, commands, network access, and concurrent work.
 
-## First-preview layout
+This roadmap describes Codev's intended product scope. It does **not** claim feature parity with Claude or Codex, and features from their separate subscription/cloud services are out of scope unless they can be provided locally or through an explicitly configured integration.
 
-- **Left rail:** Codev identity, new conversation, search, pinned conversations, recents, and a small local-service status card.
-- **Top bar:** current conversation title, local privacy hint, model selector, and pin control.
-- **Conversation canvas:** a focused welcome state with task starters, then readable role-labelled messages.
-- **Composer:** multiline prompt, project-context picker, send action, and a short local-storage note.
-- **Visual language:** warm off-white canvas, charcoal navigation, muted sage status, and restrained terracotta actions. Generous spacing and restrained chrome keep attention on the conversation.
-- **Appearance:** dark is the default theme; a sidebar toggle switches to light mode. The choice is saved locally and applies to both navigation and conversation surfaces.
+## Current design
 
-## Interaction rules
+- **Left rail:** Codev identity, new conversation, search, pinned conversations, recents, settings, and local model status.
+- **Top bar:** active conversation title, local privacy hint, model selector, and pin control.
+- **Conversation canvas:** focused welcome state, task suggestions, and readable message history.
+- **Composer:** multiline prompt, project-folder context control, and send action.
+- **Visual language:** warm terracotta action color, rounded quiet controls, spacious conversation column, and low-noise navigation. Dark mode is the default; light mode is also available and remembered locally.
 
-- New conversation creates a separate history and does not overwrite another chat.
-- Pinning is reversible and moves a conversation into a dedicated sidebar section.
-- Search filters recent conversation titles.
-- Model choice is stored per conversation.
-- Project attachment is explicit. This preview reads a bounded set of text source/config files and sends them only to the local Ollama endpoint.
-- Generation is streamed. This preview does not edit files or run shell commands.
+## Feature status
 
-## Milestones
+| Capability | Status in current build |
+|---|---|
+| Standalone Windows desktop app, no editor dependency | Done |
+| Dark/light appearance with persistent preference | Done |
+| Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
+| Streaming chat and independent persistent conversations | Done |
+| Pinning and title search | Done |
+| Choose a project folder and include bounded source/config excerpts | Basic read-only context only |
+| Project list, project-specific instructions, and reusable knowledge | Not implemented |
+| Agent reads/searches files on request and edits files | Not implemented |
+| Diff review, approve/reject, checkpoints, and undo | Not implemented |
+| Terminal commands, tests, and build output | Not implemented |
+| Plan/progress view and stop/resume/retry controls | Not implemented |
+| Truly parallel agents, tabs, and isolated worktrees | Not implemented |
+| Git status, branch, staging, and review workflow | Not implemented |
+| Markdown/code rendering, attachments, and session export | Not implemented |
+| Skills, MCP tools, recurring tasks, and notifications | Not implemented |
 
-1. **Foundation (current):** standalone WPF app, Ollama discovery and streaming, conversation persistence, model selection, pinning, search, bounded read-only project context.
-2. **Project workspaces:** project list, per-project conversations, visible file tree, relevant-file selection, context budget display.
-3. **Safe coding agent:** file read/edit tools, proposed diff review, per-action approval, undo/checkpoints, and command execution behind explicit approval.
-4. **Quality of life:** tabs or split sessions, keyboard shortcuts, markdown/code rendering, export/import, and settings for endpoint/context limits.
+So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
+
+## Roadmap
+
+### 0. Foundation — complete
+
+- Native standalone WPF shell; Ollama model list and streaming responses.
+- Persistent conversations, per-chat model choice, sidebar search, and pins.
+- Dark default and light theme, with the selection stored locally.
+- Explicit folder selection and bounded read-only project excerpts sent to the local Ollama endpoint.
+
+### 1. Projects and context
+
+- Project/workspace switcher with recent and pinned projects; each workspace maps to a chosen local folder.
+- Multiple conversations belonging to each project, plus ungrouped quick chats.
+- Project instructions and reusable context files, with visible source lists and opt-in inclusion.
+- File explorer, file preview, and deliberate file/context selection instead of sending a blind folder snapshot.
+- Context-budget display, exclusions, and relevant-file search so large repositories fit smaller local context windows.
+- Attach text files, images, and PDFs when the selected local model supports them; clearly show unsupported inputs.
+
+### 2. Coding agent and review loop
+
+- Separate **Chat** and **Code task** modes; plan-first option for larger tasks.
+- Agent tools for listing, reading, and searching project files, followed by proposed file edits.
+- Review every proposed change in a unified or side-by-side diff; approve, reject, or edit before applying.
+- Local checkpoints before writes, per-task change history, restore/undo, and a clear changed-files view.
+- Build/test/lint commands run in the selected project, with progress, captured output, stop, retry, and final verification summary.
+- Command permission choices with a safe default, explicit asks for elevated actions, and bounded filesystem/network access. Never silently claim an edit, test, or command succeeded.
+
+### 3. Sessions and parallel work
+
+- Tabs or a session switcher for many conversations, with pause, resume, cancel, and clear busy/queued states.
+- More than one independent agent task at once, subject to available RAM and model-load limits; communicate when local hardware serializes inference.
+- Optional Git worktree per task so parallel edits cannot collide in the same checkout.
+- Per-session model, context use, project, progress, changed files, and last activity visible from the workspace/session list.
+- Background task queue and completion notifications; reopening Codev restores the session list and results.
+
+### 4. Git and change management
+
+- Git status and branch picker for the selected project.
+- Review staged/unstaged diffs, inspect changed files, and comment on a selected diff hunk.
+- Stage/unstage and commit with user review; no automatic push or publish by default.
+- Compare and merge a task worktree into the chosen branch, or discard/recover it through a clearly reviewable action.
+- Show recent checkpoints and make rollback scope explicit before restoring files.
+
+### 5. Everyday assistant usability
+
+- Markdown, syntax-highlighted code, tables, and copy-code controls.
+- Stop generation, retry, regenerate, edit/resend a prompt, and branch a conversation from an earlier turn.
+- Keyboard shortcuts, accessible focus order, adjustable text size, and clear empty/loading/error states.
+- Conversation rename, archive, restore, export/import, and local backup controls.
+- Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
+
+### 6. Extensibility and automation
+
+- Local skills/instructions for repeatable workflows, with project-level and user-level scope.
+- MCP-compatible tools with per-server enablement, visible permissions, and logs; keep local-only use straightforward.
+- Reusable task templates and optional recurring local jobs with an approval/review queue.
+- Notification controls and a run history for background tasks.
+- Optional cloud connectors only as opt-in integrations, clearly separated from the local-only default.
+
+## Product principles
+
+- **Local first:** the default inference endpoint is Ollama on localhost; show clearly if a request would leave the machine.
+- **Review before change:** show a diff and make rollback possible before and after file writes.
+- **Bounded by workspace:** tools operate within the user-selected project unless an explicit permission changes that boundary.
+- **Visible work:** expose plans, tool calls, command output, changed files, and completion evidence.
+- **Honest capability:** distinguish simple chat from agent tasks, unsupported model features, queued work, and completed work.
+- **Hardware-aware concurrency:** parallel sessions must not imply that several large models can fit in RAM simultaneously; schedule/swap safely and keep GPU acceleration off unless the user enables it.
+
+## Reference workflows
+
+The feature comparison is based on official product documentation checked on 2026-09-27:
+
+- OpenAI describes Codex desktop threads grouped by projects, parallel agents, diff review, worktrees, skills, and scheduled automations in its [Codex app overview](https://openai.com/index/introducing-the-codex-app/). Windows execution also needs careful workspace boundaries and approvals; see [Codex's Windows sandbox design](https://openai.com/index/building-codex-windows-sandbox/) and [Codex safety controls](https://openai.com/index/running-codex-safely/).
+- Anthropic describes Claude Desktop projects with separate histories, reusable project knowledge and instructions, and starring/archive organization in its [Projects guide](https://support.anthropic.com/en/articles/9517075-what-are-projects) and [project management guide](https://support.anthropic.com/en/articles/9519177-how-can-i-create-and-manage-projects).
+- Anthropic's current Windows desktop supports Claude Code and Cowork on eligible plans; Cowork's visual agent can work with local files and long-running/parallel tasks in an isolated VM. See [Claude Desktop availability and Cowork](https://support.claude.com/en/articles/10065433-install-claude-desktop) and [Windows deployment requirements](https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows).
+- Claude Desktop also exposes local extensions and connected tools; see Anthropic's [connector overview](https://support.anthropic.com/en/articles/11817150-connect-your-tools-to-unlock-a-smarter-more-capable-ai-companion).
+
+We use these products as workflow references, not as an exhaustive checklist or a promise to reproduce paid/cloud features. Product capabilities change, so revisit these references when planning each milestone.
 
 ## Implementation choices
 
-- C# and modern .NET WPF keep Codev independent of VS Code and use a native Windows desktop UI.
-- Ollama HTTP API is the inference and model-discovery backend. It preserves the existing model downloads and CPU-only runtime choice.
-- Conversation persistence is local JSON under `%LOCALAPPDATA%\Codev` for the preview; a versioned SQLite store can replace it as project/workspace data grows.
+- C# and modern .NET WPF provide a native Windows desktop app independent of VS Code.
+- Ollama's HTTP API provides local model discovery and inference, reusing the user's existing model files and CPU-only runtime configuration.
+- Conversations and UI preferences are stored locally under `%LOCALAPPDATA%\Codev`; move from JSON to versioned SQLite when project/task state needs transactions, indexing, or migrations.
