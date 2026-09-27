@@ -27,7 +27,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Pinning and title search | Done |
 | Choose a project folder and include bounded source/config excerpts | Safe, bounded excerpts; Code task mode can list/read/search supported text files |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and safe project context implemented; reusable knowledge files pending |
-| Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed replacement of existing files |
+| Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
 | Plan/progress view and stop/resume/retry controls | Not implemented |
@@ -59,9 +59,9 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 ### 2. Coding agent and review loop — in progress
 
 - Separate **Chat** and **Code task** modes; plan-first option for larger tasks.
-- [x] Explicit Code task mode with bounded agent tools for listing, reading, and searching project files, followed by proposed file edits.
+- [x] Explicit Code task mode with bounded agent tools for listing, reading, searching, and proposing new or updated supported text files.
 - [x] Review proposed whole-file replacements side by side; approve or reject before applying.
-- [x] Local checkpoints before writes; per-conversation changed-file list and checkpoint restore, with rollback of the replaced version. Unified diff and richer history browsing remain.
+- [x] Local checkpoints before edits and deletes; per-conversation changed-file list and restore, including undo/redo of file creation or deletion. Unified diff and richer history browsing remain.
 - [x] Agent can request a PowerShell command in the selected project; show the exact command and current-user access warning, require per-call approval, enforce a 3-minute timeout, and capture bounded output. Progress UI, direct stop/retry, and final verification summary remain.
 - Commands are not sandboxed and may access anything available to the Windows account. Every call prompts; do not silently claim an edit, test, or command succeeded.
 

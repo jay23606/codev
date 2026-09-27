@@ -544,6 +544,7 @@ public partial class MainWindow : Window
             Tool("list_files", "List project files; pass a project-relative directory or an empty string for the root.", new { relative_directory = new { type = "string" } }, ["relative_directory"]),
             Tool("read_file", "Read a UTF-8 text file from the selected project.", new { relative_path = new { type = "string" } }, ["relative_path"]),
             Tool("search_files", "Search supported source files for a literal string.", new { query = new { type = "string" } }, ["query"]),
+            Tool("create_file", "Propose a new source, text, or configuration file in an existing project folder. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("write_file", "Propose the complete replacement contents of one existing project file. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("run_command", "Request approval to run one PowerShell command in the project folder. Every invocation requires approval.", new { command = new { type = "string" } }, ["command"])
         };
@@ -597,12 +598,25 @@ public partial class MainWindow : Window
                 "list_files" => string.Join("\n", service.ListFiles(Arg("relative_directory"), 160)),
                 "read_file" => await service.ReadFileAsync(Arg("relative_path"), cancellationToken),
                 "search_files" => string.Join("\n", await service.SearchFilesAsync(Arg("query"), cancellationToken)),
+                "create_file" => await ReviewAndCreateFileAsync(Arg("relative_path"), Arg("content"), service, conversation, cancellationToken),
                 "write_file" => await ReviewAndWriteFileAsync(Arg("relative_path"), Arg("content"), service, conversation, cancellationToken),
                 "run_command" => await ApproveAndRunCommandAsync(Arg("command"), service, cancellationToken),
                 _ => "Error: tool is not available."
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { return "Error: " + ex.Message; }
+    }
+
+    private async Task<string> ReviewAndCreateFileAsync(string relativePath, string proposed, WorkspaceFileService service, Conversation conversation, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) return "Error: a project-relative path is required.";
+        var full = service.ResolvePath(relativePath);
+        if (File.Exists(full)) return "Rejected: a file already exists here. Use write_file to propose an edit instead.";
+        if (!ShowFileReview(relativePath, "[New file]", proposed, isNewFile: true)) return "Rejected by user; no file was created.";
+        await service.CreateFileAtomicAsync(relativePath, proposed, cancellationToken);
+        conversation.FileChanges.Add(new FileChangeRecord(relativePath, null, DateTimeOffset.Now, "Create", PreviousFileExisted: false));
+        if (ReferenceEquals(_active, conversation)) UpdateChangesButton(conversation);
+        return "Approved and created the new project file.";
     }
 
     private async Task<string> ReviewAndWriteFileAsync(string relativePath, string proposed, WorkspaceFileService service, Conversation conversation, CancellationToken cancellationToken)
@@ -656,22 +670,22 @@ public partial class MainWindow : Window
         return dialog.ShowDialog() == true;
     }
 
-    private bool ShowFileReview(string relativePath, string before, string after)
+    private bool ShowFileReview(string relativePath, string before, string after, bool isNewFile = false)
     {
-        var dialog = new Window { Title = $"Review change · {relativePath}", Width = 940, Height = 660, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize };
+        var dialog = new Window { Title = $"{(isNewFile ? "Review new file" : "Review change")} · {relativePath}", Width = 940, Height = 660, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize };
         var layout = new Grid { Margin = new Thickness(16) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.ColumnDefinitions.Add(new ColumnDefinition()); layout.ColumnDefinitions.Add(new ColumnDefinition());
-        var note = new TextBlock { Text = "Review both versions. Approving replaces the existing file; a local checkpoint is saved first.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12) };
+        var note = new TextBlock { Text = isNewFile ? "No file exists at this path. Approving creates it in the selected project folder." : "Review both versions. Approving applies the reviewed state; a local checkpoint is saved first when a file exists.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12) };
         Grid.SetColumnSpan(note, 2); layout.Children.Add(note);
         TextBox ReviewBox(string value) => new() { Text = value, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(8) };
         var oldBox = ReviewBox(before); var newBox = ReviewBox(after);
         Grid.SetRow(oldBox, 1); Grid.SetColumn(oldBox, 0); Grid.SetRow(newBox, 1); Grid.SetColumn(newBox, 1); layout.Children.Add(oldBox); layout.Children.Add(newBox);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         var reject = new Button { Content = "Keep unchanged", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
-        var approve = new Button { Content = "Approve & apply", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        var approve = new Button { Content = isNewFile ? "Approve & create" : "Approve & apply", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
         approve.Click += (_, _) => { dialog.DialogResult = true; dialog.Close(); };
         buttons.Children.Add(reject); buttons.Children.Add(approve); Grid.SetRow(buttons, 2); Grid.SetColumnSpan(buttons, 2); layout.Children.Add(buttons);
         dialog.Content = layout;
@@ -725,12 +739,15 @@ public partial class MainWindow : Window
         try
         {
             var service = new WorkspaceFileService(conversation.ProjectPath);
-            var current = await service.ReadFileSnapshotAsync(change.RelativePath);
-            var previous = await service.ReadCheckpointAsync(change.RelativePath, conversation.Id, change.CheckpointPath);
-            if (!ShowFileReview(change.RelativePath, current.Content, previous)) return;
-            var rollback = await service.RestoreCheckpointAsync(change.RelativePath, conversation.Id, change.CheckpointPath, current.Sha256);
+            var currentExists = File.Exists(service.ResolvePath(change.RelativePath));
+            var current = currentExists ? await service.ReadFileSnapshotAsync(change.RelativePath) : null;
+            var previous = change.PreviousFileExisted
+                ? await service.ReadCheckpointAsync(change.RelativePath, conversation.Id, change.CheckpointPath ?? "")
+                : "[This restore will delete the file]";
+            if (!ShowFileReview(change.RelativePath, current?.Content ?? "[The file does not currently exist]", previous)) return;
+            var rollback = await service.RestoreFileStateAsync(change.RelativePath, conversation.Id, change.PreviousFileExisted, change.CheckpointPath, current?.Sha256);
             conversation.FileChanges.Remove(change);
-            conversation.FileChanges.Add(new FileChangeRecord(change.RelativePath, rollback, DateTimeOffset.Now, "Restore"));
+            conversation.FileChanges.Add(new FileChangeRecord(change.RelativePath, rollback, DateTimeOffset.Now, "Restore", currentExists));
             UpdateChangesButton(conversation);
             await SaveAsync();
             MessageBox.Show(this, $"Restored {change.RelativePath}. A checkpoint of the version that was replaced is available under Files.", "File restored", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -876,7 +893,7 @@ public sealed class Conversation
     public List<FileChangeRecord> FileChanges { get; set; } = [];
 }
 
-public sealed record FileChangeRecord(string RelativePath, string CheckpointPath, DateTimeOffset ChangedAt, string Kind);
+public sealed record FileChangeRecord(string RelativePath, string? CheckpointPath, DateTimeOffset ChangedAt, string Kind, bool PreviousFileExisted = true);
 
 public sealed record ChatMessage(string Role, string Content);
 

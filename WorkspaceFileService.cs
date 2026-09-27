@@ -231,6 +231,24 @@ public sealed class WorkspaceFileService
         }
     }
 
+    public async Task CreateFileAtomicAsync(string relativePath, string content, CancellationToken cancellationToken = default)
+    {
+        if (content.Length > 200_000) throw new InvalidOperationException("Proposed file is larger than 200 KB.");
+        var full = ResolvePath(relativePath);
+        if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files can be created by the agent.");
+        if (File.Exists(full)) throw new IOException("A file already exists at this path. Review it as an edit instead.");
+        var parent = Path.GetDirectoryName(full)!;
+        if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The parent folder must already exist; Codev will not create new directory trees yet.");
+        var temp = Path.Combine(parent, $".codev-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllTextAsync(temp, content, cancellationToken);
+            ResolvePath(relativePath);
+            File.Move(temp, full, overwrite: false);
+        }
+        finally { try { if (File.Exists(temp)) File.Delete(temp); } catch { } }
+    }
+
     public async Task<string> ReadCheckpointAsync(string relativePath, Guid conversationId, string checkpointPath, CancellationToken cancellationToken = default)
     {
         ResolvePath(relativePath);
@@ -247,6 +265,41 @@ public sealed class WorkspaceFileService
         var rollback = await CreateCheckpointAsync(relativePath, conversationId, cancellationToken, expectedCurrentHash);
         await WriteFileAtomicAsync(relativePath, restored, cancellationToken, expectedCurrentHash, maxCharacters: 500_000);
         return rollback ?? throw new IOException("Could not save a rollback checkpoint before restoring.");
+    }
+
+    public async Task<string?> RestoreFileStateAsync(string relativePath, Guid conversationId, bool previousFileExisted, string? checkpointPath, string? expectedCurrentHash, CancellationToken cancellationToken = default)
+    {
+        var full = ResolvePath(relativePath);
+        if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are restored by the agent.");
+        var currentExists = File.Exists(full);
+        if (currentExists)
+        {
+            if (expectedCurrentHash is null || !await CurrentFileMatchesAsync(full, expectedCurrentHash, cancellationToken))
+                throw new IOException("The file changed since the last review. Nothing was overwritten; review its current contents first.");
+        }
+        else if (expectedCurrentHash is not null)
+            throw new IOException("The file changed since the last review. Nothing was overwritten; review its current contents first.");
+
+        var rollback = currentExists ? await CreateCheckpointAsync(relativePath, conversationId, cancellationToken, expectedCurrentHash) : null;
+        if (currentExists && rollback is null) throw new IOException("Could not save a rollback checkpoint.");
+
+        if (previousFileExisted)
+        {
+            if (string.IsNullOrWhiteSpace(checkpointPath)) throw new FileNotFoundException("The saved checkpoint for this change is missing.");
+            var checkpoint = ValidateCheckpointPath(conversationId, checkpointPath);
+            if (new FileInfo(checkpoint).Length > 500_000) throw new InvalidOperationException("Checkpoint files larger than 500 KB cannot be restored.");
+            var content = await File.ReadAllTextAsync(checkpoint, cancellationToken);
+            if (currentExists) await WriteFileAtomicAsync(relativePath, content, cancellationToken, expectedCurrentHash, maxCharacters: 500_000);
+            else await CreateFileAtomicAsync(relativePath, content, cancellationToken);
+        }
+        else
+        {
+            if (!currentExists) return null;
+            if (!await CurrentFileMatchesAsync(full, expectedCurrentHash!, cancellationToken))
+                throw new IOException("The file changed while it was being removed. Nothing was deleted; review its current contents first.");
+            File.Delete(full);
+        }
+        return rollback;
     }
 
     private static string ValidateCheckpointPath(Guid conversationId, string checkpointPath)

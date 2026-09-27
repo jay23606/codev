@@ -92,6 +92,29 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Creates_a_new_file_and_can_undo_and_redo_its_creation()
+    {
+        var id = Guid.NewGuid();
+        var path = Path.Combine(_root, "src", "Feature.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        try
+        {
+            var service = Service;
+            await service.CreateFileAtomicAsync("src/Feature.cs", "class Feature {}");
+            var created = await service.ReadFileSnapshotAsync("src/Feature.cs");
+            var rollback = await service.RestoreFileStateAsync("src/Feature.cs", id, previousFileExisted: false, checkpointPath: null, expectedCurrentHash: created.Sha256);
+            Assert.NotNull(rollback);
+            Assert.False(File.Exists(path));
+
+            var redo = await service.RestoreFileStateAsync("src/Feature.cs", id, previousFileExisted: true, checkpointPath: rollback, expectedCurrentHash: null);
+            Assert.Null(redo);
+            Assert.Equal("class Feature {}", await File.ReadAllTextAsync(path));
+        }
+        finally { try { if (Directory.Exists(checkpoints)) Directory.Delete(checkpoints, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task Does_not_read_a_checkpoint_outside_the_conversation_backup_folder()
     {
         var outside = Path.Combine(_root, "outside.bak");
