@@ -13,6 +13,7 @@ The app should make many parallel lines of work feel organized: conversations ar
 - **Conversation canvas:** a focused welcome state with task starters, then readable role-labelled messages.
 - **Composer:** multiline prompt, project-context picker, send action, and a short local-storage note.
 - **Visual language:** warm off-white canvas, charcoal navigation, muted sage status, and restrained terracotta actions. Generous spacing and restrained chrome keep attention on the conversation.
+- **Appearance:** dark is the default theme; a sidebar toggle switches to light mode. The choice is saved locally and applies to both navigation and conversation surfaces.
 
 ## Interaction rules
 

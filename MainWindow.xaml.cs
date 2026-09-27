@@ -23,16 +23,82 @@ public partial class MainWindow : Window
     private string? _projectPath;
     private CancellationTokenSource? _requestCancellation;
     private bool _loadingModel;
+    private bool _isDarkTheme = true;
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
+    private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
 
     public MainWindow()
     {
         InitializeComponent();
+        LoadThemePreference();
+        ApplyTheme();
         LoadConversations();
         RefreshConversationLists();
         if (_conversations.Count > 0) SelectConversation(_conversations.OrderByDescending(c => c.UpdatedAt).First());
         Loaded += async (_, _) => await LoadModelsAsync();
+    }
+
+    private void LoadThemePreference()
+    {
+        try
+        {
+            if (File.Exists(ThemePath))
+            {
+                var settings = JsonSerializer.Deserialize<UiSettings>(File.ReadAllText(ThemePath), JsonOptions);
+                _isDarkTheme = !string.Equals(settings?.Theme, "light", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        catch { _isDarkTheme = true; }
+    }
+
+    private void SaveThemePreference()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
+            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light"), JsonOptions));
+        }
+        catch { }
+    }
+
+    private void ApplyTheme()
+    {
+        var palette = _isDarkTheme
+            ? new Dictionary<string, string>
+            {
+                ["AppBackgroundBrush"] = "#242522", ["SidebarBackgroundBrush"] = "#1B1C1A", ["SidebarTextBrush"] = "#D7D8D2",
+                ["SidebarMutedBrush"] = "#888B83", ["SidebarBorderBrush"] = "#383A35", ["SidebarHoverBrush"] = "#292C28",
+                ["SidebarActiveBrush"] = "#30332F", ["SidebarCardBrush"] = "#272A26", ["SidebarInputBrush"] = "#292C28",
+                ["SidebarNewButtonBrush"] = "#30332F", ["SidebarNewButtonTextBrush"] = "#FFFFFF", ["MainSurfaceBrush"] = "#292A27",
+                ["MainSurfaceAltBrush"] = "#242522", ["MainBorderBrush"] = "#3A3B37", ["MainTextBrush"] = "#ECECE6",
+                ["MutedTextBrush"] = "#A2A49C", ["ComposerBrush"] = "#2B2C29", ["ComposerBorderBrush"] = "#41423D",
+                ["SecondaryButtonBrush"] = "#383A35", ["SecondaryButtonHoverBrush"] = "#444640", ["SecondaryButtonTextBrush"] = "#E0E1DB",
+                ["InputTextBrush"] = "#ECECE6", ["MessageBubbleBrush"] = "#343530", ["MessageTextBrush"] = "#E4E5DF",
+                ["UserLabelBrush"] = "#D29A7F", ["AssistantLabelBrush"] = "#A2A49C", ["WelcomeAccentBackgroundBrush"] = "#44352F",
+                ["WelcomeAccentBrush"] = "#E18A6A"
+            }
+            : new Dictionary<string, string>
+            {
+                ["AppBackgroundBrush"] = "#F7F7F4", ["SidebarBackgroundBrush"] = "#F0F0EC", ["SidebarTextBrush"] = "#353731",
+                ["SidebarMutedBrush"] = "#85877F", ["SidebarBorderBrush"] = "#D9DAD4", ["SidebarHoverBrush"] = "#E6E7E1",
+                ["SidebarActiveBrush"] = "#E1E2DC", ["SidebarCardBrush"] = "#E6E7E1", ["SidebarInputBrush"] = "#E5E6E0",
+                ["SidebarNewButtonBrush"] = "#D97757", ["SidebarNewButtonTextBrush"] = "#FFFFFF", ["MainSurfaceBrush"] = "#FFFFFF",
+                ["MainSurfaceAltBrush"] = "#F9F9F6", ["MainBorderBrush"] = "#E6E7E1", ["MainTextBrush"] = "#282A26",
+                ["MutedTextBrush"] = "#85877F", ["ComposerBrush"] = "#FFFFFF", ["ComposerBorderBrush"] = "#E2E3DD",
+                ["SecondaryButtonBrush"] = "#EEEFEA", ["SecondaryButtonHoverBrush"] = "#E4E5DF", ["SecondaryButtonTextBrush"] = "#41433E",
+                ["InputTextBrush"] = "#272925", ["MessageBubbleBrush"] = "#EFEEE8", ["MessageTextBrush"] = "#2A2B27",
+                ["UserLabelBrush"] = "#9A6A55", ["AssistantLabelBrush"] = "#7D8077", ["WelcomeAccentBackgroundBrush"] = "#F3E3DC",
+                ["WelcomeAccentBrush"] = "#C66F53"
+            };
+
+        foreach (var (key, value) in palette)
+        {
+            var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(value));
+            brush.Freeze();
+            Resources[key] = brush;
+        }
+        ThemeButton.Content = _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
     }
 
     private void LoadConversations()
@@ -146,11 +212,11 @@ public partial class MainWindow : Window
         foreach (var message in _active.Messages)
         {
             var isUser = message.Role == "user";
-            var body = new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 23, Foreground = new SolidColorBrush(Color.FromRgb(42, 43, 39)) };
+            var body = new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 23, Foreground = ThemeBrush("MessageTextBrush") };
             var content = new StackPanel();
-            content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(isUser ? Color.FromRgb(154, 106, 85) : Color.FromRgb(125, 128, 119)), Margin = new Thickness(0, 0, 0, 6) });
+            content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
-            var border = new Border { Child = content, Padding = new Thickness(isUser ? 15 : 0, isUser ? 12 : 8, isUser ? 15 : 0, isUser ? 12 : 8), Background = isUser ? new SolidColorBrush(Color.FromRgb(239, 237, 231)) : Brushes.Transparent, CornerRadius = new CornerRadius(12), HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Stretch, MaxWidth = 720, Margin = new Thickness(0, 0, 0, 17) };
+            var border = new Border { Child = content, Padding = new Thickness(isUser ? 15 : 0, isUser ? 12 : 8, isUser ? 15 : 0, isUser ? 12 : 8), Background = isUser ? ThemeBrush("MessageBubbleBrush") : Brushes.Transparent, CornerRadius = new CornerRadius(12), HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Stretch, MaxWidth = 720, Margin = new Thickness(0, 0, 0, 17) };
             MessagesList.Items.Add(border);
         }
         ChatScroll.ScrollToEnd();
@@ -171,9 +237,9 @@ public partial class MainWindow : Window
         foreach (var item in conversations)
         {
             var title = string.IsNullOrWhiteSpace(item.Title) ? "New conversation" : item.Title;
-            var button = new Button { Style = (Style)FindResource("SidebarButton"), Tag = item, Padding = new Thickness(11, 8, 7, 8), Margin = new Thickness(0, 1, 0, 1), Background = ReferenceEquals(item, _active) ? new SolidColorBrush(Color.FromRgb(47, 50, 45)) : Brushes.Transparent };
+            var button = new Button { Style = (Style)FindResource("SidebarButton"), Tag = item, Padding = new Thickness(11, 8, 7, 8), Margin = new Thickness(0, 1, 0, 1), Background = ReferenceEquals(item, _active) ? ThemeBrush("SidebarActiveBrush") : Brushes.Transparent };
             var row = new DockPanel();
-            var caption = new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(218, 219, 213)), VerticalAlignment = VerticalAlignment.Center };
+            var caption = new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 12, Foreground = ThemeBrush("SidebarTextBrush"), VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(caption);
             button.Content = row;
             button.Click += (_, _) => SelectConversation(item);
@@ -184,7 +250,7 @@ public partial class MainWindow : Window
             button.ContextMenu = menu;
             list.Items.Add(button);
         }
-        if (list.Items.Count == 0) list.Items.Add(new TextBlock { Text = "Nothing here yet", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(113, 117, 108)), Margin = new Thickness(12, 3, 0, 3) });
+        if (list.Items.Count == 0) list.Items.Add(new TextBlock { Text = "Nothing here yet", FontSize = 11, Foreground = ThemeBrush("SidebarMutedBrush"), Margin = new Thickness(12, 3, 0, 3) });
     }
 
     private async void Send_Click(object sender, RoutedEventArgs e) => await SendPromptAsync();
@@ -365,8 +431,19 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(this, "Codev connects to Ollama at http://127.0.0.1:11434. Conversations are stored on this device in %LOCALAPPDATA%\\Codev.\n\nThis first preview provides local chat, model switching, search, and pinned conversations. Project-aware file reading and safe edit approvals are planned next.", "Codev settings", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, $"Appearance: {(_isDarkTheme ? "Dark" : "Light")} (use the appearance button above Settings to switch).\n\nCodev connects to Ollama at http://127.0.0.1:11434. Conversations and preferences are stored on this device in %LOCALAPPDATA%\\Codev.", "Codev settings", MessageBoxButton.OK, MessageBoxImage.Information);
     }
+
+    private void ToggleTheme_Click(object sender, RoutedEventArgs e)
+    {
+        _isDarkTheme = !_isDarkTheme;
+        ApplyTheme();
+        SaveThemePreference();
+        RefreshConversationLists();
+        RenderMessages();
+    }
+
+    private Brush ThemeBrush(string key) => (Brush)FindResource(key);
 
     protected override void OnClosed(EventArgs e)
     {
@@ -376,6 +453,7 @@ public partial class MainWindow : Window
     }
 
     private sealed record OllamaMessage([property: JsonPropertyName("role")] string Role, [property: JsonPropertyName("content")] string Content);
+    private sealed record UiSettings(string Theme);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);

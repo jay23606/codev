@@ -2,52 +2,79 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Codev" Height="820" Width="1320" MinHeight="620" MinWidth="900"
-        WindowStartupLocation="CenterScreen" Background="#F7F7F4"
-        Foreground="#262824" FontFamily="Segoe UI Variable Text">
+        WindowStartupLocation="CenterScreen" Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource MainTextBrush}" FontFamily="Segoe UI Variable Text">
     <Window.Resources>
-        <SolidColorBrush x:Key="Ink" Color="#20221F"/>
-        <SolidColorBrush x:Key="Muted" Color="#85877F"/>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#242522"/>
+        <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#1B1C1A"/>
+        <SolidColorBrush x:Key="SidebarTextBrush" Color="#D7D8D2"/>
+        <SolidColorBrush x:Key="SidebarMutedBrush" Color="#888B83"/>
+        <SolidColorBrush x:Key="SidebarBorderBrush" Color="#383A35"/>
+        <SolidColorBrush x:Key="SidebarHoverBrush" Color="#292C28"/>
+        <SolidColorBrush x:Key="SidebarActiveBrush" Color="#30332F"/>
+        <SolidColorBrush x:Key="SidebarNewButtonBrush" Color="#D97757"/>
+        <SolidColorBrush x:Key="SidebarNewButtonTextBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="SidebarCardBrush" Color="#272A26"/>
+        <SolidColorBrush x:Key="SidebarInputBrush" Color="#292C28"/>
+        <SolidColorBrush x:Key="MainSurfaceBrush" Color="#292A27"/>
+        <SolidColorBrush x:Key="MainSurfaceAltBrush" Color="#242522"/>
+        <SolidColorBrush x:Key="MainBorderBrush" Color="#3A3B37"/>
+        <SolidColorBrush x:Key="MainTextBrush" Color="#ECECE6"/>
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#A2A49C"/>
+        <SolidColorBrush x:Key="ComposerBrush" Color="#2B2C29"/>
+        <SolidColorBrush x:Key="ComposerBorderBrush" Color="#41423D"/>
+        <SolidColorBrush x:Key="SecondaryButtonBrush" Color="#383A35"/>
+        <SolidColorBrush x:Key="SecondaryButtonHoverBrush" Color="#444640"/>
+        <SolidColorBrush x:Key="SecondaryButtonTextBrush" Color="#E0E1DB"/>
+        <SolidColorBrush x:Key="InputTextBrush" Color="#ECECE6"/>
+        <SolidColorBrush x:Key="MessageBubbleBrush" Color="#343530"/>
+        <SolidColorBrush x:Key="MessageTextBrush" Color="#E4E5DF"/>
+        <SolidColorBrush x:Key="UserLabelBrush" Color="#D29A7F"/>
+        <SolidColorBrush x:Key="AssistantLabelBrush" Color="#A2A49C"/>
+        <SolidColorBrush x:Key="WelcomeAccentBackgroundBrush" Color="#44352F"/>
+        <SolidColorBrush x:Key="WelcomeAccentBrush" Color="#E18A6A"/>
         <SolidColorBrush x:Key="Accent" Color="#D97757"/>
         <Style x:Key="SidebarButton" TargetType="Button">
-            <Setter Property="Foreground" Value="#D7D8D2"/><Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource SidebarTextBrush}"/><Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="Padding" Value="12,10"/><Setter Property="FontSize" Value="13"/><Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#292C28"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource SidebarHoverBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
         </Style>
         <Style x:Key="SoftButton" TargetType="Button">
-            <Setter Property="Foreground" Value="#41433E"/><Setter Property="Background" Value="#EEEFEA"/><Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryButtonTextBrush}"/><Setter Property="Background" Value="{DynamicResource SecondaryButtonBrush}"/><Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="12,8"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FontSize" Value="12"/>
-            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#E4E5DF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource SecondaryButtonHoverBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
         </Style>
-        <Style TargetType="ComboBox"><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#E7E7E1"/><Setter Property="Padding" Value="9,6"/><Setter Property="FontSize" Value="12"/></Style>
-        <Style TargetType="TextBox"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="FontSize" Value="14"/><Setter Property="Foreground" Value="#272925"/><Setter Property="CaretBrush" Value="#D97757"/></Style>
+        <Style TargetType="ComboBox"><Setter Property="Background" Value="{DynamicResource MainSurfaceBrush}"/><Setter Property="Foreground" Value="{DynamicResource MainTextBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource MainBorderBrush}"/><Setter Property="Padding" Value="9,6"/><Setter Property="FontSize" Value="12"/><Setter Property="ItemContainerStyle"><Setter.Value><Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="{DynamicResource MainTextBrush}"/><Setter Property="Background" Value="{DynamicResource MainSurfaceBrush}"/><Setter Property="Padding" Value="8,6"/></Style></Setter.Value></Setter></Style>
+        <Style TargetType="TextBox"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="FontSize" Value="14"/><Setter Property="Foreground" Value="{DynamicResource InputTextBrush}"/><Setter Property="CaretBrush" Value="#D97757"/></Style>
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="264"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <Border Grid.Column="0" Background="#1D201D">
+        <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}">
             <DockPanel Margin="14,16,14,14" LastChildFill="True">
                 <StackPanel DockPanel.Dock="Top">
                     <Grid Margin="8,1,7,20"><Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition/></Grid.ColumnDefinitions>
                         <Border Width="31" Height="31" CornerRadius="10" Background="#D97757" VerticalAlignment="Center"><TextBlock Text="c" FontSize="22" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-4,0,0"/></Border>
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="codev" FontSize="20" FontWeight="SemiBold" Foreground="#F5F3EC"/><TextBlock Text="YOUR LOCAL CODING SPACE" FontSize="8" Foreground="#83867E" Margin="1,-1,0,0"/></StackPanel>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="codev" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource SidebarTextBrush}"/><TextBlock Text="YOUR LOCAL CODING SPACE" FontSize="8" Foreground="{DynamicResource SidebarMutedBrush}" Margin="1,-1,0,0"/></StackPanel>
                     </Grid>
-                    <Button x:Name="NewChatButton" Style="{StaticResource SidebarButton}" Click="NewChat_Click" Background="#30332F" Foreground="White" Margin="0,0,0,6"><StackPanel Orientation="Horizontal"><TextBlock Text="＋" FontSize="17" Margin="0,-2,10,0"/><TextBlock Text="New conversation" VerticalAlignment="Center"/></StackPanel></Button>
+                    <Button x:Name="NewChatButton" Style="{StaticResource SidebarButton}" Click="NewChat_Click" Background="{DynamicResource SidebarNewButtonBrush}" Foreground="{DynamicResource SidebarNewButtonTextBrush}" Margin="0,0,0,6"><StackPanel Orientation="Horizontal"><TextBlock Text="＋" FontSize="17" Margin="0,-2,10,0"/><TextBlock Text="New conversation" VerticalAlignment="Center"/></StackPanel></Button>
                     <Button Style="{StaticResource SidebarButton}" Click="SearchFocus_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="⌕" FontSize="19" Margin="0,-3,10,0"/><TextBlock Text="Search conversations" VerticalAlignment="Center"/></StackPanel></Button>
-                    <Border Height="1" Background="#343732" Margin="8,13,8,14"/>
+                        <Border Height="1" Background="{DynamicResource SidebarBorderBrush}" Margin="8,13,8,14"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Bottom">
-                    <Border Height="1" Background="#343732" Margin="8,10,8,12"/>
+                    <Border Height="1" Background="{DynamicResource SidebarBorderBrush}" Margin="8,10,8,12"/>
+                    <Button x:Name="ThemeButton" Style="{StaticResource SidebarButton}" Click="ToggleTheme_Click" Content="☾  Switch to light mode"/>
                     <Button Style="{StaticResource SidebarButton}" Click="Settings_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="⚙" FontSize="15" Margin="1,0,12,0"/><TextBlock Text="Settings" VerticalAlignment="Center"/></StackPanel></Button>
-                    <Border Background="#272A26" CornerRadius="9" Padding="11" Margin="4,12,4,0">
-                        <StackPanel><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Fill="#79B99A" Margin="0,0,8,0"/><TextBlock Text="LOCAL MODEL" FontSize="9" Foreground="#AEB1A9"/></StackPanel><TextBlock x:Name="ConnectionLabel" Text="Connecting to Ollama…" Foreground="#E6E7E1" FontSize="11" Margin="15,7,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
+                    <Border Background="{DynamicResource SidebarCardBrush}" CornerRadius="9" Padding="11" Margin="4,12,4,0">
+                        <StackPanel><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Fill="#79B99A" Margin="0,0,8,0"/><TextBlock Text="LOCAL MODEL" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}"/></StackPanel><TextBlock x:Name="ConnectionLabel" Text="Connecting to Ollama…" Foreground="{DynamicResource SidebarTextBrush}" FontSize="11" Margin="15,7,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
                     </Border>
                 </StackPanel>
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
-                        <TextBlock Text="PINNED" FontSize="9" Foreground="#777B73" Margin="12,1,0,8"/>
+                        <TextBlock Text="PINNED" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,1,0,8"/>
                         <ItemsControl x:Name="PinnedList"/>
-                        <TextBlock Text="RECENTS" FontSize="9" Foreground="#777B73" Margin="12,18,0,8"/>
-                        <TextBox x:Name="SearchBox" Margin="8,0,8,7" Padding="8,7" FontSize="12" Foreground="#D7D8D2" Background="#292C28" TextChanged="SearchBox_TextChanged" Visibility="Collapsed"/>
+                        <TextBlock Text="RECENTS" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,18,0,8"/>
+                        <TextBox x:Name="SearchBox" Margin="8,0,8,7" Padding="8,7" FontSize="12" Foreground="{DynamicResource SidebarTextBrush}" Background="{DynamicResource SidebarInputBrush}" TextChanged="SearchBox_TextChanged" Visibility="Collapsed"/>
                         <ItemsControl x:Name="RecentList"/>
                     </StackPanel>
                 </ScrollViewer>
@@ -56,11 +83,11 @@
 
         <Grid Grid.Column="1">
             <Grid.RowDefinitions><RowDefinition Height="62"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Border Grid.Row="0" BorderBrush="#EAEAE5" BorderThickness="0,0,0,1" Background="#F9F9F6">
+            <Border Grid.Row="0" BorderBrush="{DynamicResource MainBorderBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource MainSurfaceAltBrush}">
                 <Grid Margin="34,0,34,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center"><TextBlock x:Name="ConversationTitle" Text="New conversation" FontSize="15" FontWeight="SemiBold" Foreground="#30322D"/><TextBlock Text="Private · running on your machine" FontSize="10" Foreground="#92948D" Margin="0,2,0,0"/></StackPanel>
+                    <StackPanel VerticalAlignment="Center"><TextBlock x:Name="ConversationTitle" Text="New conversation" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource MainTextBrush}"/><TextBlock Text="Private · running on your machine" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" Margin="0,2,0,0"/></StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="MODEL" FontSize="9" Foreground="#92948D" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <TextBlock Text="MODEL" FontSize="9" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
                         <ComboBox x:Name="ModelPicker" Width="245" SelectionChanged="ModelPicker_SelectionChanged" DisplayMemberPath="DisplayName" SelectedValuePath="Name"/>
                         <Button x:Name="PinButton" Content="☆  Pin" Style="{StaticResource SoftButton}" Margin="10,0,0,0" Click="Pin_Click"/>
                     </StackPanel>
@@ -69,32 +96,32 @@
             <ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="7*"/><ColumnDefinition Width="1.5*"/></Grid.ColumnDefinitions>
                     <StackPanel x:Name="WelcomePanel" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Stretch" Margin="0,45,0,45">
-                        <Border Width="48" Height="48" CornerRadius="16" Background="#F3E3DC" HorizontalAlignment="Center" Margin="0,0,0,20"><TextBlock Text="✳" FontSize="25" Foreground="#C66F53" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                        <TextBlock Text="What are we working on?" FontSize="27" FontWeight="SemiBold" Foreground="#282A26" HorizontalAlignment="Center"/>
-                        <TextBlock Text="A thoughtful coding space, powered by your local models." FontSize="13" Foreground="#85877F" HorizontalAlignment="Center" Margin="0,8,0,28"/>
+                        <Border Width="48" Height="48" CornerRadius="16" Background="{DynamicResource WelcomeAccentBackgroundBrush}" HorizontalAlignment="Center" Margin="0,0,0,20"><TextBlock Text="✳" FontSize="25" Foreground="{DynamicResource WelcomeAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                        <TextBlock Text="What are we working on?" FontSize="27" FontWeight="SemiBold" Foreground="{DynamicResource MainTextBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="A thoughtful coding space, powered by your local models." FontSize="13" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,8,0,28"/>
                         <UniformGrid Columns="2" Rows="2" HorizontalAlignment="Center" Width="500">
-                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Explain how this codebase is organized"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Explore a codebase" FontWeight="SemiBold"/><TextBlock Text="Get oriented in a project" Foreground="#85877F" Margin="0,3,0,0"/></StackPanel></Button>
-                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Help me debug an issue"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Fix a tricky bug" FontWeight="SemiBold"/><TextBlock Text="Trace behavior and find a cause" Foreground="#85877F" Margin="0,3,0,0"/></StackPanel></Button>
-                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Review this code and suggest improvements"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Review some code" FontWeight="SemiBold"/><TextBlock Text="Spot risks and opportunities" Foreground="#85877F" Margin="0,3,0,0"/></StackPanel></Button>
-                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Help me plan a feature"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Plan a feature" FontWeight="SemiBold"/><TextBlock Text="Break an idea into clear steps" Foreground="#85877F" Margin="0,3,0,0"/></StackPanel></Button>
+                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Explain how this codebase is organized"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Explore a codebase" FontWeight="SemiBold"/><TextBlock Text="Get oriented in a project" Foreground="{DynamicResource MutedTextBrush}" Margin="0,3,0,0"/></StackPanel></Button>
+                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Help me debug an issue"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Fix a tricky bug" FontWeight="SemiBold"/><TextBlock Text="Trace behavior and find a cause" Foreground="{DynamicResource MutedTextBrush}" Margin="0,3,0,0"/></StackPanel></Button>
+                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Review this code and suggest improvements"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Review some code" FontWeight="SemiBold"/><TextBlock Text="Spot risks and opportunities" Foreground="{DynamicResource MutedTextBrush}" Margin="0,3,0,0"/></StackPanel></Button>
+                            <Button Style="{StaticResource SoftButton}" Margin="5" Click="Suggestion_Click" Tag="Help me plan a feature"><StackPanel HorizontalAlignment="Left"><TextBlock Text="Plan a feature" FontWeight="SemiBold"/><TextBlock Text="Break an idea into clear steps" Foreground="{DynamicResource MutedTextBrush}" Margin="0,3,0,0"/></StackPanel></Button>
                         </UniformGrid>
                     </StackPanel>
                     <ItemsControl x:Name="MessagesList" Grid.Column="1" Margin="0,28,0,35"/>
                 </Grid>
             </ScrollViewer>
-            <Border Grid.Row="2" Background="#F7F7F4" Padding="0,8,0,18">
+            <Border Grid.Row="2" Background="{DynamicResource AppBackgroundBrush}" Padding="0,8,0,18">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="7*"/><ColumnDefinition Width="1.5*"/></Grid.ColumnDefinitions>
                   <StackPanel Grid.Column="1" HorizontalAlignment="Stretch">
-                    <Border Background="White" BorderBrush="#E6E6E0" BorderThickness="1" CornerRadius="13" Padding="15,12,12,8">
+                    <Border Background="{DynamicResource ComposerBrush}" BorderBrush="{DynamicResource ComposerBorderBrush}" BorderThickness="1" CornerRadius="13" Padding="15,12,12,8">
                         <Grid><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <TextBox x:Name="PromptBox" MinHeight="52" MaxHeight="180" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontSize="14" KeyDown="PromptBox_KeyDown" ToolTip="Message Codev…"/>
                             <Grid Grid.Row="1" Margin="0,9,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Button Content="＋  Add context" Style="{StaticResource SoftButton}" Padding="9,6" Click="AddContext_Click"/><TextBlock x:Name="ContextLabel" Text="No project attached" FontSize="10" Foreground="#9A9C95" VerticalAlignment="Center" Margin="10,0,0,0"/></StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Button Content="＋  Add context" Style="{StaticResource SoftButton}" Padding="9,6" Click="AddContext_Click"/><TextBlock x:Name="ContextLabel" Text="No project attached" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="10,0,0,0"/></StackPanel>
                                 <Button x:Name="SendButton" Grid.Column="1" Content="↑" Width="34" Height="32" FontSize="18" FontWeight="SemiBold" Foreground="White" Background="#D97757" BorderThickness="0" Cursor="Hand" Click="Send_Click" ToolTip="Send message (Enter)"><Button.Template><ControlTemplate TargetType="Button"><Border x:Name="btn" Background="{TemplateBinding Background}" CornerRadius="9"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="btn" Property="Background" Value="#C66649"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
                             </Grid>
                         </Grid>
                     </Border>
-                    <TextBlock Text="Your conversations and model requests stay on this device." FontSize="10" Foreground="#A0A198" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                    <TextBlock Text="Your conversations and model requests stay on this device." FontSize="10" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
                   </StackPanel>
                 </Grid>
             </Border>
