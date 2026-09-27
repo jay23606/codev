@@ -86,7 +86,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 - Markdown, syntax-highlighted code, tables, and copy-code controls.
 - [x] Read-only Plan mode, stop generation while keeping partial response, plus visible current agent-tool status. Retry, regenerate, edit/resend a prompt, and branch from an earlier turn remain.
-- Keyboard shortcuts, accessible focus order, adjustable text size, and clear empty/loading/error states.
+- [x] Core shortcuts: Ctrl+N new conversation, Ctrl+F search, F2 rename, Esc stop. Accessible focus order, adjustable text size, and broader shortcut customization remain.
 - [x] Conversation rename, archive, restore, and explicit permanent delete from the archive view; export/import and local backup controls remain.
 - Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
 

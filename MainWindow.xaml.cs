@@ -45,6 +45,7 @@ public partial class MainWindow : Window
         foreach (var path in _conversations.Select(c => c.ProjectPath).Where(p => !string.IsNullOrWhiteSpace(p))) EnsureProject(path!);
         RefreshConversationLists();
         if (_conversations.Count > 0) SelectConversation(_conversations.OrderByDescending(c => c.UpdatedAt).First());
+        PreviewKeyDown += MainWindow_PreviewKeyDown;
         Loaded += async (_, _) => await LoadModelsAsync();
     }
 
@@ -268,17 +269,50 @@ public partial class MainWindow : Window
     {
         MessagesList.Items.Clear();
         if (_active is null) return;
-        foreach (var message in _active.Messages)
+        var conversation = _active;
+        for (var messageIndex = 0; messageIndex < conversation.Messages.Count; messageIndex++)
         {
+            var message = conversation.Messages[messageIndex];
             var isUser = message.Role == "user";
             var body = new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 23, Foreground = ThemeBrush("MessageTextBrush") };
             var content = new StackPanel();
             content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
             var border = new Border { Child = content, Padding = new Thickness(isUser ? 15 : 0, isUser ? 12 : 8, isUser ? 15 : 0, isUser ? 12 : 8), Background = isUser ? ThemeBrush("MessageBubbleBrush") : Brushes.Transparent, CornerRadius = new CornerRadius(12), HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Stretch, MaxWidth = 720, Margin = new Thickness(0, 0, 0, 17) };
+            if (_requestCancellation is null)
+            {
+                var menu = new ContextMenu();
+                if (isUser && messageIndex == conversation.Messages.Count - 2 && conversation.Messages[^1].Role == "assistant")
+                {
+                    var edit = new MenuItem { Header = "Edit & resend" };
+                    edit.Click += async (_, _) => await ResendFromUserMessageAsync(conversation, message);
+                    menu.Items.Add(edit);
+                }
+                else if (!isUser && messageIndex == conversation.Messages.Count - 1 && conversation.Messages.Count >= 2 && conversation.Messages[^2].Role == "user")
+                {
+                    var retry = new MenuItem { Header = "Regenerate response" };
+                    retry.Click += async (_, _) => await ResendFromUserMessageAsync(conversation, conversation.Messages[^2]);
+                    menu.Items.Add(retry);
+                }
+                if (menu.Items.Count > 0) border.ContextMenu = menu;
+            }
             MessagesList.Items.Add(border);
         }
         ChatScroll.ScrollToEnd();
+    }
+
+    private async Task ResendFromUserMessageAsync(Conversation conversation, ChatMessage userMessage)
+    {
+        if (!ReferenceEquals(_active, conversation) || _requestCancellation is not null) return;
+        var index = conversation.Messages.FindIndex(message => ReferenceEquals(message, userMessage));
+        if (index < 0) return;
+        PromptBox.Text = userMessage.Content;
+        PromptBox.CaretIndex = PromptBox.Text.Length;
+        conversation.Messages.RemoveRange(index, conversation.Messages.Count - index);
+        RenderMessages();
+        _ = SaveAsync();
+        PromptBox.Focus();
+        await SendPromptAsync();
     }
 
     private void RefreshConversationLists()
@@ -641,15 +675,15 @@ public partial class MainWindow : Window
         finally
         {
             conversation.UpdatedAt = DateTimeOffset.Now;
+            await SaveAsync();
+            _requestCancellation?.Dispose();
+            _requestCancellation = null;
             if (ReferenceEquals(_active, conversation)) RenderMessages();
             RefreshConversationLists();
-            await SaveAsync();
             SendButton.IsEnabled = true;
             SendButton.Content = "↑";
             SendButton.ToolTip = "Send message (Enter)";
             AgentStatusLabel.Text = "Your conversations and model requests stay on this device.";
-            _requestCancellation?.Dispose();
-            _requestCancellation = null;
         }
     }
 
@@ -943,6 +977,32 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None) { e.Handled = true; _ = SendPromptAsync(); }
         else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; PromptBox.AppendText(Environment.NewLine); }
+    }
+
+    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var control = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        if (e.Key == Key.Escape && _requestCancellation is not null)
+        {
+            _requestCancellation.Cancel();
+            AgentStatusLabel.Text = "Stopping…";
+            e.Handled = true;
+        }
+        else if (control && e.Key == Key.N)
+        {
+            NewChat_Click(this, new RoutedEventArgs());
+            e.Handled = true;
+        }
+        else if (control && e.Key == Key.F)
+        {
+            SearchFocus_Click(this, new RoutedEventArgs());
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F2 && _active is not null)
+        {
+            _ = RenameConversationAsync(_active);
+            e.Handled = true;
+        }
     }
 
     private void Pin_Click(object sender, RoutedEventArgs e)
