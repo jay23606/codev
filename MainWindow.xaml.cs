@@ -299,6 +299,10 @@ public partial class MainWindow : Window
             if (_requestCancellation is null)
             {
                 var menu = new ContextMenu();
+                var branchIndex = messageIndex;
+                var branch = new MenuItem { Header = "Branch conversation from here" };
+                branch.Click += async (_, _) => await BranchConversationAsync(conversation, branchIndex);
+                menu.Items.Add(branch);
                 if (isUser && messageIndex == conversation.Messages.Count - 2 && conversation.Messages[^1].Role == "assistant")
                 {
                     var edit = new MenuItem { Header = "Edit & resend" };
@@ -330,6 +334,27 @@ public partial class MainWindow : Window
         _ = SaveAsync();
         PromptBox.Focus();
         await SendPromptAsync();
+    }
+
+    private async Task BranchConversationAsync(Conversation source, int messageIndex)
+    {
+        if (!ReferenceEquals(_active, source) || _requestCancellation is not null || messageIndex < 0 || messageIndex >= source.Messages.Count) return;
+        var title = string.IsNullOrWhiteSpace(source.Title) ? "Conversation branch" : source.Title + " · branch";
+        var branch = new Conversation
+        {
+            Title = title,
+            Model = source.Model,
+            NumCtx = source.NumCtx,
+            ProjectPath = source.ProjectPath,
+            ContextFiles = [.. source.ContextFiles],
+            UpdatedAt = DateTimeOffset.Now,
+            Messages = source.Messages.Take(messageIndex + 1).Select(m => new ChatMessage(m.Role, m.Content)).ToList()
+        };
+        _conversations.Insert(0, branch);
+        SelectConversation(branch);
+        RefreshConversationLists();
+        PromptBox.Focus();
+        await SaveAsync();
     }
 
     private void RefreshConversationLists()

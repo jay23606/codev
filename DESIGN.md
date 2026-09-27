@@ -34,7 +34,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
-| Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, and current agent tool status implemented; richer plans, resume, and retry remain |
+| Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, tool status, retry/edit-resend, and branch-from-message implemented; resume and richer plans remain |
 | Truly parallel agents, tabs, and isolated worktrees | Not implemented |
 | Git status, branch, staging, and review workflow | Not implemented |
 | Markdown/code rendering, attachments, and session export | Basic Markdown and fenced code rendering with clickable web links and one-click code copying; file/image/PDF attachments and export pending |
@@ -89,7 +89,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 ### 5. Everyday assistant usability
 
 - [x] Markdown headings, emphasis, lists, quotes, inline code, safe clickable HTTP(S) links, and fenced code blocks with Copy; syntax highlighting and tables remain.
-- [x] Read-only Plan mode, stop generation while keeping partial response, plus visible current agent-tool status. Retry, regenerate, edit/resend a prompt, and branch from an earlier turn remain.
+- [x] Read-only Plan mode, stop generation while keeping partial response, visible agent-tool status, retry/edit-resend, and branch from an earlier message. Resume and richer plans remain.
 - [x] Core shortcuts: Ctrl+N new conversation, Ctrl+F search, F2 rename, Esc stop. Accessible focus order, adjustable text size, and broader shortcut customization remain.
 - [x] Conversation rename, archive, restore, and explicit permanent delete from the archive view; export/import and local backup controls remain.
 - Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
