@@ -14,7 +14,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Explicit Code task mode with project-scoped list/read/search tools and approval-gated replacement of existing files; writes create a local recovery checkpoint
 - Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json`
 
-Code task mode can edit existing project files only after showing a before/after review and receiving approval. It does not run terminal commands or create new files yet. Ordinary chat remains read-only.
+Code task mode can edit existing project files only after showing a before/after review and receiving approval. It can also request a PowerShell command; every command requires approval, runs with your Windows account permissions in the project folder, has a three-minute timeout, and is not sandboxed. New files and persistent changed-file review are still pending. Ordinary chat remains read-only.
 
 ## Run
 
@@ -42,7 +42,7 @@ Legacy Ollama tags for the same weights are recognized and shown under the same 
 
 ## Privacy
 
-Prompts and project excerpts are sent only to the configured local Ollama endpoint. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first. Symbolic links and junctions are excluded.
+Prompts and project excerpts are sent only to the configured local Ollama endpoint. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first and refuses to overwrite files that changed after review. Symbolic links and junctions are excluded. Approved shell commands are not sandboxed and can access resources available to your Windows account.
 
 ## Design
 

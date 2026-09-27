@@ -56,6 +56,43 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Refuses_to_overwrite_a_file_changed_after_its_review_snapshot()
+    {
+        var path = Path.Combine(_root, "Program.cs");
+        await File.WriteAllTextAsync(path, "version before review");
+        var service = Service;
+        var snapshot = await service.ReadFileSnapshotAsync("Program.cs");
+        await File.WriteAllTextAsync(path, "newer user edit");
+
+        await Assert.ThrowsAsync<IOException>(() => service.CreateCheckpointAsync("Program.cs", Guid.NewGuid(), expectedHash: snapshot.Sha256));
+        await Assert.ThrowsAsync<IOException>(() => service.WriteFileAtomicAsync("Program.cs", "agent edit", expectedOriginalHash: snapshot.Sha256));
+        Assert.Equal("newer user edit", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task Runs_an_explicitly_approved_command_from_workspace_and_captures_output()
+    {
+        var result = await Service.RunApprovedCommandAsync("Write-Output 'Codev smoke test'; exit 7", TimeSpan.FromSeconds(20));
+        Assert.Contains("Codev smoke test", result);
+        Assert.Contains("Exit code: 7", result);
+    }
+
+    [Fact]
+    public async Task Terminates_a_command_when_its_timeout_expires()
+    {
+        var result = await Service.RunApprovedCommandAsync("Start-Sleep -Seconds 10", TimeSpan.FromMilliseconds(150));
+        Assert.Contains("timed out", result);
+    }
+
+    [Fact]
+    public async Task Bounds_captured_command_output()
+    {
+        var result = await Service.RunApprovedCommandAsync("1..5000 | ForEach-Object { '0123456789' }", TimeSpan.FromSeconds(20));
+        Assert.True(result.Length < 22_000);
+        Assert.Contains("Exit code: 0", result);
+    }
+
+    [Fact]
     public void Hides_secret_files_from_both_path_resolution_and_project_listing()
     {
         File.WriteAllText(Path.Combine(_root, ".env"), "TOKEN=do-not-read");

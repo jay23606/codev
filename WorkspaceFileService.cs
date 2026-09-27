@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Codev;
@@ -96,11 +97,17 @@ public sealed class WorkspaceFileService
 
     public async Task<string> ReadFileAsync(string relativePath, CancellationToken cancellationToken = default)
     {
+        return (await ReadFileSnapshotAsync(relativePath, cancellationToken)).Content;
+    }
+
+    public async Task<FileSnapshot> ReadFileSnapshotAsync(string relativePath, CancellationToken cancellationToken = default)
+    {
         var full = ResolvePath(relativePath);
         var info = new FileInfo(full);
         if (!info.Exists) throw new FileNotFoundException("File not found in the selected project.", relativePath);
         if (info.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
-        return await File.ReadAllTextAsync(full, cancellationToken);
+        var bytes = await File.ReadAllBytesAsync(full, cancellationToken);
+        return new FileSnapshot(Encoding.UTF8.GetString(bytes), Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
     }
 
     public async Task<IReadOnlyList<string>> SearchFilesAsync(string query, CancellationToken cancellationToken = default)
@@ -129,24 +136,81 @@ public sealed class WorkspaceFileService
         return matches;
     }
 
-    public async Task<string?> CreateCheckpointAsync(string relativePath, Guid conversationId, CancellationToken cancellationToken = default)
+    public async Task<string> RunApprovedCommandAsync(string command, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException("A command is required.", nameof(command));
+        if (command.Length > 4000) throw new InvalidOperationException("Commands longer than 4,000 characters are not allowed.");
+        if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromMinutes(3)) throw new ArgumentOutOfRangeException(nameof(timeout), "Command timeout must be at most three minutes.");
+
+        var start = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = _root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            ArgumentList = { "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command }
+        };
+        using var process = new System.Diagnostics.Process { StartInfo = start, EnableRaisingEvents = true };
+        if (!process.Start()) throw new InvalidOperationException("Could not start PowerShell.");
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        var stdout = ReadLimitedAsync(process.StandardOutput, 10_000, linked.Token);
+        var stderr = ReadLimitedAsync(process.StandardError, 10_000, linked.Token);
+        try { await process.WaitForExitAsync(linked.Token); }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            try { await process.WaitForExitAsync(CancellationToken.None); } catch { }
+            try { await Task.WhenAll(stdout, stderr); } catch { }
+            if (cancellationToken.IsCancellationRequested) throw;
+            return $"Command timed out after {timeout.TotalSeconds:0} seconds and was terminated.";
+        }
+        await Task.WhenAll(stdout, stderr);
+        var output = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(stdout.Result)) output.AppendLine(stdout.Result);
+        if (!string.IsNullOrWhiteSpace(stderr.Result)) output.AppendLine("STDERR:").AppendLine(stderr.Result);
+        if (output.Length > 24_000) output.Length = 24_000;
+        output.AppendLine().Append("Exit code: ").Append(process.ExitCode);
+        return output.ToString();
+    }
+
+    private static async Task<string> ReadLimitedAsync(StreamReader reader, int maxCharacters, CancellationToken cancellationToken)
+    {
+        var output = new StringBuilder(Math.Min(maxCharacters, 4096));
+        var buffer = new char[2048];
+        while (true)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (count == 0) break;
+            var keep = Math.Min(count, maxCharacters - output.Length);
+            if (keep > 0) output.Append(buffer, 0, keep);
+        }
+        return output.ToString();
+    }
+
+    public async Task<string?> CreateCheckpointAsync(string relativePath, Guid conversationId, CancellationToken cancellationToken = default, string? expectedHash = null)
     {
         var full = ResolvePath(relativePath);
         if (!File.Exists(full)) return null;
+        var bytes = await File.ReadAllBytesAsync(full, cancellationToken);
+        if (expectedHash is not null && !HashMatches(bytes, expectedHash))
+            throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversationId.ToString("N"));
         Directory.CreateDirectory(directory);
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(relativePath)))[..12];
         var backup = Path.Combine(directory, $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{hash}.bak");
-        await using var source = File.OpenRead(full);
-        await using var destination = File.Create(backup);
-        await source.CopyToAsync(destination, cancellationToken);
+        await File.WriteAllBytesAsync(backup, bytes, cancellationToken);
         return backup;
     }
 
-    public async Task WriteFileAtomicAsync(string relativePath, string content, CancellationToken cancellationToken = default)
+    public async Task WriteFileAtomicAsync(string relativePath, string content, CancellationToken cancellationToken = default, string? expectedOriginalHash = null)
     {
         if (content.Length > 200_000) throw new InvalidOperationException("Proposed file is larger than 200 KB.");
         var full = ResolvePath(relativePath);
+        if (expectedOriginalHash is not null && !await CurrentFileMatchesAsync(full, expectedOriginalHash, cancellationToken))
+            throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
         var parent = Path.GetDirectoryName(full)!;
         if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The parent folder must already exist; Codev will not create new directory trees yet.");
         var temp = Path.Combine(parent, $".codev-{Guid.NewGuid():N}.tmp");
@@ -154,6 +218,8 @@ public sealed class WorkspaceFileService
         {
             await File.WriteAllTextAsync(temp, content, cancellationToken);
             ResolvePath(relativePath);
+            if (expectedOriginalHash is not null && !await CurrentFileMatchesAsync(full, expectedOriginalHash, cancellationToken))
+                throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
             File.Move(temp, full, overwrite: true);
         }
         finally
@@ -161,6 +227,15 @@ public sealed class WorkspaceFileService
             try { if (File.Exists(temp)) File.Delete(temp); } catch { }
         }
     }
+
+    private static async Task<bool> CurrentFileMatchesAsync(string path, string expectedHash, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(path)) return false;
+        return HashMatches(await File.ReadAllBytesAsync(path, cancellationToken), expectedHash);
+    }
+
+    private static bool HashMatches(byte[] bytes, string expectedHash) =>
+        CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), Convert.FromHexString(expectedHash));
 
     public static bool IsPathWithinRoot(string root, string path)
     {
@@ -178,3 +253,5 @@ public sealed class WorkspaceFileService
             .Any(IsSensitiveFileName);
     }
 }
+
+public sealed record FileSnapshot(string Content, string Sha256);

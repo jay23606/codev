@@ -479,7 +479,7 @@ public partial class MainWindow : Window
             var history = conversation.Messages.Take(conversation.Messages.Count - 1).Select(m => new OllamaMessage(m.Role, m.Content)).ToList();
             var isCodeTask = _codeTaskMode && _codeTaskConversationId == conversation.Id;
             var system = isCodeTask
-                ? "You are Codev, a concise local coding agent. Work only within the selected project. Inspect before editing. Use the provided tools instead of claiming actions. Every write requires user review and approval. Do not run shell commands; that capability is not available yet."
+                ? "You are Codev, a concise local coding agent. Work only within the selected project. Inspect before editing. Use the provided tools instead of claiming actions. Every file replacement and shell command requires user approval. Never represent tool output as successful unless its result confirms success."
                 : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
             if (_activeProject is not null && !string.IsNullOrWhiteSpace(_activeProject.Instructions))
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + _activeProject.Instructions;
@@ -543,7 +543,8 @@ public partial class MainWindow : Window
             Tool("list_files", "List project files; pass a project-relative directory or an empty string for the root.", new { relative_directory = new { type = "string" } }, ["relative_directory"]),
             Tool("read_file", "Read a UTF-8 text file from the selected project.", new { relative_path = new { type = "string" } }, ["relative_path"]),
             Tool("search_files", "Search supported source files for a literal string.", new { query = new { type = "string" } }, ["query"]),
-            Tool("write_file", "Propose the complete replacement contents of one existing project file. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"])
+            Tool("write_file", "Propose the complete replacement contents of one existing project file. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
+            Tool("run_command", "Request approval to run one PowerShell command in the project folder. Every invocation requires approval.", new { command = new { type = "string" } }, ["command"])
         };
         for (var round = 0; round < 8; round++)
         {
@@ -596,6 +597,7 @@ public partial class MainWindow : Window
                 "read_file" => await service.ReadFileAsync(Arg("relative_path"), cancellationToken),
                 "search_files" => string.Join("\n", await service.SearchFilesAsync(Arg("query"), cancellationToken)),
                 "write_file" => await ReviewAndWriteFileAsync(Arg("relative_path"), Arg("content"), service, conversationId, cancellationToken),
+                "run_command" => await ApproveAndRunCommandAsync(Arg("command"), service, cancellationToken),
                 _ => "Error: tool is not available."
             };
         }
@@ -606,11 +608,46 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(relativePath)) return "Error: a project-relative path is required.";
         if (!File.Exists(service.ResolvePath(relativePath))) return "Rejected: creating new files is not available yet; propose a change to an existing file.";
-        var current = await service.ReadFileAsync(relativePath, cancellationToken);
-        if (!ShowFileReview(relativePath, current, proposed)) return "Rejected by user; the file was left unchanged.";
-        var checkpoint = await service.CreateCheckpointAsync(relativePath, conversationId, cancellationToken);
-        await service.WriteFileAtomicAsync(relativePath, proposed, cancellationToken);
+        var snapshot = await service.ReadFileSnapshotAsync(relativePath, cancellationToken);
+        if (!ShowFileReview(relativePath, snapshot.Content, proposed)) return "Rejected by user; the file was left unchanged.";
+        var checkpoint = await service.CreateCheckpointAsync(relativePath, conversationId, cancellationToken, snapshot.Sha256);
+        await service.WriteFileAtomicAsync(relativePath, proposed, cancellationToken, snapshot.Sha256);
         return $"Approved and applied. Original backed up at {checkpoint ?? "(new file)"}.";
+    }
+
+    private async Task<string> ApproveAndRunCommandAsync(string command, WorkspaceFileService service, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(command)) return "Error: command is empty.";
+        if (command.Length > 4000) return "Rejected: command exceeds 4,000 characters.";
+        if (!ShowCommandApproval(command, service.Root)) return "Rejected by user; command was not run.";
+        return await service.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken);
+    }
+
+    private bool ShowCommandApproval(string command, string projectPath)
+    {
+        var dialog = new Window { Title = "Approve project command", Width = 760, Height = 430, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize, SizeToContent = SizeToContent.Manual };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var warning = new TextBlock
+        {
+            Text = "This command runs through PowerShell as your Windows account. It can access files and services available to that account; Codev cannot sandbox shell commands to the project folder. Review the command before approving.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
+        };
+        layout.Children.Add(warning);
+        var cwd = new TextBlock { Text = "Working directory: " + projectPath, TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) };
+        Grid.SetRow(cwd, 1); layout.Children.Add(cwd);
+        var commandBox = new TextBox { Text = command, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Consolas"), FontSize = 13, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(10) };
+        Grid.SetRow(commandBox, 2); layout.Children.Add(commandBox);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var reject = new Button { Content = "Cancel", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var approve = new Button { Content = "Approve & run", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        approve.Click += (_, _) => { dialog.DialogResult = true; dialog.Close(); };
+        buttons.Children.Add(reject); buttons.Children.Add(approve); Grid.SetRow(buttons, 3); layout.Children.Add(buttons);
+        dialog.Content = layout;
+        return dialog.ShowDialog() == true;
     }
 
     private bool ShowFileReview(string relativePath, string before, string after)
@@ -762,7 +799,7 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("role")] string Role,
         [property: JsonPropertyName("content")] string Content,
         [property: JsonPropertyName("tool_calls")] List<JsonElement>? ToolCalls = null,
-        [property: JsonPropertyName("name")] string? Name = null);
+        [property: JsonPropertyName("tool_name")] string? ToolName = null);
     private sealed record UiSettings(string Theme);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
