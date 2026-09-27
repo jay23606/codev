@@ -26,7 +26,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and title search | Done |
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
-| Choose a project folder and include bounded source/config excerpts | Safe, bounded excerpts; Code task mode can list/read/search supported text files |
+| Choose a project folder and include bounded source/config excerpts | Select project-relative chat context files or use safe bounded excerpts; Code task mode can list/read/search supported text files |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and safe project context implemented; reusable knowledge files pending |
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |
@@ -53,7 +53,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - [x] Project/workspace switcher with recent and pinned projects; each workspace maps to a chosen local folder.
 - [x] Multiple conversations belonging to each project, plus ungrouped quick chats.
 - [x] Project instructions persisted locally and applied to project conversations; chat context uses the same safe file boundary. Reusable context files and user-selected source lists remain.
-- File explorer, file preview, and deliberate file/context selection instead of sending a blind folder snapshot.
+- [x] Deliberately select project-relative files for chat context; if none are selected, use the existing bounded safe excerpt. File explorer and file preview remain.
 - Context-budget display, exclusions, and relevant-file search so large repositories fit smaller local context windows.
 - Attach text files, images, and PDFs when the selected local model supports them; clearly show unsupported inputs.
 

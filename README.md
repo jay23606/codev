@@ -14,6 +14,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Read-only Plan mode, explicit Code task mode, Stop control that retains partial output, and current agent-tool status
 - Project switcher with pinned projects, project-specific instructions, and conversations scoped to each project
 - Optional project-folder context: selected source/config files are read locally and sent to the local Ollama server as bounded context
+- Choose specific project-relative source files for a conversation; right-click Add files to clear the selection
 - Explicit Code task mode with project-scoped list/read/search tools and approval-gated replacement of existing files; writes create a local recovery checkpoint
 - Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json`
 

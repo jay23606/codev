@@ -38,6 +38,17 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var contextMenu = new ContextMenu();
+        var clearContext = new MenuItem { Header = "Clear selected context files" };
+        clearContext.Click += async (_, _) =>
+        {
+            if (_active is null) return;
+            _active.ContextFiles.Clear();
+            UpdateContextLabel(_active);
+            await SaveAsync();
+        };
+        contextMenu.Items.Add(clearContext);
+        AddContextButton.ContextMenu = contextMenu;
         LoadThemePreference();
         ApplyTheme();
         LoadProjects();
@@ -261,8 +272,7 @@ public partial class MainWindow : Window
         RenderMessages();
         RefreshConversationLists();
         _projectPath = conversation.ProjectPath;
-        ContextLabel.Text = _projectPath is null ? "No project attached" : Path.GetFileName(_projectPath);
-        ContextLabel.ToolTip = _projectPath;
+        UpdateContextLabel(conversation);
     }
 
     private void RenderMessages()
@@ -654,8 +664,8 @@ public partial class MainWindow : Window
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + _activeProject.Instructions;
             if (!string.IsNullOrWhiteSpace(conversation.ProjectPath) && !isCodeTask)
             {
-                system += "\n\nThe user attached this local project folder: " + conversation.ProjectPath + ". Here are selected source files from that folder, included as read-only context. Do not claim to have changed them.";
-                system += "\n\n" + await CollectProjectContextAsync(conversation.ProjectPath, requestCancellation.Token);
+                system += "\n\nThe user attached this local project folder: " + conversation.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
+                system += "\n\n" + await CollectProjectContextAsync(conversation.ProjectPath, requestCancellation.Token, conversation.ContextFiles);
             }
             history.Insert(0, new OllamaMessage("system", system));
             if (isCodeTask)
@@ -940,7 +950,7 @@ public partial class MainWindow : Window
         return oneLine.Length > 36 ? oneLine[..33] + "…" : oneLine;
     }
 
-    private async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken)
+    private async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken, IReadOnlyList<string>? selectedFiles = null)
     {
         var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { ".cs", ".xaml", ".csproj", ".sln", ".md", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets" };
@@ -952,7 +962,8 @@ public partial class MainWindow : Window
         const int maxFileChars = 2400;
         try
         {
-            foreach (var relative in fileService.ListFiles(maxEntries: 300))
+            var files = selectedFiles is { Count: > 0 } ? selectedFiles : fileService.ListFiles(maxEntries: 300);
+            foreach (var relative in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!allowedExtensions.Contains(Path.GetExtension(relative))) continue;
@@ -1039,14 +1050,57 @@ public partial class MainWindow : Window
 
     private void AddContext_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Choose a project folder", Multiselect = false };
-        if (dialog.ShowDialog(this) != true) return;
-        _projectPath = dialog.FolderName;
-        _activeProject = EnsureProject(_projectPath);
-        if (_active is not null) { _active.ProjectPath = _projectPath; _ = SaveAsync(); }
-        ContextLabel.Text = Path.GetFileName(_projectPath);
-        ContextLabel.ToolTip = _projectPath;
+        if (_active is null) return;
+        if (string.IsNullOrWhiteSpace(_active.ProjectPath))
+        {
+            var folder = new OpenFolderDialog { Title = "Choose a project folder", Multiselect = false };
+            if (folder.ShowDialog(this) != true) return;
+            _active.ProjectPath = folder.FolderName;
+            _projectPath = folder.FolderName;
+            _activeProject = EnsureProject(_projectPath);
+            RefreshConversationLists();
+        }
+        if (!Directory.Exists(_active.ProjectPath))
+        {
+            MessageBox.Show(this, "The selected project folder no longer exists. Open the project folder again to continue.", "Project folder missing", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var picker = new OpenFileDialog
+        {
+            Title = "Choose project files to include as context", Multiselect = true, CheckFileExists = true,
+            InitialDirectory = _active.ProjectPath,
+            Filter = "Project text and source files|*.cs;*.xaml;*.csproj;*.sln;*.md;*.txt;*.json;*.js;*.jsx;*.ts;*.tsx;*.py;*.html;*.css;*.sql;*.xml;*.yml;*.yaml;*.toml;*.props;*.targets;*.ps1;*.sh;*.bat|All files|*.*"
+        };
+        if (picker.ShowDialog(this) != true) return;
+        var service = new WorkspaceFileService(_active.ProjectPath!);
+        var availableFiles = service.ListFiles(maxEntries: 500).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in picker.FileNames)
+        {
+            var full = Path.GetFullPath(path);
+            if (!WorkspaceFileService.IsPathWithinRoot(service.Root, full)) continue;
+            var relative = Path.GetRelativePath(service.Root, full);
+            try
+            {
+                service.ResolvePath(relative);
+                if (!availableFiles.Contains(relative)) continue;
+                if (!_active.ContextFiles.Contains(relative, StringComparer.OrdinalIgnoreCase)) _active.ContextFiles.Add(relative);
+            }
+            catch (UnauthorizedAccessException) { }
+        }
+        UpdateContextLabel(_active);
         RefreshConversationLists();
+        _ = SaveAsync();
+    }
+
+    private void UpdateContextLabel(Conversation conversation)
+    {
+        _projectPath = conversation.ProjectPath;
+        ContextLabel.Text = conversation.ProjectPath is null
+            ? "No project attached"
+            : conversation.ContextFiles.Count == 0 ? Path.GetFileName(conversation.ProjectPath) : $"{Path.GetFileName(conversation.ProjectPath)} · {conversation.ContextFiles.Count} files";
+        ContextLabel.ToolTip = conversation.ProjectPath is null
+            ? null
+            : conversation.ProjectPath + (conversation.ContextFiles.Count == 0 ? "\nUsing bounded source excerpts" : "\n" + string.Join("\n", conversation.ContextFiles));
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -1094,6 +1148,7 @@ public sealed class Conversation
     public string? ProjectPath { get; set; }
     public List<ChatMessage> Messages { get; set; } = [];
     public List<FileChangeRecord> FileChanges { get; set; } = [];
+    public List<string> ContextFiles { get; set; } = [];
 }
 
 public sealed record FileChangeRecord(string RelativePath, string? CheckpointPath, DateTimeOffset ChangedAt, string Kind, bool PreviousFileExisted = true);
