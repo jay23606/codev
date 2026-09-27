@@ -70,6 +70,36 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Restores_a_conversation_checkpoint_and_keeps_a_rollback_of_the_replaced_version()
+    {
+        var id = Guid.NewGuid();
+        var path = Path.Combine(_root, "Program.cs");
+        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        try
+        {
+            await File.WriteAllTextAsync(path, "before edit");
+            var service = Service;
+            var checkpoint = await service.CreateCheckpointAsync("Program.cs", id);
+            await service.WriteFileAtomicAsync("Program.cs", "after edit");
+            var current = await service.ReadFileSnapshotAsync("Program.cs");
+
+            var rollback = await service.RestoreCheckpointAsync("Program.cs", id, checkpoint!, current.Sha256);
+
+            Assert.Equal("before edit", await File.ReadAllTextAsync(path));
+            Assert.Equal("after edit", await File.ReadAllTextAsync(rollback));
+        }
+        finally { try { if (Directory.Exists(checkpoints)) Directory.Delete(checkpoints, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Does_not_read_a_checkpoint_outside_the_conversation_backup_folder()
+    {
+        var outside = Path.Combine(_root, "outside.bak");
+        await File.WriteAllTextAsync(outside, "not a checkpoint");
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service.ReadCheckpointAsync("Program.cs", Guid.NewGuid(), outside));
+    }
+
+    [Fact]
     public async Task Runs_an_explicitly_approved_command_from_workspace_and_captures_output()
     {
         var result = await Service.RunApprovedCommandAsync("Write-Output 'Codev smoke test'; exit 7", TimeSpan.FromSeconds(20));

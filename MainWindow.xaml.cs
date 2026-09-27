@@ -246,6 +246,7 @@ public partial class MainWindow : Window
         CodeTaskButton.Content = "◇  Code task";
         CodeTaskButton.Background = ThemeBrush("SecondaryButtonBrush");
         _activeProject = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
+        UpdateChangesButton(conversation);
         if (_activeProject is not null) _activeProject.LastOpenedAt = DateTimeOffset.Now;
         ConversationTitle.Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
         PinButton.Content = conversation.IsPinned ? "★  Pinned" : "☆  Pin";
@@ -576,7 +577,7 @@ public partial class MainWindow : Window
                 var function = call.GetProperty("function");
                 var name = function.GetProperty("name").GetString() ?? "";
                 var arguments = function.TryGetProperty("arguments", out var args) ? args : default;
-                var result = await ExecuteAgentToolAsync(name, arguments, service, conversation.Id, cancellationToken);
+                var result = await ExecuteAgentToolAsync(name, arguments, service, conversation, cancellationToken);
                 history.Add(new OllamaMessage("tool", result, null, name));
                 assistantText.Append("\n\n").Append("Tool ").Append(name).Append(": ").Append(result.Length > 1400 ? result[..1400] + "… [truncated in transcript]" : result);
             }
@@ -586,7 +587,7 @@ public partial class MainWindow : Window
         throw new InvalidOperationException("The agent reached the eight-step tool limit. Send a follow-up to continue.");
     }
 
-    private async Task<string> ExecuteAgentToolAsync(string name, JsonElement arguments, WorkspaceFileService service, Guid conversationId, CancellationToken cancellationToken)
+    private async Task<string> ExecuteAgentToolAsync(string name, JsonElement arguments, WorkspaceFileService service, Conversation conversation, CancellationToken cancellationToken)
     {
         string Arg(string key) => arguments.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
         try
@@ -596,7 +597,7 @@ public partial class MainWindow : Window
                 "list_files" => string.Join("\n", service.ListFiles(Arg("relative_directory"), 160)),
                 "read_file" => await service.ReadFileAsync(Arg("relative_path"), cancellationToken),
                 "search_files" => string.Join("\n", await service.SearchFilesAsync(Arg("query"), cancellationToken)),
-                "write_file" => await ReviewAndWriteFileAsync(Arg("relative_path"), Arg("content"), service, conversationId, cancellationToken),
+                "write_file" => await ReviewAndWriteFileAsync(Arg("relative_path"), Arg("content"), service, conversation, cancellationToken),
                 "run_command" => await ApproveAndRunCommandAsync(Arg("command"), service, cancellationToken),
                 _ => "Error: tool is not available."
             };
@@ -604,14 +605,19 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is not OperationCanceledException) { return "Error: " + ex.Message; }
     }
 
-    private async Task<string> ReviewAndWriteFileAsync(string relativePath, string proposed, WorkspaceFileService service, Guid conversationId, CancellationToken cancellationToken)
+    private async Task<string> ReviewAndWriteFileAsync(string relativePath, string proposed, WorkspaceFileService service, Conversation conversation, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(relativePath)) return "Error: a project-relative path is required.";
         if (!File.Exists(service.ResolvePath(relativePath))) return "Rejected: creating new files is not available yet; propose a change to an existing file.";
         var snapshot = await service.ReadFileSnapshotAsync(relativePath, cancellationToken);
         if (!ShowFileReview(relativePath, snapshot.Content, proposed)) return "Rejected by user; the file was left unchanged.";
-        var checkpoint = await service.CreateCheckpointAsync(relativePath, conversationId, cancellationToken, snapshot.Sha256);
+        var checkpoint = await service.CreateCheckpointAsync(relativePath, conversation.Id, cancellationToken, snapshot.Sha256);
         await service.WriteFileAtomicAsync(relativePath, proposed, cancellationToken, snapshot.Sha256);
+        if (checkpoint is not null)
+        {
+            conversation.FileChanges.Add(new FileChangeRecord(relativePath, checkpoint, DateTimeOffset.Now, "Edit"));
+            if (ReferenceEquals(_active, conversation)) UpdateChangesButton(conversation);
+        }
         return $"Approved and applied. Original backed up at {checkpoint ?? "(new file)"}.";
     }
 
@@ -681,6 +687,58 @@ public partial class MainWindow : Window
     private void RenderAgentTranscript(Conversation conversation)
     {
         if (ReferenceEquals(_active, conversation)) RenderMessages();
+    }
+
+    private void UpdateChangesButton(Conversation conversation)
+    {
+        var count = conversation.FileChanges?.Count ?? 0;
+        ChangesButton.Content = count == 0 ? "Files" : $"Files · {count}";
+        ChangesButton.IsEnabled = count > 0;
+    }
+
+    private void ReviewChanges_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active is not { FileChanges.Count: > 0 } conversation) return;
+        var dialog = new Window { Title = "Changed files", Width = 540, Height = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize };
+        var layout = new DockPanel { Margin = new Thickness(18) };
+        var intro = new TextBlock { Text = "Changes approved in this conversation. Select an entry to compare the current file with its saved checkpoint and optionally restore it.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12) };
+        DockPanel.SetDock(intro, Dock.Top); layout.Children.Add(intro);
+        var list = new StackPanel();
+        foreach (var change in conversation.FileChanges.OrderByDescending(c => c.ChangedAt).ToArray())
+        {
+            var item = new Button { Style = (Style)FindResource("SidebarButton"), Padding = new Thickness(12, 10, 12, 10), Margin = new Thickness(0, 2, 0, 2), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            var card = new StackPanel();
+            card.Children.Add(new TextBlock { Text = change.RelativePath, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush("MainTextBrush") });
+            card.Children.Add(new TextBlock { Text = $"{change.Kind} · {change.ChangedAt.LocalDateTime:g}", FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 3, 0, 0) });
+            item.Content = card;
+            item.Click += async (_, _) => { dialog.Close(); await ReviewAndRestoreChangeAsync(conversation, change); };
+            list.Children.Add(item);
+        }
+        layout.Children.Add(new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        dialog.Content = layout;
+        dialog.ShowDialog();
+    }
+
+    private async Task ReviewAndRestoreChangeAsync(Conversation conversation, FileChangeRecord change)
+    {
+        if (conversation.ProjectPath is null) return;
+        try
+        {
+            var service = new WorkspaceFileService(conversation.ProjectPath);
+            var current = await service.ReadFileSnapshotAsync(change.RelativePath);
+            var previous = await service.ReadCheckpointAsync(change.RelativePath, conversation.Id, change.CheckpointPath);
+            if (!ShowFileReview(change.RelativePath, current.Content, previous)) return;
+            var rollback = await service.RestoreCheckpointAsync(change.RelativePath, conversation.Id, change.CheckpointPath, current.Sha256);
+            conversation.FileChanges.Remove(change);
+            conversation.FileChanges.Add(new FileChangeRecord(change.RelativePath, rollback, DateTimeOffset.Now, "Restore"));
+            UpdateChangesButton(conversation);
+            await SaveAsync();
+            MessageBox.Show(this, $"Restored {change.RelativePath}. A checkpoint of the version that was replaced is available under Files.", "File restored", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not restore the checkpoint. The current file was left unchanged.\n\n{ex.Message}", "Restore failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private static string MakeTitle(string prompt)
@@ -815,7 +873,10 @@ public sealed class Conversation
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public string? ProjectPath { get; set; }
     public List<ChatMessage> Messages { get; set; } = [];
+    public List<FileChangeRecord> FileChanges { get; set; } = [];
 }
+
+public sealed record FileChangeRecord(string RelativePath, string CheckpointPath, DateTimeOffset ChangedAt, string Kind);
 
 public sealed record ChatMessage(string Role, string Content);
 

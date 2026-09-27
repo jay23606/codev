@@ -10,7 +10,7 @@ public sealed class WorkspaceFileService
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "dist", "build", "coverage" };
     private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase)
-    { ".cs", ".xaml", ".csproj", ".sln", ".md", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
+    { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
 
     private readonly string _root;
 
@@ -89,6 +89,7 @@ public sealed class WorkspaceFileService
                     continue;
                 }
                 if (IsSensitivePath(entry)) continue;
+                if (!SourceExtensions.Contains(Path.GetExtension(entry))) continue;
                 results.Add(Path.GetRelativePath(_root, entry));
             }
         }
@@ -103,6 +104,7 @@ public sealed class WorkspaceFileService
     public async Task<FileSnapshot> ReadFileSnapshotAsync(string relativePath, CancellationToken cancellationToken = default)
     {
         var full = ResolvePath(relativePath);
+        if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are opened by the agent.");
         var info = new FileInfo(full);
         if (!info.Exists) throw new FileNotFoundException("File not found in the selected project.", relativePath);
         if (info.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
@@ -205,10 +207,11 @@ public sealed class WorkspaceFileService
         return backup;
     }
 
-    public async Task WriteFileAtomicAsync(string relativePath, string content, CancellationToken cancellationToken = default, string? expectedOriginalHash = null)
+    public async Task WriteFileAtomicAsync(string relativePath, string content, CancellationToken cancellationToken = default, string? expectedOriginalHash = null, int maxCharacters = 200_000)
     {
-        if (content.Length > 200_000) throw new InvalidOperationException("Proposed file is larger than 200 KB.");
+        if (content.Length > maxCharacters) throw new InvalidOperationException($"Proposed file is larger than {maxCharacters / 1000} KB.");
         var full = ResolvePath(relativePath);
+        if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are edited by the agent.");
         if (expectedOriginalHash is not null && !await CurrentFileMatchesAsync(full, expectedOriginalHash, cancellationToken))
             throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
         var parent = Path.GetDirectoryName(full)!;
@@ -226,6 +229,32 @@ public sealed class WorkspaceFileService
         {
             try { if (File.Exists(temp)) File.Delete(temp); } catch { }
         }
+    }
+
+    public async Task<string> ReadCheckpointAsync(string relativePath, Guid conversationId, string checkpointPath, CancellationToken cancellationToken = default)
+    {
+        ResolvePath(relativePath);
+        var path = ValidateCheckpointPath(conversationId, checkpointPath);
+        if (new FileInfo(path).Length > 500_000) throw new InvalidOperationException("Checkpoint files larger than 500 KB cannot be restored.");
+        return await File.ReadAllTextAsync(path, cancellationToken);
+    }
+
+    public async Task<string> RestoreCheckpointAsync(string relativePath, Guid conversationId, string checkpointPath, string expectedCurrentHash, CancellationToken cancellationToken = default)
+    {
+        var checkpoint = ValidateCheckpointPath(conversationId, checkpointPath);
+        if (new FileInfo(checkpoint).Length > 500_000) throw new InvalidOperationException("Checkpoint files larger than 500 KB cannot be restored.");
+        var restored = await File.ReadAllTextAsync(checkpoint, cancellationToken);
+        var rollback = await CreateCheckpointAsync(relativePath, conversationId, cancellationToken, expectedCurrentHash);
+        await WriteFileAtomicAsync(relativePath, restored, cancellationToken, expectedCurrentHash, maxCharacters: 500_000);
+        return rollback ?? throw new IOException("Could not save a rollback checkpoint before restoring.");
+    }
+
+    private static string ValidateCheckpointPath(Guid conversationId, string checkpointPath)
+    {
+        var expectedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversationId.ToString("N"));
+        if (!IsPathWithinRoot(expectedRoot, checkpointPath) || !File.Exists(checkpointPath) || (File.GetAttributes(checkpointPath) & FileAttributes.ReparsePoint) != 0)
+            throw new UnauthorizedAccessException("The checkpoint is not a valid local backup for this conversation.");
+        return Path.GetFullPath(checkpointPath);
     }
 
     private static async Task<bool> CurrentFileMatchesAsync(string path, string expectedHash, CancellationToken cancellationToken)

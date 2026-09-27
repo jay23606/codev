@@ -97,6 +97,7 @@
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="MODEL" FontSize="9" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
                         <ComboBox x:Name="ModelPicker" Width="245" SelectionChanged="ModelPicker_SelectionChanged" DisplayMemberPath="DisplayName" SelectedValuePath="Name"/>
+                        <Button x:Name="ChangesButton" Content="Files" Style="{StaticResource SoftButton}" Margin="10,0,0,0" Click="ReviewChanges_Click" IsEnabled="False" ToolTip="Review or restore files changed by this conversation"/>
                         <Button x:Name="PinButton" Content="☆  Pin" Style="{StaticResource SoftButton}" Margin="10,0,0,0" Click="Pin_Click"/>
                     </StackPanel>
                 </Grid>
