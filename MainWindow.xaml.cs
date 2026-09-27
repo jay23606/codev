@@ -428,7 +428,16 @@ public partial class MainWindow : Window
         if (list.Items.Count == 0) list.Items.Add(new TextBlock { Text = "Nothing here yet", FontSize = 11, Foreground = ThemeBrush("SidebarMutedBrush"), Margin = new Thickness(12, 3, 0, 3) });
     }
 
-    private async void Send_Click(object sender, RoutedEventArgs e) => await SendPromptAsync();
+    private async void Send_Click(object sender, RoutedEventArgs e)
+    {
+        if (_requestCancellation is not null)
+        {
+            _requestCancellation.Cancel();
+            AgentStatusLabel.Text = "Stopping…";
+            return;
+        }
+        await SendPromptAsync();
+    }
 
     private void ToggleCodeTask_Click(object sender, RoutedEventArgs e)
     {
@@ -454,7 +463,7 @@ public partial class MainWindow : Window
     private async Task SendPromptAsync()
     {
         var text = PromptBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(text) || _active is null || SendButton.IsEnabled == false) return;
+        if (string.IsNullOrWhiteSpace(text) || _active is null || _requestCancellation is not null) return;
         if (ModelPicker.SelectedValue is string model) _active.Model = model;
         var conversation = _active;
         var userMessage = text;
@@ -470,10 +479,13 @@ public partial class MainWindow : Window
         WelcomePanel.Visibility = Visibility.Collapsed;
         RenderMessages();
         RefreshConversationLists();
+        var requestCancellation = new CancellationTokenSource();
+        _requestCancellation = requestCancellation;
+        SendButton.Content = "■";
+        SendButton.IsEnabled = true;
+        SendButton.ToolTip = "Stop generation";
+        AgentStatusLabel.Text = _codeTaskMode ? "Code task · Thinking…" : "Generating locally…";
         await SaveAsync();
-        SendButton.IsEnabled = false;
-        SendButton.Content = "…";
-        _requestCancellation = new CancellationTokenSource();
 
         try
         {
@@ -487,20 +499,24 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(conversation.ProjectPath) && !isCodeTask)
             {
                 system += "\n\nThe user attached this local project folder: " + conversation.ProjectPath + ". Here are selected source files from that folder, included as read-only context. Do not claim to have changed them.";
-                system += "\n\n" + await CollectProjectContextAsync(conversation.ProjectPath, _requestCancellation.Token);
+                system += "\n\n" + await CollectProjectContextAsync(conversation.ProjectPath, requestCancellation.Token);
             }
             history.Insert(0, new OllamaMessage("system", system));
             if (isCodeTask)
             {
                 var service = new WorkspaceFileService(conversation.ProjectPath!);
-                await RunAgentTurnAsync(conversation, history, service, _requestCancellation.Token);
+                await RunAgentTurnAsync(conversation, history, service, requestCancellation.Token);
             }
             else
-                await RunChatTurnAsync(conversation, history, _requestCancellation.Token);
+                await RunChatTurnAsync(conversation, history, requestCancellation.Token);
             if (conversation.Messages[^1].Content.Length == 0)
                 conversation.Messages[^1] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
         }
-        catch (OperationCanceledException) { conversation.Messages[^1] = new ChatMessage("assistant", "Generation stopped."); }
+        catch (OperationCanceledException)
+        {
+            var partial = conversation.Messages[^1].Content;
+            conversation.Messages[^1] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]");
+        }
         catch (Exception ex) { conversation.Messages[^1] = new ChatMessage("assistant", $"Could not complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed."); }
         finally
         {
@@ -510,6 +526,8 @@ public partial class MainWindow : Window
             await SaveAsync();
             SendButton.IsEnabled = true;
             SendButton.Content = "↑";
+            SendButton.ToolTip = "Send message (Enter)";
+            AgentStatusLabel.Text = "Your conversations and model requests stay on this device.";
             _requestCancellation?.Dispose();
             _requestCancellation = null;
         }
@@ -577,11 +595,13 @@ public partial class MainWindow : Window
                 cancellationToken.ThrowIfCancellationRequested();
                 var function = call.GetProperty("function");
                 var name = function.GetProperty("name").GetString() ?? "";
+                AgentStatusLabel.Text = $"Code task · {name.Replace('_', ' ')}";
                 var arguments = function.TryGetProperty("arguments", out var args) ? args : default;
                 var result = await ExecuteAgentToolAsync(name, arguments, service, conversation, cancellationToken);
                 history.Add(new OllamaMessage("tool", result, null, name));
                 assistantText.Append("\n\n").Append("Tool ").Append(name).Append(": ").Append(result.Length > 1400 ? result[..1400] + "… [truncated in transcript]" : result);
             }
+            AgentStatusLabel.Text = "Code task · Thinking…";
             conversation.Messages[^1] = new ChatMessage("assistant", assistantText.ToString());
             RenderAgentTranscript(conversation);
         }

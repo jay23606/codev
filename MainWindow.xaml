@@ -130,7 +130,7 @@
                             </Grid>
                         </Grid>
                     </Border>
-                    <TextBlock Text="Your conversations and model requests stay on this device." FontSize="10" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                    <TextBlock x:Name="AgentStatusLabel" Text="Your conversations and model requests stay on this device." FontSize="10" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
                   </StackPanel>
                 </Grid>
             </Border>

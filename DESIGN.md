@@ -30,7 +30,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
-| Plan/progress view and stop/resume/retry controls | Not implemented |
+| Plan/progress view and stop/resume/retry controls | Stop generation and current agent tool status implemented; plan, resume, and retry remain |
 | Truly parallel agents, tabs, and isolated worktrees | Not implemented |
 | Git status, branch, staging, and review workflow | Not implemented |
 | Markdown/code rendering, attachments, and session export | Not implemented |
@@ -84,7 +84,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 ### 5. Everyday assistant usability
 
 - Markdown, syntax-highlighted code, tables, and copy-code controls.
-- Stop generation, retry, regenerate, edit/resend a prompt, and branch a conversation from an earlier turn.
+- [x] Stop generation while keeping any partial response, plus visible current agent-tool status. Retry, regenerate, edit/resend a prompt, and branch from an earlier turn remain.
 - Keyboard shortcuts, accessible focus order, adjustable text size, and clear empty/loading/error states.
 - Conversation rename, archive, restore, export/import, and local backup controls.
 - Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
