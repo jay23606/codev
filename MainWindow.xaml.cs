@@ -423,10 +423,13 @@ public partial class MainWindow : Window
             openItem.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = project.Path, UseShellExecute = true });
             var instructionsItem = new MenuItem { Header = "Edit project instructions…" };
             instructionsItem.Click += async (_, _) => await EditProjectInstructionsAsync(project);
+            var exclusionsItem = new MenuItem { Header = "Context exclusions…" };
+            exclusionsItem.Click += async (_, _) => await EditProjectContextExclusionsAsync(project);
             var browseItem = new MenuItem { Header = "Browse project files…" };
             browseItem.Click += (_, _) => BrowseProjectFiles(project);
             menu.Items.Add(pinItem);
             menu.Items.Add(instructionsItem);
+            menu.Items.Add(exclusionsItem);
             menu.Items.Add(browseItem);
             menu.Items.Add(openItem);
             button.ContextMenu = menu;
@@ -506,6 +509,62 @@ public partial class MainWindow : Window
         if (editor.ShowDialog() == true) await SaveProjectsAsync();
     }
 
+    private async Task EditProjectContextExclusionsAsync(WorkspaceProject project)
+    {
+        var editor = new Window
+        {
+            Title = $"Context exclusions · {project.Name}", Width = 560, Height = 460,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var help = new TextBlock
+        {
+            Text = "One project-relative file or folder per line. Folder names exclude that folder anywhere in the project; paths can target a subtree. Use a filename pattern such as *.min.js for generated files. These rules apply to chat context only; Code task file tools can still inspect excluded files.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
+        };
+        layout.Children.Add(help);
+        var input = new TextBox
+        {
+            Text = string.Join(Environment.NewLine, project.ContextExclusions), AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontSize = 13,
+            Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"),
+            BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1),
+            Padding = new Thickness(10), MinHeight = 220, FontFamily = new FontFamily("Consolas")
+        };
+        Grid.SetRow(input, 1); layout.Children.Add(input);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+        var cancel = new Button { Content = "Cancel", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var save = new Button { Content = "Save exclusions", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        save.Click += (_, _) =>
+        {
+            var rules = input.Text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(line => !line.StartsWith('#'))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (rules.Count > 100 || rules.Any(rule => !WorkspaceFileService.IsValidContextExclusion(rule)))
+            {
+                MessageBox.Show(editor, "Use up to 100 relative file/folder paths or filename patterns. Absolute paths and .. segments are not allowed.", "Invalid exclusions", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            project.ContextExclusions = rules;
+            editor.DialogResult = true;
+            editor.Close();
+        };
+        buttons.Children.Add(cancel); buttons.Children.Add(save);
+        Grid.SetRow(buttons, 2); layout.Children.Add(buttons);
+        editor.Content = layout;
+        if (editor.ShowDialog() == true)
+        {
+            await SaveProjectsAsync();
+            foreach (var conversation in _conversations.Where(c => c.ProjectPath is not null && SamePath(c.ProjectPath, project.Path)))
+                if (ReferenceEquals(_active, conversation)) UpdateContextLabel(conversation);
+        }
+    }
+
     private void BrowseProjectFiles(WorkspaceProject project)
     {
         try
@@ -548,6 +607,12 @@ public partial class MainWindow : Window
                 if (fileList.SelectedItem is not string selected || _active is null || !SameWorkspace(_active.ProjectPath, project.Path))
                 {
                     MessageBox.Show(dialog, "Open a conversation in this project before adding context files.", "Project conversation required", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                var projectSettings = EnsureProject(project.Path);
+                if (new WorkspaceFileService(project.Path, projectSettings.ContextExclusions).IsContextExcluded(selected))
+                {
+                    MessageBox.Show(dialog, "This file is excluded from chat context by the project settings.", "Context exclusion", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
                 if (!_active.ContextFiles.Contains(selected, StringComparer.OrdinalIgnoreCase)) _active.ContextFiles.Add(selected);
@@ -772,8 +837,9 @@ public partial class MainWindow : Window
         conversation.Messages.Add(new ChatMessage("assistant", ""));
         conversation.UpdatedAt = DateTimeOffset.Now;
         conversation.PendingRequestCount++;
+        List<string> exclusions = conversation.ProjectPath is null ? [] : [.. EnsureProject(conversation.ProjectPath).ContextExclusions];
         var turn = new QueuedTurn(conversation, assistantIndex, conversation.Model, conversation.NumCtx,
-            isCodeTask, isPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles]);
+            isCodeTask, isPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles], exclusions);
         PromptBox.Clear();
         WelcomePanel.Visibility = Visibility.Collapsed;
         RenderMessages();
@@ -840,7 +906,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
             {
                 system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
-                system += "\n\n" + await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles);
+                system += "\n\n" + await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles, turn.ContextExclusions);
             }
             history.Insert(0, new OllamaMessage("system", system));
             if (turn.IsCodeTask)
@@ -1176,11 +1242,11 @@ public partial class MainWindow : Window
         return oneLine.Length > 36 ? oneLine[..33] + "…" : oneLine;
     }
 
-    private async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken, IReadOnlyList<string>? selectedFiles = null)
+    private async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken, IReadOnlyList<string>? selectedFiles = null, IReadOnlyList<string>? contextExclusions = null)
     {
         var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
-        var fileService = new WorkspaceFileService(root);
+            var fileService = new WorkspaceFileService(root, contextExclusions);
         var output = new StringBuilder("Selected project files (limited read-only excerpts):\n");
         var count = 0;
         const int maxFiles = 24;
@@ -1188,11 +1254,12 @@ public partial class MainWindow : Window
         const int maxFileChars = 2400;
         try
         {
-            var files = selectedFiles is { Count: > 0 } ? selectedFiles : fileService.ListFiles(maxEntries: 300);
+            var files = selectedFiles is { Count: > 0 } ? selectedFiles : fileService.ListContextFiles(maxEntries: 300);
             foreach (var relative in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!allowedExtensions.Contains(Path.GetExtension(relative))) continue;
+                if (fileService.IsContextExcluded(relative)) continue;
                 try
                 {
                     var content = await fileService.ReadFileAsync(relative, cancellationToken);
@@ -1348,8 +1415,9 @@ public partial class MainWindow : Window
             Filter = "Project text and source files|*.cs;*.xaml;*.csproj;*.sln;*.md;*.txt;*.json;*.js;*.jsx;*.ts;*.tsx;*.py;*.html;*.css;*.sql;*.xml;*.yml;*.yaml;*.toml;*.props;*.targets;*.ps1;*.sh;*.bat|All files|*.*"
         };
         if (picker.ShowDialog(this) != true) return;
-        var service = new WorkspaceFileService(_active.ProjectPath!);
-        var availableFiles = service.ListFiles(maxEntries: 500).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var projectSettings = EnsureProject(_active.ProjectPath!);
+        var service = new WorkspaceFileService(_active.ProjectPath!, projectSettings.ContextExclusions);
+        var availableFiles = service.ListContextFiles(maxEntries: 500).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var path in picker.FileNames)
         {
             var full = Path.GetFullPath(path);
@@ -1371,9 +1439,17 @@ public partial class MainWindow : Window
     private void UpdateContextLabel(Conversation conversation)
     {
         _projectPath = conversation.ProjectPath;
+        var selectedCount = conversation.ContextFiles.Count;
+        var excludedCount = 0;
+        if (conversation.ProjectPath is not null && Directory.Exists(conversation.ProjectPath) && selectedCount > 0)
+        {
+            var project = EnsureProject(conversation.ProjectPath);
+            var contextService = new WorkspaceFileService(conversation.ProjectPath, project.ContextExclusions);
+            excludedCount = conversation.ContextFiles.Count(contextService.IsContextExcluded);
+        }
         ContextLabel.Text = conversation.ProjectPath is null
             ? "No project attached"
-            : conversation.ContextFiles.Count == 0 ? Path.GetFileName(conversation.ProjectPath) : $"{Path.GetFileName(conversation.ProjectPath)} · {conversation.ContextFiles.Count} files";
+            : selectedCount == 0 ? Path.GetFileName(conversation.ProjectPath) : $"{Path.GetFileName(conversation.ProjectPath)} · {selectedCount - excludedCount} files" + (excludedCount > 0 ? $" · {excludedCount} excluded" : "");
         ContextLabel.ToolTip = conversation.ProjectPath is null
             ? null
             : conversation.ProjectPath + (conversation.ContextFiles.Count == 0 ? "\nUsing bounded source excerpts" : "\n" + string.Join("\n", conversation.ContextFiles));
@@ -1391,9 +1467,10 @@ public partial class MainWindow : Window
 
         try
         {
-            var estimate = new WorkspaceFileService(conversation.ProjectPath).EstimateContextTokens(conversation.ContextFiles);
+            var project = EnsureProject(conversation.ProjectPath);
+            var estimate = new WorkspaceFileService(conversation.ProjectPath, project.ContextExclusions).EstimateContextTokens(conversation.ContextFiles);
             var limit = conversation.NumCtx > 0 ? conversation.NumCtx : MaxContextForModel(conversation.Model);
-            ContextEstimateLabel.Text = $"≈{FormatTokenCount(estimate)} files / {FormatContextLimit(limit)}";
+            ContextEstimateLabel.Text = $"≈{FormatTokenCount(estimate)} src tok / {FormatContextLimit(limit)}";
             ContextEstimateLabel.ToolTip = "Approximate tokens in the bounded project source excerpts only. This excludes chat history and instructions; Ollama's reported prompt count above includes the full request.";
         }
         catch (Exception ex)
@@ -1444,7 +1521,7 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
     private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
-        bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles);
+        bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions);
     private sealed record UiSettings(string Theme);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
@@ -1482,5 +1559,6 @@ public sealed class WorkspaceProject
     public string Path { get; set; } = "";
     public bool IsPinned { get; set; }
     public string Instructions { get; set; } = "";
+    public List<string> ContextExclusions { get; set; } = [];
     public DateTimeOffset LastOpenedAt { get; set; } = DateTimeOffset.Now;
 }

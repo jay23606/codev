@@ -55,11 +55,12 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 - [x] Project/workspace switcher with recent and pinned projects; each workspace maps to a chosen local folder.
 - [x] Multiple conversations belonging to each project, plus ungrouped quick chats.
-- [x] Project instructions persisted locally and applied to project conversations; chat context uses the same safe file boundary. Reusable context files and user-selected source lists remain.
+- [x] Project instructions and context exclusions persisted locally and applied to project chat context; reusable knowledge files and user-selected source lists remain.
 - [x] Deliberately select project-relative files for chat context; if none are selected, use the existing bounded safe excerpt.
 - [x] Project file browser with filtering, safe read-only previews, and direct add-to-context; richer tree navigation and file diffs remain.
 - [x] Approximate source-context token count versus the selected model context limit, with tooltip distinguishing it from Ollama's actual prompt count.
-- Configurable project exclusions and relevant-file search so large repositories fit smaller local context windows.
+- [x] Per-project context exclusions for relative folders/files and filename patterns; these do not limit Code task file access.
+- Relevant-file search so large repositories fit smaller local context windows.
 - Attach text files, images, and PDFs when the selected local model supports them; clearly show unsupported inputs.
 
 ### 2. Coding agent and review loop — in progress

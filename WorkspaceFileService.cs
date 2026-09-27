@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Enumeration;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -13,6 +14,7 @@ public sealed class WorkspaceFileService
     { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
 
     private readonly string _root;
+    private readonly string[] _contextExclusions;
 
     public static bool IsSensitiveFileName(string name)
     {
@@ -23,13 +25,14 @@ public sealed class WorkspaceFileService
                fileName.EndsWith(".key", StringComparison.Ordinal) || fileName is "id_rsa" or "id_ed25519";
     }
 
-    public WorkspaceFileService(string root)
+    public WorkspaceFileService(string root, IReadOnlyList<string>? contextExclusions = null)
     {
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException($"Project folder not found: {root}");
         var full = Path.GetFullPath(root);
         _root = string.Equals(Path.GetPathRoot(full), full, StringComparison.OrdinalIgnoreCase)
             ? full
             : full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        _contextExclusions = (contextExclusions ?? []).Select(NormalizeExclusion).Where(value => value is not null).Select(value => value!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public string Root => _root;
@@ -68,29 +71,41 @@ public sealed class WorkspaceFileService
     }
 
     public IReadOnlyList<string> ListFiles(string relativeDirectory = "", int maxEntries = 200)
+        => ListFilesCore(relativeDirectory, maxEntries, applyContextExclusions: false);
+
+    public IReadOnlyList<string> ListContextFiles(int maxEntries = 300)
+        => ListFilesCore("", maxEntries, applyContextExclusions: true);
+
+    private IReadOnlyList<string> ListFilesCore(string relativeDirectory, int maxEntries, bool applyContextExclusions)
     {
         var directory = ResolvePath(relativeDirectory, allowWorkspaceRoot: true);
         if (!Directory.Exists(directory)) throw new DirectoryNotFoundException($"Folder not found: {relativeDirectory}");
         var results = new List<string>();
         var pending = new Stack<string>();
+        const int maxScannedEntries = 10_000;
+        var scannedEntries = 0;
         pending.Push(directory);
-        while (pending.Count > 0 && results.Count < maxEntries)
+        while (pending.Count > 0 && results.Count < maxEntries && scannedEntries < maxScannedEntries)
         {
             var current = pending.Pop();
-            foreach (var entry in Directory.EnumerateFileSystemEntries(current).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+            foreach (var entry in Directory.EnumerateFileSystemEntries(current).Take(maxScannedEntries - scannedEntries).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
             {
-                if (results.Count >= maxEntries) break;
+                if (results.Count >= maxEntries || scannedEntries >= maxScannedEntries) break;
+                scannedEntries++;
                 var attributes = File.GetAttributes(entry);
                 var name = Path.GetFileName(entry);
                 if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
-                    if (!IgnoredDirectories.Contains(name)) pending.Push(entry);
+                    var relative = Path.GetRelativePath(_root, entry);
+                    if (!IgnoredDirectories.Contains(name) && (!applyContextExclusions || !IsContextExcluded(relative))) pending.Push(entry);
                     continue;
                 }
                 if (IsSensitivePath(entry)) continue;
                 if (!SourceExtensions.Contains(Path.GetExtension(entry))) continue;
-                results.Add(Path.GetRelativePath(_root, entry));
+                var relativeFile = Path.GetRelativePath(_root, entry);
+                if (applyContextExclusions && IsContextExcluded(relativeFile)) continue;
+                results.Add(relativeFile);
             }
         }
         return results;
@@ -102,15 +117,13 @@ public sealed class WorkspaceFileService
         const int maxFiles = 24;
         const int maxChars = 32_000;
         const int maxFileChars = 2_400;
-        var files = selectedFiles is { Count: > 0 } ? selectedFiles : ListFiles(maxEntries: 300);
-        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
+        var files = selectedFiles is { Count: > 0 } ? selectedFiles : ListContextFiles(maxEntries: 300);
         var estimatedChars = 0;
         var fileCount = 0;
         foreach (var relative in files)
         {
             if (fileCount >= maxFiles || estimatedChars >= maxChars) break;
-            if (!allowed.Contains(Path.GetExtension(relative))) continue;
+            if (!SourceExtensions.Contains(Path.GetExtension(relative)) || IsContextExcluded(relative)) continue;
             try
             {
                 var info = new FileInfo(ResolvePath(relative));
@@ -121,6 +134,49 @@ public sealed class WorkspaceFileService
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
         }
         return (estimatedChars + 3) / 4;
+    }
+
+    public bool IsContextExcluded(string relativePath)
+    {
+        string normalized;
+        try { normalized = NormalizeRelativePath(relativePath); }
+        catch { return false; }
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var rule in _contextExclusions)
+        {
+            if (rule.Contains('*') || rule.Contains('?'))
+            {
+                if (!rule.Contains('/') && segments.Length > 0 && FileSystemName.MatchesSimpleExpression(rule, segments[^1], ignoreCase: true)) return true;
+            }
+            else if (rule.Contains('/'))
+            {
+                if (normalized.Equals(rule, StringComparison.OrdinalIgnoreCase) || normalized.StartsWith(rule + "/", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            else if (segments.Any(segment => segment.Equals(rule, StringComparison.OrdinalIgnoreCase))) return true;
+        }
+        return false;
+    }
+
+    public static bool IsValidContextExclusion(string? value) => NormalizeExclusion(value) is not null;
+
+    private static string? NormalizeExclusion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 240 || Path.IsPathRooted(value)) return null;
+        var normalized = value.Trim().Replace('\\', '/').Trim('/');
+        if (normalized.Length == 0 || normalized.Contains(':')) return null;
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Any(segment => segment is "." or "..")) return null;
+        if ((normalized.Contains('*') || normalized.Contains('?')) && normalized.Contains('/')) return null;
+        return normalized;
+    }
+
+    private static string NormalizeRelativePath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || Path.IsPathRooted(value)) throw new ArgumentException("A project-relative path is required.", nameof(value));
+        var normalized = value.Replace('\\', '/').Trim('/');
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0 || segments.Any(segment => segment is "." or "..")) throw new ArgumentException("A normalized project-relative path is required.", nameof(value));
+        return string.Join('/', segments);
     }
 
     public async Task<string> ReadFileAsync(string relativePath, CancellationToken cancellationToken = default)

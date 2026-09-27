@@ -64,6 +64,38 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Project_context_exclusions_filter_context_without_limiting_agent_file_access()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "src", "generated"));
+        Directory.CreateDirectory(Path.Combine(_root, "docs"));
+        File.WriteAllText(Path.Combine(_root, "src", "generated", "api.cs"), "generated source");
+        File.WriteAllText(Path.Combine(_root, "src", "main.cs"), "main source");
+        File.WriteAllText(Path.Combine(_root, "docs", "site.min.js"), "minified source");
+        File.WriteAllText(Path.Combine(_root, "docs", "guide.md"), "helpful context");
+        var service = new WorkspaceFileService(_root, ["generated", "*.min.js"]);
+
+        var allAgentFiles = service.ListFiles(maxEntries: 100);
+        var contextFiles = service.ListContextFiles(maxEntries: 100);
+
+        Assert.Contains(Path.Combine("src", "generated", "api.cs"), allAgentFiles);
+        Assert.DoesNotContain(Path.Combine("src", "generated", "api.cs"), contextFiles);
+        Assert.Equal(0, service.EstimateContextTokens([Path.Combine("src", "generated", "api.cs")]));
+        Assert.DoesNotContain(Path.Combine("docs", "site.min.js"), contextFiles);
+        Assert.Contains(Path.Combine("src", "main.cs"), contextFiles);
+        Assert.Contains(Path.Combine("docs", "guide.md"), contextFiles);
+    }
+
+    [Fact]
+    public void Context_exclusion_rules_reject_absolute_traversal_and_path_globs()
+    {
+        Assert.True(WorkspaceFileService.IsValidContextExclusion("src/generated"));
+        Assert.True(WorkspaceFileService.IsValidContextExclusion("*.min.js"));
+        Assert.False(WorkspaceFileService.IsValidContextExclusion("../outside"));
+        Assert.False(WorkspaceFileService.IsValidContextExclusion("src/*.cs"));
+        Assert.False(WorkspaceFileService.IsValidContextExclusion("C:\\outside"));
+    }
+
+    [Fact]
     public async Task Reads_files_and_creates_a_recoverable_checkpoint_before_replacement()
     {
         var relative = "Program.cs";
