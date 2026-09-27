@@ -35,7 +35,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
 | Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, tool status, retry/edit-resend, and branch-from-message implemented; resume and richer plans remain |
-| Truly parallel agents, tabs, and isolated worktrees | Not implemented |
+| Conversation request scheduling | Serial Ollama queue with per-conversation running/queued indicators; true parallel agents and isolated worktrees remain pending |
 | Git status, branch, staging, and review workflow | Not implemented |
 | Markdown/code rendering, attachments, and session export | Basic Markdown and fenced code rendering with clickable web links and one-click code copying; file/image/PDF attachments and export pending |
 | Skills, MCP tools, recurring tasks, and notifications | Not implemented |
@@ -72,11 +72,12 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 3. Sessions and parallel work
 
-- Tabs or a session switcher for many conversations, with pause, resume, cancel, and clear busy/queued states.
+- [x] Hardware-aware serial Ollama request queue; each queued turn keeps its conversation, model, context size, mode, project, and selected context files, with running/queued indicators in the sidebar.
+- Tabs or a session switcher for many conversations, with pause, resume, per-session cancel, and clear busy/queued states.
 - More than one independent agent task at once, subject to available RAM and model-load limits; communicate when local hardware serializes inference.
 - Optional Git worktree per task so parallel edits cannot collide in the same checkout.
 - Per-session model, context use, project, progress, changed files, and last activity visible from the workspace/session list.
-- Background task queue and completion notifications; reopening Codev restores the session list and results.
+- Completion notifications and reliable queued-task resume after app restart remain pending; requests still waiting when Codev closes are marked as not sent.
 
 ### 4. Git and change management
 

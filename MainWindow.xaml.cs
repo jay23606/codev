@@ -23,8 +23,13 @@ public partial class MainWindow : Window
     private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
     private Conversation? _active;
     private WorkspaceProject? _activeProject;
+    private readonly SerialAsyncQueue<QueuedTurn> _requestQueue = new();
+    private readonly SemaphoreSlim _storeGate = new(1, 1);
     private string? _projectPath;
     private CancellationTokenSource? _requestCancellation;
+    private Conversation? _activeRequestConversation;
+    private bool _isClosing;
+    private bool _activeRequestIsCodeTask;
     private bool _loadingModel;
     private bool _updatingContext;
     private bool _codeTaskMode;
@@ -133,7 +138,13 @@ public partial class MainWindow : Window
             if (!File.Exists(StorePath)) return;
             var saved = JsonSerializer.Deserialize<List<Conversation>>(File.ReadAllText(StorePath), JsonOptions);
             if (saved is null) return;
-            foreach (var item in saved) _conversations.Add(item);
+            foreach (var item in saved)
+            {
+                for (var index = 0; index < item.Messages.Count; index++)
+                    if (item.Messages[index].Role == "assistant" && string.IsNullOrWhiteSpace(item.Messages[index].Content))
+                        item.Messages[index] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
+                _conversations.Add(item);
+            }
         }
         catch (Exception ex) { ConnectionLabel.Text = $"History could not be loaded: {ex.Message}"; }
     }
@@ -179,12 +190,16 @@ public partial class MainWindow : Window
 
     private async Task SaveAsync()
     {
+        var gateHeld = false;
         try
         {
+            await _storeGate.WaitAsync();
+            gateHeld = true;
             Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
             await File.WriteAllTextAsync(StorePath, JsonSerializer.Serialize(_conversations, JsonOptions));
         }
         catch (Exception ex) { ConnectionLabel.Text = $"Could not save history: {ex.Message}"; }
+        finally { if (gateHeld) _storeGate.Release(); }
     }
 
     private async Task LoadModelsAsync()
@@ -265,6 +280,8 @@ public partial class MainWindow : Window
         UpdateModeButtons();
         _activeProject = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
         UpdateChangesButton(conversation);
+        UpdateSendControl();
+        UpdateActiveRequestStatus();
         if (_activeProject is not null) _activeProject.LastOpenedAt = DateTimeOffset.Now;
         ConversationTitle.Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
         PinButton.Content = conversation.IsPinned ? "★  Pinned" : "☆  Pin";
@@ -296,7 +313,7 @@ public partial class MainWindow : Window
             content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
             var border = new Border { Child = content, Padding = new Thickness(isUser ? 15 : 0, isUser ? 12 : 8, isUser ? 15 : 0, isUser ? 12 : 8), Background = isUser ? ThemeBrush("MessageBubbleBrush") : Brushes.Transparent, CornerRadius = new CornerRadius(12), HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Stretch, MaxWidth = 720, Margin = new Thickness(0, 0, 0, 17) };
-            if (_requestCancellation is null)
+            if (_requestCancellation is null && conversation.PendingRequestCount == 0)
             {
                 var menu = new ContextMenu();
                 var branchIndex = messageIndex;
@@ -324,7 +341,7 @@ public partial class MainWindow : Window
 
     private async Task ResendFromUserMessageAsync(Conversation conversation, ChatMessage userMessage)
     {
-        if (!ReferenceEquals(_active, conversation) || _requestCancellation is not null) return;
+        if (!ReferenceEquals(_active, conversation) || conversation.PendingRequestCount > 0 || ReferenceEquals(_activeRequestConversation, conversation)) return;
         var index = conversation.Messages.FindIndex(message => ReferenceEquals(message, userMessage));
         if (index < 0) return;
         PromptBox.Text = userMessage.Content;
@@ -338,7 +355,7 @@ public partial class MainWindow : Window
 
     private async Task BranchConversationAsync(Conversation source, int messageIndex)
     {
-        if (!ReferenceEquals(_active, source) || _requestCancellation is not null || messageIndex < 0 || messageIndex >= source.Messages.Count) return;
+        if (!ReferenceEquals(_active, source) || source.PendingRequestCount > 0 || ReferenceEquals(_activeRequestConversation, source) || messageIndex < 0 || messageIndex >= source.Messages.Count) return;
         var title = string.IsNullOrWhiteSpace(source.Title) ? "Conversation branch" : source.Title + " · branch";
         var branch = new Conversation
         {
@@ -558,6 +575,15 @@ public partial class MainWindow : Window
             var title = string.IsNullOrWhiteSpace(item.Title) ? "New conversation" : item.Title;
             var button = new Button { Style = (Style)FindResource("SidebarButton"), Tag = item, Padding = new Thickness(11, 8, 7, 8), Margin = new Thickness(0, 1, 0, 1), Background = ReferenceEquals(item, _active) ? ThemeBrush("SidebarActiveBrush") : Brushes.Transparent };
             var row = new DockPanel();
+            var requestStatus = ReferenceEquals(_activeRequestConversation, item)
+                ? (_activeRequestIsCodeTask ? "Working · Code" : "Working")
+                : item.PendingRequestCount > 0 ? $"Queued · {item.PendingRequestCount}" : "";
+            if (!string.IsNullOrEmpty(requestStatus))
+            {
+                var badge = new TextBlock { Text = requestStatus, FontSize = 9, Foreground = ThemeBrush("WelcomeAccentBrush"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 4, 0) };
+                DockPanel.SetDock(badge, Dock.Right);
+                row.Children.Add(badge);
+            }
             var caption = new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 12, Foreground = ThemeBrush("SidebarTextBrush"), VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(caption);
             button.Content = row;
@@ -622,6 +648,11 @@ public partial class MainWindow : Window
 
     private async Task SetConversationArchivedAsync(Conversation conversation, bool archived)
     {
+        if (conversation.PendingRequestCount > 0 || ReferenceEquals(_activeRequestConversation, conversation))
+        {
+            MessageBox.Show(this, "Wait for this conversation’s active and queued requests to finish before archiving it.", "Conversation is busy", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         conversation.IsArchived = archived;
         conversation.UpdatedAt = DateTimeOffset.Now;
         if (ReferenceEquals(_active, conversation))
@@ -647,6 +678,11 @@ public partial class MainWindow : Window
 
     private async Task DeleteConversationAsync(Conversation conversation)
     {
+        if (conversation.PendingRequestCount > 0 || ReferenceEquals(_activeRequestConversation, conversation))
+        {
+            MessageBox.Show(this, "Wait for this conversation’s active and queued requests to finish before deleting it.", "Conversation is busy", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         var answer = MessageBox.Show(this, $"Permanently delete ‘{conversation.Title}’, its history, and its local file checkpoints?", "Delete conversation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
         var wasActive = ReferenceEquals(_active, conversation);
@@ -670,7 +706,7 @@ public partial class MainWindow : Window
 
     private async void Send_Click(object sender, RoutedEventArgs e)
     {
-        if (_requestCancellation is not null)
+        if (_requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active))
         {
             _requestCancellation.Cancel();
             AgentStatusLabel.Text = "Stopping…";
@@ -720,7 +756,9 @@ public partial class MainWindow : Window
     private async Task SendPromptAsync()
     {
         var text = PromptBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(text) || _active is null || _requestCancellation is not null) return;
+        if (string.IsNullOrWhiteSpace(text) || _active is null) return;
+        var isCodeTask = _codeTaskMode && _codeTaskConversationId == _active.Id;
+        var isPlanMode = _planMode;
         if (ModelPicker.SelectedValue is string model) _active.Model = model;
         var conversation = _active;
         var userMessage = text;
@@ -730,72 +768,116 @@ public partial class MainWindow : Window
             ConversationTitle.Text = conversation.Title;
         }
         conversation.Messages.Add(new ChatMessage("user", userMessage));
+        var assistantIndex = conversation.Messages.Count;
         conversation.Messages.Add(new ChatMessage("assistant", ""));
         conversation.UpdatedAt = DateTimeOffset.Now;
+        conversation.PendingRequestCount++;
+        var turn = new QueuedTurn(conversation, assistantIndex, conversation.Model, conversation.NumCtx,
+            isCodeTask, isPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles]);
         PromptBox.Clear();
         WelcomePanel.Visibility = Visibility.Collapsed;
         RenderMessages();
         RefreshConversationLists();
-        var requestCancellation = new CancellationTokenSource();
-        _requestCancellation = requestCancellation;
-        SendButton.Content = "■";
-        SendButton.IsEnabled = true;
-        SendButton.ToolTip = "Stop generation";
-        AgentStatusLabel.Text = _codeTaskMode ? "Code task · Thinking…" : _planMode ? "Planning locally…" : "Generating locally…";
+        UpdateSendControl();
+        UpdateActiveRequestStatus();
         await SaveAsync();
+        if (_isClosing)
+        {
+            conversation.Messages[assistantIndex] = new ChatMessage("assistant", "Queued request was not sent before Codev closed.");
+            return;
+        }
+        _requestQueue.Enqueue(turn);
+        await ProcessQueuedTurnsAsync();
+    }
 
+    private async Task ProcessQueuedTurnsAsync()
+    {
+        if (_isClosing) return;
         try
         {
-            var history = conversation.Messages.Take(conversation.Messages.Count - 1).Select(m => new OllamaMessage(m.Role, m.Content)).ToList();
-            var isCodeTask = _codeTaskMode && _codeTaskConversationId == conversation.Id;
-            var isPlanMode = _planMode;
-            var system = isCodeTask
+            await _requestQueue.ProcessPendingAsync(async turn =>
+            {
+                turn.Conversation.PendingRequestCount = Math.Max(0, turn.Conversation.PendingRequestCount - 1);
+                RefreshConversationLists();
+                await ExecuteQueuedTurnAsync(turn);
+            }, async (turn, error) =>
+            {
+                if (turn.AssistantIndex < turn.Conversation.Messages.Count)
+                    turn.Conversation.Messages[turn.AssistantIndex] = new ChatMessage("assistant", $"Could not complete the queued request.\n\n{error.Message}");
+                turn.Conversation.UpdatedAt = DateTimeOffset.Now;
+                await SaveAsync();
+            });
+        }
+        finally
+        {
+            UpdateSendControl();
+            UpdateActiveRequestStatus();
+        }
+    }
+
+    private async Task ExecuteQueuedTurnAsync(QueuedTurn turn)
+    {
+        var conversation = turn.Conversation;
+        var assistantIndex = turn.AssistantIndex;
+        var cancellation = new CancellationTokenSource();
+        _requestCancellation = cancellation;
+        _activeRequestConversation = conversation;
+        _activeRequestIsCodeTask = turn.IsCodeTask;
+        RefreshConversationLists();
+        UpdateSendControl();
+        UpdateActiveRequestStatus();
+        try
+        {
+            var history = conversation.Messages.Take(assistantIndex).Select(m => new OllamaMessage(m.Role, m.Content)).ToList();
+            var system = turn.IsCodeTask
                 ? "You are Codev, a concise local coding agent. Work only within the selected project. Inspect before editing. Use the provided tools instead of claiming actions. Every file replacement and shell command requires user approval. Never represent tool output as successful unless its result confirms success."
-                : isPlanMode
+                : turn.IsPlanMode
                     ? "You are Codev in read-only Plan mode. Give a concise, ordered implementation plan with key files, risks, and checks. Do not edit files, run commands, or claim that any work has been done. Ask a short clarifying question only if a missing detail blocks a useful plan."
                     : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
-            if (_activeProject is not null && !string.IsNullOrWhiteSpace(_activeProject.Instructions))
-                system += "\n\nProject-specific instructions (apply within this workspace):\n" + _activeProject.Instructions;
-            if (!string.IsNullOrWhiteSpace(conversation.ProjectPath) && !isCodeTask)
+            var project = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
+            if (project is not null && !string.IsNullOrWhiteSpace(project.Instructions))
+                system += "\n\nProject-specific instructions (apply within this workspace):\n" + project.Instructions;
+            if (!string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
             {
-                system += "\n\nThe user attached this local project folder: " + conversation.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
-                system += "\n\n" + await CollectProjectContextAsync(conversation.ProjectPath, requestCancellation.Token, conversation.ContextFiles);
+                system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
+                system += "\n\n" + await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles);
             }
             history.Insert(0, new OllamaMessage("system", system));
-            if (isCodeTask)
+            if (turn.IsCodeTask)
             {
-                var service = new WorkspaceFileService(conversation.ProjectPath!);
-                await RunAgentTurnAsync(conversation, history, service, requestCancellation.Token);
+                var service = new WorkspaceFileService(turn.ProjectPath!);
+                await RunAgentTurnAsync(conversation, assistantIndex, history, service, turn.Model, turn.NumCtx, cancellation.Token);
             }
             else
-                await RunChatTurnAsync(conversation, history, requestCancellation.Token);
-            if (conversation.Messages[^1].Content.Length == 0)
-                conversation.Messages[^1] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
+                await RunChatTurnAsync(conversation, assistantIndex, history, turn.Model, turn.NumCtx, cancellation.Token);
+            if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
+                conversation.Messages[assistantIndex] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
         }
         catch (OperationCanceledException)
         {
-            var partial = conversation.Messages[^1].Content;
-            conversation.Messages[^1] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]");
+            var partial = conversation.Messages[assistantIndex].Content;
+            conversation.Messages[assistantIndex] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]");
         }
-        catch (Exception ex) { conversation.Messages[^1] = new ChatMessage("assistant", $"Could not complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed."); }
+        catch (Exception ex) { conversation.Messages[assistantIndex] = new ChatMessage("assistant", $"Could not complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed."); }
         finally
         {
             conversation.UpdatedAt = DateTimeOffset.Now;
             await SaveAsync();
-            _requestCancellation?.Dispose();
+            cancellation.Dispose();
             _requestCancellation = null;
+            _activeRequestConversation = null;
+            _activeRequestIsCodeTask = false;
+            RefreshConversationLists();
             if (ReferenceEquals(_active, conversation)) RenderMessages();
             RefreshConversationLists();
-            SendButton.IsEnabled = true;
-            SendButton.Content = "↑";
-            SendButton.ToolTip = "Send message (Enter)";
-            AgentStatusLabel.Text = "Your conversations and model requests stay on this device.";
+            UpdateSendControl();
+            UpdateActiveRequestStatus();
         }
     }
 
-    private async Task RunChatTurnAsync(Conversation conversation, List<OllamaMessage> history, CancellationToken cancellationToken)
+    private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(BuildChatPayload(conversation, history, stream: true)) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(BuildChatPayload(model, numCtx, history, stream: true)) };
         using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -809,18 +891,20 @@ public partial class MainWindow : Window
             if (json.RootElement.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
             {
                 conversation.LastPromptTokens = promptTokens;
+                conversation.LastPromptContext = numCtx;
+                conversation.LastPromptModel = model;
                 UpdateContextUsage(conversation);
             }
             if (json.RootElement.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var chunk))
             {
                 output.Append(chunk.GetString());
-                conversation.Messages[^1] = new ChatMessage("assistant", output.ToString());
+                conversation.Messages[assistantIndex] = new ChatMessage("assistant", output.ToString());
                 if (ReferenceEquals(_active, conversation)) RenderMessages();
             }
         }
     }
 
-    private async Task RunAgentTurnAsync(Conversation conversation, List<OllamaMessage> history, WorkspaceFileService service, CancellationToken cancellationToken)
+    private async Task RunAgentTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, WorkspaceFileService service, string model, int numCtx, CancellationToken cancellationToken)
     {
         var tools = new object[]
         {
@@ -836,7 +920,7 @@ public partial class MainWindow : Window
             cancellationToken.ThrowIfCancellationRequested();
             using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
             {
-                Content = JsonContent.Create(BuildChatPayload(conversation, history, stream: false, tools))
+                Content = JsonContent.Create(BuildChatPayload(model, numCtx, history, stream: false, tools))
             };
             using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -845,6 +929,8 @@ public partial class MainWindow : Window
             if (json.RootElement.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
             {
                 conversation.LastPromptTokens = promptTokens;
+                conversation.LastPromptContext = numCtx;
+                conversation.LastPromptModel = model;
                 UpdateContextUsage(conversation);
             }
             var message = json.RootElement.GetProperty("message");
@@ -853,7 +939,7 @@ public partial class MainWindow : Window
                 ? callsElement.EnumerateArray().ToList() : [];
             if (calls.Count == 0)
             {
-                conversation.Messages[^1] = new ChatMessage("assistant", text);
+                conversation.Messages[assistantIndex] = new ChatMessage("assistant", text);
                 RenderAgentTranscript(conversation);
                 return;
             }
@@ -865,29 +951,29 @@ public partial class MainWindow : Window
                 cancellationToken.ThrowIfCancellationRequested();
                 var function = call.GetProperty("function");
                 var name = function.GetProperty("name").GetString() ?? "";
-                AgentStatusLabel.Text = $"Code task · {name.Replace('_', ' ')}";
+                SetAgentStatus(conversation, $"Code task · {name.Replace('_', ' ')}");
                 var arguments = function.TryGetProperty("arguments", out var args) ? args : default;
                 var result = await ExecuteAgentToolAsync(name, arguments, service, conversation, cancellationToken);
                 history.Add(new OllamaMessage("tool", result, null, name));
                 assistantText.Append("\n\n").Append("Tool ").Append(name).Append(": ").Append(result.Length > 1400 ? result[..1400] + "… [truncated in transcript]" : result);
             }
-            AgentStatusLabel.Text = "Code task · Thinking…";
-            conversation.Messages[^1] = new ChatMessage("assistant", assistantText.ToString());
+            SetAgentStatus(conversation, "Code task · Thinking…");
+            conversation.Messages[assistantIndex] = new ChatMessage("assistant", assistantText.ToString());
             RenderAgentTranscript(conversation);
         }
         throw new InvalidOperationException("The agent reached the eight-step tool limit. Send a follow-up to continue.");
     }
 
-    private static Dictionary<string, object> BuildChatPayload(Conversation conversation, List<OllamaMessage> messages, bool stream, object[]? tools = null)
+    private static Dictionary<string, object> BuildChatPayload(string model, int numCtx, List<OllamaMessage> messages, bool stream, object[]? tools = null)
     {
         var payload = new Dictionary<string, object>
         {
-            ["model"] = conversation.Model,
+            ["model"] = model,
             ["messages"] = messages,
             ["stream"] = stream
         };
         if (tools is not null) payload["tools"] = tools;
-        if (conversation.NumCtx > 0) payload["options"] = new OllamaOptions(conversation.NumCtx);
+        if (numCtx > 0) payload["options"] = new OllamaOptions(numCtx);
         return payload;
     }
 
@@ -1013,6 +1099,29 @@ public partial class MainWindow : Window
         ChangesButton.IsEnabled = count > 0;
     }
 
+    private void UpdateSendControl()
+    {
+        var stoppingThis = _requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active);
+        SendButton.IsEnabled = true;
+        SendButton.Content = stoppingThis ? "■" : "↑";
+        SendButton.ToolTip = stoppingThis ? "Stop this response" : "Send message (Enter)";
+    }
+
+    private void UpdateActiveRequestStatus()
+    {
+        if (_active is null) { AgentStatusLabel.Text = "Your conversations and model requests stay on this device."; return; }
+        if (_requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active))
+            AgentStatusLabel.Text = _activeRequestIsCodeTask ? "Code task · Running locally…" : "Generating locally…";
+        else if (_active.PendingRequestCount > 0)
+            AgentStatusLabel.Text = $"Queued · {_active.PendingRequestCount} request(s) waiting for Ollama";
+        else AgentStatusLabel.Text = "Your conversations and model requests stay on this device.";
+    }
+
+    private void SetAgentStatus(Conversation conversation, string status)
+    {
+        if (ReferenceEquals(_active, conversation)) AgentStatusLabel.Text = status;
+    }
+
     private void ReviewChanges_Click(object sender, RoutedEventArgs e)
     {
         if (_active is not { FileChanges.Count: > 0 } conversation) return;
@@ -1112,7 +1221,7 @@ public partial class MainWindow : Window
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         var control = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
-        if (e.Key == Key.Escape && _requestCancellation is not null)
+        if (e.Key == Key.Escape && _requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active))
         {
             _requestCancellation.Cancel();
             AgentStatusLabel.Text = "Stopping…";
@@ -1188,7 +1297,8 @@ public partial class MainWindow : Window
     private void UpdateContextUsage(Conversation conversation)
     {
         if (!ReferenceEquals(_active, conversation)) return;
-        var limit = conversation.NumCtx > 0 ? conversation.NumCtx : MaxContextForModel(conversation.Model);
+        var model = conversation.LastPromptTokens > 0 && !string.IsNullOrWhiteSpace(conversation.LastPromptModel) ? conversation.LastPromptModel : conversation.Model;
+        var limit = conversation.LastPromptContext > 0 ? conversation.LastPromptContext : conversation.NumCtx > 0 ? conversation.NumCtx : MaxContextForModel(model);
         ContextUsageLabel.Text = conversation.LastPromptTokens > 0 ? $"{FormatTokenCount(conversation.LastPromptTokens)} / {FormatContextLimit(limit)}" : "";
         ContextUsageLabel.ToolTip = conversation.LastPromptTokens > 0
             ? "Latest prompt and conversation history token count reported by Ollama. The denominator is the selected request context size."
@@ -1285,7 +1395,18 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _isClosing = true;
         _requestCancellation?.Cancel();
+        while (_requestQueue.TryDequeuePending(out var turn))
+        {
+            turn.Conversation.PendingRequestCount = Math.Max(0, turn.Conversation.PendingRequestCount - 1);
+            if (turn.AssistantIndex < turn.Conversation.Messages.Count)
+                turn.Conversation.Messages[turn.AssistantIndex] = new ChatMessage("assistant", "Queued request was not sent before Codev closed.");
+        }
+        foreach (var conversation in _conversations)
+            for (var i = 0; i < conversation.Messages.Count; i++)
+                if (conversation.Messages[i].Role == "assistant" && string.IsNullOrWhiteSpace(conversation.Messages[i].Content))
+                    conversation.Messages[i] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
         _ = SaveAsync();
         base.OnClosed(e);
     }
@@ -1296,6 +1417,8 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("tool_calls")] List<JsonElement>? ToolCalls = null,
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
     private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
+    private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
+        bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles);
     private sealed record UiSettings(string Theme);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
@@ -1310,6 +1433,8 @@ public sealed class Conversation
     public string Model { get; set; } = "devstral-small-2-64k";
     public int NumCtx { get; set; }
     public int LastPromptTokens { get; set; }
+    public int LastPromptContext { get; set; }
+    public string LastPromptModel { get; set; } = "";
     public bool IsPinned { get; set; }
     public bool IsArchived { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
@@ -1317,6 +1442,7 @@ public sealed class Conversation
     public List<ChatMessage> Messages { get; set; } = [];
     public List<FileChangeRecord> FileChanges { get; set; } = [];
     public List<string> ContextFiles { get; set; } = [];
+    [JsonIgnore] public int PendingRequestCount { get; set; }
 }
 
 public sealed record FileChangeRecord(string RelativePath, string? CheckpointPath, DateTimeOffset ChangedAt, string Kind, bool PreviousFileExisted = true);
