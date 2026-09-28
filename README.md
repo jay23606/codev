@@ -30,7 +30,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Optional root `AGENTS.md` is read through project-bounded file access and included as capped project guidance in local requests
 - Git status, per-file staged/unstaged diff review, sending selected diff lines to the chat composer, staging, unstaging, reviewed local commits, and local branch creation/switching from a project's menu; branch operations require a clean tree, and commits are never pushed automatically
 - Optional project-folder context: selected source/config files are read locally and sent to the local Ollama server as bounded context
-- Choose up to 24 project-relative source files for a conversation; right-click Add files to clear the selection
+- Choose up to 24 project-relative source files for a conversation; right-click Add files to remove one file or clear the selection
 - Browse project text files, filter the list, preview them read-only, and add a selected file directly to chat context
 - Drop supported project source/text files onto the composer to add them to local context; files outside the active project, secret files, excluded files, and binary/unsupported types are ignored
 - Explicit Code task mode with project-scoped list/read/search tools and approval-gated file creation/replacement; changes create local recovery checkpoints and can be reviewed, restored, or undone/redone through Files

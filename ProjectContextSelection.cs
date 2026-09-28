@@ -6,6 +6,20 @@ public sealed record ContextFileSelectionResult(int AddedCount, int IgnoredCount
 
 public static class ProjectContextSelection
 {
+    public static bool RemoveFile(IList<string> selectedFiles, string relativePath)
+    {
+        ArgumentNullException.ThrowIfNull(selectedFiles);
+        if (string.IsNullOrWhiteSpace(relativePath)) return false;
+        var removed = false;
+        for (var index = selectedFiles.Count - 1; index >= 0; index--)
+        {
+            if (!string.Equals(selectedFiles[index], relativePath, StringComparison.OrdinalIgnoreCase)) continue;
+            selectedFiles.RemoveAt(index);
+            removed = true;
+        }
+        return removed;
+    }
+
     public static ContextFileSelectionResult AddFiles(WorkspaceFileService service, IList<string> selectedFiles, IEnumerable<string> paths)
     {
         ArgumentNullException.ThrowIfNull(service);

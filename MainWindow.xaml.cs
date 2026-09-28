@@ -68,9 +68,32 @@ public partial class MainWindow : Window
             if (_active is null) return;
             _active.ContextFiles.Clear();
             UpdateContextLabel(_active);
+            RefreshConversationLists();
             await SaveAsync();
         };
         contextMenu.Items.Add(clearContext);
+        contextMenu.Opened += (_, _) =>
+        {
+            contextMenu.Items.Clear();
+            clearContext.IsEnabled = _active?.ContextFiles.Count > 0;
+            contextMenu.Items.Add(clearContext);
+            if (_active is not { ContextFiles.Count: > 0 } conversation) return;
+            var removeFiles = new MenuItem { Header = "Remove a selected file" };
+            foreach (var relativePath in conversation.ContextFiles.ToArray())
+            {
+                var remove = new MenuItem { Header = relativePath, ToolTip = "Remove this file from chat context" };
+                remove.Click += async (_, _) =>
+                {
+                    if (!ReferenceEquals(_active, conversation) || !ProjectContextSelection.RemoveFile(conversation.ContextFiles, relativePath)) return;
+                    UpdateContextLabel(conversation);
+                    RefreshConversationLists();
+                    await SaveAsync();
+                };
+                removeFiles.Items.Add(remove);
+            }
+            contextMenu.Items.Add(new Separator());
+            contextMenu.Items.Add(removeFiles);
+        };
         AddContextButton.ContextMenu = contextMenu;
         _conversationSearchDebounce.Tick += (_, _) => { _conversationSearchDebounce.Stop(); RefreshConversationLists(); };
         _draftSaveDebounce.Tick += async (_, _) => await SaveDraftAsync();

@@ -64,6 +64,16 @@ public sealed class ProjectContextSelectionTests : IDisposable
         Assert.Equal(WorkspaceFileService.MaxContextFiles, selected.Count);
     }
 
+    [Fact]
+    public void Removing_a_context_file_is_case_insensitive_and_leaves_other_selections_intact()
+    {
+        var selected = new List<string> { "src/app.cs", "docs/readme.md" };
+
+        Assert.True(ProjectContextSelection.RemoveFile(selected, "SRC/APP.CS"));
+        Assert.False(ProjectContextSelection.RemoveFile(selected, "missing.cs"));
+        Assert.Equal("docs/readme.md", Assert.Single(selected));
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_root, recursive: true); }
