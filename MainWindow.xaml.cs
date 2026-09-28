@@ -2361,6 +2361,37 @@ public partial class MainWindow : Window
         _draftSaveDebounce.Start();
     }
 
+    private void PromptBox_PreviewDragOver(object sender, DragEventArgs e)
+    {
+        var paths = e.Data.GetData(DataFormats.FileDrop) as string[];
+        e.Effects = paths?.Any(File.Exists) == true ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void PromptBox_PreviewDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (_active is null || string.IsNullOrWhiteSpace(_active.ProjectPath) || !Directory.Exists(_active.ProjectPath))
+        {
+            MessageBox.Show(this, "Open or attach a project folder first, then drop supported project files onto the composer.", "Project required", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
+        var project = EnsureProject(_active.ProjectPath);
+        var result = ProjectContextSelection.AddDroppedFiles(new WorkspaceFileService(_active.ProjectPath, project.ContextExclusions), _active.ContextFiles, paths);
+        if (result.AddedCount > 0)
+        {
+            UpdateContextLabel(_active);
+            RefreshConversationLists();
+            await SaveAsync();
+        }
+        if (_requestCancellation is null)
+            AgentStatusLabel.Text = result.AddedCount > 0
+                ? $"Added {result.AddedCount} file(s) to local context" + (result.IgnoredCount > 0 ? $" · ignored {result.IgnoredCount} unsupported, excluded, duplicate, or outside-project file(s)" : "")
+                : $"No files added · ignored {result.IgnoredCount} unsupported, excluded, duplicate, or outside-project file(s)";
+    }
+
     private void Suggestion_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string text }) { PromptBox.Text = text; PromptBox.CaretIndex = PromptBox.Text.Length; PromptBox.Focus(); }
