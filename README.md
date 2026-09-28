@@ -74,6 +74,8 @@ Completed local Ollama replies in Avalonia show first-token latency, generated t
 
 Avalonia also supports user and trusted-project Markdown prompt commands with named arguments, and manages saved prompt templates through `/template-…` suggestions and the **Prompt templates** button; see [custom slash commands](docs/custom-slash-commands.md) or type `/commands` in the composer.
 
+Manually invoked user and trusted-project Markdown skills are also available through slash suggestions; type `/skills` for the folders and see [the skills guide](docs/skills.md).
+
 Fork an idle Avalonia conversation from its sidebar context menu to continue in a separate chat. The fork copies its history, settings, project link, and Codev-managed rollback checkpoints; busy conversations must finish and clear their queue first.
 
 When you attach a folder that already has conversations, Codev offers to resume the most recent one for that project, attach the folder to the current chat, or start a new conversation.

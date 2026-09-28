@@ -11,6 +11,7 @@ public enum SlashCommandAction
     ReviewProject,
     ShowStatus,
     OpenCommandsFolder,
+    OpenSkillsFolder,
     UserPrompt
 }
 
@@ -18,7 +19,7 @@ public sealed record SlashCommandDefinition(string Name, string Description, Sla
     IReadOnlyList<string>? ArgumentNames = null, string? Scope = null, string? FilePath = null)
 {
     public bool IsCustom => Action == SlashCommandAction.UserPrompt;
-    public string ScopeLabel => Scope switch { "project" => "PROJECT", "user" => "USER", _ => "BUILT IN" };
+    public string ScopeLabel => Scope switch { "project" => "PROJECT", "user" => "USER", "template" => "SAVED", "skill-user" => "USER SKILL", "skill-project" => "PROJECT SKILL", _ => "BUILT IN" };
 }
 
 /// <summary>Built-in composer commands that are currently backed by implemented Codev actions.</summary>
@@ -36,6 +37,7 @@ public static class SlashCommandCatalog
         new("/plan", "Toggle read-only Plan mode", SlashCommandAction.TogglePlan),
         new("/review", "Prepare a read-only project review prompt", SlashCommandAction.ReviewProject,
             "Review the available project context and recent changes for correctness bugs, security risks, edge cases, and missing tests. Do not edit files. Return only actionable findings, prioritized by severity, with file and line references where possible."),
+        new("/skills", "Open user and trusted-project skill folders", SlashCommandAction.OpenSkillsFolder),
         new("/status", "Show local provider, model, mode, context, and queue status", SlashCommandAction.ShowStatus)
     ];
 

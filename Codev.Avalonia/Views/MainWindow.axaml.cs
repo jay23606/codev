@@ -619,6 +619,11 @@ public partial class MainWindow : Window
                 ComposerTextBox.Text = "";
                 await ShowSlashCommandFoldersAsync(viewModel);
                 break;
+            case Codev.SlashCommandAction.OpenSkillsFolder:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                await ShowSkillFoldersAsync(viewModel);
+                break;
             case Codev.SlashCommandAction.InitProject:
             case Codev.SlashCommandAction.ReviewProject:
                 viewModel.Draft = command.Prompt ?? "";
@@ -702,6 +707,59 @@ public partial class MainWindow : Window
             MinHeight = 44
         });
         var openProject = new Button { Content = "Open project commands folder", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left, IsEnabled = projectFolder is not null };
+        if (projectFolder is not null) openProject.Click += async (_, _) => await OpenCommandFolderAsync(projectFolder, viewModel);
+        content.Children.Add(openProject);
+        var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right };
+        close.Click += (_, _) => dialog.Close();
+        content.Children.Add(close);
+        dialog.Content = content;
+        await dialog.ShowDialog(this);
+    }
+
+    private async Task ShowSkillFoldersAsync(ViewModels.MainViewModel viewModel)
+    {
+        var projectFolder = viewModel.ProjectSkillsFolder;
+        var dialog = new Window
+        {
+            Title = "Markdown skills",
+            Width = 580,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        var content = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "A skill is a folder containing SKILL.md. It appears as /skill-name with its description in the menu. Selecting it loads the prompt into the composer for review; it is never sent automatically. Skills are manually invoked only, and Codev does not run scripts from skill folders or let the model trigger them.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        });
+        content.Children.Add(new Border
+        {
+            Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
+            Padding = new Thickness(10),
+            CornerRadius = new CornerRadius(6),
+            Child = new TextBlock
+            {
+                Text = "review/SKILL.md\n---\ndescription: Review a project for correctness and test gaps\narguments: area\n---\nReview {{area}}. Return prioritized, actionable findings only.",
+                FontFamily = "Cascadia Code",
+                FontSize = 10,
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+            }
+        });
+        content.Children.Add(new TextBlock { Text = "User skills · available in all conversations", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        content.Children.Add(new TextBox { Text = viewModel.UserSkillsFolder, IsReadOnly = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MinHeight = 44 });
+        var openUser = new Button { Content = "Open user skills folder", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left };
+        openUser.Click += async (_, _) => await OpenCommandFolderAsync(viewModel.UserSkillsFolder, viewModel);
+        content.Children.Add(openUser);
+        content.Children.Add(new TextBlock { Text = "Project skills · trusted project only", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Margin = new Thickness(0, 5, 0, 0) });
+        content.Children.Add(new TextBox
+        {
+            Text = projectFolder ?? (viewModel.HasProject ? "Trust this project to enable its .codev/skills folder." : "Attach and trust a project to use project skills."),
+            IsReadOnly = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MinHeight = 44
+        });
+        var openProject = new Button { Content = "Open project skills folder", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left, IsEnabled = projectFolder is not null };
         if (projectFolder is not null) openProject.Click += async (_, _) => await OpenCommandFolderAsync(projectFolder, viewModel);
         content.Children.Add(openProject);
         var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right };

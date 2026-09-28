@@ -30,6 +30,8 @@ public sealed class MainViewModel : ViewModelBase
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-active-conversation.json");
     private static readonly string UserSlashCommandsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "commands");
+    private static readonly string UserSkillsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "skills");
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
     private readonly Codev.ProjectFolderTrustRegistry _projectFolderTrust = Codev.ProjectFolderTrustRegistry.Load(ProjectTrustPath);
@@ -224,6 +226,10 @@ public sealed class MainViewModel : ViewModelBase
     public string UserSlashCommandsFolder => UserSlashCommandsPath;
     public string? ProjectSlashCommandsFolder => HasProject && IsProjectTrusted
         ? Path.Combine(ActiveConversation!.ProjectPath!, ".codev", "commands")
+        : null;
+    public string UserSkillsFolder => UserSkillsPath;
+    public string? ProjectSkillsFolder => HasProject && IsProjectTrusted
+        ? Path.Combine(ActiveConversation!.ProjectPath!, ".codev", "skills")
         : null;
     public bool IsModelPickerPlaceholderVisible => !HasModels;
     public string ProviderStatusLabel => $"{(IsCodeTask ? "Code task" : IsPlanMode ? "Plan" : "Chat")} · {(IsLocalModel ? (Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "local Ollama" : "remote Ollama") : $"{Provider} hosted model")}";
@@ -731,10 +737,26 @@ public sealed class MainViewModel : ViewModelBase
         var userCommands = loaded.Commands.Where(command => hasArguments
             ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
             : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
-        var templates = Codev.PromptTemplateCatalog.ToSlashCommands(PromptTemplates, loaded.Commands.Select(command => command.Name)).Where(command => hasArguments
+        var skills = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, projectPath, IsProjectTrusted, cancellationToken);
+        if (skills.Warnings.Count > 0)
+        {
+            var warning = skills.Warnings[0];
+            if (!warning.Equals(_lastSlashCommandWarning, StringComparison.Ordinal))
+            {
+                _lastSlashCommandWarning = warning;
+                ReportContextActionStatus("Skill: " + warning);
+            }
+        }
+        var skillNames = skills.Skills.Where(command => !loaded.Commands.Any(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase)))
+            .Select(command => command.Name).ToArray();
+        var templates = Codev.PromptTemplateCatalog.ToSlashCommands(PromptTemplates, loaded.Commands.Select(command => command.Name).Concat(skillNames)).Where(command => hasArguments
             ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
             : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
-        return builtIns.Concat(userCommands).Concat(templates).ToArray();
+        var skillSuggestions = skillNames.Where(name => hasArguments
+                ? name.Equals(token, StringComparison.OrdinalIgnoreCase)
+                : name.StartsWith(token, StringComparison.OrdinalIgnoreCase))
+            .Select(name => skills.Skills.First(skill => skill.Name.Equals(name, StringComparison.OrdinalIgnoreCase)));
+        return builtIns.Concat(userCommands).Concat(skillSuggestions).Concat(templates).ToArray();
     }
 
     public async Task<Codev.SlashCommandExpansionResult> ExpandSlashCommandAsync(
@@ -750,6 +772,16 @@ public sealed class MainViewModel : ViewModelBase
             return currentTemplate is null
                 ? new(false, "", "That saved prompt template is no longer available.")
                 : Codev.CustomSlashCommandService.Expand(currentTemplate, invocation);
+        }
+        if (command.Scope is "skill-user" or "skill-project")
+        {
+            var skills = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
+            var currentSkill = skills.Skills.FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.Scope, command.Scope, StringComparison.OrdinalIgnoreCase));
+            return currentSkill is null
+                ? new(false, "", "That skill is no longer available. Check its Markdown file and project trust setting.")
+                : await Codev.ProjectSkillCatalog.ReadPromptAsync(currentSkill, UserSkillsPath, ActiveConversation?.ProjectPath,
+                    IsProjectTrusted, invocation, cancellationToken);
         }
         var loaded = await Codev.CustomSlashCommandService.LoadAsync(UserSlashCommandsPath,
             ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
