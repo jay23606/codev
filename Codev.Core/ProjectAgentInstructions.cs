@@ -10,7 +10,8 @@ public static class ProjectAgentInstructions
 
     public static async Task<string> LoadAsync(WorkspaceFileService service,
         IReadOnlyList<string>? applicableFiles = null, int maxCharacters = MaxCharacters,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IReadOnlyList<string>? manualRuleNames = null,
+        bool includePathRules = true)
     {
         ArgumentNullException.ThrowIfNull(service);
         if (maxCharacters <= 0) return "";
@@ -60,8 +61,8 @@ public static class ProjectAgentInstructions
             }
         }
 
-        if (applicableFiles is { Count: > 0 })
-            entries.AddRange(await LoadApplicablePathRulesAsync(service, applicableFiles, cancellationToken).ConfigureAwait(false));
+        if (includePathRules && (applicableFiles is { Count: > 0 } || manualRuleNames is { Count: > 0 }))
+            entries.AddRange(await LoadApplicablePathRulesAsync(service, applicableFiles ?? [], manualRuleNames ?? [], cancellationToken).ConfigureAwait(false));
 
         foreach (var (relativePath, content) in entries)
         {
@@ -86,7 +87,7 @@ public static class ProjectAgentInstructions
     }
 
     private static async Task<IReadOnlyList<(string RelativePath, string Content)>> LoadApplicablePathRulesAsync(
-        WorkspaceFileService service, IReadOnlyList<string> applicableFiles, CancellationToken cancellationToken)
+        WorkspaceFileService service, IReadOnlyList<string> applicableFiles, IReadOnlyList<string> manualRuleNames, CancellationToken cancellationToken)
     {
         const string rulesDirectory = ".codev/rules";
         var result = new List<(string RelativePath, string Content)>();
@@ -103,11 +104,10 @@ public static class ProjectAgentInstructions
                 if (result.Count >= 32 || service.IsContextExcluded(relative)) continue;
                 try
                 {
-                    var safePath = service.ResolvePath(relative);
-                    if (new FileInfo(safePath).Length > 16 * 1024) continue;
-                    var contents = await service.ReadFileAsync(relative, cancellationToken).ConfigureAwait(false);
-                    if (!ProjectPathInstructionRuleParser.TryParse(relative, contents, out var rule) || rule is null) continue;
-                    var applies = false;
+                    var contents = await ProjectPathInstructionRuleParser.ReadDefinitionAsync(service, relative, cancellationToken).ConfigureAwait(false);
+                    if (contents is null || !ProjectPathInstructionRuleParser.TryParse(relative, contents, out var rule) || rule is null) continue;
+                    var name = Path.GetFileNameWithoutExtension(relative);
+                    var applies = manualRuleNames.Contains(name, StringComparer.OrdinalIgnoreCase);
                     foreach (var file in applicableFiles)
                     {
                         cancellationToken.ThrowIfCancellationRequested();

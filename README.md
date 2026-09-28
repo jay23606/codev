@@ -41,7 +41,7 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 
 Code task mode can create or edit supported source, text, and configuration files after showing a review and receiving approval. The Files button shows changes and lets you review or restore checkpoints, including undo/redo of file creation. Code task mode can also request an approved shell command: PowerShell on Windows, or `$SHELL` (falling back to Bash) on macOS and Linux. Set `CODEV_SHELL` to override the executable. Every command requires approval, shows elapsed progress, runs with your account permissions in the project folder, has a three-minute timeout, and is not sandboxed. Use the active-turn Stop control to terminate it. Ordinary chat remains read-only.
 
-Path-scoped project rules live in `.codev/rules/` and are included only for a trusted project when a matching source file is in context. For example, `javascript.md` can start with:
+In the Avalonia app, path-scoped project rules live in `.codev/rules/` and are included only for a trusted project when a matching source file is in context. You can also type `@rule:` in the composer and choose a rule to apply it to that request. For example, `javascript.md` can start with:
 
 ```markdown
 ---

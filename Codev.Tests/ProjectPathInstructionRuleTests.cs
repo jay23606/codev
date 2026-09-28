@@ -2,6 +2,35 @@ namespace Codev.Tests;
 
 public sealed class ProjectPathInstructionRuleTests
 {
+    [Fact]
+    public void Finds_unique_explicit_rule_mentions()
+    {
+        Assert.Equal(["javascript", "review"], ProjectPathInstructionRuleParser.FindManualMentions(
+            "Please check @rule:javascript and @rule:review, then reapply @rule:javascript."));
+        Assert.Empty(ProjectPathInstructionRuleParser.FindManualMentions("email@rule:javascript"));
+    }
+
+    [Fact]
+    public async Task Lists_only_valid_rule_definitions_for_manual_mention_suggestions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-rule-suggestions", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, ".codev", "rules"));
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, ".codev", "rules", "javascript.md"),
+                "---\ndescription: JavaScript\nglobs: **/*.js\n---\nUse semicolons.");
+            await File.WriteAllTextAsync(Path.Combine(root, ".codev", "rules", "broken.md"), "not frontmatter");
+            await File.WriteAllTextAsync(Path.Combine(root, ".codev", "rules", "oversized.md"), new string('x', ProjectPathInstructionRuleParser.MaxDefinitionBytes + 1));
+
+            var suggestions = ProjectPathInstructionRuleParser.FindMentionSuggestions(new WorkspaceFileService(root), "rule:ja");
+            var excluded = ProjectPathInstructionRuleParser.FindMentionSuggestions(new WorkspaceFileService(root, [".codev/rules"]), "rule:");
+
+            Assert.Equal(["rule:javascript"], suggestions);
+            Assert.Empty(excluded);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Theory]
     [InlineData("**/*.ts", "src/ui/app.ts", true)]
     [InlineData("**/*.ts", "app.ts", true)]

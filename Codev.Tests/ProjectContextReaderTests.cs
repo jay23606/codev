@@ -107,6 +107,21 @@ public sealed class ProjectContextReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Explicit_rule_mention_loads_that_rule_even_when_its_glob_does_not_match_context_files()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, ".codev", "rules"));
+        await File.WriteAllTextAsync(Path.Combine(_root, ".codev", "rules", "javascript.md"),
+            "---\ndescription: JavaScript conventions\nglobs: **/*.js\n---\nPrefer const declarations.");
+        await File.WriteAllTextAsync(Path.Combine(_root, "readme.md"), "Review JavaScript project conventions.");
+
+        var trusted = await ProjectContextReader.ReadAsync(_root, ["readme.md"], includeProjectInstructions: true, manualRuleNames: ["javascript"]);
+        var untrusted = await ProjectContextReader.ReadAsync(_root, ["readme.md"], manualRuleNames: ["javascript"]);
+
+        Assert.Contains("Prefer const declarations.", trusted);
+        Assert.DoesNotContain("Prefer const declarations.", untrusted);
+    }
+
+    [Fact]
     public async Task Instructions_and_source_excerpts_share_the_project_context_character_cap()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), new string('g', ProjectAgentInstructions.MaxCharacters));

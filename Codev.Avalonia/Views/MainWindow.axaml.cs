@@ -973,7 +973,10 @@ public partial class MainWindow : Window
         var currentText = ComposerTextBox.Text ?? "";
         if (_activeFileMention is null || DataContext is not ViewModels.MainViewModel viewModel ||
             !Codev.ProjectFileMentionParser.TryGet(currentText, ComposerTextBox.CaretIndex, out var currentMention) ||
-            currentMention.StartIndex != _activeFileMention.StartIndex || !viewModel.AddProjectFileMention(path))
+            currentMention.StartIndex != _activeFileMention.StartIndex ||
+            (path.StartsWith("rule:", StringComparison.OrdinalIgnoreCase)
+                ? !viewModel.CanMentionProjectRule(path)
+                : !viewModel.AddProjectFileMention(path)))
         {
             FileMentionPopup.IsOpen = false;
             _activeFileMention = null;

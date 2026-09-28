@@ -1819,7 +1819,10 @@ public partial class MainWindow : Window
             {
                 var agentGuidance = await ProjectAgentInstructions.LoadAsync(
                     new WorkspaceFileService(project.Path, project.ContextExclusions), turn.ContextFiles,
-                    cancellationToken: cancellation.Token);
+                    cancellationToken: cancellation.Token,
+                    manualRuleNames: ProjectPathInstructionRuleParser.FindManualMentions(
+                        history.LastOrDefault(message => message.IsUser)?.Content),
+                    includePathRules: false);
                 if (!string.IsNullOrWhiteSpace(agentGuidance)) system += "\n\n" + agentGuidance;
             }
             if (!hosted && !string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)

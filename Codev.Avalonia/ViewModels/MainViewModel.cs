@@ -860,7 +860,13 @@ public sealed class MainViewModel : ViewModelBase
         if (ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath || !Directory.Exists(projectPath)) return [];
         try
         {
-            return Codev.ProjectFileMentionSuggestions.Find(new Codev.WorkspaceFileService(projectPath), prefix);
+            var service = new Codev.WorkspaceFileService(projectPath);
+            if (prefix.StartsWith("rule:", StringComparison.OrdinalIgnoreCase))
+                return CanSuggestProjectRules ? Codev.ProjectPathInstructionRuleParser.FindMentionSuggestions(service, prefix) : [];
+            var files = Codev.ProjectFileMentionSuggestions.Find(service, prefix).ToList();
+            if (CanSuggestProjectRules && "rule:".StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return ["rule:", .. files];
+            return files;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
@@ -1397,7 +1403,9 @@ public sealed class MainViewModel : ViewModelBase
             {
                 var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
                     savedTurn.ContextFiles, savedTurn.ContextExclusions, includeProjectInstructions: projectStillTrusted,
-                    cancellationToken: token.Token);
+                    cancellationToken: token.Token,
+                    manualRuleNames: Codev.ProjectPathInstructionRuleParser.FindManualMentions(
+                        conversation.Messages.Take(assistantIndex).LastOrDefault(message => message.IsUser)?.Content));
                 priorMessages.Add(new Codev.ChatMessage("system", projectContext));
                 if (savedTurn.IncludeRepoMap)
                 {
@@ -1646,6 +1654,17 @@ public sealed class MainViewModel : ViewModelBase
             return [];
         }
     }
+
+    public bool CanMentionProjectRule(string suggestion)
+    {
+        if (!CanSuggestProjectRules) return false;
+        if (suggestion.Equals("rule:", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!suggestion.StartsWith("rule:", StringComparison.OrdinalIgnoreCase) ||
+            ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath || !Directory.Exists(projectPath)) return false;
+        return GetProjectFileSuggestions(suggestion).Contains(suggestion, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private bool CanSuggestProjectRules => IsProjectTrusted && (!IsHostedModel || IncludeProjectContextForHosted);
 
     public async Task<bool> SetOllamaEndpointAsync(string value)
     {

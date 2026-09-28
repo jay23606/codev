@@ -270,7 +270,7 @@
                                 <Button Content="Prompt templates" Classes="soft" Click="PromptTemplates_Click" Padding="7,3" FontSize="10" ToolTip.Tip="Create and manage reusable prompts saved on this device" />
                                 <Button IsVisible="{Binding IsQueuePaused}" Content="Resume saved queue" Command="{Binding ResumeQueueCommand}" Classes="soft" Padding="7,3" FontSize="10" />
                                 <Button IsVisible="{Binding HasQueuedTurns}" Content="Cancel queued" Command="{Binding CancelQueuedCommand}" Classes="soft" Padding="7,3" FontSize="10" />
-                                <TextBlock Text="Enter to send · Shift+Enter for new line · / commands · @ files" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="Enter to send · Shift+Enter for new line · / commands · @ files/rules" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                         </Grid>
                     </StackPanel>
