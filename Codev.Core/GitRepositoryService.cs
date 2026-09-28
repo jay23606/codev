@@ -183,7 +183,7 @@ public sealed class GitRepositoryService
         var resolved = await RunGitAsync(["rev-parse", "--verify", "--end-of-options", commit + "^{commit}"], cancellationToken);
         EnsureSuccess(resolved, "Git could not find that commit in this repository.");
         var hash = resolved.Output.Trim();
-        var filesResult = await RunGitAsync(["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "-z", hash], cancellationToken);
+        var filesResult = await RunGitAsync(["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "-z", hash], cancellationToken, 250_000);
         EnsureSuccess(filesResult, "Git could not list the files changed by this commit.");
         var allFiles = filesResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var files = allFiles.Take(maxFiles).ToArray();
@@ -191,7 +191,7 @@ public sealed class GitRepositoryService
         diffArguments.AddRange(files.Select(path => ":(literal)" + path));
         var diffResult = await RunGitAsync(diffArguments, cancellationToken, maxCharacters + 1);
         EnsureSuccess(diffResult, "Git could not read this commit's diff.");
-        var truncated = allFiles.Length > files.Length || diffResult.Output.Length > maxCharacters;
+        var truncated = allFiles.Length > files.Length || filesResult.Output.Length >= 250_000 || diffResult.Output.Length > maxCharacters;
         var diff = diffResult.Output.Length > maxCharacters ? diffResult.Output[..maxCharacters] : diffResult.Output;
         if (truncated)
         {
@@ -201,6 +201,41 @@ public sealed class GitRepositoryService
             diff += marker;
         }
         return new GitWorkingTreeReview($"commit {hash[..12]}", files, diff, truncated);
+    }
+
+    public async Task<GitWorkingTreeReview> GetBranchReviewAsync(string baseBranch, CancellationToken cancellationToken = default,
+        int maxCharacters = MaxReviewDiffCharacters, int maxFiles = MaxReviewFiles)
+    {
+        if (string.IsNullOrWhiteSpace(baseBranch) || !string.Equals(baseBranch, baseBranch.Trim(), StringComparison.Ordinal))
+            throw new ArgumentException("Enter the exact name of a local base branch.", nameof(baseBranch));
+        if (maxCharacters < 1 || maxFiles < 1) throw new ArgumentOutOfRangeException(nameof(maxCharacters));
+        var branches = await GetLocalBranchesAsync(cancellationToken);
+        if (!branches.Contains(baseBranch, StringComparer.Ordinal)) throw new InvalidOperationException("Choose an existing local branch as the review base.");
+        var baseResult = await RunGitAsync(["rev-parse", "--verify", "--end-of-options", $"refs/heads/{baseBranch}^{{commit}}"], cancellationToken);
+        EnsureSuccess(baseResult, "Git could not resolve the selected local base branch.");
+        var headResult = await RunGitAsync(["rev-parse", "--verify", "HEAD^{commit}"], cancellationToken);
+        EnsureSuccess(headResult, "Git could not resolve the current branch commit.");
+        var baseHash = baseResult.Output.Trim();
+        var headHash = headResult.Output.Trim();
+        var range = $"{baseHash}...{headHash}";
+        var filesResult = await RunGitAsync(["diff", "--name-only", "-z", range, "--"], cancellationToken, 250_000);
+        EnsureSuccess(filesResult, "Git could not list changes from this branch.");
+        var allFiles = filesResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        var files = allFiles.Take(maxFiles).ToArray();
+        var diffArguments = new List<string> { "diff", "--no-ext-diff", "--no-color", "--no-renames", "--unified=3", range, "--" };
+        diffArguments.AddRange(files.Select(path => ":(literal)" + path));
+        var diffResult = await RunGitAsync(diffArguments, cancellationToken, maxCharacters + 1);
+        EnsureSuccess(diffResult, "Git could not read changes from this branch.");
+        var truncated = allFiles.Length > files.Length || filesResult.Output.Length >= 250_000 || diffResult.Output.Length > maxCharacters;
+        var diff = diffResult.Output.Length > maxCharacters ? diffResult.Output[..maxCharacters] : diffResult.Output;
+        if (truncated)
+        {
+            var marker = "\n[Review input truncated at Codev's safety limit.]";
+            if (marker.Length > maxCharacters) marker = marker[..maxCharacters];
+            if (diff.Length + marker.Length > maxCharacters) diff = diff[..Math.Max(0, maxCharacters - marker.Length)];
+            diff += marker;
+        }
+        return new GitWorkingTreeReview($"branch {baseBranch}...HEAD", files, diff, truncated);
     }
 
     public async Task<string> GetStagedDiffAsync(CancellationToken cancellationToken = default) =>

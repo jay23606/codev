@@ -1270,6 +1270,16 @@ public partial class MainWindow : Window
                         commit: commitHash) is { } commitReview)
                     await ShowReadOnlyReviewAsync(commitReview, this);
                 break;
+            case Codev.SlashCommandAction.ReviewBranch:
+            case Codev.SlashCommandAction.SecurityReviewBranch:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (await ShowBaseBranchDialogAsync(this) is { Length: > 0 } baseBranch &&
+                    await viewModel.ReviewUncommittedChangesAsync(
+                        securityFocused: command.Action == Codev.SlashCommandAction.SecurityReviewBranch,
+                        baseBranch: baseBranch) is { } branchReview)
+                    await ShowReadOnlyReviewAsync(branchReview, this);
+                break;
             case Codev.SlashCommandAction.UserPrompt:
                 if (command.ArgumentNames is { Count: > 0 } argumentNames &&
                     Codev.SlashCommandCatalog.TryGetCommandToken(ComposerTextBox.Text, ComposerTextBox.CaretIndex, out var token, out var hasArguments) &&
@@ -2405,6 +2415,30 @@ public partial class MainWindow : Window
         cancel.Click += (_, _) => dialog.Close(null);
         review.Click += (_, _) => dialog.Close(hash.Text?.Trim());
         dialog.Opened += (_, _) => hash.Focus();
+        return await dialog.ShowDialog<string?>(owner);
+    }
+
+    private async Task<string?> ShowBaseBranchDialogAsync(Window owner)
+    {
+        var branch = new TextBox { Watermark = "Local base branch name", MinWidth = 360 };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" }, IsCancel = true };
+        var review = new Button { Content = "Review", Classes = { "soft" }, IsDefault = true };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { cancel, review } };
+        var dialog = new Window
+        {
+            Title = "Review branch changes", Width = 480, SizeToContent = SizeToContent.Height, CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = owner.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+            Foreground = owner.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+            Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
+            {
+                new TextBlock { Text = "Enter an existing local base branch. Codev compares its merge base with the current HEAD using a bounded diff.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                branch, buttons
+            }}
+        };
+        cancel.Click += (_, _) => dialog.Close(null);
+        review.Click += (_, _) => dialog.Close(branch.Text?.Trim());
+        dialog.Opened += (_, _) => branch.Focus();
         return await dialog.ShowDialog<string?>(owner);
     }
 

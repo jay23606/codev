@@ -99,6 +99,10 @@ public sealed class GitRepositoryServiceTests
             var omittedFile = Assert.Single(commitReview.Files.Except(oneFileCommit.Files));
             Assert.DoesNotContain(omittedFile, oneFileCommit.Diff, StringComparison.Ordinal);
             await Assert.ThrowsAsync<ArgumentException>(() => service.GetCommitReviewAsync("HEAD~1;whoami"));
+            var branchReview = await service.GetBranchReviewAsync("main");
+            Assert.Equal("branch main...HEAD", branchReview.Branch);
+            Assert.Contains("new content", branchReview.Diff, StringComparison.Ordinal);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetBranchReviewAsync("--all"));
         }
         finally
         {

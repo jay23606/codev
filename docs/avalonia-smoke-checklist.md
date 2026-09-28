@@ -126,3 +126,11 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Queue a prompt while a response is running, change the conversation Think setting, and confirm the queued turn uses the captured setting.
 - Restart and reopen the chat; confirm both the setting and returned thinking text persist, and confirm thinking text is not included in follow-up request history.
 - Switch to a hosted provider and confirm the Think control is hidden and `/status` identifies thinking as unavailable for hosted providers.
+
+## Read-only Git reviews
+
+- Attach and trust a disposable Git project; with local loopback Ollama selected, run `/review` and `/security-review` against working-tree changes and confirm the selectable report identifies the scope and no files or Git state change.
+- Run `/review-commit` and `/security-review-commit`, enter a valid commit hash, and verify only that commit's bounded diff is reviewed. Try malformed text and a nonexistent hash; confirm no diff is sent and a clear error appears.
+- Run `/review-branch` and `/security-review-branch` against a local base branch; verify the comparison is base...HEAD, rejects a name that is not an existing local branch, and leaves the repository unchanged.
+- Add a disposable token-shaped string on a new diff line and verify the deterministic scan reports file and line while hiding the value; check removed lines do not trigger it and a truncated diff is labeled incomplete.
+- Switch to a hosted provider and run a security review; verify the deterministic local scan still runs but no request containing the diff is sent to a hosted endpoint. If local loopback Ollama is unavailable, confirm scan-only output says no model review ran.
