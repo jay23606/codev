@@ -9,6 +9,7 @@
 //     --budget: minutes allowed per model and thinking mode before the remaining tasks are skipped
 //     --temp: used for thinking-off runs; thinking-on runs use the sampling Qwen publishes for thinking mode (temperature 1.0, top_p 0.95, top_k 20)
 //   Environment: BENCH_OLLAMA_URL (default http://127.0.0.1:11434), BENCH_MAXTOK (thinking-off answer cap, default 6000),
+//                BENCH_EXTRA_OPTIONS (JSON of extra Ollama options applied to every request),
 //                BENCH_THINK_MAXTOK (thinking-on cap, default 8000 for single answers and 6000 per agent step), BENCH_CTX (context size, default 16384)
 // Needs Node 20 or newer (global fetch, node:test). One JSON line per finished task is appended to --out.
 const vm = require('node:vm')
@@ -377,7 +378,10 @@ async function chat(model, body, timeoutMs = 45 * 60 * 1000) {
 }
 const stats = (res) => ({ evalTokens: res.eval_count || 0, genS: ns(res.eval_duration), promptTokens: res.prompt_eval_count || 0, promptS: ns(res.prompt_eval_duration), loadS: ns(res.load_duration), thinkChars: (res.message?.thinking || '').length })
 // Thinking runs use the sampling settings Qwen publishes for its thinking mode (greedy decoding can make thinking models repeat endlessly).
-const opts = (temp, run, think) => think ? { temperature: 1.0, top_p: 0.95, top_k: 20, seed: 100 + run, num_ctx: Number(process.env.BENCH_CTX) || NUM_CTX, num_predict: Number(process.env.BENCH_THINK_MAXTOK) || 8000 } : { temperature: temp, seed: 100 + run, num_ctx: NUM_CTX, num_predict: Number(process.env.BENCH_MAXTOK) || 6000 }
+// Extra Ollama options for every request, as JSON in BENCH_EXTRA_OPTIONS (for example {"presence_penalty":1.5,"top_k":20}). Use it to run two builds of a model under identical settings: a model's own default sampling settings apply unless overridden here.
+const EXTRA_OPTIONS = process.env.BENCH_EXTRA_OPTIONS ? JSON.parse(process.env.BENCH_EXTRA_OPTIONS) : {}
+const opts = (temp, run, think) => ({ ...EXTRA_OPTIONS, ...baseOpts(temp, run, think) })
+const baseOpts = (temp, run, think) => think ? { temperature: 1.0, top_p: 0.95, top_k: 20, seed: 100 + run, num_ctx: Number(process.env.BENCH_CTX) || NUM_CTX, num_predict: Number(process.env.BENCH_THINK_MAXTOK) || 8000 } : { temperature: temp, seed: 100 + run, num_ctx: NUM_CTX, num_predict: Number(process.env.BENCH_MAXTOK) || 6000 }
 
 async function singleShot(model, think, temp, run, prompt) {
   const res = await chat(model, { think, messages: [{ role: 'user', content: prompt }], options: opts(temp, run, think) })
