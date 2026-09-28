@@ -113,7 +113,7 @@
                     <Button Grid.Column="3" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
                 </Grid>
             </Border>
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
                 <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid ColumnDefinitions="*,760,*" Margin="0,0,0,20">

@@ -1,19 +1,69 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
+using System.Collections.Specialized;
 
 namespace Codev.Avalonia.Views;
 
 public partial class MainWindow : Window
 {
+    private INotifyCollectionChanged? _observedMessages;
+    private bool _followOutput = true;
+    private bool _scrollPending;
+
     public MainWindow()
     {
         InitializeComponent();
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
+        DataContextChanged += (_, _) => ObserveMessages();
+        ObserveMessages();
+        Opened += (_, _) => ScheduleScrollToLatest();
         Closed += async (_, _) =>
         {
             if (DataContext is ViewModels.MainViewModel viewModel) await viewModel.SavePendingDraftAsync();
         };
+    }
+
+    private void ObserveMessages()
+    {
+        if (_observedMessages is not null) _observedMessages.CollectionChanged -= Messages_CollectionChanged;
+        _observedMessages = (DataContext as ViewModels.MainViewModel)?.Messages;
+        if (_observedMessages is not null)
+        {
+            _observedMessages.CollectionChanged += Messages_CollectionChanged;
+            _followOutput = true;
+            ScheduleScrollToLatest();
+        }
+    }
+
+    private void Messages_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Reset ||
+            e.NewItems?.Cast<Codev.ChatMessage>().Any(message => message.Role == "user") == true)
+            _followOutput = true;
+        if (_followOutput) ScheduleScrollToLatest();
+    }
+
+    private void ScheduleScrollToLatest()
+    {
+        if (_scrollPending) return;
+        _scrollPending = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _scrollPending = false;
+            if (!_followOutput) return;
+            var bottom = Math.Max(0, ConversationScrollViewer.Extent.Height - ConversationScrollViewer.Viewport.Height);
+            ConversationScrollViewer.Offset = new global::Avalonia.Vector(ConversationScrollViewer.Offset.X, bottom);
+        }, DispatcherPriority.Background);
+    }
+
+    private void ConversationScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (e.OffsetDelta.Y < 0)
+            _followOutput = false;
+        else if (ConversationScrollViewer.Extent.Height - ConversationScrollViewer.Offset.Y - ConversationScrollViewer.Viewport.Height <= 64)
+            _followOutput = true;
     }
 
     private async void CopyMessage_Click(object? sender, RoutedEventArgs e)
