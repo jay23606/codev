@@ -179,6 +179,19 @@
                                 </Border>
                             </Popup>
                         </Grid>
+                        <ItemsControl ItemsSource="{Binding PendingDiffComments}" IsVisible="{Binding HasPendingDiffComments}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:GitDiffComment">
+                                <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="7" Padding="8,5" Margin="0,0,6,4" ToolTip.Tip="{Binding SelectedDiff}">
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <TextBlock Text="{Binding RelativePath}" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding Comment}" FontSize="10" MaxWidth="420" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <Button Content="×" Padding="3,0" Background="Transparent" BorderThickness="0" Command="{Binding $parent[Window].DataContext.RemoveDiffCommentCommand}" CommandParameter="{Binding}" ToolTip.Tip="Remove this unsent diff comment" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <Button Classes="soft" Content="Open project" Padding="8,4" FontSize="10" Click="AttachProject_Click" ToolTip.Tip="Attach a local folder as read-only context for this conversation" />

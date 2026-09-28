@@ -28,6 +28,7 @@ public static class ConversationPersistence
             Messages = [.. conversation.Messages],
             FileChanges = [.. conversation.FileChanges],
             ContextFiles = [.. conversation.ContextFiles],
+            PendingDiffComments = conversation.PendingDiffComments?.Select(comment => comment with { }).ToList() ?? [],
             PendingTurns = conversation.PendingTurns?.Select(turn => turn with
             {
                 ContextFiles = turn.ContextFiles is null ? [] : [.. turn.ContextFiles],

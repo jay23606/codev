@@ -18,6 +18,7 @@ public sealed class ConversationPersistenceTests
             IncludeProjectContextForHosted = true,
             Messages = [new("user", "before")],
             ContextFiles = ["src/a.cs"],
+            PendingDiffComments = [new("src/a.cs", "+ updated", "Check null handling.")],
             PendingTurns = [turn]
         };
 
@@ -26,6 +27,7 @@ public sealed class ConversationPersistenceTests
         source.Draft = "changed draft";
         source.Messages[0] = new("user", "after");
         source.ContextFiles[0] = "src/b.cs";
+        source.PendingDiffComments[0] = new("src/b.cs", "changed", "changed");
         source.PendingTurns[0] = turn with { Model = "model-b" };
 
         Assert.Equal("Snapshot", snapshot.Title);
@@ -36,6 +38,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal("unsent prompt", snapshot.Draft);
         Assert.Equal("before", snapshot.Messages[0].Content);
         Assert.Equal("src/a.cs", Assert.Single(snapshot.ContextFiles));
+        Assert.Equal(new GitDiffComment("src/a.cs", "+ updated", "Check null handling."), Assert.Single(snapshot.PendingDiffComments));
         Assert.Equal("model-a", Assert.Single(snapshot.PendingTurns).Model);
         Assert.Equal("src/a.cs", Assert.Single(snapshot.PendingTurns[0].ContextFiles!));
         Assert.Equal("private", Assert.Single(snapshot.PendingTurns[0].ContextExclusions!));

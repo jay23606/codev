@@ -716,11 +716,14 @@ public partial class MainWindow : Window
         };
         var askAboutDiff = new Button { Content = "Ask Codev about selection", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), IsEnabled = false };
         ToolTip.SetTip(askAboutDiff, "Add selected diff lines to the composer without sending them");
+        var commentOnDiff = new Button { Content = "Comment on selection", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), IsEnabled = false };
+        ToolTip.SetTip(commentOnDiff, "Attach a review comment to selected diff lines; it will not be sent until you send a prompt");
+        var diffActions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 8, 0, 0), Children = { askAboutDiff, commentOnDiff } };
         var diffPanel = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
         var diffScroll = new ScrollViewer { Content = diffBox, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
         diffPanel.Children.Add(diffScroll);
-        Grid.SetRow(askAboutDiff, 1);
-        diffPanel.Children.Add(askAboutDiff);
+        Grid.SetRow(diffActions, 1);
+        diffPanel.Children.Add(diffActions);
         Grid.SetColumn(diffPanel, 1);
         body.Children.Add(diffPanel);
         Grid.SetRow(body, 1);
@@ -807,7 +810,11 @@ public partial class MainWindow : Window
         diffBox.PropertyChanged += (_, args) =>
         {
             if (args.Property.Name is "SelectionStart" or "SelectionEnd")
-                askAboutDiff.IsEnabled = files.SelectedItem is ListBoxItem { Tag: Codev.GitFileStatus } && !string.IsNullOrWhiteSpace(diffBox.SelectedText);
+            {
+                var hasSelection = files.SelectedItem is ListBoxItem { Tag: Codev.GitFileStatus } && !string.IsNullOrWhiteSpace(diffBox.SelectedText);
+                askAboutDiff.IsEnabled = hasSelection;
+                commentOnDiff.IsEnabled = hasSelection;
+            }
         };
         askAboutDiff.Click += (_, _) =>
         {
@@ -819,6 +826,33 @@ public partial class MainWindow : Window
                 ComposerTextBox.Focus();
                 ComposerTextBox.CaretIndex = (ComposerTextBox.Text ?? "").Length;
             }, DispatcherPriority.Background);
+        };
+        commentOnDiff.Click += async (_, _) =>
+        {
+            if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file } || string.IsNullOrWhiteSpace(diffBox.SelectedText)) return;
+            var selectedDiff = diffBox.SelectedText;
+            var commentBox = new TextBox { Watermark = "What should Codev review about these lines?", AcceptsReturn = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MinHeight = 90, MaxHeight = 180 };
+            var content = new StackPanel { Margin = new Thickness(18), Spacing = 10 };
+            content.Children.Add(new TextBlock { Text = $"Add an unsent comment for {file.DisplayPath}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+            content.Children.Add(new TextBlock { Text = selectedDiff.Length > 1200 ? selectedDiff[..1200] + "…" : selectedDiff, FontFamily = new global::Avalonia.Media.FontFamily("Consolas"), FontSize = 10, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxHeight = 130 });
+            content.Children.Add(commentBox);
+            var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+            var cancelComment = new Button { Content = "Cancel", Classes = { "soft" } };
+            var addComment = new Button { Content = "Add comment", Classes = { "soft" } };
+            actions.Children.Add(cancelComment);
+            actions.Children.Add(addComment);
+            content.Children.Add(actions);
+            var commentDialog = new Window { Title = "Comment on diff", Width = 580, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = content };
+            cancelComment.Click += (_, _) => commentDialog.Close(false);
+            addComment.Click += (_, _) => commentDialog.Close(true);
+            if (await commentDialog.ShowDialog<bool>(dialog) != true) return;
+            if (!viewModel.AddPendingDiffComment(file.DisplayPath, selectedDiff, commentBox.Text ?? ""))
+            {
+                await ShowGitInfoAsync("Could not add diff comment", "Enter a comment and keep the selected diff and comment within their supported length limits.", dialog);
+                return;
+            }
+            dialog.Close();
+            Dispatcher.UIThread.Post(() => ComposerTextBox.Focus(), DispatcherPriority.Background);
         };
         branchPicker.SelectionChanged += (_, _) => UpdateBranchButtons(status);
         refresh.Click += async (_, _) => await RefreshAsync();

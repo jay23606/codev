@@ -27,12 +27,15 @@ public sealed class Conversation
     public List<ChatMessage> Messages { get; set; } = [];
     public List<FileChangeRecord> FileChanges { get; set; } = [];
     public List<string> ContextFiles { get; set; } = [];
+    public List<GitDiffComment> PendingDiffComments { get; set; } = [];
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PersistedQueuedTurn> PendingTurns { get; set; } = [];
     [JsonIgnore] public int PendingRequestCount { get; set; }
 }
 
 public sealed record FileChangeRecord(string RelativePath, string? CheckpointPath, DateTimeOffset ChangedAt, string Kind, bool PreviousFileExisted = true);
+
+public sealed record GitDiffComment(string RelativePath, string SelectedDiff, string Comment);
 
 public sealed record ChatMessage(string Role, string Content)
 {

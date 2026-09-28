@@ -21,6 +21,7 @@ public sealed class ConversationBackupServiceTests
             IsCodeTask = true,
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
+            PendingDiffComments = [new("src/app.cs", "+ change", "Check the error path.")],
             PendingRequestCount = 3,
             Messages = [new("user", "Why does this fail?"), new("assistant", "I will trace the cause.")]
         };
@@ -38,6 +39,7 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
+        Assert.Equal(source.PendingDiffComments, imported.PendingDiffComments);
         Assert.Equal(0, imported.PendingRequestCount);
     }
 

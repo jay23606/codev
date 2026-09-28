@@ -31,6 +31,7 @@ public static class ConversationBackupService
             FileChanges = conversation.FileChanges.Where(change => change is not null)
                 .Select(change => change with { CheckpointPath = null }).ToList(),
             ContextFiles = [.. conversation.ContextFiles],
+            PendingDiffComments = conversation.PendingDiffComments?.Select(comment => comment with { }).ToList() ?? [],
             PendingTurns = null!
         }).ToList();
         return JsonSerializer.Serialize(snapshot, options);
@@ -68,6 +69,13 @@ public static class ConversationBackupService
             item.PendingRequestCount = 0;
             item.PendingTurns = [];
             item.ContextFiles = item.ContextFiles?.Take(WorkspaceFileService.MaxContextFiles).ToList() ?? [];
+            item.PendingDiffComments = item.PendingDiffComments?.Where(comment => comment is not null)
+                .Take(GitDiffPromptBuilder.MaxComments)
+                .Select(comment => new GitDiffComment(
+                    Limit(comment.RelativePath, 500, "selected file"),
+                    Limit(comment.SelectedDiff, GitDiffPromptBuilder.MaxDiffLength, ""),
+                    Limit(comment.Comment, GitDiffPromptBuilder.MaxCommentLength, "")))
+                .Where(comment => !string.IsNullOrWhiteSpace(comment.SelectedDiff) && !string.IsNullOrWhiteSpace(comment.Comment)).ToList() ?? [];
             item.FileChanges = item.FileChanges?.Where(change => change is not null)
                 .Select(change => change with { CheckpointPath = null }).ToList() ?? [];
             item.Messages = item.Messages.Select(message =>

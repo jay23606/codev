@@ -66,6 +66,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
     public ObservableCollection<Codev.ChatMessage> Messages { get; } = [];
     public ObservableCollection<string> SelectedContextFiles { get; } = [];
+    public ObservableCollection<Codev.GitDiffComment> PendingDiffComments { get; } = [];
     public ObservableCollection<ContextSizeChoice> ContextSizes { get; } = [];
     public ICommand NewConversationCommand { get; }
     public ICommand SelectConversationCommand { get; }
@@ -80,6 +81,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ToggleCodeTaskCommand { get; }
     public ICommand RemoveContextFileCommand { get; }
     public ICommand ClearContextFilesCommand { get; }
+    public ICommand RemoveDiffCommentCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
     [
     ];
@@ -96,11 +98,12 @@ public sealed class MainViewModel : ViewModelBase
         ToggleCodeTaskCommand = new RelayCommand(_ => ToggleCodeTaskMode(), _ => CanToggleCodeTaskMode);
         RemoveContextFileCommand = new RelayCommand(value => { if (value is string path) RemoveContextFile(path); });
         ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
+        RemoveDiffCommentCommand = new RelayCommand(value => { if (value is Codev.GitDiffComment comment) RemovePendingDiffComment(comment); });
         SendCommand = new RelayCommand(_ =>
         {
-            if (string.IsNullOrWhiteSpace(Draft)) StopGeneration();
+            if (string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0) StopGeneration();
             else _ = SendDraftAsync();
-        }, _ => IsGenerating || !string.IsNullOrWhiteSpace(Draft));
+        }, _ => IsGenerating || !string.IsNullOrWhiteSpace(Draft) || PendingDiffComments.Count > 0);
         StopGenerationCommand = new RelayCommand(_ => StopGeneration(), _ => IsGenerating);
         ResumeQueueCommand = new RelayCommand(_ => ResumeQueue(), _ => HasQueuedTurns && _queuePaused);
         CancelQueuedCommand = new RelayCommand(_ => CancelQueuedTurns(), _ => ActiveConversation?.PendingRequestCount > 0);
@@ -188,7 +191,8 @@ public sealed class MainViewModel : ViewModelBase
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
     public string ThemeLabel => _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
     public string OllamaEndpointDisplay => _ollamaEndpoint.ToString().TrimEnd('/');
-    public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) ? "■" : "↑";
+    public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0 ? "■" : "↑";
+    public bool HasPendingDiffComments => PendingDiffComments.Count > 0;
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Count > 0;
     public bool IsModelPickerPlaceholderVisible => !HasModels;
@@ -492,6 +496,10 @@ public sealed class MainViewModel : ViewModelBase
             ? $"Hosted model selected · {conversation.Model}"
             : $"{conversation.Model} selected · connect its API key to send";
         Draft = conversation.Draft;
+        Reset(PendingDiffComments, conversation.PendingDiffComments ?? []);
+        OnPropertyChanged(nameof(HasPendingDiffComments));
+        ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(SendButtonLabel));
         Messages.Clear();
         foreach (var message in conversation.Messages) Messages.Add(message);
         Reset(SelectedContextFiles, conversation.ContextFiles);
@@ -670,6 +678,33 @@ public sealed class MainViewModel : ViewModelBase
         Persist();
     }
 
+    public bool AddPendingDiffComment(string relativePath, string selectedDiff, string comment)
+    {
+        if (ActiveConversation is not { } conversation || string.IsNullOrWhiteSpace(relativePath) ||
+            string.IsNullOrWhiteSpace(selectedDiff) || string.IsNullOrWhiteSpace(comment)) return false;
+        if (conversation.PendingDiffComments.Count >= Codev.GitDiffPromptBuilder.MaxComments ||
+            selectedDiff.Length > Codev.GitDiffPromptBuilder.MaxDiffLength ||
+            comment.Length > Codev.GitDiffPromptBuilder.MaxCommentLength) return false;
+        var item = new Codev.GitDiffComment(relativePath.Trim(), selectedDiff.Trim(), comment.Trim());
+        conversation.PendingDiffComments.Add(item);
+        PendingDiffComments.Add(item);
+        OnPropertyChanged(nameof(HasPendingDiffComments));
+        ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(SendButtonLabel));
+        Persist();
+        return true;
+    }
+
+    private void RemovePendingDiffComment(Codev.GitDiffComment comment)
+    {
+        if (ActiveConversation is not { } conversation || !conversation.PendingDiffComments.Remove(comment)) return;
+        PendingDiffComments.Remove(comment);
+        OnPropertyChanged(nameof(HasPendingDiffComments));
+        ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(SendButtonLabel));
+        Persist();
+    }
+
     public bool IsProjectPathTrusted(string path) => _projectFolderTrust.IsTrusted(path);
     public bool IsProjectPathKnown(string path) => _projectFolderTrust.IsKnown(path);
 
@@ -769,9 +804,9 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task SendDraftAsync()
     {
-        if (ActiveConversation is not { } conversation || string.IsNullOrWhiteSpace(Draft)) return;
+        if (ActiveConversation is not { } conversation || (string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0)) return;
         var text = Draft.Trim();
-        if (text.Equals("/status", StringComparison.OrdinalIgnoreCase))
+        if (PendingDiffComments.Count == 0 && text.Equals("/status", StringComparison.OrdinalIgnoreCase))
         {
             AddStatusReport(conversation);
             return;
@@ -786,9 +821,11 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("Code task was not queued: it requires a loopback Ollama endpoint and a currently trusted project folder.");
             return;
         }
-        if (conversation.Title == "New conversation") conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
-        else if (conversation.Messages.Count == 0) conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
-        var userMessage = new Codev.ChatMessage("user", text);
+        var sentText = Codev.GitDiffPromptBuilder.AppendComments(text, PendingDiffComments.ToArray());
+        var titleText = string.IsNullOrWhiteSpace(text) ? "Review selected diff" : text;
+        if (conversation.Title == "New conversation") conversation.Title = titleText.Length > 48 ? titleText[..48].TrimEnd() + "…" : titleText;
+        else if (conversation.Messages.Count == 0) conversation.Title = titleText.Length > 48 ? titleText[..48].TrimEnd() + "…" : titleText;
+        var userMessage = new Codev.ChatMessage("user", sentText);
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(new Codev.ChatMessage("assistant", ""));
         conversation.Draft = "";
@@ -835,6 +872,11 @@ public sealed class MainViewModel : ViewModelBase
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(assistantMessage);
         conversation.Draft = "";
+        conversation.PendingDiffComments.Clear();
+        PendingDiffComments.Clear();
+        OnPropertyChanged(nameof(HasPendingDiffComments));
+        ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(SendButtonLabel));
         conversation.UpdatedAt = DateTimeOffset.Now;
         Draft = "";
         Messages.Add(userMessage);
@@ -1453,7 +1495,10 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (!File.Exists(StorePath)) return;
             foreach (var conversation in JsonSerializer.Deserialize<List<Codev.Conversation>>(File.ReadAllText(StorePath)) ?? [])
+            {
+                conversation.PendingDiffComments ??= [];
                 _conversations.Add(conversation);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
     }
