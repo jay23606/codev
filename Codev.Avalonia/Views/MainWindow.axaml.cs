@@ -597,12 +597,12 @@ public partial class MainWindow : Window
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation) return;
         var hints = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["temperature"] = "0–2 · lower is more focused",
-            ["top_p"] = "0–1 · nucleus sampling",
-            ["top_k"] = "1–1000 · candidate token limit",
-            ["presence_penalty"] = "0–2 · reduce repeated topics",
-            ["repeat_penalty"] = "0–2 · reduce repeated text",
-            ["num_predict"] = "1–131072 · maximum generated tokens"
+            ["temperature"] = "0–2 · Lower values make replies more predictable; higher values add variety.",
+            ["top_p"] = "0–1 · Limits choices to the most likely group of tokens; lower values narrow that group.",
+            ["top_k"] = "1–1000 · Limits each next-token choice to this many likely candidates.",
+            ["presence_penalty"] = "0–2 · Discourages topics or tokens already used; high values can hurt code that repeats names.",
+            ["repeat_penalty"] = "0–2 · Discourages repeating recent text; high values can make code inconsistent.",
+            ["num_predict"] = "1–131072 · Caps the combined reasoning and answer tokens; a higher cap can take longer and use more memory."
         };
         var fields = new Dictionary<string, TextBox>(StringComparer.Ordinal)
         {
@@ -627,8 +627,23 @@ public partial class MainWindow : Window
         panel.Children.Add(status);
         foreach (var (name, field) in fields)
         {
-            panel.Children.Add(new TextBlock { Text = name, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+            var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
+            header.Children.Add(new TextBlock { Text = name, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center });
+            var useDefault = new Button { Content = "Default", Classes = { "soft" }, Padding = new Thickness(7, 2), FontSize = 10 };
+            useDefault.Click += (_, _) => field.Text = "";
+            global::Avalonia.Controls.Grid.SetColumn(useDefault, 1);
+            header.Children.Add(useDefault);
+            panel.Children.Add(header);
+            panel.Children.Add(new TextBlock
+            {
+                Text = hints[name],
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush,
+                MaxWidth = 470,
+                FontSize = 11
+            });
             global::Avalonia.Automation.AutomationProperties.SetName(field, name);
+            global::Avalonia.Controls.ToolTip.SetTip(useDefault, "Clear this override and use the model default");
             panel.Children.Add(field);
         }
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
