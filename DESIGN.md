@@ -53,6 +53,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Skills, MCP tools, recurring tasks, and notifications | Not implemented |
 | Patch-based agent file edits | Avalonia Code task can apply strict unified-diff hunks, review the patch and resulting file, and use the same approval, checkpoint, and concurrency protection as full replacements |
 | Per-conversation output styles | Avalonia offers balanced, concise, explanatory, and code-only response styles; the choice persists with the conversation and queued turns and does not alter permissions |
+| Ollama loaded-model memory view | Avalonia reads the server's running-model list, shows reported model size and VRAM allocation, and offers a confirmed unload while no response or queued request is active |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
 
@@ -181,7 +182,7 @@ This section is the single backlog for features drawn from studying Claude Code 
 | 3. Smarter context | A3, A5, A8, B2, B6, B9, D2 | Cuts wasted tokens; skills and structured calls make agents more reliable, and folder trust (B9) must be in place before any project-provided skill, hook, agent or command file is read |
 | 4. Extend | D3, D4, D6, B12, A9, E4, E6, E7 | Extension points, once the basics are solid |
 | 5. Parallel and unattended | D5, D8, B7, E8, D10 | Depends on worktrees, the shared core, and sandbox research |
-| Anytime | A4, A7, A10, A11, A12, B8, B10, B11, C4, C6, C7, D7, D9, E1, E3, E4, E5, E9, E10, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
+| Anytime | A4, A7, A10, A11, A12, B10, B11, C4, C6, C7, D7, D9, E1, E3, E4, E5, E9, E10, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
 
 X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia port; E7 needs `Codev.Core` (X2), and E8 is a decision after X2.
 
@@ -226,7 +227,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | B5 | Test and lint loop | M | B1 | Done |
 | B6 | Show model reasoning | S | none | Later |
 | B7 | Sandbox research | L | X3, per OS | Speculative |
-| B8 | Loaded-model awareness | S | none | Later |
+| B8 | Loaded-model awareness | S | none | Done |
 | B9 | Folder trust | M | none; must land before D2, D3, D4 and D6 read project files | Core |
 | B10 | Untrusted content handling | S–M | B1 | Later |
 | B11 | Task checklist | S–M | none | Later |
@@ -239,7 +240,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **B5 Test and lint loop (implemented in Avalonia Code task).** The model can propose a test or lint command through a distinct `verify_command` tool. Codev shows a verification-specific approval dialog for every run, reports the exit code and bounded output in the transcript, and only identifies exit code 0 as a pass. Failure output returns to the model; up to two reviewed repair cycles are allowed, after which file edits and commands are blocked for that task. Verification is optional, not silently selected or run.
 - **B6 Show model reasoning.** For Ollama models with a thinking mode, show the reasoning as a collapsible block and let the user turn thinking off per conversation.
 - **B7 Sandbox research.** Codex separates *what a process may physically do* (read-only, workspace-write, full access) from *when it must ask*; Codev has only the second. Real sandboxing needs a different mechanism on each OS, and [Codex's own Windows sandbox write-up](https://openai.com/index/building-codex-windows-sandbox/) shows it is hard to get right. This item is research first: write down what each OS offers, prototype, and only then add a mode. No mode is described as safe until tested. The simplest cross-platform candidate to prototype first is running commands in a Docker or Podman container with the project mounted, which is what Gemini CLI offers as its sandbox option. It needs a container runtime installed, so make it optional and detect it.
-- **B8 Loaded-model awareness.** Show which models Ollama currently holds in memory and their memory use, and offer to unload one. Backs the hardware-aware principle with real numbers.
+- **B8 Loaded-model awareness (implemented in Avalonia).** A Memory view reads Ollama's live `/api/ps` result, showing loaded model names, server-reported size, VRAM allocation, context length when supplied, and expiry time. The user can confirm unloading an installed model through the documented `keep_alive: 0` API action. Unload is refused during generation or while requests are queued, and sending is briefly held during the unload. These API values are labeled as server stats, not a complete system RAM measurement.
 - **B9 Folder trust (implemented for Avalonia chat; project integrations remain future work).** Folder trust is stored in a separate readable local JSON file, can be revoked, and appears in `/status`. The first attachment dialog offers the current folder, its parent and descendants, or keeping it untrusted. Untrusted folders still allow chat, browsing, and explicitly selected files; automatic bounded project excerpts require trust. Hosted context still requires its separate opt-in. Avalonia chat does not currently load project instructions, skills, commands, hooks, or MCP settings; if any are added, trust must gate them before they are read or executed. A corrupt trust file stays untouched and leaves projects untrusted. The broader security behavior is informed by Gemini CLI's [trusted folders](https://geminicli.com/docs/cli/trusted-folders/) and Claude Code's [security model](https://code.claude.com/docs/en/security).
 - **B10 Untrusted content handling.** Treat text from files, command output, web pages and MCP tools as data, not instructions: present it to the model as quoted tool output. In each approval prompt, show where a proposed command or edit came from, and highlight it when the model appears to be following an instruction found in a file it read (for example a command mentioned in a README). This is a design recommendation from Codev's own principles, not something taken from another tool.
 - **B11 Task checklist.** For multi-step tasks the agent keeps a visible checklist (pending, in progress, done) that the user can edit or reorder. It is stored with the conversation and re-inserted after compaction (A2). This is the concrete design for the "richer plans remain" item in the feature status. Goose has a Todo extension and Claude Code a todo tool for the same purpose.
@@ -349,7 +350,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B6, B8, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E3, E4, E6, E7, E10, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B6, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E3, E4, E6, E7, E10, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.

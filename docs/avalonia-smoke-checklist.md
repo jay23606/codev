@@ -81,3 +81,11 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Switch conversations and restart the app; verify each style persists.
 - Queue a prompt while a response runs, change the selected style, and confirm the queued prompt uses the style captured when it was queued.
 - Verify the style changes answer formatting without enabling tools or weakening approval, caveat, and test-result reporting.
+
+## Ollama loaded-model awareness
+
+- Open Memory and compare model names, size, VRAM, context length, and expiry with Ollama's current /api/ps response; confirm empty and unreachable states are clear.
+- Cancel the unload confirmation and verify the model remains loaded.
+- Confirm unload while idle; check the model disappears but remains installed and can be loaded again by selecting it.
+- Attempt unload while a response is generating or a request is queued; confirm Codev refuses and does not interrupt the request.
+- Start a send during the unload operation; confirm it is held until unload finishes instead of racing the model state.

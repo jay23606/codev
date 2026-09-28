@@ -120,7 +120,7 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
@@ -152,6 +152,7 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
+                    <Button Grid.Column="9" Classes="soft" Content="Memory" Click="LoadedModels_Click" ToolTip.Tip="See models currently loaded by Ollama and their reported memory use; unload a model when the queue is idle." />
                 </Grid>
             </Border>
             <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">

@@ -373,6 +373,121 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
     }
 
+    private async void LoadedModels_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        var list = new StackPanel { Spacing = 8 };
+        var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var refresh = new Button { Content = "Refresh", Classes = { "soft" }, MinWidth = 90 };
+        var close = new Button { Content = "Close", Classes = { "soft" }, MinWidth = 80 };
+        var dialog = new Window
+        {
+            Title = "Models loaded in Ollama",
+            Width = 700,
+            Height = 560,
+            MinWidth = 520,
+            MinHeight = 380,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        var buttons = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+            Children = { refresh, close }
+        };
+        var content = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), RowSpacing = 10 };
+        content.Children.Add(new TextBlock { Text = $"Ollama server · {viewModel.OllamaEndpointDisplay}", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        var note = new TextBlock
+        {
+            Text = "Ollama-reported model size and VRAM allocation. These server statistics are not a complete system RAM meter.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+        };
+        Grid.SetRow(note, 1);
+        content.Children.Add(note);
+        var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+        Grid.SetRow(scroll, 2);
+        content.Children.Add(scroll);
+        var footer = new StackPanel { Spacing = 8, Children = { status, buttons } };
+        Grid.SetRow(footer, 3);
+        content.Children.Add(footer);
+        dialog.Content = content;
+        close.Click += (_, _) => dialog.Close();
+
+        static string MemorySize(long bytes) => bytes <= 0 ? "0 B" : bytes >= 1024L * 1024 * 1024
+            ? $"{bytes / (1024d * 1024 * 1024):0.00} GiB" : $"{bytes / (1024d * 1024):0} MiB";
+
+        async Task RefreshListAsync()
+        {
+            refresh.IsEnabled = false;
+            status.Text = "Refreshing loaded-model state…";
+            list.Children.Clear();
+            try
+            {
+                var loaded = await viewModel.GetLoadedModelsAsync();
+                if (loaded.Count == 0)
+                    list.Children.Add(new TextBlock { Text = "No models are currently loaded.", Margin = new Thickness(4, 10) });
+                foreach (var model in loaded)
+                {
+                    var details = new StackPanel { Spacing = 4 };
+                    details.Children.Add(new TextBlock { Text = model.Name, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
+                    details.Children.Add(new TextBlock
+                    {
+                        Text = $"Model size: {MemorySize(model.Size)}    VRAM: {MemorySize(model.SizeVram)}" +
+                               (model.ContextLength > 0 ? $"    Context: {model.ContextLength:N0}" : "") +
+                               (model.ExpiresAt is { } expiry ? $"\nExpires: {expiry.ToLocalTime():g}" : ""),
+                        TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                        Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush,
+                        FontSize = 11
+                    });
+                    var unload = new Button { Content = "Unload", Classes = { "soft" }, VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center };
+                    unload.Click += async (_, _) =>
+                    {
+                        if (!await ConfirmGitActionAsync(dialog, "Unload model?", $"Unload {model.Name} from the Ollama server and release its allocated model memory? The model remains installed and can be loaded again by selecting it.")) return;
+                        unload.IsEnabled = false;
+                        status.Text = $"Unloading {model.Name}…";
+                        try
+                        {
+                            if (await viewModel.UnloadModelAsync(model.Name))
+                                await RefreshListAsync();
+                            else
+                                status.Text = string.IsNullOrWhiteSpace(viewModel.ContextActionStatus) ? viewModel.ConnectionStatus : viewModel.ContextActionStatus;
+                        }
+                        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or OperationCanceledException or InvalidOperationException)
+                        {
+                            status.Text = $"Could not unload model: {ex.Message}";
+                            unload.IsEnabled = true;
+                        }
+                    };
+                    var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
+                    row.Children.Add(details);
+                    Grid.SetColumn(unload, 1);
+                    row.Children.Add(unload);
+                    list.Children.Add(new Border
+                    {
+                        Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
+                        BorderBrush = this.FindResource("FieldBorderBrush") as global::Avalonia.Media.IBrush,
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(8),
+                        Padding = new Thickness(12),
+                        Child = row
+                    });
+                }
+                status.Text = loaded.Count == 0 ? "Loaded state refreshed." : $"{loaded.Count} model(s) loaded.";
+            }
+            catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or OperationCanceledException or InvalidOperationException)
+            {
+                status.Text = $"Could not read loaded models: {ex.Message}";
+            }
+            finally { refresh.IsEnabled = true; }
+        }
+
+        refresh.Click += async (_, _) => await RefreshListAsync();
+        _ = RefreshListAsync();
+        await dialog.ShowDialog(this);
+    }
+
     private async void Composer_TextChanged(object? sender, TextChangedEventArgs e)
     {
         _fileMentionSearch?.Cancel();

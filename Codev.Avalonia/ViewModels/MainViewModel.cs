@@ -52,6 +52,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly Dictionary<string, string> _cloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
+    private bool _isUnloadingModel;
     private readonly Queue<QueuedChatTurn> _requestQueue = new();
     private bool _queuePaused;
     private bool _queueProcessorRunning;
@@ -376,6 +377,12 @@ public sealed class MainViewModel : ViewModelBase
 
     private void SelectModel(ModelChoice choice)
     {
+        if (_isUnloadingModel)
+        {
+            ReportContextActionStatus("Wait for the current Ollama unload operation before changing models.");
+            OnPropertyChanged(nameof(SelectedModel));
+            return;
+        }
         if (IsCodeTask && choice.Provider != "ollama")
         {
             ReportContextActionStatus("Code task mode requires a local Ollama model. Turn Code task mode off before selecting a hosted model.");
@@ -894,6 +901,11 @@ public sealed class MainViewModel : ViewModelBase
     private async Task SendDraftAsync()
     {
         if (ActiveConversation is not { } conversation || (string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0)) return;
+        if (_isUnloadingModel)
+        {
+            ReportContextActionStatus("Wait for the Ollama model unload operation to finish before sending a prompt.");
+            return;
+        }
         var text = Draft.Trim();
         if (PendingDiffComments.Count == 0 && text.Equals("/status", StringComparison.OrdinalIgnoreCase))
         {
@@ -1387,9 +1399,11 @@ public sealed class MainViewModel : ViewModelBase
             return false;
         }
         if (_ollamaEndpoint == endpoint) return true;
-        if (IsGenerating || HasQueuedTurns)
+        if (IsGenerating || HasQueuedTurns || _isUnloadingModel)
         {
-            ConnectionStatus = "Wait for the current response and queued turns to finish before changing the Ollama endpoint.";
+            ConnectionStatus = _isUnloadingModel
+                ? "Wait for the current Ollama unload operation before changing the endpoint."
+                : "Wait for the current response and queued turns to finish before changing the Ollama endpoint.";
             return false;
         }
         if (_isLoadingModels)
@@ -1482,6 +1496,52 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     public Task RefreshModelsAsync() => LoadModelsAsync();
+
+    public async Task<IReadOnlyList<Codev.OllamaRunningModel>> GetLoadedModelsAsync(CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        return await new Codev.OllamaRuntimeClient(_http, _ollamaEndpoint).ListRunningModelsAsync(timeout.Token);
+    }
+
+    public async Task<bool> UnloadModelAsync(string model, CancellationToken cancellationToken = default)
+    {
+        if (_isUnloadingModel)
+        {
+            ReportContextActionStatus("An Ollama model unload is already in progress.");
+            return false;
+        }
+        var blockReason = Codev.OllamaUnloadPolicy.GetBlockingReason(IsGenerating, HasQueuedTurns, _modelLoadCancellation is { IsCancellationRequested: false });
+        if (blockReason is not null)
+        {
+            ReportContextActionStatus(blockReason);
+            return false;
+        }
+        _isUnloadingModel = true;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(20));
+            var runtime = new Codev.OllamaRuntimeClient(_http, _ollamaEndpoint);
+            var loaded = await runtime.ListRunningModelsAsync(timeout.Token);
+            blockReason = Codev.OllamaUnloadPolicy.GetBlockingReason(IsGenerating, HasQueuedTurns, _modelLoadCancellation is { IsCancellationRequested: false });
+            if (blockReason is not null)
+            {
+                ReportContextActionStatus($"{blockReason} The unload was canceled.");
+                return false;
+            }
+            var confirmedLoaded = loaded.FirstOrDefault(entry => entry.Name.Equals(model, StringComparison.OrdinalIgnoreCase));
+            if (confirmedLoaded is null)
+            {
+                ReportContextActionStatus("That model is no longer loaded in Ollama. Refresh the loaded-model list.");
+                return false;
+            }
+            await runtime.UnloadAsync(confirmedLoaded.Name, timeout.Token);
+            ConnectionStatus = $"Unloaded {confirmedLoaded.Name} from Ollama memory";
+            return true;
+        }
+        finally { _isUnloadingModel = false; }
+    }
 
     public async Task<bool> ConnectCloudProviderAsync(string provider, string? apiKey, bool allowCloudRequests)
     {
@@ -1674,6 +1734,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task WarmModelAsync(string model)
     {
+        if (_isUnloadingModel) return;
         if (!Models.Any(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase))) return;
         var revision = Interlocked.Increment(ref _modelSelectionRevision);
         var displayName = Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName;
