@@ -15,7 +15,7 @@ public sealed class ProjectAgentInstructionsTests : IDisposable
 
         var result = await ProjectAgentInstructions.LoadAsync(new WorkspaceFileService(_root));
 
-        Assert.Contains("Applicable AGENTS.md guidance", result);
+        Assert.Contains("Applicable project guidance", result);
         Assert.Contains("--- AGENTS.md (project guidance; user-provided) ---", result);
         Assert.EndsWith("Use xUnit and keep handlers small.", result);
     }

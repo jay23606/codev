@@ -29,7 +29,7 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 - Code tasks stop after eight tool rounds and ask before a tool call repeats with identical arguments three times in a row
 - Project switcher with pinned projects, project-specific instructions and reusable knowledge notes, and conversations scoped to each project
 - Optional personal instructions apply across chats, plans, and code tasks; they are stored locally and included with requests to the configured Ollama server
-- Optional root `AGENTS.md` is read through project-bounded file access and included as capped project guidance in local requests
+- Trusted projects can include bounded `AGENTS.md` guidance plus `.codev/rules/*.md` path rules when matching source files enter context. Untrusted projects do not load hidden project instructions.
 - Git status, per-file staged/unstaged diff review, sending selected diff lines to the chat composer, staging, unstaging, reviewed local commits, and local branch creation/switching from a project's menu; branch operations require a clean tree, and commits are never pushed automatically
 - Optional project-folder context: selected source/config files are read locally and sent to the local Ollama server as bounded context
 - Choose up to 24 project-relative source files for a conversation; right-click Add files to remove one file or clear the selection
@@ -40,6 +40,16 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 - Create a local JSON backup of all conversations and import one additively; imports receive new conversation IDs and do not replace current history
 
 Code task mode can create or edit supported source, text, and configuration files after showing a review and receiving approval. The Files button shows changes and lets you review or restore checkpoints, including undo/redo of file creation. Code task mode can also request an approved shell command: PowerShell on Windows, or `$SHELL` (falling back to Bash) on macOS and Linux. Set `CODEV_SHELL` to override the executable. Every command requires approval, shows elapsed progress, runs with your account permissions in the project folder, has a three-minute timeout, and is not sandboxed. Use the active-turn Stop control to terminate it. Ordinary chat remains read-only.
+
+Path-scoped project rules live in `.codev/rules/` and are included only for a trusted project when a matching source file is in context. For example, `javascript.md` can start with:
+
+```markdown
+---
+description: JavaScript style
+globs: **/*.js, **/*.ts
+---
+Prefer named exports and keep functions small.
+```
 
 ## Hosted models
 

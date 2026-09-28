@@ -72,6 +72,41 @@ public sealed class ProjectContextReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Includes_only_matching_path_scoped_project_rules_for_trusted_context()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, ".codev", "rules"));
+        Directory.CreateDirectory(Path.Combine(_root, "src", "ui"));
+        Directory.CreateDirectory(Path.Combine(_root, "docs"));
+        await File.WriteAllTextAsync(Path.Combine(_root, ".codev", "rules", "javascript.md"),
+            "---\ndescription: JavaScript conventions\nglobs: **/*.js, **/*.ts\n---\nUse semicolons.");
+        await File.WriteAllTextAsync(Path.Combine(_root, ".codev", "rules", "docs.md"),
+            "---\ndescription: Documentation conventions\nglobs: docs/**/*.md\n---\nUse short headings.");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "ui", "app.ts"), "export const app = true;");
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "guide.md"), "# Guide");
+
+        var context = await ProjectContextReader.ReadAsync(_root, ["src/ui/app.ts"], includeProjectInstructions: true);
+        var untrusted = await ProjectContextReader.ReadAsync(_root, ["src/ui/app.ts"]);
+
+        Assert.Contains("Use semicolons.", context);
+        Assert.DoesNotContain("Use short headings.", context);
+        Assert.DoesNotContain("Use semicolons.", untrusted);
+    }
+
+    [Fact]
+    public async Task Path_scoped_rules_respect_context_exclusions()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, ".codev", "rules"));
+        Directory.CreateDirectory(Path.Combine(_root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(_root, ".codev", "rules", "source.md"),
+            "---\ndescription: Source conventions\nglobs: src/**/*.cs\n---\nUse nullable annotations.");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "app.cs"), "class App { }");
+
+        var context = await ProjectContextReader.ReadAsync(_root, ["src/app.cs"], [".codev/rules"], includeProjectInstructions: true);
+
+        Assert.DoesNotContain("Use nullable annotations.", context);
+    }
+
+    [Fact]
     public async Task Instructions_and_source_excerpts_share_the_project_context_character_cap()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), new string('g', ProjectAgentInstructions.MaxCharacters));
