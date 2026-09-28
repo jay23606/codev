@@ -9,6 +9,8 @@ namespace Codev;
 public sealed class WorkspaceFileService
 {
     public const int MaxContextFiles = 24;
+    public const int MaxContextCharacters = 32_000;
+    public const int MaxContextFileCharacters = 2_400;
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "dist", "build", "coverage" };
     private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -115,20 +117,18 @@ public sealed class WorkspaceFileService
     /// <summary>Estimates source-file tokens using bounded sizes; it does not include chat history or prompt instructions.</summary>
     public int EstimateContextTokens(IReadOnlyList<string>? selectedFiles = null)
     {
-        const int maxChars = 32_000;
-        const int maxFileChars = 2_400;
         var files = selectedFiles is { Count: > 0 } ? selectedFiles : ListContextFiles(maxEntries: 300);
         var estimatedChars = 0;
         var fileCount = 0;
         foreach (var relative in files)
         {
-            if (fileCount >= MaxContextFiles || estimatedChars >= maxChars) break;
+            if (fileCount >= MaxContextFiles || estimatedChars >= MaxContextCharacters) break;
             if (!SourceExtensions.Contains(Path.GetExtension(relative)) || IsContextExcluded(relative)) continue;
             try
             {
                 var info = new FileInfo(ResolvePath(relative));
                 if (!info.Exists) continue;
-                estimatedChars = Math.Min(maxChars, estimatedChars + Math.Min(maxFileChars, (int)Math.Min(int.MaxValue, info.Length)) + relative.Length + 16);
+                estimatedChars = Math.Min(MaxContextCharacters, estimatedChars + Math.Min(MaxContextFileCharacters, (int)Math.Min(int.MaxValue, info.Length)) + relative.Length + 16);
                 fileCount++;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }

@@ -2125,8 +2125,6 @@ public partial class MainWindow : Window
             var fileService = new WorkspaceFileService(root, contextExclusions);
         var output = new StringBuilder("Selected project files (limited read-only excerpts):\n");
         var count = 0;
-        const int maxChars = 32000;
-        const int maxFileChars = 2400;
         try
         {
             var files = selectedFiles is { Count: > 0 } ? selectedFiles : fileService.ListContextFiles(maxEntries: 300);
@@ -2138,10 +2136,10 @@ public partial class MainWindow : Window
                 try
                 {
                     var content = await fileService.ReadFileAsync(relative, cancellationToken);
-                    if (content.Length > maxFileChars) content = content[..maxFileChars] + "\n… [excerpt truncated]";
+                    if (content.Length > WorkspaceFileService.MaxContextFileCharacters) content = content[..WorkspaceFileService.MaxContextFileCharacters] + "\n… [excerpt truncated]";
                     output.Append("\n--- ").Append(relative).AppendLine(" ---\n").AppendLine(content);
                     count++;
-                    if (count >= WorkspaceFileService.MaxContextFiles || output.Length >= maxChars) break;
+                    if (count >= WorkspaceFileService.MaxContextFiles || output.Length >= WorkspaceFileService.MaxContextCharacters) break;
                 }
                 catch (OperationCanceledException) { throw; }
                 catch { }
