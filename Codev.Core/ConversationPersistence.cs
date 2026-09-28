@@ -16,6 +16,7 @@ public static class ConversationPersistence
             IsPlanMode = conversation.IsPlanMode,
             IsCodeTask = conversation.IsCodeTask,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
+            IncludeRepoMap = conversation.IncludeRepoMap,
             NumCtx = conversation.NumCtx,
             Temperature = conversation.Temperature,
             LastPromptTokens = conversation.LastPromptTokens,

@@ -37,6 +37,9 @@ public static class ConversationStatusReport
             ? "not applicable"
             : !projectFolderTrusted ? "untrusted"
             : projectFolderTrustRoot is null ? "trusted" : $"trusted · {FolderName(projectFolderTrustRoot)}";
+        var canIncludeRepoMap = !string.IsNullOrWhiteSpace(conversation.ProjectPath) &&
+            (conversation.ContextFiles.Count > 0 || projectFolderTrusted) &&
+            (!CloudModelProviders.IsCloud(conversation.Provider) || conversation.IncludeProjectContextForHosted);
 
         return string.Join('\n',
             $"Model: {provider} · {conversation.Model}",
@@ -46,6 +49,7 @@ public static class ConversationStatusReport
             $"Project: {project}",
             $"Folder trust: {folderTrust}",
             $"Project context: {projectContext}",
+            $"Repository map: {(!conversation.IncludeRepoMap ? "off" : canIncludeRepoMap ? "included" : "unavailable under the current context policy")}",
             $"Queue: {queue}",
             $"Hosted requests: {(CloudModelProviders.IsCloud(conversation.Provider) ? hostedRequestsEnabled ? "enabled for this session" : "disabled" : "not in use")}",
             $"Tools and file changes: {(conversation.IsCodeTask ? "available with per-change and per-command approval" : "unavailable outside Code task mode")}");

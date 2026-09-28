@@ -11,6 +11,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [ ] Change context size, switch conversations, and verify context size is stored per conversation and capped for the selected model.
 - [x] Attach a disposable project folder, select a supported source file, and verify the local response uses its bounded read-only context.
 - [ ] Verify the composer shows an approximate project-file token estimate, updates when files are selected/cleared, excludes history from its wording, and reports that hosted project files stay local until opted in.
+- [ ] Enable the repository map for a trusted project and verify a bounded file/symbol outline reaches the local model; test an explicitly selected file in an untrusted folder, verify exclusions/secrets are omitted, inspect its estimate, and confirm hosted chats omit it until project context is opted in. Verify the setting survives conversation switches/restart and queued-turn recovery.
 - [ ] Attach an untrusted project; verify first-use choices, automatic context is off, chat/browsing and explicit file selection still work, trust persists after restart, `/status` reports trust, and revoking trust disables automatic context again.
 - [ ] Trust a parent folder; verify a child project inherits trust, a sibling outside that parent does not, and the child UI explains inherited scope.
 - [ ] Clear selection and verify the bounded default file set is used; confirm `.env`, unsupported files, and paths outside the project are excluded in the UI flow.

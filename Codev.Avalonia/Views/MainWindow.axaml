@@ -199,6 +199,7 @@
                                 <Button Classes="soft" Content="＋ Add files" Padding="8,4" FontSize="10" IsEnabled="{Binding HasProject}" Click="AddContextFiles_Click" ToolTip.Tip="Select supported source and text files from the attached project" />
                                 <Button Classes="soft" Content="Clear selection" Padding="8,4" FontSize="10" IsVisible="{Binding HasSelectedContextFiles}" Command="{Binding ClearContextFilesCommand}" />
                                 <TextBlock Text="{Binding ContextLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <CheckBox Content="Include repo map" IsChecked="{Binding IncludeRepoMap, Mode=TwoWay}" IsEnabled="{Binding CanIncludeRepoMap}" FontSize="10" VerticalAlignment="Center" ToolTip.Tip="Attach a compact, bounded project file and symbol outline. Uses the same trust, selection, and hosted-context rules as project files." />
                             </StackPanel>
                             <ItemsControl Grid.Row="1" Grid.ColumnSpan="2" ItemsSource="{Binding SelectedContextFiles}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -211,7 +212,10 @@
                                     </Border>
                                 </DataTemplate></ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ContextEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
+                            <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="2">
+                                <TextBlock Text="{Binding ContextEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding RepoMapEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
+                            </StackPanel>
                             <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">

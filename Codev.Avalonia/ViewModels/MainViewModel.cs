@@ -149,6 +149,8 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(CodeTaskLabel));
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
                 OnPropertyChanged(nameof(IncludeProjectContextForHosted));
+                OnPropertyChanged(nameof(IncludeRepoMap));
+                OnPropertyChanged(nameof(CanIncludeRepoMap));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
                 RefreshContextSizes(Model);
@@ -186,6 +188,8 @@ public sealed class MainViewModel : ViewModelBase
         ? IsProjectTrusted ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included" : $"{SelectedContextFiles.Count} file(s) explicitly selected · folder untrusted"
         : IsProjectTrusted ? "Trusted project · bounded source files included automatically" : "Untrusted project · automatic context is off";
     public string ContextEstimateLabel => _contextEstimateLabel;
+    public bool CanIncludeRepoMap => HasProject && (SelectedContextFiles.Count > 0 || IsProjectTrusted) && (!IsHostedModel || IncludeProjectContextForHosted);
+    public string RepoMapEstimateLabel => IncludeRepoMap && CanIncludeRepoMap ? "Repo map: up to ≈2,000 tokens." : "";
     public string ContextActionStatus { get; private set; } = "";
     public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
@@ -309,6 +313,23 @@ public sealed class MainViewModel : ViewModelBase
             if (ActiveConversation is not { } conversation || conversation.IncludeProjectContextForHosted == value) return;
             conversation.IncludeProjectContextForHosted = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(CanIncludeRepoMap));
+            OnPropertyChanged(nameof(RepoMapEstimateLabel));
+            RefreshContextEstimate();
+            Persist();
+        }
+    }
+
+    public bool IncludeRepoMap
+    {
+        get => ActiveConversation?.IncludeRepoMap ?? false;
+        set
+        {
+            if (ActiveConversation is not { } conversation || conversation.IncludeRepoMap == value) return;
+            if (value && !CanIncludeRepoMap) return;
+            conversation.IncludeRepoMap = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(RepoMapEstimateLabel));
             RefreshContextEstimate();
             Persist();
         }
@@ -398,6 +419,7 @@ public sealed class MainViewModel : ViewModelBase
             Model = Model,
             Provider = Provider,
             IsPlanMode = IsPlanMode,
+            IncludeRepoMap = IncludeRepoMap,
             NumCtx = ContextSize,
             UpdatedAt = DateTimeOffset.Now
         };
@@ -496,6 +518,9 @@ public sealed class MainViewModel : ViewModelBase
             ? $"Hosted model selected · {conversation.Model}"
             : $"{conversation.Model} selected · connect its API key to send";
         Draft = conversation.Draft;
+        OnPropertyChanged(nameof(IncludeRepoMap));
+        OnPropertyChanged(nameof(CanIncludeRepoMap));
+        OnPropertyChanged(nameof(RepoMapEstimateLabel));
         Reset(PendingDiffComments, conversation.PendingDiffComments ?? []);
         OnPropertyChanged(nameof(HasPendingDiffComments));
         ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
@@ -774,6 +799,8 @@ public sealed class MainViewModel : ViewModelBase
             conversation is not null && !string.IsNullOrWhiteSpace(conversation.ProjectPath) && _projectFolderTrust.IsTrusted(conversation.ProjectPath),
             conversation?.ContextFiles);
         OnPropertyChanged(nameof(ContextEstimateLabel));
+        OnPropertyChanged(nameof(CanIncludeRepoMap));
+        OnPropertyChanged(nameof(RepoMapEstimateLabel));
     }
 
     private void TogglePin()
@@ -840,7 +867,7 @@ public sealed class MainViewModel : ViewModelBase
             conversation.ProjectPath, hasExplicitProjectFiles, projectTrusted);
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
             conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
-            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted);
+            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -1071,6 +1098,12 @@ public sealed class MainViewModel : ViewModelBase
                 var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
                     savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
                 priorMessages.Add(new Codev.ChatMessage("system", projectContext));
+                if (savedTurn.IncludeRepoMap)
+                {
+                    var repoMap = await Codev.RepoMapBuilder.BuildAsync(savedTurn.ProjectPath,
+                        savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
+                    priorMessages.Add(new Codev.ChatMessage("system", repoMap));
+                }
             }
             var normalizedHistory = Codev.OllamaConversationHistory.Normalize(priorMessages);
             var output = new System.Text.StringBuilder();

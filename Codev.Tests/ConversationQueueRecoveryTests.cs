@@ -9,7 +9,7 @@ public sealed class ConversationQueueRecoveryTests
         var late = new Conversation { Messages = [new("user", "second"), new("assistant", "")] };
         var invalid = new Conversation { Messages = [new("user", "not an assistant placeholder")] };
         var earlyTurn = new PersistedQueuedTurn(1, "model-a", 8192, true, false, @"C:\project", ["a.cs"], ["obj"], DateTimeOffset.UnixEpoch, 0.2);
-        var lateTurn = new PersistedQueuedTurn(1, "model-b", 16384, false, true, null, [], [], DateTimeOffset.UnixEpoch.AddMinutes(1), Provider: CloudModelProviders.OpenAI, IncludeProjectContext: true);
+        var lateTurn = new PersistedQueuedTurn(1, "model-b", 16384, false, true, null, [], [], DateTimeOffset.UnixEpoch.AddMinutes(1), Provider: CloudModelProviders.OpenAI, IncludeProjectContext: true, IncludeRepoMap: true);
         early.PendingTurns = [earlyTurn];
         late.PendingTurns = [lateTurn];
         invalid.PendingTurns = [new PersistedQueuedTurn(0, "model-c", 0, false, false, null, [], [], DateTimeOffset.UnixEpoch)];
@@ -24,6 +24,7 @@ public sealed class ConversationQueueRecoveryTests
         Assert.Equal(CloudModelProviders.OpenAI, restored[1].Turn.Provider);
         Assert.True(restored[1].Turn.IsPlanMode);
         Assert.True(restored[1].Turn.IncludeProjectContext);
+        Assert.True(restored[1].Turn.IncludeRepoMap);
         Assert.Single(early.PendingTurns);
         Assert.Empty(invalid.PendingTurns);
     }

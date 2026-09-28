@@ -16,6 +16,7 @@ public sealed class ConversationPersistenceTests
             IsPlanMode = false,
             IsCodeTask = true,
             IncludeProjectContextForHosted = true,
+            IncludeRepoMap = true,
             Messages = [new("user", "before")],
             ContextFiles = ["src/a.cs"],
             PendingDiffComments = [new("src/a.cs", "+ updated", "Check null handling.")],
@@ -35,6 +36,7 @@ public sealed class ConversationPersistenceTests
         Assert.False(snapshot.IsPlanMode);
         Assert.True(snapshot.IsCodeTask);
         Assert.True(snapshot.IncludeProjectContextForHosted);
+        Assert.True(snapshot.IncludeRepoMap);
         Assert.Equal("unsent prompt", snapshot.Draft);
         Assert.Equal("before", snapshot.Messages[0].Content);
         Assert.Equal("src/a.cs", Assert.Single(snapshot.ContextFiles));

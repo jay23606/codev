@@ -26,6 +26,7 @@ public sealed class ConversationStatusReportTests
         Assert.Contains("Project: app", report);
         Assert.DoesNotContain(@"C:\work\app", report, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Project context: 1 selected file(s)", report);
+        Assert.Contains("Repository map: off", report);
         Assert.Contains("Folder trust: untrusted", report);
         Assert.Contains("Queue: 2 queued turn(s)", report);
         Assert.Contains("Hosted requests: not in use", report);
@@ -42,7 +43,8 @@ public sealed class ConversationStatusReportTests
             Provider = provider,
             Model = "hosted-model",
             ProjectPath = @"C:\work\private",
-            IncludeProjectContextForHosted = false
+            IncludeProjectContextForHosted = false,
+            IncludeRepoMap = true
         };
 
         var report = ConversationStatusReport.Build(conversation, true, 0, false, true);
@@ -50,6 +52,7 @@ public sealed class ConversationStatusReportTests
         Assert.Contains($"Model: {displayName} · hosted-model", report);
         Assert.Contains("Context window: managed by provider", report);
         Assert.Contains("Project context: excluded from hosted requests", report);
+        Assert.Contains("Repository map: unavailable under the current context policy", report);
         Assert.Contains("Queue: response in progress", report);
         Assert.Contains("Hosted requests: enabled for this session", report);
         Assert.Contains("Folder trust: untrusted", report);
