@@ -711,6 +711,183 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
     }
 
+    private async void PromptTemplates_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        var templates = viewModel.PromptTemplates.ToList();
+        var list = new ListBox { MinHeight = 220, ItemsSource = templates.Select(item => item.Name).ToArray() };
+        var preview = new TextBlock
+        {
+            Text = "Select a template to preview its prompt.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MaxHeight = 130,
+            VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Top
+        };
+        var managerStatus = new TextBlock { Text = $"{templates.Count} of {Codev.PromptTemplateCatalog.MaxTemplates} templates", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
+        list.SelectionChanged += (_, _) =>
+        {
+            var selected = templates.FirstOrDefault(item => item.Name == list.SelectedItem as string);
+            preview.Text = selected?.Prompt ?? "Select a template to preview its prompt.";
+        };
+        var add = new Button { Content = "Add…", Classes = { "soft" } };
+        var edit = new Button { Content = "Edit…", Classes = { "soft" } };
+        var remove = new Button { Content = "Remove", Classes = { "soft" } };
+        var use = new Button { Content = "Use in composer", Classes = { "soft" } };
+        var close = new Button { Content = "Close", Classes = { "soft" } };
+        var dialog = new Window
+        {
+            Title = "Prompt templates",
+            Width = 620,
+            Height = 540,
+            MinWidth = 500,
+            MinHeight = 400,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = true
+        };
+        void RefreshList(string? selectedName = null)
+        {
+            list.ItemsSource = templates.Select(item => item.Name).ToArray();
+            list.SelectedIndex = -1;
+            if (selectedName is not null) list.SelectedItem = selectedName;
+            else preview.Text = "Select a template to preview its prompt.";
+            managerStatus.Text = $"{templates.Count} of {Codev.PromptTemplateCatalog.MaxTemplates} templates";
+        }
+        add.Click += async (_, _) =>
+        {
+            if (templates.Count >= Codev.PromptTemplateCatalog.MaxTemplates)
+            {
+                managerStatus.Text = $"You can save up to {Codev.PromptTemplateCatalog.MaxTemplates} templates.";
+                return;
+            }
+            var template = await EditPromptTemplateAsync(dialog, null);
+            if (template is null) return;
+            if (templates.Any(item => item.Name.Equals(template.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                managerStatus.Text = "Template names must be unique.";
+                return;
+            }
+            templates.Add(template);
+            viewModel.SavePromptTemplates(templates);
+            RefreshList(template.Name);
+        };
+        edit.Click += async (_, _) =>
+        {
+            if (list.SelectedItem is not string selectedName) return;
+            var index = templates.FindIndex(item => item.Name == selectedName);
+            if (index < 0) return;
+            var edited = await EditPromptTemplateAsync(dialog, templates[index]);
+            if (edited is null) return;
+            if (templates.Where((_, itemIndex) => itemIndex != index).Any(item => item.Name.Equals(edited.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                managerStatus.Text = "Template names must be unique.";
+                return;
+            }
+            templates[index] = edited;
+            viewModel.SavePromptTemplates(templates);
+            RefreshList(edited.Name);
+        };
+        remove.Click += (_, _) =>
+        {
+            if (list.SelectedItem is not string selectedName) return;
+            templates.RemoveAll(item => item.Name == selectedName);
+            viewModel.SavePromptTemplates(templates);
+            RefreshList();
+        };
+        use.Click += (_, _) =>
+        {
+            if (list.SelectedItem is not string selectedName) return;
+            var template = templates.FirstOrDefault(item => item.Name == selectedName);
+            if (template is null) return;
+            var prefix = string.IsNullOrWhiteSpace(viewModel.Draft) ? "" : viewModel.Draft.TrimEnd() + Environment.NewLine + Environment.NewLine;
+            viewModel.Draft = prefix + template.Prompt;
+            ComposerTextBox.Text = viewModel.Draft;
+            ComposerTextBox.CaretIndex = ComposerTextBox.Text.Length;
+            ComposerTextBox.Focus();
+            dialog.Close();
+        };
+        close.Click += (_, _) => dialog.Close();
+        var buttons = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+            Children = { add, edit, remove, use, close }
+        };
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(18),
+            Spacing = 10,
+            Children =
+            {
+                new TextBlock { Text = "Reusable prompts stay on this device. Choose Use to place a prompt in the composer for review before sending.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                list,
+                new ScrollViewer { Content = preview, MaxHeight = 140, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto },
+                managerStatus,
+                buttons
+            }
+        };
+        if (list.ItemCount > 0) list.SelectedIndex = 0;
+        await dialog.ShowDialog(this);
+    }
+
+    private static async Task<Codev.PromptTemplate?> EditPromptTemplateAsync(Window owner, Codev.PromptTemplate? original)
+    {
+        var name = new TextBox { Text = original?.Name ?? "", MaxLength = Codev.PromptTemplateCatalog.MaxNameCharacters, Watermark = "Template name" };
+        var prompt = new TextBox
+        {
+            Text = original?.Prompt ?? "",
+            MaxLength = Codev.PromptTemplateCatalog.MaxPromptCharacters,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Stretch,
+            Watermark = "Prompt text"
+        };
+        var dialog = new Window
+        {
+            Title = original is null ? "Add prompt template" : "Edit prompt template",
+            Width = 560,
+            Height = 460,
+            MinWidth = 440,
+            MinHeight = 340,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        var status = new TextBlock { Text = "", Foreground = owner.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" } };
+        var save = new Button { Content = "Save", Classes = { "soft" } };
+        Codev.PromptTemplate? result = null;
+        cancel.Click += (_, _) => dialog.Close();
+        save.Click += (_, _) =>
+        {
+            var candidate = new Codev.PromptTemplate(name.Text?.Trim() ?? "", prompt.Text?.Trim() ?? "");
+            var normalized = Codev.PromptTemplateCatalog.Normalize([candidate]);
+            if (normalized.Count == 0)
+            {
+                status.Text = "Enter a name and prompt within the displayed length limits.";
+                return;
+            }
+            result = normalized[0];
+            dialog.Close();
+        };
+        dialog.Content = new Grid
+        {
+            RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto"),
+            Margin = new Thickness(18),
+            RowSpacing = 10,
+            Children =
+            {
+                name,
+                prompt,
+                status,
+                new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { cancel, save } }
+            }
+        };
+        Grid.SetRow(prompt, 1);
+        Grid.SetRow(status, 2);
+        Grid.SetRow((global::Avalonia.Controls.Control)((Grid)dialog.Content).Children[3], 3);
+        await dialog.ShowDialog(owner);
+        return result;
+    }
+
     private static async Task OpenCommandFolderAsync(string path, ViewModels.MainViewModel viewModel)
     {
         try

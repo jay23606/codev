@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Codev;
 
 public sealed record PromptTemplate(string Name, string Prompt);
@@ -8,6 +10,21 @@ public static class PromptTemplateCatalog
     public const int MaxTemplates = 40;
     public const int MaxNameCharacters = 80;
     public const int MaxPromptCharacters = 10_000;
+
+    public static List<PromptTemplate> DeserializeLegacySettings(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object) return [];
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (!property.Name.Equals("PromptTemplates", StringComparison.OrdinalIgnoreCase)) continue;
+            if (property.Value.ValueKind != JsonValueKind.Array) return [];
+            var templates = property.Value.Deserialize<List<PromptTemplate>>(
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return Normalize(templates);
+        }
+        return [];
+    }
 
     /// <summary>Expose existing settings-backed templates in the slash menu while users migrate to Markdown commands.</summary>
     public static IReadOnlyList<SlashCommandDefinition> ToSlashCommands(IEnumerable<PromptTemplate?>? templates,

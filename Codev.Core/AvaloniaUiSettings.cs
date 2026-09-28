@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Codev;
 
 /// <summary>Local Avalonia UI preferences, including migration from the original theme-only JSON string.</summary>
-public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint)
+public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, List<PromptTemplate>? PromptTemplates = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     public static AvaloniaUiSettings Default { get; } = new("dark", Codev.OllamaEndpoint.Default.ToString());
@@ -19,7 +19,8 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint)
         var endpoint = Codev.OllamaEndpoint.TryParse(value.OllamaEndpoint, out var parsed, out _)
             ? parsed.ToString()
             : Default.OllamaEndpoint;
-        return new AvaloniaUiSettings(NormalizeTheme(value.Theme), endpoint);
+        return new AvaloniaUiSettings(NormalizeTheme(value.Theme), endpoint,
+            value.PromptTemplates is null ? null : PromptTemplateCatalog.Normalize(value.PromptTemplates));
     }
 
     public static string Serialize(AvaloniaUiSettings settings) => JsonSerializer.Serialize(settings);

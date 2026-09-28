@@ -72,7 +72,7 @@ It currently provides a Claude/Codex-inspired dark shell, locally persisted conv
 
 Completed local Ollama replies in Avalonia show first-token latency, generated tokens per second, output token count, and model load time when the server reports it. Hosted model replies do not show locally estimated performance stats.
 
-Avalonia also supports user and trusted-project Markdown prompt commands with named arguments, and exposes saved WPF prompt templates as `/template-…` suggestions; see [custom slash commands](docs/custom-slash-commands.md) or type `/commands` in the composer.
+Avalonia also supports user and trusted-project Markdown prompt commands with named arguments, and manages saved prompt templates through `/template-…` suggestions and the **Prompt templates** button; see [custom slash commands](docs/custom-slash-commands.md) or type `/commands` in the composer.
 
 Fork an idle Avalonia conversation from its sidebar context menu to continue in a separate chat. The fork copies its history, settings, project link, and Codev-managed rollback checkpoints; busy conversations must finish and clear their queue first.
 

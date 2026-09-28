@@ -31,6 +31,14 @@ public sealed class PromptTemplateCatalogTests
         Assert.Empty(PromptTemplateCatalog.Normalize(null));
 
     [Fact]
+    public void Imports_prompt_templates_from_case_insensitive_legacy_settings_json()
+    {
+        var imported = PromptTemplateCatalog.DeserializeLegacySettings("""{"theme":"light","prompttemplates":[{"name":"Review","prompt":"Review this."},{"name":"","prompt":"ignored"}]}""");
+
+        Assert.Equal([new PromptTemplate("Review", "Review this.")], imported);
+    }
+
+    [Fact]
     public void Maps_saved_templates_to_unique_slash_commands_for_migration()
     {
         var commands = PromptTemplateCatalog.ToSlashCommands(
@@ -54,5 +62,7 @@ public sealed class PromptTemplateCatalogTests
             Assert.Equal("template", command.Scope);
             Assert.True(command.Name.Length <= 40);
         });
+        var reserved = PromptTemplateCatalog.ToSlashCommands([new PromptTemplate("Review", "Prompt")], ["/template-review"]);
+        Assert.Equal("/template-review-2", Assert.Single(reserved).Name);
     }
 }

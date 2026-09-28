@@ -25,6 +25,17 @@ public sealed class AvaloniaUiSettingsTests
     }
 
     [Fact]
+    public void Round_trips_saved_prompt_templates()
+    {
+        var original = new AvaloniaUiSettings("dark", OllamaEndpoint.Default.ToString(),
+            [new PromptTemplate("Review", "Review this project carefully.")]);
+
+        var restored = AvaloniaUiSettings.Deserialize(AvaloniaUiSettings.Serialize(original));
+
+        Assert.Equal(original.PromptTemplates, restored.PromptTemplates);
+    }
+
+    [Fact]
     public void Invalid_or_credential_bearing_endpoint_falls_back_to_loopback()
     {
         var settings = AvaloniaUiSettings.Deserialize("""{"Theme":"unexpected","OllamaEndpoint":"https://user:secret@ollama.example"}""");

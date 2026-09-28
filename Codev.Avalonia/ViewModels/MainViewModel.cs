@@ -73,6 +73,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
     public ObservableCollection<Codev.ChatMessage> Messages { get; } = [];
+    public ObservableCollection<Codev.PromptTemplate> PromptTemplates { get; } = [];
     public ObservableCollection<string> SelectedContextFiles { get; } = [];
     public ObservableCollection<Codev.GitDiffComment> PendingDiffComments { get; } = [];
     public ObservableCollection<ContextSizeChoice> ContextSizes { get; } = [];
@@ -730,7 +731,7 @@ public sealed class MainViewModel : ViewModelBase
         var userCommands = loaded.Commands.Where(command => hasArguments
             ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
             : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
-        var templates = LoadLegacyPromptTemplateCommands(loaded.Commands.Select(command => command.Name)).Where(command => hasArguments
+        var templates = Codev.PromptTemplateCatalog.ToSlashCommands(PromptTemplates, loaded.Commands.Select(command => command.Name)).Where(command => hasArguments
             ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
             : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
         return builtIns.Concat(userCommands).Concat(templates).ToArray();
@@ -744,7 +745,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             var currentCustom = await Codev.CustomSlashCommandService.LoadAsync(UserSlashCommandsPath,
                 ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
-            var currentTemplate = LoadLegacyPromptTemplateCommands(currentCustom.Commands.Select(item => item.Name))
+            var currentTemplate = Codev.PromptTemplateCatalog.ToSlashCommands(PromptTemplates, currentCustom.Commands.Select(item => item.Name))
                 .FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase));
             return currentTemplate is null
                 ? new(false, "", "That saved prompt template is no longer available.")
@@ -759,22 +760,12 @@ public sealed class MainViewModel : ViewModelBase
             : Codev.CustomSlashCommandService.Expand(current, invocation);
     }
 
-    private static IReadOnlyList<Codev.SlashCommandDefinition> LoadLegacyPromptTemplateCommands(IEnumerable<string>? reservedNames)
+    public void SavePromptTemplates(IEnumerable<Codev.PromptTemplate?> templates)
     {
-        try
-        {
-            var info = new FileInfo(LegacySettingsPath);
-            if (!info.Exists || info.Length > 1024 * 1024) return [];
-            var settings = JsonSerializer.Deserialize<LegacyTemplateSettings>(File.ReadAllText(LegacySettingsPath), BackupJsonOptions);
-            return Codev.PromptTemplateCatalog.ToSlashCommands(settings?.PromptTemplates, reservedNames);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return [];
-        }
+        PromptTemplates.Clear();
+        foreach (var template in Codev.PromptTemplateCatalog.Normalize(templates)) PromptTemplates.Add(template);
+        PersistSettings();
     }
-
-    private sealed record LegacyTemplateSettings(List<Codev.PromptTemplate>? PromptTemplates);
 
     public async Task<string> ExportActiveConversationMarkdownAsync()
     {
@@ -1577,12 +1568,14 @@ public sealed class MainViewModel : ViewModelBase
     {
         try
         {
-            if (File.Exists(SettingsPath))
-            {
-                var settings = Codev.AvaloniaUiSettings.Deserialize(File.ReadAllText(SettingsPath));
-                _isDarkTheme = !string.Equals(settings.Theme, "light", StringComparison.OrdinalIgnoreCase);
-                if (Codev.OllamaEndpoint.TryParse(settings.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
-            }
+            var settings = File.Exists(SettingsPath)
+                ? Codev.AvaloniaUiSettings.Deserialize(File.ReadAllText(SettingsPath))
+                : Codev.AvaloniaUiSettings.Default;
+            _isDarkTheme = !string.Equals(settings.Theme, "light", StringComparison.OrdinalIgnoreCase);
+            if (Codev.OllamaEndpoint.TryParse(settings.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
+            var templates = settings.PromptTemplates ?? LoadLegacyPromptTemplates();
+            foreach (var template in Codev.PromptTemplateCatalog.Normalize(templates)) PromptTemplates.Add(template);
+            if (settings.PromptTemplates is null && PromptTemplates.Count > 0) PersistSettings();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { _isDarkTheme = true; }
         if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
@@ -1592,7 +1585,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private void PersistSettings()
     {
-        var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString());
+        var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString(), PromptTemplates.ToList());
         var revision = Interlocked.Increment(ref _settingsRevision);
         _settingsPersistenceTask = Task.Run(async () =>
         {
@@ -1605,6 +1598,20 @@ public sealed class MainViewModel : ViewModelBase
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             finally { _settingsPersistGate.Release(); }
         });
+    }
+
+    private static List<Codev.PromptTemplate> LoadLegacyPromptTemplates()
+    {
+        try
+        {
+            var info = new FileInfo(LegacySettingsPath);
+            if (!info.Exists || info.Length > 1024 * 1024) return [];
+            return Codev.PromptTemplateCatalog.DeserializeLegacySettings(File.ReadAllText(LegacySettingsPath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return [];
+        }
     }
 
     public async Task<bool> SetOllamaEndpointAsync(string value)
