@@ -9,7 +9,12 @@ public static class ConversationSearch
         var search = query?.Trim();
         if (string.IsNullOrWhiteSpace(search)) return true;
         if ((conversation.Title ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)) return true;
-        return conversation.Messages.Any(message => (message.Content ?? "").Contains(search, StringComparison.OrdinalIgnoreCase));
+        if (conversation.Messages.Any(message => (message.Content ?? "").Contains(search, StringComparison.OrdinalIgnoreCase))) return true;
+
+        var terms = search.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return terms.Length > 1 && terms.All(term =>
+            (conversation.Title ?? "").Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            conversation.Messages.Any(message => (message.Content ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)));
     }
 
     public static bool IsInScope(Conversation conversation, string? activeWorkspacePath, bool includeAllProjects)
@@ -30,16 +35,20 @@ public static class ConversationSearch
     {
         var search = query?.Trim();
         if (string.IsNullOrWhiteSpace(search) || maxLength < 12) return null;
-        foreach (var message in conversation.Messages)
+        var excerpts = new[] { search }.Concat(search.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Where(term => !string.Equals(term, search, StringComparison.OrdinalIgnoreCase)));
+        foreach (var term in excerpts)
         {
-            var content = message.Content ?? "";
-            var index = content.IndexOf(search, StringComparison.OrdinalIgnoreCase);
-            if (index < 0) continue;
-            var excerptLength = Math.Max(maxLength, search.Length + 24);
-            var start = Math.Max(0, index - excerptLength / 3);
-            var length = Math.Min(content.Length - start, excerptLength);
-            var excerpt = string.Join(' ', content.Substring(start, length).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-            return (start > 0 ? "…" : "") + excerpt + (start + length < content.Length ? "…" : "");
+            foreach (var message in conversation.Messages)
+            {
+                var content = message.Content ?? "";
+                var index = content.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+                if (index < 0) continue;
+                var excerptLength = Math.Max(maxLength, term.Length + 24);
+                var start = Math.Max(0, index - excerptLength / 3);
+                var length = Math.Min(content.Length - start, excerptLength);
+                var excerpt = string.Join(' ', content.Substring(start, length).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+                return (start > 0 ? "…" : "") + excerpt + (start + length < content.Length ? "…" : "");
+            }
         }
         return null;
     }

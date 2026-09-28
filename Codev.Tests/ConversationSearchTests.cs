@@ -35,6 +35,33 @@ public sealed class ConversationSearchTests
     }
 
     [Fact]
+    public void Search_matches_all_query_words_even_when_they_are_not_adjacent()
+    {
+        var conversation = new Conversation
+        {
+            Title = "Queue improvements",
+            Messages = [new("user", "Please add a persistent serial runner.")]
+        };
+
+        Assert.True(ConversationSearch.Matches(conversation, "serial queue"));
+        Assert.False(ConversationSearch.Matches(conversation, "serial absent"));
+    }
+
+    [Fact]
+    public void Search_excerpt_falls_back_to_the_first_matching_query_word()
+    {
+        var conversation = new Conversation
+        {
+            Messages = [new("assistant", "The request waits in a persistent serial processing queue.")]
+        };
+
+        var excerpt = ConversationSearch.FindMessageExcerpt(conversation, "serial queue");
+
+        Assert.NotNull(excerpt);
+        Assert.Contains("serial", excerpt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Scope_is_current_workspace_by_default_and_can_include_every_project()
     {
         var projectConversation = new Conversation { ProjectPath = Path.Combine(Path.GetTempPath(), "codev-project") };

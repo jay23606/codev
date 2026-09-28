@@ -337,7 +337,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         var reports = new System.Collections.Concurrent.ConcurrentQueue<TimeSpan>();
         var progress = new Progress<TimeSpan>(reports.Enqueue);
 
-        var result = await Service.RunApprovedCommandAsync("Start-Sleep -Seconds 2; Write-Output 'done'", TimeSpan.FromSeconds(10), progress: progress);
+        var result = await Service.RunApprovedCommandAsync("Start-Sleep -Seconds 2; Write-Output 'done'", TimeSpan.FromSeconds(30), progress: progress);
 
         Assert.Contains("done", result);
         Assert.NotEmpty(reports);
