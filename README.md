@@ -93,9 +93,8 @@ GitHub Actions builds `Codev.Core` and the Avalonia prototype and runs the porta
 
 ## Local models
 
-Codev discovers installed models from Ollama at startup and refreshes the picker when it opens. The three models from the original setup receive friendly labels; other installed Ollama tags, including Qwen3.8-27B, are listed automatically:
+Codev discovers installed models from Ollama at startup and refreshes the picker when it opens. Two models from the original setup receive friendly labels; other installed Ollama tags, including Qwen3.8-27B, are listed automatically:
 
-- `devstral-small-2-64k`
 - `qwen3-coder-next-q2-24k`
 - `qwen3-coder:30b`
 

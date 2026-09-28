@@ -3,7 +3,6 @@ namespace Codev.Tests;
 public sealed class OllamaContextSizesTests
 {
     [Theory]
-    [InlineData("devstral-small-2-64k:latest", 65_536)]
     [InlineData("qwen3-coder:30b", 65_536)]
     [InlineData("qwen3-coder-next-q2-24k", 24_576)]
     [InlineData("hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L", 24_576)]

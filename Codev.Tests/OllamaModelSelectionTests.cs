@@ -5,17 +5,17 @@ public sealed class OllamaModelSelectionTests
     [Fact]
     public void Resolves_a_saved_alias_to_the_actual_installed_latest_tag()
     {
-        var resolved = OllamaModelSelection.ResolveInstalledTag("devstral-small-2-64k", ["qwen3.8:27b", "devstral-small-2-64k:latest"]);
+        var resolved = OllamaModelSelection.ResolveInstalledTag("qwen3-coder-next-q2-24k", ["qwen3.8:27b", "qwen3-coder-next-q2-24k:latest"]);
 
-        Assert.Equal("devstral-small-2-64k:latest", resolved);
+        Assert.Equal("qwen3-coder-next-q2-24k:latest", resolved);
     }
 
     [Fact]
     public void Resolves_saved_alias_against_the_selectable_installed_choice()
     {
-        var resolved = OllamaModelSelection.ResolveInstalledTag("devstral-small-2-64k", ["devstral-small-2-64k:latest"]);
+        var resolved = OllamaModelSelection.ResolveInstalledTag("qwen3-coder-next-q2-24k", ["qwen3-coder-next-q2-24k:latest"]);
 
-        Assert.Equal("devstral-small-2-64k:latest", resolved);
+        Assert.Equal("qwen3-coder-next-q2-24k:latest", resolved);
     }
 
     [Fact]

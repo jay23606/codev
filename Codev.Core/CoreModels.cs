@@ -10,7 +10,7 @@ public sealed class Conversation
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = "";
     public string Draft { get; set; } = "";
-    public string Model { get; set; } = "devstral-small-2-64k";
+    public string Model { get; set; } = "qwen3-coder:30b";
     public int NumCtx { get; set; }
     public double? Temperature { get; set; }
     public int LastPromptTokens { get; set; }

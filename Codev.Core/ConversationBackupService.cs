@@ -55,7 +55,7 @@ public static class ConversationBackupService
 
             item.Id = Guid.NewGuid();
             item.Title = Limit(item.Title, 300, "Imported conversation");
-            item.Model = Limit(item.Model, 200, "devstral-small-2-64k");
+            item.Model = Limit(item.Model, 200, "qwen3-coder:30b");
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
             item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];

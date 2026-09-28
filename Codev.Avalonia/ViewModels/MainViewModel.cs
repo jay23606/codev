@@ -27,7 +27,7 @@ public sealed class MainViewModel : ViewModelBase
     private Codev.Conversation? _active;
     private string _searchText = "";
     private string _draft = "";
-    private string _model = "devstral-small-2-64k";
+    private string _model = "qwen3-coder:30b";
     private int _contextSize;
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly SemaphoreSlim _persistGate = new(1, 1);
@@ -513,7 +513,6 @@ public sealed class MainViewModel : ViewModelBase
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
             var known = new (string Display, string[] Aliases)[]
             {
-                ("Devstral Small 2 · Q4 · 64K", ["devstral-small-2-64k", "devstral-small-2:q4_k_m", "hf.co/bartowski/mistralai_Devstral-Small-2-24B-Instruct-2512-GGUF:Q4_K_M"]),
                 ("Qwen3-Coder-Next · Q2 · 24K", ["qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l", "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L"]),
                 ("Qwen3-Coder 30B · Q4 · 64K", ["qwen3-coder:30b"])
             };

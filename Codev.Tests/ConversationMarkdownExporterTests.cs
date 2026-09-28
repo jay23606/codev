@@ -10,7 +10,7 @@ public sealed class ConversationMarkdownExporterTests
         var conversation = new Conversation
         {
             Title = "Fix startup",
-            Model = "devstral-small-2-64k:latest",
+            Model = "qwen3-coder:30b",
             ProjectPath = Path.Combine(Path.GetTempPath(), "sample-project"),
             ContextFiles = [Path.Combine("src", "App.cs")],
             Messages = [new ChatMessage("user", "Find the startup issue."), new ChatMessage("assistant", "I found it in `App.cs`.")],
@@ -20,7 +20,7 @@ public sealed class ConversationMarkdownExporterTests
         var markdown = ConversationMarkdownExporter.Export(conversation);
 
         Assert.Contains("# Fix startup", markdown);
-        Assert.Contains("**Model:** devstral-small-2-64k:latest", markdown);
+        Assert.Contains("**Model:** qwen3-coder:30b", markdown);
         Assert.Contains("**Project:** sample-project", markdown);
         Assert.Contains("`src/App.cs`", markdown);
         Assert.Contains("## You", markdown);

@@ -15,7 +15,7 @@ public sealed class ConversationBackupServiceTests
             Id = Guid.NewGuid(),
             Title = "Debug session",
             Draft = "an unsent prompt draft",
-            Model = "devstral-small-2-64k",
+            Model = "qwen3-coder:30b",
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
             PendingRequestCount = 3,

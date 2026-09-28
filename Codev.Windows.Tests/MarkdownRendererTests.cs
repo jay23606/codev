@@ -70,7 +70,7 @@ public sealed class MarkdownRendererTests
         {
             try
             {
-                var rendered = MarkdownRenderer.Render("| Model | Context |\n| :--- | ---: |\n| Devstral | 64K |", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral);
+                var rendered = MarkdownRenderer.Render("| Model | Context |\n| :--- | ---: |\n| Qwen3-Coder | 64K |", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral);
                 var frame = rendered.Children.OfType<Border>().Single();
                 var scroll = (ScrollViewer)frame.Child!;
                 var grid = (Grid)scroll.Content;
