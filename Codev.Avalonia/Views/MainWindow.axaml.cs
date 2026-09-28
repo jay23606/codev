@@ -601,6 +601,8 @@ public partial class MainWindow : Window
     private async void AdvancedModelSettings_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation) return;
+        var primaryLabelBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#ECECEC" : "#262522"));
+        var secondaryLabelBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#B0B0B0" : "#65625D"));
         var hints = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["temperature"] = "0–2 · Lower values make replies more predictable; higher values add variety.",
@@ -620,18 +622,27 @@ public partial class MainWindow : Window
             ["num_predict"] = SettingField(hints["num_predict"], conversation.NumPredict)
         };
         var presetPicker = new ComboBox { MinWidth = 180, ItemsSource = viewModel.SamplingPresets.Select(preset => preset.Name).ToArray() };
+        var emptyPresetsNotice = new TextBlock
+        {
+            Text = "No saved presets yet. Use Save / update… to save these settings, or Import… to add a preset.",
+            Foreground = secondaryLabelBrush,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MaxWidth = 470
+        };
         var presetStatus = new TextBlock
         {
-            Text = viewModel.SamplingPresets.Count == 0 ? "No saved presets yet. Presets are optional and user-defined." : $"{viewModel.SamplingPresets.Count} saved preset(s)",
-            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush,
+            Text = viewModel.SamplingPresets.Count == 0 ? "" : $"{viewModel.SamplingPresets.Count} saved preset(s)",
+            Foreground = secondaryLabelBrush,
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         };
         void RefreshPresets(string? selectName = null)
         {
             presetPicker.ItemsSource = viewModel.SamplingPresets.Select(preset => preset.Name).ToArray();
+            presetPicker.IsVisible = viewModel.SamplingPresets.Count > 0;
+            emptyPresetsNotice.IsVisible = viewModel.SamplingPresets.Count == 0;
             presetPicker.SelectedIndex = -1;
             if (selectName is not null) presetPicker.SelectedItem = selectName;
-            presetStatus.Text = viewModel.SamplingPresets.Count == 0 ? "No saved presets yet. Presets are optional and user-defined." : $"{viewModel.SamplingPresets.Count} saved preset(s)";
+            presetStatus.Text = viewModel.SamplingPresets.Count == 0 ? "" : $"{viewModel.SamplingPresets.Count} saved preset(s)";
         }
         var applyPreset = new Button { Content = "Apply", Classes = { "soft" }, IsEnabled = false };
         var savePreset = new Button { Content = "Save / update…", Classes = { "soft" } };
@@ -750,12 +761,13 @@ public partial class MainWindow : Window
             Text = "Blank means the model's default. Values are saved with this conversation and captured for queued turns. Maximum tokens limits the combined reasoning and answer output; a higher limit can take longer and use more memory. Loading defaults reads this model's metadata from the configured Ollama server; unlisted values may be runtime defaults.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             MaxWidth = 470,
-            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+            Foreground = secondaryLabelBrush
         });
         var loadDefaults = new Button { Content = "Load model defaults…", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left };
-        var status = new TextBlock { Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
-        panel.Children.Add(new TextBlock { Text = "Your sampling presets", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        var status = new TextBlock { Foreground = secondaryLabelBrush, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
+        panel.Children.Add(new TextBlock { Text = "Your sampling presets", Foreground = primaryLabelBrush, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
         panel.Children.Add(presetPicker);
+        panel.Children.Add(emptyPresetsNotice);
         panel.Children.Add(new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 6, Children = { applyPreset, savePreset, removePreset } });
         panel.Children.Add(new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 6, Children = { importPreset, exportPreset } });
         panel.Children.Add(presetStatus);
@@ -764,7 +776,7 @@ public partial class MainWindow : Window
         panel.Children.Add(new TextBlock
         {
             Text = "Sampling parameters",
-            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+            Foreground = primaryLabelBrush,
             FontSize = 13,
             FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
             Margin = new Thickness(0, 8, 0, 2)
@@ -775,7 +787,7 @@ public partial class MainWindow : Window
             header.Children.Add(new TextBlock
             {
                 Text = name,
-                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+                Foreground = primaryLabelBrush,
                 FontSize = 12,
                 FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
                 VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center
@@ -789,7 +801,7 @@ public partial class MainWindow : Window
             {
                 Text = hints[name],
                 TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-                Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush,
+                Foreground = secondaryLabelBrush,
                 MaxWidth = 470,
                 FontSize = 11
             });
@@ -811,7 +823,7 @@ public partial class MainWindow : Window
             MinHeight = 560,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = opaqueBackground,
-            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+            Foreground = primaryLabelBrush,
             Content = new Border
             {
                 Background = opaqueBackground,

@@ -275,6 +275,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
     public string ThemeLabel => _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
+    public bool IsDarkTheme => _isDarkTheme;
     public string OllamaEndpointDisplay => _ollamaEndpoint.ToString().TrimEnd('/');
     public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0 ? "■" : "↑";
     public bool HasPendingDiffComments => PendingDiffComments.Count > 0;
@@ -2203,6 +2204,7 @@ public sealed class MainViewModel : ViewModelBase
         _isDarkTheme = !_isDarkTheme;
         if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
         OnPropertyChanged(nameof(ThemeLabel));
+        OnPropertyChanged(nameof(IsDarkTheme));
         PersistSettings();
     }
 
@@ -2224,6 +2226,7 @@ public sealed class MainViewModel : ViewModelBase
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { _isDarkTheme = true; }
         if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
         OnPropertyChanged(nameof(ThemeLabel));
+        OnPropertyChanged(nameof(IsDarkTheme));
         OnPropertyChanged(nameof(ReadingWidth));
         OnPropertyChanged(nameof(IsCompactReadingWidth));
         OnPropertyChanged(nameof(IsStandardReadingWidth));
