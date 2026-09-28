@@ -4,15 +4,18 @@ using System.Text.RegularExpressions;
 
 namespace Codev;
 
-public sealed record GitFileStatus(string Staged, string WorkingTree, string Path)
+public sealed record GitFileStatus(string Staged, string WorkingTree, string Path, string? OriginalPath = null)
 {
     public string State => $"{Staged}{WorkingTree}";
+    public string DisplayPath => OriginalPath is null ? Path : $"{Path} ← {OriginalPath}";
 }
 
 public sealed record GitRepositoryStatus(string Root, string Branch, string? Upstream, int Ahead, int Behind, IReadOnlyList<GitFileStatus> Files)
 {
     public bool HasChanges => Files.Count > 0;
 }
+
+public sealed record GitStagedReview(string TreeId, string Diff);
 
 /// <summary>Reads Git state and switches only between existing local branches on a clean worktree.</summary>
 public sealed class GitRepositoryService
@@ -63,9 +66,10 @@ public sealed class GitRepositoryService
             var staged = line[..1];
             var workingTree = line.Substring(1, 1);
             var path = line[3..];
-            if ((staged is "R" or "C" || workingTree is "R" or "C") && index + 1 < entries.Length)
-                path += " ← " + entries[++index];
-            files.Add(new GitFileStatus(staged, workingTree, path));
+            var originalPath = (staged is "R" or "C" || workingTree is "R" or "C") && index + 1 < entries.Length
+                ? entries[++index]
+                : null;
+            files.Add(new GitFileStatus(staged, workingTree, path, originalPath));
         }
         return new GitRepositoryStatus(root, branch, upstream, ahead, behind, files);
     }
@@ -87,6 +91,100 @@ public sealed class GitRepositoryService
         if (string.Equals(status.Branch, branch, StringComparison.Ordinal)) return;
         var result = await RunGitAsync(["switch", "--", branch], cancellationToken);
         EnsureSuccess(result, "Git could not switch to the selected branch.");
+    }
+
+    public async Task<string> GetFileDiffAsync(GitFileStatus file, CancellationToken cancellationToken = default)
+    {
+        var status = await GetStatusAsync(cancellationToken);
+        var current = status.Files.FirstOrDefault(candidate => string.Equals(candidate.Path, file.Path, StringComparison.Ordinal));
+        if (current is null) throw new InvalidOperationException("That file is no longer changed in the repository. Refresh Git status and select it again.");
+
+        var output = new System.Text.StringBuilder();
+        if (current.Staged != " ")
+        {
+            output.AppendLine("STAGED CHANGES");
+            output.AppendLine(await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken));
+        }
+        if (current.WorkingTree == "?")
+        {
+            output.AppendLine("UNTRACKED FILE");
+            var diff = await RunGitAsync(["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", current.Path], cancellationToken);
+            if (diff.ExitCode is not 0 and not 1) EnsureSuccess(diff, "Git could not read this untracked file.");
+            output.AppendLine(diff.Output);
+        }
+        else if (current.WorkingTree != " ")
+        {
+            output.AppendLine("UNSTAGED CHANGES");
+            output.AppendLine(await ReadDiffAsync(["diff", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken));
+        }
+        return output.ToString().TrimEnd();
+    }
+
+    public async Task<string> GetStagedDiffAsync(CancellationToken cancellationToken = default) =>
+        await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color"], cancellationToken);
+
+    public async Task<GitStagedReview> GetStagedReviewAsync(CancellationToken cancellationToken = default)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var before = await GetIndexTreeIdAsync(cancellationToken);
+            var diff = await GetStagedDiffAsync(cancellationToken);
+            var after = await GetIndexTreeIdAsync(cancellationToken);
+            if (string.Equals(before, after, StringComparison.Ordinal)) return new GitStagedReview(after, diff);
+        }
+        throw new InvalidOperationException("The Git index is changing too quickly to produce a stable review. Refresh and try again.");
+    }
+
+    public async Task StageFileAsync(string path, CancellationToken cancellationToken = default)
+    {
+        await EnsureChangedPathAsync(path, cancellationToken);
+        var result = await RunGitAsync(["add", "--", path], cancellationToken);
+        EnsureSuccess(result, "Git could not stage this file.");
+    }
+
+    public async Task UnstageFileAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var file = await EnsureChangedPathAsync(path, cancellationToken);
+        if (file.Staged == " ") throw new InvalidOperationException("This file has no staged changes.");
+        var result = await RunGitAsync(["restore", "--staged", "--", path], cancellationToken);
+        EnsureSuccess(result, "Git could not unstage this file.");
+    }
+
+    public async Task CommitAsync(string message, GitStagedReview? expectedReview = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(message)) throw new ArgumentException("Enter a commit message.", nameof(message));
+        var status = await GetStatusAsync(cancellationToken);
+        if (!status.Files.Any(file => file.Staged != " ")) throw new InvalidOperationException("Stage at least one file before creating a commit.");
+        if (expectedReview is not null)
+        {
+            var currentReview = await GetStagedReviewAsync(cancellationToken);
+            if (!string.Equals(expectedReview.TreeId, currentReview.TreeId, StringComparison.Ordinal) ||
+                !string.Equals(expectedReview.Diff, currentReview.Diff, StringComparison.Ordinal))
+                throw new InvalidOperationException("The staged changes changed after review. Reopen the commit review and confirm the updated diff.");
+        }
+        var result = await RunGitAsync(["commit", "-m", message.Trim()], cancellationToken);
+        EnsureSuccess(result, "Git could not create the commit.");
+    }
+
+    private async Task<GitFileStatus> EnsureChangedPathAsync(string path, CancellationToken cancellationToken)
+    {
+        var status = await GetStatusAsync(cancellationToken);
+        return status.Files.FirstOrDefault(file => string.Equals(file.Path, path, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("That file is no longer changed in the repository. Refresh Git status and select it again.");
+    }
+
+    private async Task<string> ReadDiffAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(arguments, cancellationToken);
+        EnsureSuccess(result, "Git could not read the selected diff.");
+        return result.Output;
+    }
+
+    private async Task<string> GetIndexTreeIdAsync(CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(["write-tree"], cancellationToken);
+        EnsureSuccess(result, "Git could not snapshot the staged index for review.");
+        return result.Output.Trim();
     }
 
     private async Task<GitCommandResult> RunGitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)

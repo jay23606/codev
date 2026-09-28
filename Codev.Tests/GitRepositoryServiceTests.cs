@@ -27,6 +27,7 @@ public sealed class GitRepositoryServiceTests
             Assert.Equal("main", clean.Branch);
             Assert.False(clean.HasChanges);
             Assert.Contains("feature/test", await service.GetLocalBranchesAsync());
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CommitAsync("empty commit"));
 
             await service.SwitchBranchAsync("feature/test");
             Assert.Equal("feature/test", (await service.GetStatusAsync()).Branch);
@@ -37,6 +38,33 @@ public sealed class GitRepositoryServiceTests
             Assert.Contains(dirty.Files, entry => entry.Path == "read me.txt" && entry.WorkingTree == "M");
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.SwitchBranchAsync("main"));
             Assert.Equal("feature/test", (await service.GetStatusAsync()).Branch);
+
+            var modification = dirty.Files.Single(entry => entry.Path == "read me.txt");
+            Assert.Contains("modified", await service.GetFileDiffAsync(modification), StringComparison.Ordinal);
+            await service.StageFileAsync(modification.Path);
+            var staged = Assert.Single((await service.GetStatusAsync()).Files);
+            Assert.Equal("M ", staged.State);
+            Assert.Contains("modified", await service.GetStagedDiffAsync(), StringComparison.Ordinal);
+            await service.UnstageFileAsync(modification.Path);
+            Assert.Equal(" M", Assert.Single((await service.GetStatusAsync()).Files).State);
+
+            var untracked = Path.Combine(root, "new file.txt");
+            await File.WriteAllTextAsync(untracked, "new content\n");
+            var untrackedStatus = (await service.GetStatusAsync()).Files.Single(entry => entry.Path == "new file.txt");
+            Assert.Equal("??", untrackedStatus.State);
+            Assert.Contains("new content", await service.GetFileDiffAsync(untrackedStatus), StringComparison.Ordinal);
+
+            await service.StageFileAsync("read me.txt");
+            await service.StageFileAsync("new file.txt");
+            Assert.Contains("new content", await service.GetStagedDiffAsync(), StringComparison.Ordinal);
+            var reviewedDiff = await service.GetStagedReviewAsync();
+            await File.AppendAllTextAsync(untracked, "updated after review\n");
+            await service.StageFileAsync("new file.txt");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CommitAsync("stale review", reviewedDiff));
+            Assert.True((await service.GetStatusAsync()).HasChanges);
+            reviewedDiff = await service.GetStagedReviewAsync();
+            await service.CommitAsync("Save reviewed changes", reviewedDiff);
+            Assert.False((await service.GetStatusAsync()).HasChanges);
         }
         finally
         {

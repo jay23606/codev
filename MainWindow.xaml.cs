@@ -507,8 +507,32 @@ public partial class MainWindow : Window
         DockPanel.SetDock(header, Dock.Top);
         layout.Children.Add(header);
 
+        var body = new Grid();
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var left = new DockPanel { Margin = new Thickness(0, 0, 10, 0) };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        DockPanel.SetDock(actions, Dock.Bottom);
+        var stageButton = new Button { Content = "Stage selected", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(10, 6, 10, 6), IsEnabled = false };
+        actions.Children.Add(stageButton);
+        var commitButton = new Button { Content = "Review staged diff & commit…", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(10, 6, 10, 6), Margin = new Thickness(7, 0, 0, 0), IsEnabled = false };
+        actions.Children.Add(commitButton);
+        left.Children.Add(actions);
         var files = new ListBox { Background = ThemeBrush("MainSurfaceAltBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), Foreground = ThemeBrush("MainTextBrush") };
-        layout.Children.Add(files);
+        left.Children.Add(files);
+        var diffVersion = 0;
+        Grid.SetColumn(left, 0);
+        body.Children.Add(left);
+        var diffBox = new TextBox
+        {
+            IsReadOnly = true, AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.NoWrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            FontFamily = new FontFamily("Consolas"), FontSize = 11, Background = ThemeBrush("MainSurfaceAltBrush"),
+            Foreground = ThemeBrush("MainTextBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), Padding = new Thickness(10)
+        };
+        Grid.SetColumn(diffBox, 1);
+        body.Children.Add(diffBox);
+        layout.Children.Add(body);
         dialog.Content = layout;
 
         void RenderStatus(GitRepositoryStatus value)
@@ -516,17 +540,22 @@ public partial class MainWindow : Window
             var tracking = value.Upstream is null ? "no upstream" : value.Upstream + (value.Ahead > 0 || value.Behind > 0 ? $" · ahead {value.Ahead}, behind {value.Behind}" : " · up to date");
             summary.Text = value.HasChanges ? $"{value.Files.Count} changed file(s) · {tracking}" : $"Working tree clean · {tracking}";
             files.Items.Clear();
+            stageButton.IsEnabled = false;
+            diffBox.Text = value.HasChanges ? "Select a changed file to inspect its staged and unstaged diff." : "The working tree is clean.";
             if (!value.HasChanges)
                 files.Items.Add(new ListBoxItem { Content = "No staged, unstaged, or untracked changes.", IsEnabled = false, Padding = new Thickness(8) });
             foreach (var file in value.Files)
                 files.Items.Add(new ListBoxItem
                 {
-                    Content = $"{file.State.Replace(' ', '·')}   {file.Path}",
-                    ToolTip = $"Index: {file.Staged} · Working tree: {file.WorkingTree} · {file.Path}",
-                    FontFamily = new FontFamily("Consolas"), Padding = new Thickness(8)
+                    Content = $"{file.State.Replace(' ', '·')}   {file.DisplayPath}",
+                    ToolTip = $"Index: {file.Staged} · Working tree: {file.WorkingTree} · {file.DisplayPath}",
+                    FontFamily = new FontFamily("Consolas"), Padding = new Thickness(8), Tag = file
                 });
-            switchButton.IsEnabled = !value.HasChanges && branches.Count > 0 && branchPicker.SelectedItem is string selected && selected != value.Branch;
+            commitButton.IsEnabled = value.Files.Any(file => file.Staged != " ");
+            UpdateSwitchControl();
         }
+
+        void UpdateSwitchControl() => switchButton.IsEnabled = !status.HasChanges && branches.Count > 0 && branchPicker.SelectedItem is string selected && selected != status.Branch;
 
         async Task RefreshAsync()
         {
@@ -543,10 +572,101 @@ public partial class MainWindow : Window
                 summary.Text = "Could not refresh Git status: " + ex.Message;
                 files.Items.Clear();
                 switchButton.IsEnabled = false;
+                stageButton.IsEnabled = false;
+                commitButton.IsEnabled = false;
+                diffBox.Text = "Git status could not be loaded.";
             }
         }
 
-        branchPicker.SelectionChanged += (_, _) => RenderStatus(status);
+        files.SelectionChanged += async (_, _) =>
+        {
+            var version = ++diffVersion;
+            if (files.SelectedItem is not ListBoxItem { Tag: GitFileStatus file })
+            {
+                stageButton.IsEnabled = false;
+                return;
+            }
+            stageButton.Content = file.Staged != " " && file.WorkingTree == " " ? "Unstage selected" : "Stage selected";
+            stageButton.IsEnabled = true;
+            diffBox.Text = "Loading diff…";
+            try
+            {
+                var diff = await service.GetFileDiffAsync(file);
+                if (version != diffVersion) return;
+                diffBox.Text = string.IsNullOrWhiteSpace(diff) ? "Git reported no textual diff for this file (it may be binary or unchanged since the index was refreshed)." : diff;
+            }
+            catch (Exception ex) { if (version == diffVersion) diffBox.Text = "Could not load diff: " + ex.Message; }
+        };
+        stageButton.Click += async (_, _) =>
+        {
+            if (files.SelectedItem is not ListBoxItem { Tag: GitFileStatus file }) return;
+            try
+            {
+                if (file.Staged != " " && file.WorkingTree == " ") await service.UnstageFileAsync(file.Path);
+                else await service.StageFileAsync(file.Path);
+                await RefreshAsync();
+            }
+            catch (Exception ex) { MessageBox.Show(dialog, $"Could not update the Git index.\n\n{ex.Message}", "Stage change", MessageBoxButton.OK, MessageBoxImage.Error); await RefreshAsync(); }
+        };
+        commitButton.Click += async (_, _) =>
+        {
+            var stagedReview = await service.GetStagedReviewAsync();
+            var diff = stagedReview.Diff;
+            if (string.IsNullOrWhiteSpace(diff))
+            {
+                MessageBox.Show(dialog, "There are no staged textual changes to review.", "Review staged changes", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var commitDialog = new Window
+            {
+                Title = "Review staged changes", Width = 900, Height = 680, MinWidth = 640, MinHeight = 440,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = dialog,
+                Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize
+            };
+            var commitLayout = new DockPanel { Margin = new Thickness(16) };
+            var commitActions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            DockPanel.SetDock(commitActions, Dock.Bottom);
+            var cancelCommit = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+            var createCommit = new Button { Content = "Create local commit", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+            commitActions.Children.Add(cancelCommit); commitActions.Children.Add(createCommit);
+            commitLayout.Children.Add(commitActions);
+            var commitMessage = new TextBox { Height = 34, Margin = new Thickness(0, 0, 0, 10), Padding = new Thickness(8, 6, 8, 6), ToolTip = "Commit message" };
+            DockPanel.SetDock(commitMessage, Dock.Bottom);
+            commitLayout.Children.Add(commitMessage);
+            var review = new DockPanel();
+            var reviewIntro = new TextBlock { Text = "Review the exact staged diff below. Unstaged working-tree edits will not be included in this commit.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 8) };
+            DockPanel.SetDock(reviewIntro, Dock.Top); review.Children.Add(reviewIntro);
+            review.Children.Add(new TextBox
+            {
+                Text = diff, IsReadOnly = true, AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.NoWrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                FontFamily = new FontFamily("Consolas"), FontSize = 11, Background = ThemeBrush("MainSurfaceAltBrush"),
+                Foreground = ThemeBrush("MainTextBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), Padding = new Thickness(10)
+            });
+            commitLayout.Children.Add(review);
+            commitDialog.Content = commitLayout;
+            createCommit.Click += async (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(commitMessage.Text)) { MessageBox.Show(commitDialog, "Enter a commit message.", "Commit message required", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+                var confirmation = MessageBox.Show(commitDialog, $"Create a local commit with this message?\n\n{commitMessage.Text.Trim()}\n\nThis will not push to GitHub.", "Confirm local commit", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (confirmation != MessageBoxResult.Yes) return;
+                createCommit.IsEnabled = false;
+                try
+                {
+                    await service.CommitAsync(commitMessage.Text, stagedReview);
+                    commitDialog.DialogResult = true;
+                    commitDialog.Close();
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    createCommit.IsEnabled = true;
+                    MessageBox.Show(commitDialog, $"Could not create the commit.\n\n{ex.Message}", "Commit failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+            commitDialog.ShowDialog();
+        };
+        branchPicker.SelectionChanged += (_, _) => UpdateSwitchControl();
         refreshButton.Click += async (_, _) => await RefreshAsync();
         switchButton.Click += async (_, _) =>
         {
