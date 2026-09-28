@@ -77,6 +77,10 @@ public sealed class ProjectPathInstructionRuleTests
         Assert.Empty(rule.Globs);
 
         Assert.False(ProjectPathInstructionRuleParser.TryParse("rule.md",
-            "---\ndescription: Rule\nactivation: relevant\nglobs: **/*.cs\n---\nUse the rule.", out _));
+            "---\ndescription: Rule\nactivation: sometimes\nglobs: **/*.cs\n---\nUse the rule.", out _));
+
+        Assert.True(ProjectPathInstructionRuleParser.TryParse("architecture.md",
+            "---\ndescription: Architecture-specific guidance\nactivation: model\n---\nUse existing services.", out var modelRule));
+        Assert.Equal(ProjectPathRuleActivation.ModelRelevant, modelRule!.Activation);
     }
 }

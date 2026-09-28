@@ -13,7 +13,8 @@ public static class ProjectContextReader
         IReadOnlyList<string>? contextExclusions = null,
         bool includeProjectInstructions = false,
         CancellationToken cancellationToken = default,
-        IReadOnlyList<string>? manualRuleNames = null)
+        IReadOnlyList<string>? manualRuleNames = null,
+        IReadOnlyList<string>? relevantRuleNames = null)
     {
         var service = new WorkspaceFileService(projectPath, contextExclusions);
         var files = selectedFiles is { Count: > 0 } ? selectedFiles : service.ListContextFiles(maxEntries: 300);
@@ -41,7 +42,8 @@ public static class ProjectContextReader
         var projectInstructions = includeProjectInstructions
             ? await ProjectAgentInstructions.LoadAsync(service, sourceFiles.Select(file => file.RelativePath).ToArray(),
                 maxCharacters: Math.Min(ProjectAgentInstructions.MaxCharacters, WorkspaceFileService.MaxContextCharacters / 2),
-                cancellationToken: cancellationToken, manualRuleNames: manualRuleNames).ConfigureAwait(false)
+                cancellationToken: cancellationToken, manualRuleNames: manualRuleNames,
+                relevantRuleNames: relevantRuleNames).ConfigureAwait(false)
             : "";
         var output = new StringBuilder();
         if (projectInstructions.Length > 0) output.AppendLine(projectInstructions).AppendLine();

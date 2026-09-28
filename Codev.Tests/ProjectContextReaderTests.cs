@@ -137,6 +137,23 @@ public sealed class ProjectContextReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Model_activation_rules_enter_context_only_when_selected_by_the_relevance_preflight()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, ".codev", "rules"));
+        await File.WriteAllTextAsync(Path.Combine(_root, ".codev", "rules", "selected.md"),
+            "---\ndescription: Relevant guidance\nactivation: model\nglobs: **/*.md\n---\nUse the existing HTTP client.");
+        await File.WriteAllTextAsync(Path.Combine(_root, ".codev", "rules", "unselected.md"),
+            "---\ndescription: Unrelated guidance\nactivation: model\nglobs: **/*.md\n---\nUse a custom binary protocol.");
+        await File.WriteAllTextAsync(Path.Combine(_root, "readme.md"), "Review project architecture.");
+
+        var context = await ProjectContextReader.ReadAsync(_root, ["readme.md"], includeProjectInstructions: true,
+            relevantRuleNames: ["selected"]);
+
+        Assert.Contains("Use the existing HTTP client.", context);
+        Assert.DoesNotContain("Use a custom binary protocol.", context);
+    }
+
+    [Fact]
     public async Task Instructions_and_source_excerpts_share_the_project_context_character_cap()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), new string('g', ProjectAgentInstructions.MaxCharacters));

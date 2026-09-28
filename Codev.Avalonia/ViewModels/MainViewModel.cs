@@ -1371,6 +1371,97 @@ public sealed class MainViewModel : ViewModelBase
 
     private static string TruncateToolOutput(string value, int max = 6000) => value.Length <= max ? value : value[..max] + "\n… [tool output truncated]";
 
+    private async Task<IReadOnlyList<string>> SelectModelRelevantProjectRulesAsync(
+        Codev.PersistedQueuedTurn turn, string task, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !Directory.Exists(turn.ProjectPath)) return [];
+        if (Codev.CloudModelProviders.IsCloud(turn.Provider) &&
+            (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(turn.Provider))) return [];
+        try
+        {
+            var service = new Codev.WorkspaceFileService(turn.ProjectPath, turn.ContextExclusions);
+            var definitions = await Codev.ProjectPathInstructionRuleCatalog.LoadAsync(service, cancellationToken);
+            var candidates = definitions.Where(rule => rule.Activation == Codev.ProjectPathRuleActivation.ModelRelevant)
+                .Select(rule => new Codev.ProjectPathRuleCandidate(Path.GetFileNameWithoutExtension(rule.RelativePath), rule.Description, rule.Globs))
+                .Take(Codev.ProjectPathInstructionRuleCatalog.MaxRules).ToArray();
+            if (candidates.Length == 0) return [];
+
+            await SetConnectionStatusAsync("Checking project rules with the selected model…");
+            var fileCandidates = turn.ContextFiles is { Count: > 0 }
+                ? turn.ContextFiles
+                : service.ListContextFiles(maxEntries: Codev.WorkspaceFileService.MaxContextFiles);
+            var includedFiles = new List<string>();
+            foreach (var candidate in fileCandidates)
+            {
+                if (includedFiles.Count >= Codev.WorkspaceFileService.MaxContextFiles) break;
+                try
+                {
+                    var fullPath = service.ResolvePath(candidate);
+                    var relative = Path.GetRelativePath(service.Root, fullPath).Replace('\\', '/');
+                    if (!File.Exists(fullPath) || service.IsContextExcluded(relative) || !service.IsSupportedContextFile(relative) ||
+                        Path.GetFileName(relative).Equals(Codev.ProjectAgentInstructions.RelativePath, StringComparison.OrdinalIgnoreCase) ||
+                        relative.StartsWith(".codev/rules/", StringComparison.OrdinalIgnoreCase)) continue;
+                    includedFiles.Add(relative);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException) { }
+            }
+            var input = Codev.ProjectPathRuleRelevanceSelection.BuildInput(task, includedFiles, candidates);
+            string responseText;
+            if (Codev.CloudModelProviders.IsCloud(turn.Provider))
+            {
+                if (!_cloudRequestsEnabled || !_cloudApiKeys.TryGetValue(turn.Provider, out var key)) return [];
+                var result = new System.Text.StringBuilder();
+                var messages = new[]
+                {
+                    new Codev.CloudChatMessage("system", Codev.ProjectPathRuleRelevanceSelection.SystemPrompt),
+                    new Codev.CloudChatMessage("user", input)
+                };
+                await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
+                                   turn.Provider, key, turn.Model, messages, cancellationToken, maxOutputTokens: 256))
+                {
+                    if (result.Length + delta.Length > Codev.ProjectPathRuleRelevanceSelection.MaxResponseCharacters) return [];
+                    result.Append(delta);
+                }
+                responseText = result.ToString();
+            }
+            else
+            {
+                var payload = new
+                {
+                    model = turn.Model,
+                    messages = new[]
+                    {
+                        new { role = "system", content = Codev.ProjectPathRuleRelevanceSelection.SystemPrompt },
+                        new { role = "user", content = input }
+                    },
+                    stream = false,
+                    format = "json",
+                    think = false,
+                    options = new { num_predict = 256 }
+                };
+                using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"))
+                { Content = JsonContent.Create(payload) };
+                using var response = await _http.SendAsync(request, cancellationToken);
+                if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Rule relevance request returned HTTP {(int)response.StatusCode}.");
+                using var document = await System.Text.Json.JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+                if (document.RootElement.TryGetProperty("error", out var error))
+                    throw new InvalidOperationException(error.GetString() ?? "Ollama could not evaluate project rules.");
+                responseText = document.RootElement.TryGetProperty("message", out var message) &&
+                               message.TryGetProperty("content", out var content) ? content.GetString() ?? "" : "";
+            }
+            var selected = Codev.ProjectPathRuleRelevanceSelection.ParseResponse(responseText, candidates);
+            await SetConnectionStatusAsync($"Project rule check complete · {selected.Count} selected");
+            return selected;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception)
+        {
+            await SetConnectionStatusAsync("Project rule selection failed; continuing without model-relevance rules.");
+            return [];
+        }
+    }
+
     private async Task ExecuteQueuedTurnAsync(QueuedChatTurn turn)
     {
         var conversation = turn.Conversation;
@@ -1401,11 +1492,16 @@ public sealed class MainViewModel : ViewModelBase
                     savedTurn.IncludeProjectContext, hasSelectedProjectFiles, projectStillTrusted) &&
                 Directory.Exists(savedTurn.ProjectPath))
             {
+                var currentTask = conversation.Messages.Take(assistantIndex).LastOrDefault(message => message.IsUser)?.Content ?? "";
+                var relevantRuleNames = projectStillTrusted
+                    ? await SelectModelRelevantProjectRulesAsync(savedTurn, currentTask, token.Token)
+                    : [];
                 var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
                     savedTurn.ContextFiles, savedTurn.ContextExclusions, includeProjectInstructions: projectStillTrusted,
                     cancellationToken: token.Token,
                     manualRuleNames: Codev.ProjectPathInstructionRuleParser.FindManualMentions(
-                        conversation.Messages.Take(assistantIndex).LastOrDefault(message => message.IsUser)?.Content));
+                        currentTask),
+                    relevantRuleNames: relevantRuleNames);
                 priorMessages.Add(new Codev.ChatMessage("system", projectContext));
                 if (savedTurn.IncludeRepoMap)
                 {

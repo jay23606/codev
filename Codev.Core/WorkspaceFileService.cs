@@ -40,6 +40,9 @@ public sealed class WorkspaceFileService
 
     public string Root => _root;
 
+    public bool IsSupportedContextFile(string relativePath) =>
+        !string.IsNullOrWhiteSpace(relativePath) && SourceExtensions.Contains(Path.GetExtension(relativePath));
+
     public string ResolvePath(string relativePath, bool allowWorkspaceRoot = false)
     {
         if (string.IsNullOrWhiteSpace(relativePath))

@@ -153,6 +153,27 @@ public sealed class CloudModelApiClientTests
     }
 
     [Theory]
+    [InlineData(CloudModelProviders.OpenAI, "max_output_tokens")]
+    [InlineData(CloudModelProviders.Anthropic, "max_tokens")]
+    public async Task Can_cap_hosted_preflight_output_tokens(string provider, string outputTokenField)
+    {
+        string? body = null;
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            var stream = provider == CloudModelProviders.OpenAI
+                ? "data: {\"type\":\"response.completed\"}\n\n"
+                : "data: {\"type\":\"message_stop\"}\n\n";
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(stream, Encoding.UTF8, "text/event-stream") };
+        }));
+
+        await foreach (var _ in new CloudModelApiClient(http).StreamChatAsync(provider, "key", "model",
+                           [new("user", "select rules")], maxOutputTokens: 192)) { }
+
+        Assert.Contains($"\"{outputTokenField}\":192", body);
+    }
+
+    [Theory]
     [InlineData(CloudModelProviders.OpenAI, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")]
     [InlineData(CloudModelProviders.Anthropic, "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n")]
     public async Task Rejects_a_stream_that_ends_without_a_provider_completion_event(string provider, string sse)

@@ -11,7 +11,7 @@ public static class ProjectAgentInstructions
     public static async Task<string> LoadAsync(WorkspaceFileService service,
         IReadOnlyList<string>? applicableFiles = null, int maxCharacters = MaxCharacters,
         CancellationToken cancellationToken = default, IReadOnlyList<string>? manualRuleNames = null,
-        bool includePathRules = true)
+        bool includePathRules = true, IReadOnlyList<string>? relevantRuleNames = null)
     {
         ArgumentNullException.ThrowIfNull(service);
         if (maxCharacters <= 0) return "";
@@ -62,7 +62,8 @@ public static class ProjectAgentInstructions
         }
 
         if (includePathRules)
-            entries.AddRange(await LoadApplicablePathRulesAsync(service, applicableFiles ?? [], manualRuleNames ?? [], cancellationToken).ConfigureAwait(false));
+            entries.AddRange(await LoadApplicablePathRulesAsync(service, applicableFiles ?? [], manualRuleNames ?? [],
+                relevantRuleNames ?? [], cancellationToken).ConfigureAwait(false));
 
         foreach (var (relativePath, content) in entries)
         {
@@ -87,51 +88,32 @@ public static class ProjectAgentInstructions
     }
 
     private static async Task<IReadOnlyList<(string RelativePath, string Content)>> LoadApplicablePathRulesAsync(
-        WorkspaceFileService service, IReadOnlyList<string> applicableFiles, IReadOnlyList<string> manualRuleNames, CancellationToken cancellationToken)
+        WorkspaceFileService service, IReadOnlyList<string> applicableFiles, IReadOnlyList<string> manualRuleNames,
+        IReadOnlyList<string> relevantRuleNames, CancellationToken cancellationToken)
     {
-        const string rulesDirectory = ".codev/rules";
         var result = new List<(string RelativePath, string Content)>();
-        try
+        var rules = await ProjectPathInstructionRuleCatalog.LoadAsync(service, cancellationToken).ConfigureAwait(false);
+        foreach (var rule in rules)
         {
-            if (service.IsContextExcluded(rulesDirectory)) return result;
-            var folder = service.ResolvePath(rulesDirectory, allowWorkspaceRoot: true);
-            if (!Directory.Exists(folder)) return result;
-            foreach (var path in Directory.EnumerateFiles(folder, "*.md", SearchOption.TopDirectoryOnly)
-                         .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).Take(33))
+            cancellationToken.ThrowIfCancellationRequested();
+            var name = Path.GetFileNameWithoutExtension(rule.RelativePath);
+            var applies = rule.Activation == ProjectPathRuleActivation.Always ||
+                          manualRuleNames.Contains(name, StringComparer.OrdinalIgnoreCase) ||
+                          (rule.Activation == ProjectPathRuleActivation.ModelRelevant && relevantRuleNames.Contains(name, StringComparer.OrdinalIgnoreCase));
+            foreach (var file in rule.Activation == ProjectPathRuleActivation.MatchingFiles ? applicableFiles : [])
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var relative = Path.GetRelativePath(service.Root, path).Replace('\\', '/');
-                if (result.Count >= 32 || service.IsContextExcluded(relative)) continue;
+                if (applies) break;
                 try
                 {
-                    var contents = await ProjectPathInstructionRuleParser.ReadDefinitionAsync(service, relative, cancellationToken).ConfigureAwait(false);
-                    if (contents is null || !ProjectPathInstructionRuleParser.TryParse(relative, contents, out var rule) || rule is null) continue;
-                    var name = Path.GetFileNameWithoutExtension(relative);
-                    var applies = rule.Activation == ProjectPathRuleActivation.Always ||
-                                  manualRuleNames.Contains(name, StringComparer.OrdinalIgnoreCase);
-                    foreach (var file in applicableFiles)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        try
-                        {
-                            var resolved = service.ResolvePath(file);
-                            var relativeFile = Path.GetRelativePath(service.Root, resolved).Replace('\\', '/');
-                            if (!service.IsContextExcluded(relativeFile) && ProjectPathInstructionRuleParser.AppliesTo(rule, relativeFile))
-                            {
-                                applies = true;
-                                break;
-                            }
-                        }
-                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException) { }
-                    }
-                    if (applies) result.Add((relative, $"{rule.Description}\n{rule.Instructions}"));
+                    var resolved = service.ResolvePath(file);
+                    var relativeFile = Path.GetRelativePath(service.Root, resolved).Replace('\\', '/');
+                    if (!service.IsContextExcluded(relativeFile) && ProjectPathInstructionRuleParser.AppliesTo(rule, relativeFile))
+                        applies = true;
                 }
-                catch (OperationCanceledException) { throw; }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException) { }
             }
+            if (applies) result.Add((rule.RelativePath, $"{rule.Description}\n{rule.Instructions}"));
         }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException) { }
         return result;
     }
 }

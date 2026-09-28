@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Codev;
 
-public enum ProjectPathRuleActivation { MatchingFiles, Always }
+public enum ProjectPathRuleActivation { MatchingFiles, Always, ModelRelevant }
 
 public sealed record ProjectPathInstructionRule(string RelativePath, string Description, IReadOnlyList<string> Globs,
     string Instructions, ProjectPathRuleActivation Activation = ProjectPathRuleActivation.MatchingFiles);
@@ -42,6 +42,7 @@ public static class ProjectPathInstructionRuleParser
             {
                 if (value.Equals("always", StringComparison.OrdinalIgnoreCase)) activation = ProjectPathRuleActivation.Always;
                 else if (value.Equals("files", StringComparison.OrdinalIgnoreCase)) activation = ProjectPathRuleActivation.MatchingFiles;
+                else if (value.Equals("model", StringComparison.OrdinalIgnoreCase)) activation = ProjectPathRuleActivation.ModelRelevant;
                 else return false;
             }
             else return false;

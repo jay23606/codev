@@ -92,15 +92,17 @@ public sealed class CloudModelApiClient(HttpClient http)
         string apiKey,
         string model,
         IReadOnlyList<CloudChatMessage> messages,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        int? maxOutputTokens = null)
     {
         Validate(provider, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose a hosted model first.", nameof(model));
+        if (maxOutputTokens is <= 0 or > 2048) throw new ArgumentOutOfRangeException(nameof(maxOutputTokens));
 
         var endpoint = provider == CloudModelProviders.OpenAI ? new Uri(OpenAiBase, "responses") : new Uri(AnthropicBase, "messages");
         var payload = provider == CloudModelProviders.OpenAI
-            ? BuildOpenAiPayload(model, messages)
-            : BuildAnthropicPayload(model, messages);
+            ? BuildOpenAiPayload(model, messages, maxOutputTokens)
+            : BuildAnthropicPayload(model, messages, maxOutputTokens);
         using var request = CreateRequest(HttpMethod.Post, endpoint, provider, apiKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         request.Content = JsonContent.Create(payload);
@@ -156,22 +158,33 @@ public sealed class CloudModelApiClient(HttpClient http)
             throw new IOException($"The {ProviderDisplayName(provider)} stream ended before the provider reported a completed response.");
     }
 
-    private static object BuildOpenAiPayload(string model, IReadOnlyList<CloudChatMessage> messages) => new
+    private static object BuildOpenAiPayload(string model, IReadOnlyList<CloudChatMessage> messages, int? maxOutputTokens)
     {
-        model,
-        input = messages.Select(message => new { role = NormalizeRole(message.Role), content = message.Content }).ToArray(),
-        stream = true,
-        store = false
-    };
+        var payload = new Dictionary<string, object>
+        {
+            ["model"] = model,
+            ["input"] = messages.Select(message => new { role = NormalizeRole(message.Role), content = message.Content }).ToArray(),
+            ["stream"] = true,
+            ["store"] = false
+        };
+        if (maxOutputTokens is { } max) payload["max_output_tokens"] = max;
+        return payload;
+    }
 
-    private static object BuildAnthropicPayload(string model, IReadOnlyList<CloudChatMessage> messages)
+    private static object BuildAnthropicPayload(string model, IReadOnlyList<CloudChatMessage> messages, int? maxOutputTokens)
     {
         var system = string.Join("\n\n", messages.Where(message => message.Role is "system" or "developer").Select(message => message.Content).Where(content => !string.IsNullOrWhiteSpace(content)));
         var chatMessages = messages.Where(message => message.Role is "user" or "assistant")
             .Select(message => new { role = message.Role, content = message.Content }).ToArray();
-        return string.IsNullOrWhiteSpace(system)
-            ? new { model, max_tokens = 4096, messages = chatMessages, stream = true }
-            : new { model, max_tokens = 4096, system, messages = chatMessages, stream = true };
+        var payload = new Dictionary<string, object>
+        {
+            ["model"] = model,
+            ["max_tokens"] = maxOutputTokens ?? 4096,
+            ["messages"] = chatMessages,
+            ["stream"] = true
+        };
+        if (!string.IsNullOrWhiteSpace(system)) payload["system"] = system;
+        return payload;
     }
 
     private static string NormalizeRole(string role) => role == "developer" ? "system" : role;
