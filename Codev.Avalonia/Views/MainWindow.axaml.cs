@@ -313,9 +313,14 @@ public partial class MainWindow : Window
         return await dialog.ShowDialog<bool>(this);
     }
 
-    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName, bool isVerification,
-        IReadOnlyList<string>? contextSources, string? matchingUntrustedSource)
+    private async Task<Codev.ProjectCommandApprovalChoice> ApproveAgentCommandAsync(Codev.CodeTaskCommandProposal proposal)
     {
+        var command = proposal.Command;
+        var projectPath = proposal.ProjectPath;
+        var shellName = proposal.ShellName;
+        var isVerification = proposal.IsVerification;
+        var contextSources = proposal.ContextSources;
+        var matchingUntrustedSource = proposal.MatchingUntrustedSource;
         var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
         var proposalWarnings = Codev.InstructionFollowingContentDetector.Detect(command);
         layout.Children.Add(new TextBlock
@@ -355,15 +360,35 @@ public partial class MainWindow : Window
             Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
         });
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
-        var dialog = new Window { Title = isVerification ? "Approve verification command" : "Approve project command", Width = 720, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        layout.Children.Add(new TextBlock
+        {
+            Text = "Saved permissions apply only to this exact command in this project. Allowing it turns on this project's allowlist; other commands still ask. Denials always block that exact command. Commands are not sandboxed.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            FontSize = 11,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+        });
+        var dialog = new Window { Title = isVerification ? "Approve verification command" : "Approve project command", Width = 900, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
         var reject = new Button { Content = "Cancel" };
-        var approve = new Button { Content = isVerification ? "Approve & verify" : "Approve & run" };
-        reject.Click += (_, _) => dialog.Close(false);
-        approve.Click += (_, _) => dialog.Close(true);
+        var deny = new Button { Content = "Deny exact command" };
+        var canRememberAllow = Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(command);
+        var rememberAllow = new Button
+        {
+            Content = canRememberAllow ? "Allow exact command + run" : "Protected · ask every time",
+            IsEnabled = canRememberAllow
+        };
+        if (!canRememberAllow)
+            ToolTip.SetTip(rememberAllow, "Commands invoking Git or referencing .git metadata or Codev app data always require approval.");
+        var approve = new Button { Content = isVerification ? "Run once & verify" : "Run once" };
+        reject.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.Cancel);
+        deny.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.DenyExactCommand);
+        rememberAllow.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.AllowExactCommand);
+        approve.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.RunOnce);
         buttons.Children.Add(reject);
+        buttons.Children.Add(deny);
+        buttons.Children.Add(rememberAllow);
         buttons.Children.Add(approve);
         layout.Children.Add(buttons);
-        return await dialog.ShowDialog<bool>(this);
+        return await dialog.ShowDialog<Codev.ProjectCommandApprovalChoice>(this);
     }
 
     private async Task<bool> ConfirmRepeatedToolCallAsync(string toolName)
@@ -1930,6 +1955,108 @@ public partial class MainWindow : Window
         {
             viewModel.ReportContextActionStatus($"Could not update folder trust: {ex.Message}");
         }
+    }
+
+    private async void ProjectCommandPermissions_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath) return;
+
+        var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
+        layout.Children.Add(new TextBlock
+        {
+            Text = "Command rules are saved locally for this exact project folder, outside the project. Deny rules always block their exact command. Allowlist mode runs exact saved allows without asking, except Git or protected app-data commands, which always ask; every unlisted command also asks. Ask every time is the default.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        });
+        var mode = new ComboBox
+        {
+            ItemsSource = new[] { "Ask every time", "Allow exact saved commands" },
+            SelectedIndex = viewModel.ProjectCommandPermissionMode == Codev.ProjectCommandPermissionMode.Allowlist ? 1 : 0,
+            IsEnabled = viewModel.CanPersistProjectCommandPermissions
+        };
+        layout.Children.Add(new TextBlock { Text = "Approval mode", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        layout.Children.Add(mode);
+        var notice = new TextBlock
+        {
+            Text = viewModel.ProjectCommandPermissionStoreNotice,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            FontSize = 11,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+        };
+        layout.Children.Add(notice);
+        layout.Children.Add(new TextBlock { Text = "Saved exact command rules", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        var rules = new StackPanel { Spacing = 6 };
+        var noRules = new TextBlock { Text = "No saved command rules for this project.", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var scroll = new ScrollViewer { Content = rules, MaxHeight = 300, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+        layout.Children.Add(scroll);
+        var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 11 };
+        layout.Children.Add(status);
+
+        void RefreshRules()
+        {
+            rules.Children.Clear();
+            var currentRules = viewModel.ProjectCommandPermissionRules;
+            if (currentRules.Count == 0) { rules.Children.Add(noRules); return; }
+            foreach (var rule in currentRules.OrderBy(rule => rule.Command, StringComparer.Ordinal))
+            {
+                var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), ColumnSpacing = 8 };
+                row.Children.Add(new TextBlock
+                {
+                    Text = rule.Decision == Codev.ProjectCommandPermissionDecision.Allow
+                        ? Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command) ? "ALLOW" : "ASK"
+                        : "DENY",
+                    FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+                    Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush,
+                    VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center
+                });
+                var command = new TextBlock { Text = rule.Command, TextTrimming = global::Avalonia.Media.TextTrimming.CharacterEllipsis, VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center };
+                ToolTip.SetTip(command, rule.Command);
+                if (rule.Decision == Codev.ProjectCommandPermissionDecision.Allow && !Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command))
+                    ToolTip.SetTip(command, "This saved rule cannot skip approval because it invokes Git or references protected .git or Codev app data.\n\n" + rule.Command);
+                Grid.SetColumn(command, 1);
+                row.Children.Add(command);
+                var remove = new Button { Content = "Remove", Classes = { "soft" }, IsEnabled = viewModel.CanPersistProjectCommandPermissions };
+                remove.Click += async (_, _) =>
+                {
+                    try { await viewModel.RemoveProjectCommandPermissionRuleAsync(rule.Command, rule.Decision); RefreshRules(); status.Text = "Rule removed."; }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException) { status.Text = $"Could not remove rule ({ex.GetType().Name})."; }
+                };
+                Grid.SetColumn(remove, 2);
+                row.Children.Add(remove);
+                rules.Children.Add(row);
+            }
+        }
+        RefreshRules();
+        mode.SelectionChanged += async (_, _) =>
+        {
+            try
+            {
+                await viewModel.SetProjectCommandPermissionModeAsync(mode.SelectedIndex == 1
+                    ? Codev.ProjectCommandPermissionMode.Allowlist : Codev.ProjectCommandPermissionMode.AskEveryTime);
+                status.Text = mode.SelectedIndex == 1
+                    ? "Allowlist mode is on. Unlisted commands still require approval."
+                    : "Commands will ask every time. Saved denials remain active.";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            {
+                status.Text = $"Could not save the mode ({ex.GetType().Name}).";
+                mode.SelectedIndex = viewModel.ProjectCommandPermissionMode == Codev.ProjectCommandPermissionMode.Allowlist ? 1 : 0;
+            }
+        };
+
+        var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right };
+        var dialog = new Window
+        {
+            Title = "Command permissions · " + Path.GetFileName(projectPath),
+            Width = 700,
+            Height = 560,
+            MinWidth = 560,
+            MinHeight = 420,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = layout
+        };
+        close.Click += (_, _) => dialog.Close();
+        layout.Children.Add(close);
+        await dialog.ShowDialog(this);
     }
 
     private async void ReviewFileChanges_Click(object? sender, RoutedEventArgs e)

@@ -123,6 +123,7 @@
                                     <MenuItem Header="Git status and changes…" Click="GitStatus_Click" />
                                     <MenuItem Header="{Binding FileChangesLabel}" IsEnabled="{Binding CanReviewFileChanges}" Click="ReviewFileChanges_Click" />
                                     <MenuItem Header="{Binding ProjectTrustLabel}" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />
+                                    <MenuItem Header="Command permissions…" Click="ProjectCommandPermissions_Click" ToolTip.Tip="Choose whether exact saved command rules may skip approval for this project" />
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>

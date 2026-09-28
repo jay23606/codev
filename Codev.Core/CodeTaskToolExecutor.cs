@@ -17,7 +17,8 @@ public sealed class CodeTaskToolExecutor(
     IProgress<TimeSpan>? commandProgress = null,
     Action<string>? status = null,
     int maxRepairAttempts = 2,
-    IEnumerable<string>? initialContextSources = null)
+    IEnumerable<string>? initialContextSources = null,
+    Func<CodeTaskCommandProposal, Task<CommandApprovalOutcome>>? permissionApproval = null)
 {
     private int _failedVerifications;
     private readonly List<(string Source, string Content)> _untrustedContents = [];
@@ -153,9 +154,13 @@ public sealed class CodeTaskToolExecutor(
         if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
             return "Rejected: command must contain 1–4,000 characters.";
         var shell = ShellCommandResolver.ResolveCurrent();
-        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
-                ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command))))
-            return "Rejected by user; the command was not run.";
+        var commandProposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command));
+        var approval = await RequestCommandApprovalAsync(commandProposal);
+        if (approval != CommandApprovalOutcome.Approved)
+            return approval == CommandApprovalOutcome.Denied
+                ? "Denied by a saved project command permission rule; the command was not run."
+                : "Rejected by user; the command was not run.";
         status?.Invoke($"Code task · starting approved {shell.DisplayName} command…");
         var progress = new Progress<TimeSpan>(elapsed =>
             status?.Invoke($"Code task · command running · {elapsed:mm\\:ss}"));
@@ -178,9 +183,13 @@ public sealed class CodeTaskToolExecutor(
             return "Rejected: verification command must contain 1–4,000 characters.";
         if (RepairBudgetExhausted) return RepairLimitMessage;
         var shell = ShellCommandResolver.ResolveCurrent();
-        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true,
-                ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command))))
-            return "Verification rejected by user; it was not run and no result is available.";
+        var commandProposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true,
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command));
+        var approval = await RequestCommandApprovalAsync(commandProposal);
+        if (approval != CommandApprovalOutcome.Approved)
+            return approval == CommandApprovalOutcome.Denied
+                ? "Verification denied by a saved project command permission rule; it was not run and no result is available."
+                : "Verification rejected by user; it was not run and no result is available.";
 
         status?.Invoke("Code task · running approved verification…");
         try
@@ -205,6 +214,12 @@ public sealed class CodeTaskToolExecutor(
             return verificationStatus + "\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000));
         }
         finally { status?.Invoke("Code task · Thinking…"); }
+    }
+
+    private async Task<CommandApprovalOutcome> RequestCommandApprovalAsync(CodeTaskCommandProposal proposal)
+    {
+        if (permissionApproval is not null) return await permissionApproval(proposal);
+        return await approveCommand(proposal) ? CommandApprovalOutcome.Approved : CommandApprovalOutcome.Rejected;
     }
 
     private static string Truncate(string value, int max = 6000) => value.Length <= max ? value : value[..max] + "\n… [tool output truncated]";

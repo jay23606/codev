@@ -108,7 +108,17 @@ public sealed class ConversationStatusReportTests
         var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true, ProjectPath = @"C:\work\repo" }, false, 0, false, false, projectFolderTrusted: true);
 
         Assert.Contains("Mode: Code task", report);
-        Assert.Contains("Tools and file changes: available with per-change and per-command approval", report);
+        Assert.Contains("Tools and file changes: available with per-change review and project command permissions", report);
+        Assert.Contains("Project command permissions: ask every time", report);
+    }
+
+    [Fact]
+    public void Status_reports_exact_project_allowlist_and_deny_counts()
+    {
+        var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true }, false, 0, false, false,
+            commandPermissionMode: ProjectCommandPermissionMode.Allowlist, allowedCommandRules: 2, deniedCommandRules: 1);
+
+        Assert.Contains("Project command permissions: exact allowlist · 2 allow rule(s), 1 deny rule(s); unlisted commands ask", report);
     }
 
     [Fact]

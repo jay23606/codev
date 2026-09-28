@@ -6,7 +6,9 @@ public static class ConversationStatusReport
     public static string Build(Conversation conversation, bool isGenerating, int queuedTurns, bool queuePaused,
         bool hostedRequestsEnabled, bool projectFolderTrusted = false, string? projectFolderTrustRoot = null,
         string? ollamaEndpoint = null, bool ollamaEndpointIsLocal = true,
-        IReadOnlyList<string>? lastPromptInstructionFiles = null)
+        IReadOnlyList<string>? lastPromptInstructionFiles = null,
+        ProjectCommandPermissionMode commandPermissionMode = ProjectCommandPermissionMode.AskEveryTime,
+        int allowedCommandRules = 0, int deniedCommandRules = 0)
     {
         ArgumentNullException.ThrowIfNull(conversation);
 
@@ -80,7 +82,8 @@ public static class ConversationStatusReport
             $"Repository map: {(!conversation.IncludeRepoMap ? "off" : canIncludeRepoMap ? "included" : "unavailable under the current context policy")}",
             $"Queue: {queue}",
             $"Hosted requests: {(CloudModelProviders.IsCloud(conversation.Provider) ? hostedRequestsEnabled ? "enabled for this session" : "disabled" : "not in use")}",
-            $"Tools and file changes: {(conversation.IsCodeTask ? "available with per-change and per-command approval" : "unavailable outside Code task mode")}");
+            $"Tools and file changes: {(conversation.IsCodeTask ? "available with per-change review and project command permissions" : "unavailable outside Code task mode")}",
+            $"Project command permissions: {(commandPermissionMode == ProjectCommandPermissionMode.Allowlist ? $"exact allowlist · {allowedCommandRules} allow rule(s), {deniedCommandRules} deny rule(s); unlisted commands ask" : $"ask every time · {deniedCommandRules} saved deny rule(s)")}");
     }
 
     private static string FolderName(string path)

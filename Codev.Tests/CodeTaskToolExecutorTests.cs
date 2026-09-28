@@ -105,6 +105,50 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Saved_permission_denial_blocks_command_before_the_approval_callback()
+    {
+        var approvalDialogShown = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => { approvalDialogShown = true; return Task.FromResult(true); },
+            permissionApproval: _ => Task.FromResult(CommandApprovalOutcome.Denied));
+
+        var result = await ExecuteAsync(executor, "run_command", """{"command":"echo should-not-run"}""");
+
+        Assert.Contains("saved project command permission rule", result);
+        Assert.False(approvalDialogShown);
+    }
+
+    [Fact]
+    public async Task Explicit_exact_allow_decision_runs_command_without_the_default_approval_callback()
+    {
+        var approvalDialogShown = false;
+        var command = OperatingSystem.IsWindows() ? "Write-Output allowlisted" : "printf allowlisted";
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => { approvalDialogShown = true; return Task.FromResult(false); },
+            permissionApproval: _ => Task.FromResult(CommandApprovalOutcome.Approved));
+
+        var result = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command }));
+
+        Assert.Contains("allowlisted", result);
+        Assert.False(approvalDialogShown);
+    }
+
+    [Fact]
+    public async Task Saved_permission_denial_blocks_verification_without_returning_a_test_result()
+    {
+        var approvalDialogShown = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => { approvalDialogShown = true; return Task.FromResult(true); },
+            permissionApproval: _ => Task.FromResult(CommandApprovalOutcome.Denied));
+
+        var result = await ExecuteAsync(executor, "verify_command", """{"command":"dotnet test"}""");
+
+        Assert.Contains("denied by a saved project command permission rule", result);
+        Assert.DoesNotContain("FAILED", result);
+        Assert.False(approvalDialogShown);
+    }
+
+    [Fact]
     public async Task Approved_new_file_creates_only_a_supported_project_file()
     {
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
