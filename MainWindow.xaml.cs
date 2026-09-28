@@ -250,7 +250,9 @@ public partial class MainWindow : Window
         {
             await _storeGate.WaitAsync();
             gateHeld = true;
-            await AtomicTextFile.WriteAsync(StorePath, JsonSerializer.Serialize(_conversations, JsonOptions));
+            var snapshot = ConversationPersistence.CreateSnapshot(_conversations);
+            var json = await Task.Run(() => JsonSerializer.Serialize(snapshot, JsonOptions));
+            await AtomicTextFile.WriteAsync(StorePath, json);
             return true;
         }
         catch (Exception ex) { ConnectionLabel.Text = $"Could not save history: {ex.Message}"; return false; }

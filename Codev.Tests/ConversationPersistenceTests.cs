@@ -1,0 +1,34 @@
+namespace Codev.Tests;
+
+public sealed class ConversationPersistenceTests
+{
+    [Fact]
+    public void Snapshot_detaches_mutable_lists_and_preserves_queued_turn_data()
+    {
+        var turn = new PersistedQueuedTurn(1, "model-a", 8192, false, false, null,
+            ["src/a.cs"], ["private"], DateTimeOffset.UnixEpoch);
+        var source = new Conversation
+        {
+            Title = "Snapshot",
+            Draft = "unsent prompt",
+            Messages = [new("user", "before")],
+            ContextFiles = ["src/a.cs"],
+            PendingTurns = [turn]
+        };
+
+        var snapshot = Assert.Single(ConversationPersistence.CreateSnapshot([source]));
+        source.Title = "changed";
+        source.Draft = "changed draft";
+        source.Messages[0] = new("user", "after");
+        source.ContextFiles[0] = "src/b.cs";
+        source.PendingTurns[0] = turn with { Model = "model-b" };
+
+        Assert.Equal("Snapshot", snapshot.Title);
+        Assert.Equal("unsent prompt", snapshot.Draft);
+        Assert.Equal("before", snapshot.Messages[0].Content);
+        Assert.Equal("src/a.cs", Assert.Single(snapshot.ContextFiles));
+        Assert.Equal("model-a", Assert.Single(snapshot.PendingTurns).Model);
+        Assert.Equal("src/a.cs", Assert.Single(snapshot.PendingTurns[0].ContextFiles!));
+        Assert.Equal("private", Assert.Single(snapshot.PendingTurns[0].ContextExclusions!));
+    }
+}
