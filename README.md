@@ -126,6 +126,7 @@ GitHub Actions builds `Codev.Core` and the Avalonia prototype and runs the porta
 | `Codev.Windows.Tests/` | Tests that need Windows: WPF rendering and PowerShell command execution |
 | `Codev.Avalonia/` | The cross-platform Avalonia UI prototype |
 | `docs/` | Manual test checklists |
+| `bench/` | A local-model coding benchmark (nine tasks checked against hidden tests) and its results; see [bench/README.md](bench/README.md) |
 | `DESIGN.md` | The interaction model, roadmap and feature backlog |
 
 ## Local models
