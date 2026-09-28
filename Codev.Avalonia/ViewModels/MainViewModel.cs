@@ -22,10 +22,13 @@ public sealed class MainViewModel : ViewModelBase
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-conversations.json");
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
+    private static readonly string ProjectTrustPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-trusted-folders.json");
     private static readonly string ActiveConversationPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-active-conversation.json");
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
+    private readonly Codev.ProjectFolderTrustRegistry _projectFolderTrust = Codev.ProjectFolderTrustRegistry.Load(ProjectTrustPath);
     private Codev.Conversation? _active;
     private string _searchText = "";
     private string _draft = "";
@@ -148,10 +151,21 @@ public sealed class MainViewModel : ViewModelBase
     public string MessageCountLabel => $"Local conversation · {Messages.Count} messages";
     public string ProjectLabel => ActiveConversation?.ProjectPath is { Length: > 0 } path ? Path.GetFileName(path) + " · " + path : "No project folder attached";
     public bool HasProject => ActiveConversation?.ProjectPath is { Length: > 0 } path && Directory.Exists(path);
+    public bool IsProjectTrusted => ActiveConversation?.ProjectPath is { Length: > 0 } path && _projectFolderTrust.IsTrusted(path);
+    public string? ProjectTrustRoot => ActiveConversation?.ProjectPath is { Length: > 0 } path ? _projectFolderTrust.FindTrustedRoot(path) : null;
+    public bool IsProjectTrustInherited => IsProjectTrusted && ActiveConversation?.ProjectPath is { } path && !_projectFolderTrust.IsDirectTrustRoot(path);
+    public bool CanManageProjectTrust => HasProject && _projectFolderTrust.CanWrite && !IsFileSystemRoot(ActiveConversation!.ProjectPath!) && !IsProjectTrustInherited;
+    public string ProjectTrustLabel => !HasProject ? "No folder" : !_projectFolderTrust.CanWrite ? "Trust settings unavailable" : IsFileSystemRoot(ActiveConversation!.ProjectPath!) ? "Choose project folder" :
+        IsProjectTrustInherited ? "Trusted via parent" : IsProjectTrusted ? "Trusted · revoke" : "Untrusted · trust folder";
+    public string ProjectTrustTooltip => IsProjectTrustInherited
+        ? $"This folder inherits trust from {ProjectTrustRoot}. Attach that trusted root to revoke its trust."
+        : !_projectFolderTrust.CanWrite ? $"Folder trust settings could not be loaded and were preserved: {_projectFolderTrust.LoadError}"
+        : HasProject && IsFileSystemRoot(ActiveConversation!.ProjectPath!) ? "Trusting a filesystem root would trust every folder under it. Choose a narrower project folder."
+        : "Trust or revoke trust for this project folder; untrusted folders can still be browsed and explicitly selected files can still be attached.";
     public bool HasSelectedContextFiles => SelectedContextFiles.Count > 0;
     public string ContextLabel => !HasProject ? "No project context" : SelectedContextFiles.Count > 0
-        ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included"
-        : "Project attached · bounded source files included automatically";
+        ? IsProjectTrusted ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included" : $"{SelectedContextFiles.Count} file(s) explicitly selected · folder untrusted"
+        : IsProjectTrusted ? "Trusted project · bounded source files included automatically" : "Untrusted project · automatic context is off";
     public string ContextEstimateLabel => _contextEstimateLabel;
     public string ContextActionStatus { get; private set; } = "";
     public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
@@ -425,6 +439,12 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsPlanMode));
         OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(HasProject));
+        OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(ProjectTrustRoot));
+        OnPropertyChanged(nameof(IsProjectTrustInherited));
+        OnPropertyChanged(nameof(CanManageProjectTrust));
+        OnPropertyChanged(nameof(ProjectTrustLabel));
+        OnPropertyChanged(nameof(ProjectTrustTooltip));
         OnPropertyChanged(nameof(ContextLabel));
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(MessageCountLabel));
@@ -444,9 +464,17 @@ public sealed class MainViewModel : ViewModelBase
             conversation.ContextFiles.Clear();
         conversation.ProjectPath = fullPath;
         Reset(SelectedContextFiles, conversation.ContextFiles);
-        ContextActionStatus = "Project attached. Bounded source files will be included with local chat requests.";
+        ContextActionStatus = _projectFolderTrust.IsTrusted(fullPath)
+            ? "Project attached. Bounded source files will be included with local chat requests."
+            : "Project attached as untrusted. Automatic source context is off until you trust this folder.";
         OnPropertyChanged(nameof(ProjectLabel));
         OnPropertyChanged(nameof(HasProject));
+        OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(ProjectTrustRoot));
+        OnPropertyChanged(nameof(IsProjectTrustInherited));
+        OnPropertyChanged(nameof(CanManageProjectTrust));
+        OnPropertyChanged(nameof(ProjectTrustLabel));
+        OnPropertyChanged(nameof(ProjectTrustTooltip));
         OnPropertyChanged(nameof(ContextLabel));
         RefreshContextEstimate();
         OnPropertyChanged(nameof(ContextActionStatus));
@@ -571,11 +599,70 @@ public sealed class MainViewModel : ViewModelBase
         Persist();
     }
 
+    public bool IsProjectPathTrusted(string path) => _projectFolderTrust.IsTrusted(path);
+    public bool IsProjectPathKnown(string path) => _projectFolderTrust.IsKnown(path);
+
+    public async Task MarkProjectFolderKnownAsync(string path)
+    {
+        await _projectFolderTrust.MarkKnownAsync(path);
+        ReportContextActionStatus("Project folder kept untrusted. Automatic source context remains off.");
+    }
+
+    public async Task TrustProjectFolderAsync(string path, bool includeSubfolders = false)
+    {
+        var folder = includeSubfolders ? Directory.GetParent(Path.GetFullPath(path))?.FullName ?? Path.GetFullPath(path) : path;
+        await _projectFolderTrust.TrustAsync(folder);
+        await _projectFolderTrust.MarkKnownAsync(path);
+        RefreshProjectTrustState();
+        ReportContextActionStatus(includeSubfolders
+            ? $"Trusted {folder} and its subfolders on this device. Automatic bounded context is enabled."
+            : "Project folder trusted on this device. Automatic bounded source context is enabled.");
+    }
+
+    public async Task ToggleProjectFolderTrustAsync()
+    {
+        if (ActiveConversation?.ProjectPath is not { Length: > 0 } path || !Directory.Exists(path)) return;
+        if (_projectFolderTrust.FindTrustedRoot(path) is { } root)
+        {
+            if (IsProjectTrustInherited)
+            {
+                ReportContextActionStatus($"This folder inherits trust from {root}. Attach that trusted parent folder to revoke its trust.");
+                return;
+            }
+            await _projectFolderTrust.RevokeAsync(path);
+        }
+        else
+            await _projectFolderTrust.TrustAsync(path);
+        RefreshProjectTrustState();
+        ReportContextActionStatus(IsProjectTrusted
+            ? "Project folder trusted on this device. Automatic bounded source context is enabled."
+            : "Project trust revoked. Automatic source context is off; manually selected files remain available.");
+    }
+
+    private void RefreshProjectTrustState()
+    {
+        OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(ProjectTrustRoot));
+        OnPropertyChanged(nameof(IsProjectTrustInherited));
+        OnPropertyChanged(nameof(CanManageProjectTrust));
+        OnPropertyChanged(nameof(ProjectTrustLabel));
+        OnPropertyChanged(nameof(ProjectTrustTooltip));
+        OnPropertyChanged(nameof(ContextLabel));
+        RefreshContextEstimate();
+    }
+
+    private static bool IsFileSystemRoot(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        return string.Equals(fullPath, Path.GetPathRoot(fullPath), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
     private void RefreshContextEstimate()
     {
         var conversation = ActiveConversation;
         _contextEstimateLabel = Codev.ProjectContextEstimateLabel.ForProject(conversation?.ProjectPath,
             conversation?.Provider ?? "ollama", conversation?.IncludeProjectContextForHosted == true,
+            conversation is not null && !string.IsNullOrWhiteSpace(conversation.ProjectPath) && _projectFolderTrust.IsTrusted(conversation.ProjectPath),
             conversation?.ContextFiles);
         OnPropertyChanged(nameof(ContextEstimateLabel));
     }
@@ -631,8 +718,12 @@ public sealed class MainViewModel : ViewModelBase
         Messages.Add(userMessage);
         Messages.Add(conversation.Messages[^1]);
         var assistantIndex = conversation.Messages.Count - 1;
+        var hasExplicitProjectFiles = conversation.ContextFiles.Count > 0;
+        var projectTrusted = !string.IsNullOrWhiteSpace(conversation.ProjectPath) && _projectFolderTrust.IsTrusted(conversation.ProjectPath);
+        var contextProjectPath = Codev.ProjectContextPolicy.GetProjectPathForQueuedTurn(
+            conversation.ProjectPath, hasExplicitProjectFiles, projectTrusted);
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
-            false, conversation.IsPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
+            false, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
             conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
@@ -656,9 +747,11 @@ public sealed class MainViewModel : ViewModelBase
     private void AddStatusReport(Codev.Conversation conversation)
     {
         var userMessage = new Codev.ChatMessage("user", Draft.Trim());
+        var trustRoot = string.IsNullOrWhiteSpace(conversation.ProjectPath) ? null : _projectFolderTrust.FindTrustedRoot(conversation.ProjectPath);
         var assistantMessage = new Codev.ChatMessage("assistant", Codev.ConversationStatusReport.Build(
             conversation, ReferenceEquals(_generationConversation, conversation) && IsGenerating,
-            conversation.PendingRequestCount, _queuePaused, _cloudRequestsEnabled));
+            conversation.PendingRequestCount, _queuePaused, _cloudRequestsEnabled,
+            trustRoot is not null, trustRoot));
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(assistantMessage);
         conversation.Draft = "";
@@ -724,7 +817,11 @@ public sealed class MainViewModel : ViewModelBase
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
                 .Prepend(new Codev.ChatMessage("system", systemPrompt))
                 .ToList();
-            if ((savedTurn.Provider == "ollama" || savedTurn.IncludeProjectContext) && !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && Directory.Exists(savedTurn.ProjectPath))
+            var hasSelectedProjectFiles = savedTurn.ContextFiles is { Count: > 0 };
+            var projectStillTrusted = !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath);
+            if (Codev.ProjectContextPolicy.ShouldInclude(savedTurn.ProjectPath, savedTurn.Provider,
+                    savedTurn.IncludeProjectContext, hasSelectedProjectFiles, projectStillTrusted) &&
+                Directory.Exists(savedTurn.ProjectPath))
             {
                 var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
                     savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);

@@ -258,10 +258,73 @@ public partial class MainWindow : Window
                 return;
             }
             viewModel.SetProjectFolder(path);
+            if (!viewModel.IsProjectPathKnown(path) && !viewModel.IsProjectPathTrusted(path) && viewModel.CanManageProjectTrust)
+            {
+                var trustChoice = await ShowProjectTrustDialog(path);
+                if (trustChoice == "folder") await viewModel.TrustProjectFolderAsync(path);
+                else if (trustChoice == "parent") await viewModel.TrustProjectFolderAsync(path, includeSubfolders: true);
+                else await viewModel.MarkProjectFolderKnownAsync(path);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
         {
             viewModel.ReportContextActionStatus($"Could not attach project folder: {ex.Message}");
+        }
+    }
+
+    private async Task<string?> ShowProjectTrustDialog(string projectPath)
+    {
+        var parent = Directory.GetParent(Path.GetFullPath(projectPath))?.FullName ?? projectPath;
+        var parentIsRoot = string.Equals(parent, Path.GetPathRoot(parent), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        var status = new TextBlock
+        {
+            Text = "This folder is untrusted. Chat and read-only browsing remain available. Codev will only include files you explicitly select until you trust this folder. Trust is stored locally. Avalonia chat currently does not load project instructions, skills, commands, hooks, or MCP settings.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MaxWidth = 510
+        };
+        var actions = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+            Children =
+            {
+                new Button { Content = "Keep untrusted", Tag = "untrusted" },
+                new Button { Content = parentIsRoot ? "Parent is filesystem root" : "Trust parent and subfolders", Tag = "parent", IsEnabled = !parentIsRoot },
+                new Button { Content = "Trust folder", Tag = "folder" }
+            }
+        };
+        var dialog = new Window
+        {
+            Title = "Project folder trust",
+            Width = 570,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock { Text = projectPath, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold },
+                    status,
+                    new TextBlock { Text = $"Parent folder: {parent}", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 11 },
+                    actions
+                }
+            }
+        };
+        foreach (var button in actions.Children.OfType<Button>()) button.Click += (_, _) => dialog.Close(button.Tag?.ToString());
+        return await dialog.ShowDialog<string?>(this);
+    }
+
+    private async void ToggleProjectTrust_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        try { await viewModel.ToggleProjectFolderTrustAsync(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            viewModel.ReportContextActionStatus($"Could not update folder trust: {ex.Message}");
         }
     }
 

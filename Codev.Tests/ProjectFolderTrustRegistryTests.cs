@@ -1,0 +1,93 @@
+using Codev;
+
+namespace Codev.Tests;
+
+public sealed class ProjectFolderTrustRegistryTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "codev-trust-" + Guid.NewGuid().ToString("N"));
+    private string SettingsPath => Path.Combine(_root, "trusted-folders.json");
+
+    public ProjectFolderTrustRegistryTests() => Directory.CreateDirectory(_root);
+
+    [Fact]
+    public async Task Trust_is_persisted_for_folder_and_descendants_and_can_be_revoked()
+    {
+        var project = Path.Combine(_root, "project");
+        Directory.CreateDirectory(project);
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+
+        await registry.TrustAsync(project);
+
+        Assert.True(registry.IsTrusted(project));
+        Assert.True(registry.IsTrusted(Path.Combine(project, "src", "nested")));
+        var reloaded = ProjectFolderTrustRegistry.Load(SettingsPath);
+        Assert.True(reloaded.IsTrusted(project));
+        await reloaded.RevokeAsync(project);
+        Assert.False(ProjectFolderTrustRegistry.Load(SettingsPath).IsTrusted(project));
+    }
+
+    [Fact]
+    public async Task Trusted_folder_prefix_does_not_trust_a_sibling()
+    {
+        var project = Path.Combine(_root, "project");
+        var sibling = Path.Combine(_root, "project-copy");
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+        await registry.TrustAsync(project);
+
+        Assert.False(registry.IsTrusted(sibling));
+    }
+
+    [Fact]
+    public async Task Child_reports_parent_trust_source_and_cannot_remove_parent_scope_by_revoke()
+    {
+        var child = Path.Combine(_root, "parent", "child");
+        var parent = Path.GetDirectoryName(child)!;
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+        await registry.TrustAsync(parent);
+
+        Assert.Equal(Path.GetFullPath(parent), registry.FindTrustedRoot(child));
+        Assert.False(registry.IsDirectTrustRoot(child));
+        await registry.RevokeAsync(child);
+        Assert.True(registry.IsTrusted(child));
+    }
+
+    [Fact]
+    public async Task Keeping_a_folder_untrusted_is_remembered_without_trusting_it()
+    {
+        var project = Path.Combine(_root, "project");
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+        await registry.MarkKnownAsync(project);
+
+        var reloaded = ProjectFolderTrustRegistry.Load(SettingsPath);
+        Assert.True(reloaded.IsKnown(project));
+        Assert.False(reloaded.IsTrusted(project));
+    }
+
+    [Fact]
+    public async Task Unreadable_trust_file_is_preserved_and_cannot_be_overwritten()
+    {
+        const string contents = "not valid json";
+        File.WriteAllText(SettingsPath, contents);
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+
+        Assert.False(registry.CanWrite);
+        Assert.False(registry.IsTrusted(_root));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.TrustAsync(_root));
+        Assert.Equal(contents, File.ReadAllText(SettingsPath));
+    }
+
+    [Fact]
+    public async Task Filesystem_root_cannot_be_trusted()
+    {
+        var root = Path.GetPathRoot(_root)!;
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.TrustAsync(root));
+        Assert.False(registry.IsTrusted(_root));
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+    }
+}

@@ -23,8 +23,10 @@ public sealed class ConversationStatusReportTests
         Assert.Contains("Context window: 65,536 tokens", report);
         Assert.Contains("Temperature: 0.2", report);
         Assert.Contains("Mode: Plan", report);
-        Assert.Contains(@"Project: C:\work\app", report);
+        Assert.Contains("Project: app", report);
+        Assert.DoesNotContain(@"C:\work\app", report, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Project context: 1 selected file(s)", report);
+        Assert.Contains("Folder trust: untrusted", report);
         Assert.Contains("Queue: 2 queued turn(s)", report);
         Assert.Contains("Hosted requests: not in use", report);
         Assert.DoesNotContain("api-key", report, StringComparison.OrdinalIgnoreCase);
@@ -50,5 +52,19 @@ public sealed class ConversationStatusReportTests
         Assert.Contains("Project context: excluded from hosted requests", report);
         Assert.Contains("Queue: response in progress", report);
         Assert.Contains("Hosted requests: enabled for this session", report);
+        Assert.Contains("Folder trust: untrusted", report);
+    }
+
+    [Fact]
+    public void Trusted_project_is_visible_and_reports_automatic_context()
+    {
+        var conversation = new Conversation { ProjectPath = @"C:\work\repo" };
+
+        var report = ConversationStatusReport.Build(conversation, false, 0, false, false, projectFolderTrusted: true, projectFolderTrustRoot: @"C:\work");
+
+        Assert.Contains("Project: repo", report);
+        Assert.Contains("Folder trust: trusted · work", report);
+        Assert.DoesNotContain(@"C:\work", report, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Project context: bounded source files included automatically", report);
     }
 }

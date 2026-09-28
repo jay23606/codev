@@ -2,12 +2,15 @@ namespace Codev;
 
 public static class ProjectContextEstimateLabel
 {
-    public static string ForProject(string? projectPath, string provider, bool includeProjectContextForHosted, IReadOnlyList<string>? selectedFiles)
+    public static string ForProject(string? projectPath, string provider, bool includeProjectContextForHosted,
+        bool projectFolderTrusted, IReadOnlyList<string>? selectedFiles)
     {
         var projectAvailable = !string.IsNullOrWhiteSpace(projectPath) && Directory.Exists(projectPath);
         var hostedProvider = CloudModelProviders.IsCloud(provider);
         if (!projectAvailable || (hostedProvider && !includeProjectContextForHosted))
             return Format(projectAvailable, hostedProvider, includeProjectContextForHosted, 0);
+        if (!projectFolderTrusted && selectedFiles is not { Count: > 0 })
+            return "Untrusted folder · automatic project context is off.";
 
         try
         {

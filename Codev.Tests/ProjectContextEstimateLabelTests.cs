@@ -36,8 +36,8 @@ public sealed class ProjectContextEstimateLabelTests
             File.WriteAllText(Path.Combine(root, "safe.cs"), new string('x', 20));
             File.WriteAllText(Path.Combine(root, ".env"), "SECRET=do-not-estimate");
 
-            var selected = ProjectContextEstimateLabel.ForProject(root, "ollama", false, ["safe.cs"]);
-            var secret = ProjectContextEstimateLabel.ForProject(root, "ollama", false, [".env"]);
+            var selected = ProjectContextEstimateLabel.ForProject(root, "ollama", false, true, ["safe.cs"]);
+            var secret = ProjectContextEstimateLabel.ForProject(root, "ollama", false, true, [".env"]);
 
             Assert.Contains("≈11 tokens", selected);
             Assert.Contains("≈0 tokens", secret);
@@ -52,8 +52,29 @@ public sealed class ProjectContextEstimateLabelTests
     [Fact]
     public void Hosted_opt_out_skips_project_estimation()
     {
-        var label = ProjectContextEstimateLabel.ForProject(Path.GetTempPath(), CloudModelProviders.Anthropic, false, null);
+        var label = ProjectContextEstimateLabel.ForProject(Path.GetTempPath(), CloudModelProviders.Anthropic, false, false, null);
 
         Assert.Equal("Project files stay local; hosted context is off.", label);
+    }
+
+    [Fact]
+    public void Untrusted_folder_does_not_automatically_add_project_files_but_explicit_files_are_estimable()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-untrusted-estimate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "safe.cs"), new string('x', 20));
+
+            var automatic = ProjectContextEstimateLabel.ForProject(root, "ollama", false, false, null);
+            var explicitFile = ProjectContextEstimateLabel.ForProject(root, "ollama", false, false, ["safe.cs"]);
+
+            Assert.Contains("automatic project context is off", automatic);
+            Assert.Contains("≈11 tokens", explicitFile);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 }

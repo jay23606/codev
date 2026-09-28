@@ -108,6 +108,7 @@
                         <TextBlock Text="PROJECT" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
+                        <Button Classes="soft" Content="{Binding ProjectTrustLabel}" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />
                         <TextBlock Text="{Binding ConnectionStatus}" Foreground="#89B895" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
