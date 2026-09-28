@@ -18,7 +18,7 @@ namespace Codev;
 
 public partial class MainWindow : Window
 {
-    private static readonly HttpClient Http = new() { BaseAddress = new Uri("http://127.0.0.1:11434/"), Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Conversation> _conversations = [];
     private readonly ObservableCollection<WorkspaceProject> _projects = [];
@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private bool _completionNotificationsEnabled = true;
     private double _chatFontSize = 14;
     private List<PromptTemplate> _promptTemplates = [];
+    private Uri _ollamaEndpoint = OllamaEndpoint.Default;
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
     private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
@@ -92,6 +93,7 @@ public partial class MainWindow : Window
                 _chatFontSize = settings?.ChatFontSize is double storedSize && double.IsFinite(storedSize) ? Math.Clamp(storedSize, 12, 22) : 14;
                 _completionNotificationsEnabled = settings?.CompletionNotifications ?? true;
                 _promptTemplates = PromptTemplateCatalog.Normalize(settings?.PromptTemplates);
+                if (OllamaEndpoint.TryParse(settings?.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
             }
         }
         catch { _isDarkTheme = true; }
@@ -102,7 +104,7 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
-            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled, _promptTemplates), JsonOptions));
+            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled, _promptTemplates, _ollamaEndpoint.ToString()), JsonOptions));
         }
         catch { }
     }
@@ -251,7 +253,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var response = await Http.GetFromJsonAsync<TagsResponse>("api/tags");
+            var response = await Http.GetFromJsonAsync<TagsResponse>(OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/tags"));
             _models.Clear();
             var installed = response?.Models ?? [];
             AddKnownModel(installed, "devstral-small-2-64k", "Devstral Small 2 · Q4 · 64K",
@@ -271,7 +273,7 @@ public partial class MainWindow : Window
             }
             _loadingModel = false;
             RefreshContextPicker(_active);
-            ConnectionLabel.Text = _models.Count == 0 ? "No supported local models found" : $"Ollama · {_models.Count} coding models";
+            ConnectionLabel.Text = _models.Count == 0 ? "No supported models found" : $"Ollama · {_models.Count} coding models · {_ollamaEndpoint.Host}";
             RefreshConversationLists();
         }
         catch
@@ -1708,7 +1710,7 @@ public partial class MainWindow : Window
 
     private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(BuildChatPayload(model, numCtx, history, stream: true)) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(BuildChatPayload(model, numCtx, history, stream: true)) };
         using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -1749,7 +1751,7 @@ public partial class MainWindow : Window
         for (var round = 0; round < 8; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
+            using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"))
             {
                 Content = JsonContent.Create(BuildChatPayload(model, numCtx, history, stream: false, tools))
             };
@@ -2370,7 +2372,7 @@ public partial class MainWindow : Window
     {
         var editor = new Window
         {
-            Title = "Codev settings", Width = 540, Height = 360,
+            Title = "Codev settings", Width = 560, Height = 470,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
             Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
             ResizeMode = ResizeMode.NoResize
@@ -2379,14 +2381,21 @@ public partial class MainWindow : Window
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var help = new TextBlock
         {
-            Text = $"Appearance: {(_isDarkTheme ? "Dark" : "Light")} · inference: local Ollama at http://127.0.0.1:11434. Chat size is stored on this device.",
+            Text = $"Appearance: {(_isDarkTheme ? "Dark" : "Light")} · chat size and endpoint are stored on this device.",
             TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 15)
         };
         layout.Children.Add(help);
+        var endpointPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+        endpointPanel.Children.Add(new TextBlock { Text = "Ollama server", FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush("MainTextBrush"), Margin = new Thickness(0, 0, 0, 5) });
+        var endpointInput = new TextBox { Text = _ollamaEndpoint.ToString().TrimEnd('/'), Padding = new Thickness(8, 6, 8, 6), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1) };
+        endpointPanel.Children.Add(endpointInput);
+        endpointPanel.Children.Add(new TextBlock { Text = "Default: http://127.0.0.1:11434 · Non-local servers receive your prompts and selected project context.", TextWrapping = TextWrapping.Wrap, FontSize = 10, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 5, 0, 0) });
+        Grid.SetRow(endpointPanel, 1); layout.Children.Add(endpointPanel);
         var sizeRow = new Grid { Margin = new Thickness(0, 0, 0, 12) };
         sizeRow.ColumnDefinitions.Add(new ColumnDefinition()); sizeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         sizeRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2396,23 +2405,43 @@ public partial class MainWindow : Window
         Grid.SetColumn(sizeLabel, 1); sizeRow.Children.Add(sizeLabel);
         var slider = new Slider { Minimum = 12, Maximum = 22, Value = _chatFontSize, TickFrequency = 1, IsSnapToTickEnabled = true, Margin = new Thickness(0, 8, 0, 0), Foreground = ThemeBrush("WelcomeAccentBrush"), Focusable = true };
         Grid.SetRow(slider, 1); Grid.SetColumnSpan(slider, 2); sizeRow.Children.Add(slider);
-        Grid.SetRow(sizeRow, 1); layout.Children.Add(sizeRow);
+        Grid.SetRow(sizeRow, 2); layout.Children.Add(sizeRow);
         var completionNotifications = new CheckBox
         {
             Content = "Show a toast when a response finishes away from this conversation",
             IsChecked = _completionNotificationsEnabled, Foreground = ThemeBrush("MainTextBrush"),
             Margin = new Thickness(0, 0, 0, 8), VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetRow(completionNotifications, 2); layout.Children.Add(completionNotifications);
+        Grid.SetRow(completionNotifications, 3); layout.Children.Add(completionNotifications);
         var preview = new TextBlock { Text = "The quick brown fox jumps over the lazy dog.", FontSize = _chatFontSize, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrush("MainTextBrush"), Margin = new Thickness(0, 4, 0, 14) };
         slider.ValueChanged += (_, _) => { sizeLabel.Text = $"{slider.Value:0} pt"; preview.FontSize = slider.Value; };
-        Grid.SetRow(preview, 3); layout.Children.Add(preview);
+        Grid.SetRow(preview, 4); layout.Children.Add(preview);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
         var apply = new Button { Content = "Apply", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
-        apply.Click += (_, _) => { _chatFontSize = slider.Value; _completionNotificationsEnabled = completionNotifications.IsChecked == true; ApplyChatTextSize(); SaveThemePreference(); RenderMessages(); editor.DialogResult = true; editor.Close(); };
+        apply.Click += async (_, _) =>
+        {
+            if (!OllamaEndpoint.TryParse(endpointInput.Text, out var endpoint, out var error))
+            {
+                MessageBox.Show(editor, error, "Invalid Ollama endpoint", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            var endpointChanged = _ollamaEndpoint != endpoint;
+            if (endpointChanged && !OllamaEndpoint.IsLoopback(endpoint) && MessageBox.Show(editor,
+                    $"Requests, prompts, and selected project context will be sent to this non-local server:\n\n{endpoint.GetLeftPart(UriPartial.Authority)}\n\nOnly continue if you trust this server.",
+                    "Use non-local Ollama server?", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            _chatFontSize = slider.Value;
+            _completionNotificationsEnabled = completionNotifications.IsChecked == true;
+            _ollamaEndpoint = endpoint;
+            ApplyChatTextSize();
+            SaveThemePreference();
+            RenderMessages();
+            editor.DialogResult = true;
+            editor.Close();
+            if (endpointChanged) await LoadModelsAsync();
+        };
         buttons.Children.Add(cancel); buttons.Children.Add(apply);
-        Grid.SetRow(buttons, 4); layout.Children.Add(buttons);
+        Grid.SetRow(buttons, 5); layout.Children.Add(buttons);
         editor.Content = layout;
         editor.ShowDialog();
     }
@@ -2599,7 +2628,7 @@ public partial class MainWindow : Window
     private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
         bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions);
-    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null);
+    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);

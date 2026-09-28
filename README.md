@@ -1,6 +1,6 @@
 # Codev
 
-Codev is a standalone Windows desktop coding workspace for local language models. It talks directly to Ollama on `127.0.0.1`; no VS Code, account, or cloud model is required.
+Codev is a standalone Windows desktop coding workspace for local language models. It connects directly to Ollama on `127.0.0.1` by default; a different server can be configured explicitly in Settings, with a warning before using a non-local endpoint. No VS Code dependency is required.
 
 ## First preview
 
@@ -33,7 +33,7 @@ Code task mode can create or edit supported source, text, and configuration file
 
 ## Run
 
-Requirements: Windows 10/11, .NET 9 Desktop Runtime, and Ollama running at `http://127.0.0.1:11434`.
+Requirements: Windows 10/11, .NET 9 Desktop Runtime, and Ollama running at `http://127.0.0.1:11434` (the default endpoint).
 
 ```powershell
 dotnet run --project .\Codev.csproj

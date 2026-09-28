@@ -23,7 +23,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Standalone Windows desktop app, no editor dependency | Done |
 | Dark/light appearance with persistent preference | Done |
 | Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
-| Per-conversation context size | Choices from Model default through model's configured max, sent as Ollama `num_ctx` |
+| Ollama endpoint and per-conversation context size | Configurable HTTP(S) endpoint defaults to localhost, warns before a changed non-local server; context choices run from Model default through model's configured max and are sent as Ollama `num_ctx` |
 | Context use visibility | Last request's prompt/history token count from Ollama and selected context limit; bounded source-context estimate shown before sending |
 | Streaming chat and independent persistent conversations | Done |
 | Pinning and conversation search | Title and message text search, matching excerpts, project/archive scope, and debounced input are implemented |
@@ -98,7 +98,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - [x] Read-only Plan mode, stop generation while keeping partial response, visible agent-tool status, continue from an explicitly stopped answer, retry/edit-resend, and branch from an earlier message. Richer plans remain.
 - [x] Core shortcuts: Ctrl+N new conversation, Ctrl+F search, F2 rename, Esc stop. Adjustable chat/composer text size is available in Settings. Accessible focus order and broader shortcut customization remain.
 - [x] Conversation rename, archive, restore, explicit permanent delete, Markdown export, and additive JSON conversation backup/import. JSON backups omit rollback checkpoint file paths and do not contain project files.
-- Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
+- Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources. Endpoint changes are validated, non-local destinations require confirmation, and HTTP redirects are disabled to prevent silently following requests to another host.
 
 ### 6. Extensibility and automation
 
