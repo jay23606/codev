@@ -226,7 +226,7 @@ public sealed class GitRepositoryService
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            throw new InvalidOperationException("Git was not found. Install Git for Windows and ensure git.exe is on PATH.", ex);
+            throw new InvalidOperationException("Git was not found. Install Git and ensure `git` is on PATH.", ex);
         }
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);

@@ -610,8 +610,8 @@ public partial class MainWindow : Window
             var menu = new ContextMenu();
             var pinItem = new MenuItem { Header = project.IsPinned ? "Unpin project" : "Pin project" };
             pinItem.Click += async (_, _) => { project.IsPinned = !project.IsPinned; RefreshConversationLists(); await SaveProjectsAsync(); };
-            var openItem = new MenuItem { Header = "Open folder in File Explorer" };
-            openItem.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = project.Path, UseShellExecute = true });
+            var openItem = new MenuItem { Header = "Open project folder" };
+            openItem.Click += (_, _) => OpenFolderInSystemFileManager(project.Path);
             var instructionsItem = new MenuItem { Header = "Edit project instructions…" };
             instructionsItem.Click += async (_, _) => await EditProjectInstructionsAsync(project);
             var knowledgeItem = new MenuItem { Header = "Edit project knowledge…" };
@@ -635,6 +635,12 @@ public partial class MainWindow : Window
             button.ContextMenu = menu;
         }
         ProjectsList.Items.Add(button);
+    }
+
+    private static void OpenFolderInSystemFileManager(string path)
+    {
+        var command = FolderOpenCommandResolver.ResolveCurrent(path);
+        System.Diagnostics.Process.Start(command.CreateStartInfo());
     }
 
     private async Task ShowGitStatusAsync(WorkspaceProject project)
