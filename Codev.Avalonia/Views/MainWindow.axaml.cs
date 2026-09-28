@@ -15,11 +15,14 @@ public partial class MainWindow : Window
     private INotifyCollectionChanged? _observedMessages;
     private bool _followOutput = true;
     private bool _scrollPending;
+    private Codev.ProjectFileMention? _activeFileMention;
+    private CancellationTokenSource? _fileMentionSearch;
 
     public MainWindow()
     {
         InitializeComponent();
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
+        Closed += (_, _) => _fileMentionSearch?.Cancel();
         DataContextChanged += (_, _) => ObserveMessages();
         ObserveMessages();
         Opened += (_, _) => ScheduleScrollToLatest();
@@ -141,8 +144,84 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
     }
 
+    private async void Composer_TextChanged(object? sender, TextChangedEventArgs e)
+    {
+        _fileMentionSearch?.Cancel();
+        _fileMentionSearch?.Dispose();
+        _fileMentionSearch = null;
+        var text = ComposerTextBox.Text ?? "";
+        if (DataContext is not ViewModels.MainViewModel viewModel ||
+            !Codev.ProjectFileMentionParser.TryGet(text, ComposerTextBox.CaretIndex, out var mention))
+        {
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+            return;
+        }
+
+        var search = _fileMentionSearch = new CancellationTokenSource();
+        var caretIndex = ComposerTextBox.CaretIndex;
+        try
+        {
+            await Task.Delay(120, search.Token);
+            var suggestions = await Task.Run(() => viewModel.GetProjectFileSuggestions(mention.Prefix), search.Token);
+            if (search.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) || ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != caretIndex) return;
+            FileMentionListBox.ItemsSource = suggestions;
+            FileMentionListBox.SelectedIndex = -1;
+            _activeFileMention = suggestions.Count > 0 ? mention : null;
+            FileMentionPopup.IsOpen = suggestions.Count > 0;
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void FileMentionSuggestion_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: string path }) ApplyProjectFileMention(path);
+    }
+
+    private void ApplyProjectFileMention(string path)
+    {
+        var currentText = ComposerTextBox.Text ?? "";
+        if (_activeFileMention is null || DataContext is not ViewModels.MainViewModel viewModel ||
+            !Codev.ProjectFileMentionParser.TryGet(currentText, ComposerTextBox.CaretIndex, out var currentMention) ||
+            currentMention.StartIndex != _activeFileMention.StartIndex || !viewModel.AddProjectFileMention(path))
+        {
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+            return;
+        }
+        var (text, caretIndex) = Codev.ProjectFileMentionParser.Insert(currentText, currentMention, path);
+        FileMentionPopup.IsOpen = false;
+        _activeFileMention = null;
+        ComposerTextBox.Text = text;
+        ComposerTextBox.CaretIndex = caretIndex;
+        viewModel.Draft = text;
+        ComposerTextBox.Focus();
+    }
+
     private void Composer_KeyDown(object? sender, KeyEventArgs e)
     {
+        if (FileMentionPopup.IsOpen && e.Key is Key.Down or Key.Up)
+        {
+            var count = FileMentionListBox.ItemCount;
+            if (count > 0) FileMentionListBox.SelectedIndex = Math.Clamp(FileMentionListBox.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, count - 1);
+            e.Handled = true;
+            return;
+        }
+        if (FileMentionPopup.IsOpen && (e.Key is Key.Enter or Key.Tab))
+        {
+            var selectedPath = FileMentionListBox.SelectedItem as string ??
+                (e.Key == Key.Enter ? FileMentionListBox.Items?.OfType<string>().FirstOrDefault() : null);
+            if (selectedPath is not null) ApplyProjectFileMention(selectedPath);
+            e.Handled = selectedPath is not null;
+            return;
+        }
+        if (FileMentionPopup.IsOpen && e.Key == Key.Escape)
+        {
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+            e.Handled = true;
+            return;
+        }
         if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
         e.Handled = true;
         if (DataContext is not ViewModels.MainViewModel viewModel) return;

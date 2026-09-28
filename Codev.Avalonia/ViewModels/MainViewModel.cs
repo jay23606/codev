@@ -511,6 +511,29 @@ public sealed class MainViewModel : ViewModelBase
         return result;
     }
 
+    public IReadOnlyList<string> GetProjectFileSuggestions(string prefix)
+    {
+        if (ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath || !Directory.Exists(projectPath)) return [];
+        try
+        {
+            return Codev.ProjectFileMentionSuggestions.Find(new Codev.WorkspaceFileService(projectPath), prefix);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return [];
+        }
+    }
+
+    public bool AddProjectFileMention(string relativePath)
+    {
+        if (ActiveConversation is not { ProjectPath: { Length: > 0 } projectPath } conversation || !Directory.Exists(projectPath)) return false;
+        if (conversation.ContextFiles.Contains(relativePath, StringComparer.OrdinalIgnoreCase)) return true;
+        var result = AddContextFiles([Path.Combine(projectPath, relativePath.Replace('/', Path.DirectorySeparatorChar))]);
+        if (result.AddedCount > 0) return true;
+        ReportContextActionStatus("This file could not be added to context. It may be excluded, unsupported, outside the project, or the 24-file limit may be full.");
+        return false;
+    }
+
     private void RemoveContextFile(string path)
     {
         if (ActiveConversation is not { } conversation || !Codev.ProjectContextSelection.RemoveFile(conversation.ContextFiles, path)) return;

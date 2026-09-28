@@ -160,8 +160,19 @@
                         <Grid ColumnDefinitions="*,790,*">
                     <StackPanel Grid.Column="1" Spacing="7">
                         <Grid ColumnDefinitions="*,Auto">
-                            <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" />
+                            <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
+                            <Popup x:Name="FileMentionPopup" PlacementTarget="{Binding #ComposerTextBox}" Placement="Top" IsLightDismissEnabled="True">
+                                <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4" Width="480">
+                                    <ListBox x:Name="FileMentionListBox" MaxHeight="220">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="x:String">
+                                                <Button Content="{Binding}" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="FileMentionSuggestion_Click" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+                            </Popup>
                         </Grid>
                         <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -192,7 +203,7 @@
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                                 <Button IsVisible="{Binding IsQueuePaused}" Content="Resume saved queue" Command="{Binding ResumeQueueCommand}" Classes="soft" Padding="7,3" FontSize="10" />
                                 <Button IsVisible="{Binding HasQueuedTurns}" Content="Cancel queued" Command="{Binding CancelQueuedCommand}" Classes="soft" Padding="7,3" FontSize="10" />
-                                <TextBlock Text="Enter to send · Shift+Enter for new line" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="Enter to send · Shift+Enter for new line · @ files" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                         </Grid>
                     </StackPanel>
