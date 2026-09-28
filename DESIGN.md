@@ -158,6 +158,7 @@ This section is the single backlog for features drawn from studying Claude Code 
 
 | Phase | Items | Why first |
 |---|---|---|
+| 0. Validate | V1, V2, V4 | Cheap, and the results change what the rest should be (section 9) |
 | 1. Cheap, high value | X1, D1, E2, A1, A6, B1, B4, C5 | Small changes that make the agent safer and easier to see into |
 | 2. Recover and review | C3, A2, C1, C2, B3 | Rewind, compaction and better review make long agent tasks survivable |
 | 3. Smarter context | A3, A5, A8, B2, B6, B9, D2 | Cuts wasted tokens; skills and structured calls make agents more reliable, and folder trust (B9) must be in place before any project-provided skill, hook, agent or command file is read |
@@ -304,7 +305,6 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 #### Open questions: verify before building
 
 - **B4:** OpenCode's permission list includes `doom_loop`; its exact behavior was not read. Check its docs before copying the name or semantics.
-- **B8:** confirm the Ollama endpoints for listing running models and unloading one, and their fields, against the current Ollama API docs.
 - **E6:** whether Windows voice typing (Win+H) and macOS Dictation stay on the machine depends on OS version and settings; test before making any privacy claim.
 - **B7:** decide the mechanism per OS (Windows restricted tokens or job objects, macOS sandbox profiles, Linux namespaces or Landlock) only after prototyping; none of these has been tried.
 - **X6:** confirm Avalonia can render Codev's Markdown, tables and copyable code blocks acceptably before committing to the full port.
@@ -312,8 +312,76 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **A9 / E6:** measure model sizes and RAM cost before recommending defaults.
 - **B9:** confirm how Claude Code and Gemini CLI implement folder trust (what is blocked before trust, how it is revoked) before designing Codev's version.
 - **C7:** measure a shadow-repository snapshot on a large project (time, disk use, ignored and binary files) before choosing between whole-tree and edited-files-only snapshots.
-- **E10:** confirm which timing and token-count fields Ollama returns per response.
 - **E8:** the Agent Client Protocol was only seen in a search summary; read its specification before treating it as an option.
+
+### 9. Validation and backlog hygiene
+
+Section 8 is a long list of ideas. These four workstreams keep it honest: they cut it down, replace guesses with facts, check that the features depend on things local models can actually do, and test what already exists. They are process items, not features, and each has an outcome that can be checked. Run them alongside implementation (phase 0 of the build order for V1, V2 and V4).
+
+#### V1. Triage the backlog
+
+**Outcome:** every item in section 8 carries a tier, added as a column in its table: **Core** (helps nearly every local-model user, low risk), **Later** (valuable but depends on other work or on evidence), or **Speculative** (decide only after V3 or V4 produce evidence). Rule of thumb: an item is Core only if it makes the agent safer, makes its work easier to see, or lets a user recover from a mistake, and it needs no new infrastructure.
+
+Proposed first triage. This is a recommendation; the maintainer decides.
+
+| Tier | Items |
+|---|---|
+| Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B3, B5, B6, B8, B10, B11, C2, C4, C6, D2, D3, D4, D6, E1, E3, E4, E6, E7, E10, E11, and X6 and X7 |
+| Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
+
+Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.
+
+**Done when:** the tier column exists in every table, and any Speculative item that V3 or V4 supports has been promoted with a note saying why.
+
+#### V2. Close the open questions
+
+**Outcome:** each bullet under "Open questions" becomes either a verified fact with a source and date, or is deleted.
+
+Already verified against the [Ollama API reference](https://github.com/ollama/ollama/blob/main/docs/api.md) on 2026-09-27 (the doc is versioned, so Codev should still check a model's capabilities at run time rather than assume them):
+
+| Need | What the API provides |
+|---|---|
+| Which models are loaded (B8) | `GET /api/ps` returns, per model, `name`, `model`, `size`, `digest`, `details`, `expires_at` and `size_vram` |
+| Unload a model (B8) | Send a request with `"keep_alive": 0` |
+| Speed and load time (E10) | The final response of a generate or chat call reports `total_duration`, `load_duration`, `prompt_eval_count`, `prompt_eval_duration`, `eval_count` and `eval_duration` |
+| Thinking (B6) | A `think` request parameter, a boolean or a level (low, medium, high, max) |
+| Tool calling (B2) | A `tools` array of function definitions in the request; `tool_calls` in the response |
+| Structured output (B2) | The `format` field accepts a JSON schema |
+| Embeddings (A9) | `POST /api/embed` (`/api/embeddings` is superseded) |
+
+Still open, with the way to close each: B4 (read OpenCode's config docs for what `doom_loop` does), B9 (read Claude Code's and Gemini CLI's folder-trust behavior), C7 (measure a shadow-repository snapshot on a large project), E6 (test whether OS voice typing stays on the machine), B7 (prototype per OS), X6 (Markdown-rendering spike), D8 (read OpenAI's own automations documentation), E8 (read the Agent Client Protocol specification).
+
+**Done when:** the "Open questions" list is empty or every remaining bullet has a named way and a date to be closed.
+
+#### V3. Measure what local models can actually do
+
+**Outcome:** a findings table in this document, filled from real runs, that says which backlog items work on the models Codev supports.
+
+Many items assume a model can do something reliably: call tools with valid arguments (B2), produce a patch that applies (B3), notice it is looping (B4), stay on task after its history is summarized (A2), and use a repo map or retrieved files well (A8, A9). Small local models often cannot, and nothing in the research above measured that. Method: keep a small fixed task suite in the repository (for example ten short tasks on a sample project, each with a pass/fail check), run it headlessly (E7) or by hand against each model listed in the README, and record the results.
+
+| Question to answer | Feature it decides |
+|---|---|
+| Does native tool calling work, and how often are arguments invalid? | B2 |
+| Does a patch or a whole-file rewrite apply correctly more often? | B3 |
+| How often does the model repeat itself, and after how many steps? | B4 |
+| Does a task survive compaction (A2) without losing its goal? | A2, B11 |
+| How large a repo map or retrieved context helps, and where it hurts? | A8, A9 |
+| Usable context size and speed (tokens per second, load time) on typical hardware | A1, B8, E10 |
+| Does thinking mode help or just slow things down? | B6 |
+
+**Done when:** the table is filled for at least the models named in the README, each affected backlog item is annotated with the measured outcome, and any item that fails on those models is demoted in V1.
+
+#### V4. Test what exists
+
+**Outcome:** the current features are checked on every supported platform, and real friction feeds back into the backlog.
+
+- **V4a. CI baseline.** Recorded in section 7: the hosted matrix passes the portable suite on Windows, Linux and macOS. Keep it green, and record any new platform-specific failure with its cause instead of skipping the test.
+- **V4b. Manual smoke checklist.** Commit a checklist (for example `docs/manual-checklist.md`) and run it before each release: streaming chat; project context and file selection; a Code task edit, approval and undo; a command approval, timeout and stop; queue pause, resume and crash recovery; backup export and import; Ollama endpoint change warning. Run it on Windows now, and on Linux and macOS once the Avalonia port (X6) exists.
+- **V4c. Real-use log.** Use Codev on a real project for a stretch of time and write down every point of friction, wrong answer and confusing moment. These notes feed V1 and are usually more valuable than another comparison with a competitor.
+
+**Done when:** V4a stays green, the checklist is committed and has been run at least once, and the first real-use log has been read and its items triaged.
+
 
 ## Product principles
 
@@ -346,7 +414,7 @@ Checked on 2026-09-27. Product capabilities change, so revisit these when planni
 - Other agents: Cline ([docs index](https://docs.cline.bot/llms.txt), [Memory Bank](https://docs.cline.bot/features/memory-bank)), Gemini CLI ([checkpointing](https://geminicli.com/docs/cli/checkpointing/), [docs](https://geminicli.com/docs/)), Zed ([agent panel](https://zed.dev/docs/ai/agent-panel)), Cursor ([rules](https://cursor.com/docs/rules)), Roo Code ([modes](https://roocodeinc.github.io/Roo-Code/basic-usage/using-modes)), Goose ([extensions](https://goose-docs.ai/docs/getting-started/using-extensions)).
 - Local chat apps: [Open WebUI comparison with Msty](https://docs.openwebui.com/alternatives/msty/) and [with LM Studio](https://docs.openwebui.com/alternatives/lm-studio/), for side-by-side model comparison and knowledge stacks.
 - [Aider](https://aider.chat/docs/): repo map, edit formats, lint and test loop.
-- Ollama: [structured outputs](https://docs.ollama.com/capabilities/structured-outputs) and the API for tool calling, thinking, vision and embeddings.
+- Ollama: [structured outputs](https://docs.ollama.com/capabilities/structured-outputs) and the [API reference](https://github.com/ollama/ollama/blob/main/docs/api.md) for tool calling, thinking, vision and embeddings.
 - Voice: [whisper.cpp](https://github.com/ggml-org/whisper.cpp), [Whisper.net](https://github.com/sandrohanea/whisper.net), [Piper](https://github.com/rhasspy/piper), [Apple SFSpeechRecognizer](https://developer.apple.com/documentation/speech/sfspeechrecognizer).
 - Cross-platform UI: [Avalonia on GitHub](https://github.com/AvaloniaUI/Avalonia) (MIT license) and [pricing](https://avaloniaui.net/pricing).
 - Continue.dev was reported discontinued in June 2026, so it is not used as a reference.
