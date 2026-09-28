@@ -68,4 +68,19 @@ public sealed class ConversationQueueRecoveryTests
         Assert.Equal(1, restored.Turn.AssistantIndex);
         Assert.Equal("Queued request was not sent before Codev closed.", conversation.Messages[1].Content);
     }
+
+    [Fact]
+    public void Drops_queue_entries_when_the_message_list_has_null_slots()
+    {
+        var conversation = new Conversation
+        {
+            Messages = [null!, new("assistant", "")],
+            PendingTurns = [new(0, "model-a", 4096, false, false, null, [], [], DateTimeOffset.UtcNow)]
+        };
+
+        var restored = ConversationQueueRecovery.Restore([conversation]);
+
+        Assert.Empty(restored);
+        Assert.Empty(conversation.PendingTurns);
+    }
 }

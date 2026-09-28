@@ -49,6 +49,17 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Backup_import_discards_saved_queue_entries_even_if_the_file_contains_them()
+    {
+        var json = """[{"Messages":[{"Role":"user","Content":"do work"},{"Role":"assistant","Content":"Queued locally"}],"PendingTurns":[{"AssistantIndex":1,"Model":"model-a","NumCtx":8192,"IsCodeTask":true,"IsPlanMode":false,"ProjectPath":"C:\\work","ContextFiles":[],"ContextExclusions":[],"EnqueuedAt":"2026-01-01T00:00:00+00:00"}]}]""";
+
+        var imported = Assert.Single(ConversationBackupService.Import(json, Options));
+
+        Assert.Empty(imported.PendingTurns);
+        Assert.Equal("Queued locally", imported.Messages[1].Content);
+    }
+
+    [Fact]
     public void Backup_omits_local_checkpoint_file_paths()
     {
         var conversation = new Conversation

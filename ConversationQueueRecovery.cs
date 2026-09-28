@@ -9,11 +9,13 @@ public static class ConversationQueueRecovery
         var restored = new List<RestoredConversationTurn>();
         foreach (var conversation in conversations)
         {
+            if (conversation is null) continue;
+            conversation.Messages ??= [];
             conversation.PendingTurns ??= [];
             var valid = conversation.PendingTurns
                 .Where(turn => turn is not null && turn.AssistantIndex >= 0 &&
                     turn.AssistantIndex < conversation.Messages.Count &&
-                    conversation.Messages[turn.AssistantIndex].Role == "assistant" &&
+                    conversation.Messages[turn.AssistantIndex] is { Role: "assistant" } &&
                     !string.IsNullOrWhiteSpace(turn.Model))
                 .GroupBy(turn => turn.AssistantIndex)
                 .Select(group => group.OrderBy(turn => turn.EnqueuedAt).First())

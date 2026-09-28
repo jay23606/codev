@@ -157,12 +157,13 @@ public partial class MainWindow : Window
             if (!File.Exists(StorePath)) return;
             var saved = JsonSerializer.Deserialize<List<Conversation>>(File.ReadAllText(StorePath), JsonOptions);
             if (saved is null) return;
-            foreach (var item in saved)
+            foreach (var item in saved.Where(item => item is not null))
             {
                 item.Messages ??= [];
                 item.PendingTurns ??= [];
                 item.FileChanges ??= [];
                 item.ContextFiles ??= [];
+                item.Messages = item.Messages.Where(message => message is not null).ToList();
                 for (var index = 0; index < item.Messages.Count; index++)
                     if (item.Messages[index].Role == "assistant" && string.IsNullOrWhiteSpace(item.Messages[index].Content))
                         item.Messages[index] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
@@ -229,7 +230,7 @@ public partial class MainWindow : Window
         catch { return string.Equals(left, right, StringComparison.OrdinalIgnoreCase); }
     }
 
-    private async Task SaveAsync()
+    private async Task<bool> SaveAsync()
     {
         var gateHeld = false;
         try
@@ -238,8 +239,9 @@ public partial class MainWindow : Window
             gateHeld = true;
             Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
             await File.WriteAllTextAsync(StorePath, JsonSerializer.Serialize(_conversations, JsonOptions));
+            return true;
         }
-        catch (Exception ex) { ConnectionLabel.Text = $"Could not save history: {ex.Message}"; }
+        catch (Exception ex) { ConnectionLabel.Text = $"Could not save history: {ex.Message}"; return false; }
         finally { if (gateHeld) _storeGate.Release(); }
     }
 
@@ -1312,7 +1314,13 @@ public partial class MainWindow : Window
         if (_isClosing)
         {
             conversation.Messages[assistantIndex] = new ChatMessage("assistant", "Queued request was not sent before Codev closed.");
-            await SaveAsync();
+            if (!await SaveAsync())
+            {
+                conversation.PendingTurns.Remove(persistedTurn);
+                conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
+                conversation.Messages[assistantIndex] = new ChatMessage("assistant", "This request was not sent because conversation history could not be saved.");
+                ConnectionLabel.Text = "The request was not sent. History could not be saved.";
+            }
             return;
         }
         _requestQueue.Enqueue(turn);
@@ -1336,17 +1344,26 @@ public partial class MainWindow : Window
             await _requestQueue.ProcessPendingAsync(async turn =>
             {
                 turn.Conversation.PendingRequestCount = Math.Max(0, turn.Conversation.PendingRequestCount - 1);
-                var savedTurns = turn.Conversation.PendingTurns?.Where(saved => saved.AssistantIndex == turn.AssistantIndex).ToList() ?? [];
-                turn.Conversation.PendingTurns?.RemoveAll(saved => saved.AssistantIndex == turn.AssistantIndex);
-                await SaveAsync();
+                var savedTurn = turn.Conversation.PendingTurns?.FirstOrDefault(saved => saved.AssistantIndex == turn.AssistantIndex);
+                if (!await SaveAsync())
+                {
+                    turn.Conversation.PendingRequestCount++;
+                    throw new InvalidOperationException("Codev could not save the queue state. The request was left queued and was not sent.");
+                }
                 if (_isClosing)
                 {
-                    turn.Conversation.PendingTurns ??= [];
-                    turn.Conversation.PendingTurns.AddRange(savedTurns);
                     turn.Conversation.PendingRequestCount++;
                     if (turn.AssistantIndex < turn.Conversation.Messages.Count)
                         turn.Conversation.Messages[turn.AssistantIndex] = new ChatMessage("assistant", "Queued request was not sent before Codev closed.");
                     return;
+                }
+                turn.Conversation.PendingTurns?.RemoveAll(saved => saved.AssistantIndex == turn.AssistantIndex);
+                if (!await SaveAsync())
+                {
+                    turn.Conversation.PendingTurns ??= [];
+                    if (savedTurn is not null) turn.Conversation.PendingTurns.Add(savedTurn);
+                    turn.Conversation.PendingRequestCount++;
+                    throw new InvalidOperationException("Codev could not save the queue state. The request was left queued and was not sent.");
                 }
                 RefreshConversationLists();
                 UpdateQueueControl();
@@ -2370,7 +2387,14 @@ public partial class MainWindow : Window
                 conversation.Messages[i] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
             }
         }
-        await SaveAsync();
+        if (!await SaveAsync())
+        {
+            ConnectionLabel.Text = "Codev could not save the shutdown state. Fix the history storage issue, then close again.";
+            IsEnabled = true;
+            _isClosing = false;
+            _closeFinalizing = false;
+            return;
+        }
         _allowClose = true;
         Close();
     }

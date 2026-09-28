@@ -82,7 +82,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - Optional Git worktree per task so parallel edits cannot collide in the same checkout.
 - Per-session model, context use, project, progress, changed files, and last activity visible from the workspace/session list.
 - [x] Optional completion toasts for responses that finish while the user is away from that conversation; toast clicks return to the conversation.
-- [x] Queued turns are persisted with their model, context, mode, project, and enqueue order; on restart they stay paused behind an explicit **Resume saved queue** action. A turn is removed from the recovery journal before it starts, so an in-progress model/tool action is marked interrupted rather than replayed after a crash. Normal app close waits for active work to cancel and saves the remaining queue for recovery.
+- [x] Queued turns are persisted with their model, context, mode, project, and enqueue order; on restart they stay paused behind an explicit **Resume saved queue** action. A turn is removed from the recovery journal only after Codev confirms the removal was saved and just before execution, so an in-progress model/tool action is marked interrupted rather than replayed after a crash. Normal app close waits for active work to cancel and saves the remaining queue for recovery.
 
 ### 4. Git and change management
 
