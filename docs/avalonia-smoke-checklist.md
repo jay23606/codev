@@ -27,6 +27,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [ ] Toggle Plan mode; verify it is visibly selected, persists after restart, produces a read-only ordered plan, and is captured per queued turn.
 - [ ] Type `@` in the composer with a project attached; verify safe project-relative suggestions appear, selecting one adds it to context and replaces the mention, and sensitive/excluded/outside-project files never appear.
 - [ ] Send a follow-up while a response is running; verify it queues, the first answer completes, and the follow-up then runs.
+- [ ] Rewind from an earlier user prompt; cancel once and verify nothing changes, then confirm and verify that prompt and later messages are removed, the prompt returns to the composer, project files and Files history are unchanged, and rewind is disabled during generation or queued work.
 - [ ] Start another response, queue a follow-up, close and relaunch the app, verify the turn is paused, then explicitly resume it.
 - [ ] Queue a follow-up and cancel it before it starts; verify it is labeled canceled and does not run.
 - [ ] Stop a response with Escape and with the stop button; verify partial output is retained.
@@ -43,7 +44,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 
 ## Not yet supported in Avalonia
 
-Turn-level rewind, richer hunk navigation and staging/revert, worktree merge/recovery, and the remaining WPF feature-parity workflows are not implemented in Avalonia yet. Code task mode, per-conversation checkpoint history with reviewed file restore, project file browsing, Git status and basic local change management (including selected-diff questions and unsent comments), custom Ollama endpoint settings, and read-only Plan mode are implemented but still need the manual interaction checks above. Keep the Windows WPF release checklist separate until its remaining workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
+Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert, worktree merge/recovery, and the remaining WPF feature-parity workflows are not implemented in Avalonia yet. Conversation-only rewind, Code task mode, per-conversation checkpoint history with reviewed file restore, project file browsing, Git status and basic local change management (including selected-diff questions and unsent comments), custom Ollama endpoint settings, and read-only Plan mode are implemented but still need the manual interaction checks above. Keep the Windows WPF release checklist separate until its remaining workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
 
 ## Run record
 

@@ -42,6 +42,7 @@ public sealed record ChatMessage(string Role, string Content)
 {
     [JsonIgnore] public bool IsUser => string.Equals(Role, "user", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool IsAssistant => string.Equals(Role, "assistant", StringComparison.OrdinalIgnoreCase);
+    [JsonIgnore] public int MessageIndex { get; init; } = -1;
 }
 
 public sealed class WorkspaceProject

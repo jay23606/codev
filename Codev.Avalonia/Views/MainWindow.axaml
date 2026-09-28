@@ -151,9 +151,15 @@
                 <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
-                            <Border IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="760" Margin="48,0,24,0" Padding="16,10" CornerRadius="15" Background="{DynamicResource UserBubbleBrush}">
-                                <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
-                            </Border>
+                            <StackPanel IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="760" Margin="48,0,24,0" Spacing="4">
+                                <Border HorizontalAlignment="Right" Padding="16,10" CornerRadius="15" Background="{DynamicResource UserBubbleBrush}">
+                                    <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
+                                </Border>
+                                <Button Content="Rewind" Classes="soft" HorizontalAlignment="Right" Padding="7,3" FontSize="10"
+                                        Command="{Binding $parent[Window].DataContext.RewindConversationCommand}"
+                                        CommandParameter="{Binding MessageIndex}"
+                                        ToolTip.Tip="Restore conversation to before this prompt; project files stay unchanged" />
+                            </StackPanel>
                             <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="1050" Margin="24,0,24,0" Spacing="8">
                                 <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
                             </StackPanel>

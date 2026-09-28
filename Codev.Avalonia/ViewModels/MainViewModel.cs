@@ -82,6 +82,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand RemoveContextFileCommand { get; }
     public ICommand ClearContextFilesCommand { get; }
     public ICommand RemoveDiffCommentCommand { get; }
+    public ICommand RewindConversationCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
     [
     ];
@@ -99,6 +100,8 @@ public sealed class MainViewModel : ViewModelBase
         RemoveContextFileCommand = new RelayCommand(value => { if (value is string path) RemoveContextFile(path); });
         ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
         RemoveDiffCommentCommand = new RelayCommand(value => { if (value is Codev.GitDiffComment comment) RemovePendingDiffComment(comment); });
+        RewindConversationCommand = new RelayCommand(value => { if (value is int index) _ = RewindConversationAsync(index); },
+            value => value is int index && CanRewindConversationMessage(index));
         SendCommand = new RelayCommand(_ =>
         {
             if (string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0) StopGeneration();
@@ -130,6 +133,7 @@ public sealed class MainViewModel : ViewModelBase
             if (SetProperty(ref _active, value))
             {
                 OnPropertyChanged(nameof(ConversationTitle));
+                ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(PinLabel));
                 OnPropertyChanged(nameof(MessageCountLabel));
                 OnPropertyChanged(nameof(ProjectLabel));
@@ -207,6 +211,7 @@ public sealed class MainViewModel : ViewModelBase
     public string CodeTaskLabel => IsCodeTask ? "Code task on" : "Code task";
     public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (IsLocalModel && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted && !IsPlanMode));
     public Func<string, string, string, bool, Task<bool>>? ReviewFileChangeAsync { get; set; }
+    public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
     public Func<string, string, string, Task<bool>>? ApproveProjectCommandAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
@@ -228,6 +233,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(QueueStatusLabel));
                 OnPropertyChanged(nameof(CanReviewFileChanges));
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)StopGenerationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -526,7 +532,12 @@ public sealed class MainViewModel : ViewModelBase
         ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(SendButtonLabel));
         Messages.Clear();
-        foreach (var message in conversation.Messages) Messages.Add(message);
+        for (var index = 0; index < conversation.Messages.Count; index++)
+        {
+            var message = conversation.Messages[index] with { MessageIndex = index };
+            conversation.Messages[index] = message;
+            Messages.Add(message);
+        }
         Reset(SelectedContextFiles, conversation.ContextFiles);
         RefreshContextEstimate();
         ContextActionStatus = "";
@@ -803,6 +814,32 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(RepoMapEstimateLabel));
     }
 
+    private bool CanRewindConversationMessage(int messageIndex) =>
+        !IsGenerating && ActiveConversation is { PendingRequestCount: 0 } conversation &&
+        !ReferenceEquals(_generationConversation, conversation) && messageIndex >= 0 && messageIndex < conversation.Messages.Count &&
+        conversation.Messages[messageIndex].IsUser;
+
+    private async Task RewindConversationAsync(int messageIndex)
+    {
+        if (ActiveConversation is not { } conversation || !CanRewindConversationMessage(messageIndex)) return;
+        if (await (ConfirmConversationRewindAsync?.Invoke(messageIndex) ?? Task.FromResult(false)) != true) return;
+        try
+        {
+            var prompt = Codev.ConversationRewindService.RestoreConversationOnly(conversation, messageIndex);
+            Draft = prompt;
+            Messages.Clear();
+            foreach (var message in conversation.Messages) Messages.Add(message);
+            OnPropertyChanged(nameof(MessageCountLabel));
+            ContextActionStatus = "Conversation rewound before that prompt. Project files were left unchanged; review them in Files history.";
+            OnPropertyChanged(nameof(ContextActionStatus));
+            OnPropertyChanged(nameof(HasContextActionStatus));
+            Persist();
+            RebuildLists();
+        }
+        catch (InvalidOperationException ex) { ReportContextActionStatus(ex.Message); }
+        finally { ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged(); }
+    }
+
     private void TogglePin()
     {
         if (ActiveConversation is not { } conversation) return;
@@ -852,7 +889,7 @@ public sealed class MainViewModel : ViewModelBase
         var titleText = string.IsNullOrWhiteSpace(text) ? "Review selected diff" : text;
         if (conversation.Title == "New conversation") conversation.Title = titleText.Length > 48 ? titleText[..48].TrimEnd() + "…" : titleText;
         else if (conversation.Messages.Count == 0) conversation.Title = titleText.Length > 48 ? titleText[..48].TrimEnd() + "…" : titleText;
-        var userMessage = new Codev.ChatMessage("user", sentText);
+        var userMessage = new Codev.ChatMessage("user", sentText) { MessageIndex = conversation.Messages.Count };
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(new Codev.ChatMessage("assistant", ""));
         conversation.Draft = "";
@@ -872,6 +909,7 @@ public sealed class MainViewModel : ViewModelBase
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
         OnPropertyChanged(nameof(CanReviewFileChanges));
+        ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
         var turn = new QueuedChatTurn(conversation, queuedTurn);
         _requestQueue.Enqueue(turn);
         conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued locally · waiting for the current response");
@@ -890,7 +928,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private void AddStatusReport(Codev.Conversation conversation)
     {
-        var userMessage = new Codev.ChatMessage("user", Draft.Trim());
+        var userMessage = new Codev.ChatMessage("user", Draft.Trim()) { MessageIndex = conversation.Messages.Count };
         var trustRoot = string.IsNullOrWhiteSpace(conversation.ProjectPath) ? null : _projectFolderTrust.FindTrustedRoot(conversation.ProjectPath);
         var assistantMessage = new Codev.ChatMessage("assistant", Codev.ConversationStatusReport.Build(
             conversation, ReferenceEquals(_generationConversation, conversation) && IsGenerating,
@@ -1217,6 +1255,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(QueueStatusLabel));
         OnPropertyChanged(nameof(HasQueuedTurns));
         OnPropertyChanged(nameof(CanReviewFileChanges));
+        ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
         Persist();
     }
@@ -1251,6 +1290,7 @@ public sealed class MainViewModel : ViewModelBase
         if (_requestQueue.Count == 0) _queuePaused = false;
         OnPropertyChanged(nameof(HasQueuedTurns));
         OnPropertyChanged(nameof(CanReviewFileChanges));
+        ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsQueuePaused));
         OnPropertyChanged(nameof(QueueStatusLabel));
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();

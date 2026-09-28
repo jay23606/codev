@@ -3,6 +3,13 @@ namespace Codev.Tests;
 public sealed class ConversationPersistenceTests
 {
     [Fact]
+    public void Message_index_is_runtime_only_and_is_not_serialized()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new ChatMessage("user", "hello") { MessageIndex = 3 });
+        Assert.DoesNotContain("MessageIndex", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Snapshot_detaches_mutable_lists_and_preserves_queued_turn_data()
     {
         var turn = new PersistedQueuedTurn(1, "model-a", 8192, false, false, null,

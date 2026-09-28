@@ -79,8 +79,19 @@ public partial class MainWindow : Window
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         viewModel.ReviewFileChangeAsync = ReviewAgentFileChangeAsync;
+        viewModel.ConfirmConversationRewindAsync = ConfirmConversationRewindAsync;
         viewModel.ApproveProjectCommandAsync = ApproveAgentCommandAsync;
         viewModel.ConfirmRepeatedToolCallAsync = ConfirmRepeatedToolCallAsync;
+    }
+
+    private async Task<bool> ConfirmConversationRewindAsync(int messageIndex)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation ||
+            messageIndex < 0 || messageIndex >= conversation.Messages.Count) return false;
+        var prompt = conversation.Messages[messageIndex].Content;
+        var excerpt = prompt.Length > 220 ? prompt[..220] + "…" : prompt;
+        return await ConfirmGitActionAsync(this, "Rewind conversation only?",
+            $"Restore the conversation to before this prompt and put it back in the composer? This removes this prompt and every later message.\n\n{excerpt}\n\nProject files will be left unchanged. Review them separately in Files history.");
     }
 
     private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile)
