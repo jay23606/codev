@@ -53,7 +53,7 @@ The Avalonia renderer prototype is separate and is not yet a replacement for the
 dotnet run --project .\Codev.Avalonia\Codev.Avalonia.csproj
 ```
 
-It currently provides a dark shell, locally persisted conversations, chat search, pin/archive, draft saving, installed-model discovery, and streaming chat through local Ollama with a Stop control. Project tools, reviewed edits, Git, export, backups, settings, light mode, and the remaining WPF workflows are still on the porting roadmap.
+It currently provides a Claude/Codex-inspired dark shell, locally persisted conversations, chat search, pin/archive, draft saving, installed-model discovery, streaming chat through local Ollama with a Stop control, message copy, and a persistent dark/light theme toggle. Project tools, reviewed edits, Git, export, backups, settings, and the remaining WPF workflows are still on the porting roadmap.
 
 Build a self-contained Windows app:
 

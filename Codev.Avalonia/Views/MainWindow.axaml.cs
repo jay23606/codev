@@ -8,7 +8,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Closed += (_, _) => (DataContext as ViewModels.MainViewModel)?.SavePendingDraft();
+        Closed += async (_, _) =>
+        {
+            if (DataContext is ViewModels.MainViewModel viewModel) await viewModel.SavePendingDraftAsync();
+        };
     }
 
     private async void CopyMessage_Click(object? sender, RoutedEventArgs e)

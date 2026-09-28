@@ -1695,7 +1695,7 @@ public partial class MainWindow : Window
         var completionFailed = false;
         try
         {
-            var history = conversation.Messages.Take(assistantIndex).Select(m => new OllamaMessage(m.Role, m.Content)).ToList();
+            var history = conversation.Messages.Take(assistantIndex).Select(m => new ChatMessage(m.Role, m.Content)).ToList();
             var system = turn.IsCodeTask
                 ? "You are Codev, a concise local coding agent. Work only within the selected project. Inspect before editing. Use the provided tools instead of claiming actions. Every file replacement and shell command requires user approval. Never represent tool output as successful unless its result confirms success."
                 : turn.IsPlanMode
@@ -1718,14 +1718,16 @@ public partial class MainWindow : Window
                 system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
                 system += "\n\n" + await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles, turn.ContextExclusions);
             }
-            history.Insert(0, new OllamaMessage("system", system));
+            history.Insert(0, new ChatMessage("system", system));
+            var ollamaHistory = OllamaConversationHistory.Normalize(history)
+                .Select(message => new OllamaMessage(message.Role, message.Content)).ToList();
             if (turn.IsCodeTask)
             {
                 var service = new WorkspaceFileService(turn.ProjectPath!);
-                await RunAgentTurnAsync(conversation, assistantIndex, history, service, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
+                await RunAgentTurnAsync(conversation, assistantIndex, ollamaHistory, service, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
             }
             else
-                await RunChatTurnAsync(conversation, assistantIndex, history, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
+                await RunChatTurnAsync(conversation, assistantIndex, ollamaHistory, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
                 conversation.Messages[assistantIndex] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
             shouldNotifyCompletion = true;

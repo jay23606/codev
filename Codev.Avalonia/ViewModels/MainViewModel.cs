@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Collections.Generic;
 using System.Windows.Input;
 using Avalonia.Threading;
+using Avalonia;
+using Avalonia.Styling;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -17,16 +19,25 @@ public sealed class MainViewModel : ViewModelBase
 {
     private static readonly string StorePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-conversations.json");
+    private static readonly string SettingsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
     private Codev.Conversation? _active;
     private string _searchText = "";
     private string _draft = "";
     private string _model = "devstral-small-2-64k";
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
+    private readonly SemaphoreSlim _persistGate = new(1, 1);
+    private Task _persistenceTask = Task.CompletedTask;
+    private Task _themePersistenceTask = Task.CompletedTask;
+    private long _persistenceRevision;
     private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
     private string _connectionStatus = "Checking Ollama…";
+    private bool _isDarkTheme = true;
+    private CancellationTokenSource? _modelLoadCancellation;
+    private long _modelSelectionRevision;
 
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
@@ -36,6 +47,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand TogglePinCommand { get; }
     public ICommand ArchiveConversationCommand { get; }
     public ICommand SendCommand { get; }
+    public ICommand ToggleThemeCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
     [
     ];
@@ -47,6 +59,7 @@ public sealed class MainViewModel : ViewModelBase
         TogglePinCommand = new RelayCommand(_ => TogglePin(), _ => ActiveConversation is not null);
         ArchiveConversationCommand = new RelayCommand(_ => ArchiveConversation(), _ => ActiveConversation is not null);
         ToggleArchiveViewCommand = new RelayCommand(_ => { ShowArchived = !ShowArchived; RebuildLists(); });
+        ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
         SendCommand = new RelayCommand(_ => { if (IsGenerating) StopGeneration(); else _ = SendDraftAsync(); }, _ => IsGenerating || !string.IsNullOrWhiteSpace(Draft));
         _draftSaveTimer.Tick += (_, _) => { _draftSaveTimer.Stop(); Persist(); };
         LoadConversations();
@@ -57,6 +70,7 @@ public sealed class MainViewModel : ViewModelBase
         }
         RebuildLists();
         SelectConversation(_conversations.FirstOrDefault(c => !c.IsArchived) ?? _conversations[0]);
+        LoadTheme();
         _ = LoadModelsAsync();
     }
 
@@ -86,6 +100,7 @@ public sealed class MainViewModel : ViewModelBase
     public string ProjectLabel => ActiveConversation?.ProjectPath is { Length: > 0 } path ? Path.GetFileName(path) + " · " + path : "No project folder attached";
     public string ContextLabel => ActiveConversation?.ContextFiles.Count > 0 ? $"{ActiveConversation.ContextFiles.Count} context files" : "No project context";
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
+    public string ThemeLabel => _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
     public string SendButtonLabel => IsGenerating ? "■" : "↑";
     public bool IsGenerating
     {
@@ -112,7 +127,17 @@ public sealed class MainViewModel : ViewModelBase
             _draftSaveTimer.Start();
         }
     }
-    public string Model { get => ActiveConversation?.Model ?? _model; set { if (ActiveConversation is null) { SetProperty(ref _model, value); return; } if (ActiveConversation.Model == value) return; ActiveConversation.Model = value; OnPropertyChanged(); Persist(); } }
+    public string Model
+    {
+        get => ActiveConversation?.Model ?? _model;
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.Equals(Model, value, StringComparison.OrdinalIgnoreCase)) return;
+            if (ActiveConversation is null) SetProperty(ref _model, value);
+            else { ActiveConversation.Model = value; OnPropertyChanged(); Persist(); }
+            _ = WarmModelAsync(value);
+        }
+    }
 
     public void NewConversation()
     {
@@ -126,8 +151,10 @@ public sealed class MainViewModel : ViewModelBase
 
     private void SelectConversation(Codev.Conversation conversation)
     {
+        var previousModel = Model;
         ActiveConversation = conversation;
         _model = conversation.Model;
+        if (!string.Equals(previousModel, conversation.Model, StringComparison.OrdinalIgnoreCase)) _ = WarmModelAsync(conversation.Model);
         Draft = conversation.Draft;
         Messages.Clear();
         foreach (var message in conversation.Messages) Messages.Add(message);
@@ -170,12 +197,13 @@ public sealed class MainViewModel : ViewModelBase
         var text = Draft.Trim();
         if (conversation.Title == "New conversation") conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
         else if (conversation.Messages.Count == 0) conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
-        conversation.Messages.Add(new Codev.ChatMessage("user", text));
+        var userMessage = new Codev.ChatMessage("user", text);
+        conversation.Messages.Add(userMessage);
         conversation.Messages.Add(new Codev.ChatMessage("assistant", ""));
         conversation.Draft = "";
         conversation.UpdatedAt = DateTimeOffset.Now;
         Draft = "";
-        Messages.Add(conversation.Messages[^1]);
+        Messages.Add(userMessage);
         Messages.Add(conversation.Messages[^1]);
         var assistantIndex = conversation.Messages.Count - 1;
         var token = new CancellationTokenSource();
@@ -187,13 +215,19 @@ public sealed class MainViewModel : ViewModelBase
         RebuildLists();
         try
         {
-            var history = conversation.Messages.Take(assistantIndex).Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
-            history.Insert(0, new OllamaChatMessage("system", "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only."));
+            var history = Codev.OllamaConversationHistory.Normalize(
+                conversation.Messages.Take(assistantIndex).Select(message => new Codev.ChatMessage(message.Role, message.Content))
+                    .Prepend(new Codev.ChatMessage("system", "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only.")))
+                .Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
             var payload = new Dictionary<string, object> { ["model"] = conversation.Model, ["messages"] = history, ["stream"] = true };
             if (conversation.NumCtx > 0) payload["options"] = new Dictionary<string, object> { ["num_ctx"] = conversation.NumCtx };
             using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/chat")) { Content = JsonContent.Create(payload) };
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token.Token);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var details = await response.Content.ReadAsStringAsync(token.Token);
+                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).\n{details}");
+            }
             await using var stream = await response.Content.ReadAsStreamAsync(token.Token);
             using var reader = new StreamReader(stream);
             var output = new System.Text.StringBuilder();
@@ -237,6 +271,36 @@ public sealed class MainViewModel : ViewModelBase
 
     private void StopGeneration() => _generationCancellation?.Cancel();
 
+    private void ToggleTheme()
+    {
+        _isDarkTheme = !_isDarkTheme;
+        if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
+        OnPropertyChanged(nameof(ThemeLabel));
+        PersistTheme();
+    }
+
+    private void LoadTheme()
+    {
+        try
+        {
+            if (File.Exists(SettingsPath))
+                _isDarkTheme = !string.Equals(JsonSerializer.Deserialize<string>(File.ReadAllText(SettingsPath)), "light", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { _isDarkTheme = true; }
+        if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
+        OnPropertyChanged(nameof(ThemeLabel));
+    }
+
+    private void PersistTheme()
+    {
+        var theme = _isDarkTheme ? "dark" : "light";
+        _themePersistenceTask = Task.Run(async () =>
+        {
+            try { await Codev.AtomicTextFile.WriteAsync(SettingsPath, JsonSerializer.Serialize(theme)).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        });
+    }
+
     public async Task LoadModelsAsync()
     {
         try
@@ -256,7 +320,12 @@ public sealed class MainViewModel : ViewModelBase
                 Models.Clear();
                 foreach (var model in choices) Models.Add(model);
                 if (Models.Count > 0 && Models.All(m => !m.Name.Equals(Model, StringComparison.OrdinalIgnoreCase))) Model = Models[0].Name;
-                ConnectionStatus = Models.Count == 0 ? "Ollama connected · no supported models installed" : $"Ollama connected · {Models.Count} local coding model(s)";
+                if (Models.Count == 0) ConnectionStatus = "Ollama connected · no supported models installed";
+                else
+                {
+                    ConnectionStatus = $"Ollama connected · {Models.Count} local coding model(s)";
+                    _ = WarmModelAsync(Model);
+                }
             });
         }
         catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException)
@@ -291,11 +360,15 @@ public sealed class MainViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(model)) Model = model;
     }
 
-    public void SavePendingDraft()
+    public async Task SavePendingDraftAsync()
     {
         _draftSaveTimer.Stop();
         if (ActiveConversation is { } conversation) conversation.Draft = Draft;
         Persist();
+        try { await _persistenceTask; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        try { await _themePersistenceTask; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     private static void Reset<T>(ObservableCollection<T> target, IEnumerable<T> source)
@@ -320,14 +393,65 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             var snapshot = Codev.ConversationPersistence.CreateSnapshot(_conversations);
-            Codev.AtomicTextFile.WriteAsync(StorePath, JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true })).GetAwaiter().GetResult();
+            var revision = Interlocked.Increment(ref _persistenceRevision);
+            _persistenceTask = Task.Run(async () =>
+            {
+                var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true });
+                await _persistGate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    if (revision < Interlocked.Read(ref _persistenceRevision)) return;
+                    await Codev.AtomicTextFile.WriteAsync(StorePath, json).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+                finally { _persistGate.Release(); }
+            });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
+    private async Task WarmModelAsync(string model)
+    {
+        if (!Models.Any(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase))) return;
+        var revision = Interlocked.Increment(ref _modelSelectionRevision);
+        var next = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _modelLoadCancellation, next);
+        previous?.Cancel();
+        previous?.Dispose();
+        await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = $"Loading {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName}…");
+        try
+        {
+            var payload = new Dictionary<string, object> { ["model"] = model, ["keep_alive"] = "5m" };
+            using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/generate"), payload, next.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                var details = await response.Content.ReadAsStringAsync(next.Token);
+                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {details}");
+            }
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (revision == Interlocked.Read(ref _modelSelectionRevision)) ConnectionStatus = $"Ready · {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName}";
+            });
+        }
+        catch (OperationCanceledException) when (next.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (revision == Interlocked.Read(ref _modelSelectionRevision)) ConnectionStatus = $"Could not load model · {ex.Message}";
+            });
+        }
+        finally
+        {
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _modelLoadCancellation, null, next), next)) next.Dispose();
+        }
+    }
+
     private sealed class OllamaTags { [JsonPropertyName("models")] public List<OllamaTag>? Models { get; set; } }
     private sealed class OllamaTag { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
-    private sealed record OllamaChatMessage(string Role, string Content);
+    private sealed record OllamaChatMessage(
+        [property: JsonPropertyName("role")] string Role,
+        [property: JsonPropertyName("content")] string Content);
     private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;
 }
 

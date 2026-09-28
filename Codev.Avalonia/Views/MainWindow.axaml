@@ -7,42 +7,42 @@
         x:DataType="vm:MainViewModel"
         Title="Codev"
         Width="1440" Height="960" MinWidth="1000" MinHeight="650"
-        Background="#191919" Foreground="#ECECEC">
+        Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}">
 
     <Window.Styles>
         <Style Selector="Button.nav">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#C7C7C7" />
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Padding" Value="12,9" />
             <Setter Property="CornerRadius" Value="7" />
         </Style>
         <Style Selector="Button.nav:pointerover">
-            <Setter Property="Background" Value="#282828" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
         </Style>
         <Style Selector="Button.soft">
-            <Setter Property="Background" Value="#252525" />
-            <Setter Property="Foreground" Value="#E7E7E7" />
-            <Setter Property="BorderBrush" Value="#383838" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FieldBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="12,7" />
         </Style>
         <Style Selector="Button.soft:pointerover">
-            <Setter Property="Background" Value="#333333" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
         </Style>
         <Style Selector="TextBox.search">
-            <Setter Property="Background" Value="#252525" />
-            <Setter Property="Foreground" Value="#E7E7E7" />
-            <Setter Property="BorderBrush" Value="#353535" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FieldBorderBrush}" />
             <Setter Property="CornerRadius" Value="7" />
             <Setter Property="Padding" Value="10,8" />
         </Style>
         <Style Selector="TextBox.composer">
-            <Setter Property="Background" Value="#242424" />
-            <Setter Property="Foreground" Value="#ECECEC" />
-            <Setter Property="BorderBrush" Value="#3B3B3B" />
+            <Setter Property="Background" Value="{DynamicResource ComposerBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FieldBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="12" />
             <Setter Property="Padding" Value="15,13" />
@@ -50,29 +50,29 @@
     </Window.Styles>
 
     <Grid ColumnDefinitions="258,*">
-        <Border Grid.Column="0" Background="#202020" BorderBrush="#303030" BorderThickness="0,0,1,0" Padding="14,17,12,12">
-            <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+        <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="14,17,12,12">
+            <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto">
                 <Grid ColumnDefinitions="30,*" Margin="5,0,3,20">
                     <Border Width="25" Height="25" CornerRadius="8" Background="#D97757" VerticalAlignment="Center">
                         <TextBlock Text="c" FontSize="17" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <StackPanel Grid.Column="1" Spacing="0" VerticalAlignment="Center">
-                        <TextBlock Text="codev" FontSize="20" FontWeight="SemiBold" Foreground="#F0F0F0" />
-                        <TextBlock Text="YOUR LOCAL CODING SPACE" FontSize="8" Foreground="#858585" />
+                        <TextBlock Text="codev" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                        <TextBlock Text="YOUR LOCAL CODING SPACE" FontSize="8" Foreground="{DynamicResource MutedTextBrush}" />
                     </StackPanel>
                 </Grid>
                 <Button Grid.Row="1" Classes="nav" Content="＋   New conversation" Command="{Binding NewConversationCommand}" Background="#D97757" Foreground="White" Margin="0,0,0,4" />
                 <TextBox Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" />
                 <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="2">
-                        <TextBlock Text="PINNED" Foreground="#898989" FontSize="10" FontWeight="SemiBold" Margin="9,4,0,5" />
+                        <TextBlock Text="PINNED" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" Margin="9,4,0,5" />
                         <ItemsControl ItemsSource="{Binding PinnedConversations}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
                                 <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" />
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <Button Classes="nav" Content="{Binding ArchiveViewLabel}" Command="{Binding ToggleArchiveViewCommand}" Margin="1,12,0,0" />
-                        <TextBlock Text="RECENTS" Foreground="#898989" FontSize="10" FontWeight="SemiBold" Margin="9,8,0,5" />
+                        <TextBlock Text="RECENTS" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" Margin="9,8,0,5" />
                         <ItemsControl ItemsSource="{Binding RecentConversations}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
                                 <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" />
@@ -80,11 +80,14 @@
                         </ItemsControl>
                     </StackPanel>
                 </ScrollViewer>
-                <Border Grid.Row="4" BorderBrush="#343434" BorderThickness="0,1,0,0" Padding="4,13,4,3">
+                <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
+                    <Button Classes="nav" Content="{Binding ThemeLabel}" Command="{Binding ToggleThemeCommand}" />
+                </StackPanel>
+                <Border Grid.Row="5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="4,13,4,3">
                     <StackPanel Spacing="5">
-                        <TextBlock Text="PROJECT" Foreground="#898989" FontSize="10" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="#D0D0D0" />
-                        <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="#8C8C8C" />
+                        <TextBlock Text="PROJECT" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
                         <TextBlock Text="{Binding ConnectionStatus}" Foreground="#89B895" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
@@ -92,13 +95,19 @@
         </Border>
 
         <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
-            <Border Grid.Row="0" BorderBrush="#303030" BorderThickness="0,0,0,1" Padding="30,0">
+            <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
                 <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="#EEEEEE" />
-                        <TextBlock Text="{Binding MessageCountLabel}" Foreground="#8F8F8F" FontSize="10" />
+                        <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                        <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
                     </StackPanel>
-                    <ComboBox Grid.Column="1" Width="250" ItemsSource="{Binding Models}" SelectedValue="{Binding Model, Mode=TwoWay}" SelectedValueBinding="{Binding Name}" VerticalAlignment="Center" Background="#252525" Foreground="#E7E7E7" BorderBrush="#3B3B3B" />
+                    <ComboBox Grid.Column="1" Width="250" ItemsSource="{Binding Models}" SelectedValue="{Binding Model, Mode=TwoWay}" SelectedValueBinding="{Binding Name}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ModelChoice">
+                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <Button Grid.Column="2" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
                     <Button Grid.Column="3" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
                 </Grid>
@@ -109,7 +118,7 @@
                         <Grid ColumnDefinitions="*,760,*" Margin="0,0,0,20">
                             <StackPanel Grid.Column="1" Spacing="8">
                                 <Grid ColumnDefinitions="*,Auto">
-                                    <TextBlock Text="{Binding Role}" Foreground="#A7A7A7" FontSize="12" FontWeight="SemiBold" Margin="2,0,0,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Role}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12" FontWeight="SemiBold" Margin="2,0,0,0" VerticalAlignment="Center" />
                                     <Button Grid.Column="1" Classes="soft" Content="Copy" Padding="8,4" FontSize="10" Click="CopyMessage_Click" />
                                 </Grid>
                                 <md:MarkdownScrollViewer Markdown="{Binding Content}" />
@@ -118,7 +127,7 @@
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
-            <Border Grid.Row="2" BorderBrush="#303030" BorderThickness="0,1,0,0" Padding="22,14,22,18">
+            <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,14,22,18">
                         <Grid ColumnDefinitions="*,790,*">
                     <StackPanel Grid.Column="1" Spacing="7">
                         <Grid ColumnDefinitions="*,Auto">
@@ -127,11 +136,11 @@
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="Chat · local Ollama streaming" Foreground="#858585" FontSize="10" VerticalAlignment="Center" />
-                                <TextBlock Text="·" Foreground="#666666" FontSize="10" VerticalAlignment="Center" />
-                                <TextBlock Text="Project tools and agent modes are on the porting roadmap" Foreground="#858585" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="Chat · local Ollama streaming" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="Project tools and agent modes are on the porting roadmap" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
-                            <TextBlock Grid.Column="1" Text="Local storage" Foreground="#858585" FontSize="10" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Text="Local storage" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                         </Grid>
                     </StackPanel>
                 </Grid>

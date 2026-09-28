@@ -9,6 +9,37 @@
         <local:ViewLocator />
     </Application.DataTemplates>
 
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#191919" />
+                    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="SurfaceBrush" Color="#252525" />
+                    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#333333" />
+                    <SolidColorBrush x:Key="ComposerBrush" Color="#242424" />
+                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#ECECEC" />
+                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#C7C7C7" />
+                    <SolidColorBrush x:Key="MutedTextBrush" Color="#898989" />
+                    <SolidColorBrush x:Key="BorderBrush" Color="#303030" />
+                    <SolidColorBrush x:Key="FieldBorderBrush" Color="#3B3B3B" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#FAF9F7" />
+                    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#F1F0ED" />
+                    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#E9E7E3" />
+                    <SolidColorBrush x:Key="ComposerBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#262522" />
+                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#46443F" />
+                    <SolidColorBrush x:Key="MutedTextBrush" Color="#77746E" />
+                    <SolidColorBrush x:Key="BorderBrush" Color="#E0DED9" />
+                    <SolidColorBrush x:Key="FieldBorderBrush" Color="#D5D2CC" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+
     <Application.Styles>
         <FluentTheme />
     </Application.Styles>
