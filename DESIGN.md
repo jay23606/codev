@@ -85,7 +85,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 4. Git and change management
 
-- [x] Git status and local branch picker from the project menu, with staged/working-tree indicators; switching branches requires a clean tree and explicit confirmation.
+- [x] Git status, local branch creation and switching from the project menu, with staged/working-tree indicators; both branch actions require a clean tree, and switching confirms before updating files.
 - [x] Review staged/unstaged diffs per file; send a selected diff excerpt to the composer; commit review shows the exact staged tree and rechecks it before committing. Persistent comments on diff hunks remain pending.
 - [x] Stage/unstage selected files and create a local commit after review and confirmation; Codev never pushes automatically.
 - Compare and merge a task worktree into the chosen branch, or discard/recover it through a clearly reviewable action.

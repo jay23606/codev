@@ -499,6 +499,8 @@ public partial class MainWindow : Window
         branchRow.Children.Add(branchPicker);
         var switchButton = new Button { Content = "Switch…", Style = (Style)FindResource("SoftButton"), Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(11, 6, 11, 6) };
         branchRow.Children.Add(switchButton);
+        var createBranchButton = new Button { Content = "New branch…", Style = (Style)FindResource("SoftButton"), Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(11, 6, 11, 6) };
+        branchRow.Children.Add(createBranchButton);
         var refreshButton = new Button { Content = "Refresh", Style = (Style)FindResource("SoftButton"), Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(11, 6, 11, 6) };
         branchRow.Children.Add(refreshButton);
         header.Children.Add(branchRow);
@@ -682,6 +684,45 @@ public partial class MainWindow : Window
         };
         branchPicker.SelectionChanged += (_, _) => UpdateSwitchControl();
         refreshButton.Click += async (_, _) => await RefreshAsync();
+        createBranchButton.Click += (_, _) =>
+        {
+            var createDialog = new Window
+            {
+                Title = "Create local branch", Width = 450, Height = 200, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = dialog, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.NoResize
+            };
+            var createLayout = new DockPanel { Margin = new Thickness(18) };
+            var createActions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            DockPanel.SetDock(createActions, Dock.Bottom);
+            var cancelCreate = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+            var create = new Button { Content = "Create and switch", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), IsDefault = true };
+            createActions.Children.Add(cancelCreate); createActions.Children.Add(create);
+            createLayout.Children.Add(createActions);
+            var branchName = new TextBox { Margin = new Thickness(0, 10, 0, 0), Padding = new Thickness(8, 6, 8, 6), ToolTip = "For example: feature/context-search" };
+            DockPanel.SetDock(branchName, Dock.Bottom);
+            createLayout.Children.Add(branchName);
+            createLayout.Children.Add(new TextBlock { Text = status.HasChanges ? "Stage or discard current changes first. A new branch starts from the current commit." : "A new branch will start from the current commit and the working tree must be clean.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush") });
+            createDialog.Content = createLayout;
+            create.IsEnabled = !status.HasChanges;
+            create.Click += async (_, _) =>
+            {
+                create.IsEnabled = false;
+                try
+                {
+                    await service.CreateAndSwitchBranchAsync(branchName.Text);
+                    createDialog.DialogResult = true;
+                    createDialog.Close();
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    create.IsEnabled = true;
+                    MessageBox.Show(createDialog, $"Could not create the branch.\n\n{ex.Message}", "Create branch", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+            createDialog.Loaded += (_, _) => branchName.Focus();
+            createDialog.ShowDialog();
+        };
         switchButton.Click += async (_, _) =>
         {
             if (branchPicker.SelectedItem is not string selected || selected == status.Branch || status.HasChanges) return;

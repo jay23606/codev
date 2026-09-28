@@ -93,6 +93,21 @@ public sealed class GitRepositoryService
         EnsureSuccess(result, "Git could not switch to the selected branch.");
     }
 
+    public async Task CreateAndSwitchBranchAsync(string branch, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(branch) || !string.Equals(branch, branch.Trim(), StringComparison.Ordinal) || branch.StartsWith("-", StringComparison.Ordinal))
+            throw new ArgumentException("Enter a valid local branch name.", nameof(branch));
+        if (branch.Contains("@{-", StringComparison.Ordinal)) throw new ArgumentException("Previous-branch shorthand is not allowed as a new branch name.", nameof(branch));
+        var validation = await RunGitAsync(["check-ref-format", "--branch", branch], cancellationToken);
+        EnsureSuccess(validation, "Git rejected this branch name.");
+        var branches = await GetLocalBranchesAsync(cancellationToken);
+        if (branches.Contains(branch, StringComparer.Ordinal)) throw new InvalidOperationException("A local branch with that name already exists.");
+        var status = await GetStatusAsync(cancellationToken);
+        if (status.HasChanges) throw new InvalidOperationException("Commit or stash the working tree changes before creating a branch.");
+        var result = await RunGitAsync(["switch", "-c", branch], cancellationToken);
+        EnsureSuccess(result, "Git could not create and switch to the new branch.");
+    }
+
     public async Task<string> GetFileDiffAsync(GitFileStatus file, CancellationToken cancellationToken = default)
     {
         var status = await GetStatusAsync(cancellationToken);

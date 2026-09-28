@@ -19,24 +19,29 @@ public sealed class GitRepositoryServiceTests
             await File.WriteAllTextAsync(file, "base\n");
             await RunGitAsync(root, "add", "--", "read me.txt");
             await RunGitAsync(root, "commit", "-m", "initial");
-            await RunGitAsync(root, "branch", "feature/test");
 
             var service = new GitRepositoryService(root);
             var clean = await service.GetStatusAsync();
             Assert.Equal(Path.GetFullPath(root), clean.Root);
             Assert.Equal("main", clean.Branch);
             Assert.False(clean.HasChanges);
-            Assert.Contains("feature/test", await service.GetLocalBranchesAsync());
+            Assert.Contains("main", await service.GetLocalBranchesAsync());
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.CommitAsync("empty commit"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAndSwitchBranchAsync("bad..branch"));
 
-            await service.SwitchBranchAsync("feature/test");
+            await service.CreateAndSwitchBranchAsync("feature/test");
             Assert.Equal("feature/test", (await service.GetStatusAsync()).Branch);
+            Assert.Contains("feature/test", await service.GetLocalBranchesAsync());
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAndSwitchBranchAsync("feature/test"));
+            await service.SwitchBranchAsync("main");
+            await service.SwitchBranchAsync("feature/test");
 
             await File.AppendAllTextAsync(file, "modified\n");
             var dirty = await service.GetStatusAsync();
             Assert.True(dirty.HasChanges);
             Assert.Contains(dirty.Files, entry => entry.Path == "read me.txt" && entry.WorkingTree == "M");
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.SwitchBranchAsync("main"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAndSwitchBranchAsync("feature/blocked"));
             Assert.Equal("feature/test", (await service.GetStatusAsync()).Branch);
 
             var modification = dirty.Files.Single(entry => entry.Path == "read me.txt");
