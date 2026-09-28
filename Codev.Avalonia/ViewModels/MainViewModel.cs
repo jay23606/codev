@@ -365,7 +365,7 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (!CanEnableHostedCodeTaskConsent) return;
         IncludeProjectContextForHosted = true;
-        ReportContextActionStatus("OpenAI coding tools are enabled for this conversation. Requested project files and tool results may be sent to OpenAI.");
+        ToggleCodeTaskMode();
     }
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
@@ -918,7 +918,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(Provider)) return "Connect OpenAI and approve hosted requests before enabling Code task.";
             if (!IncludeProjectContextForHosted)
-                return "Enable the hosted project-context option before using OpenAI Code task. Tool requests and selected file or command output will be sent to OpenAI.";
+                return "OpenAI Code task sends requested workspace files and tool results to OpenAI. Allow this for the conversation to enable Code task.";
             return null;
         }
         if (!IsLocalModel) return "Select an installed local Ollama model for Code task.";

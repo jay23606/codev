@@ -198,7 +198,7 @@
             <Border Grid.Row="1" IsVisible="{Binding ShowCodeTaskUnavailableReason}" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,7">
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                     <TextBlock Text="{Binding CodeTaskUnavailableReason}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Classes="soft" Content="Allow OpenAI tools" IsVisible="{Binding CanEnableHostedCodeTaskConsent}" Command="{Binding EnableHostedCodeTaskConsentCommand}" ToolTip.Tip="For this conversation, requested project files and tool results may be sent to OpenAI." />
+                    <Button Grid.Column="1" Classes="soft" Content="Allow + enable Code task" IsVisible="{Binding CanEnableHostedCodeTaskConsent}" Command="{Binding EnableHostedCodeTaskConsentCommand}" ToolTip.Tip="Enables OpenAI coding tools for this conversation. Requested workspace files and tool results may be sent to OpenAI. If no folder is attached, Codev creates a dedicated conversation workspace." />
                 </Grid>
             </Border>
             <Border Grid.Row="2" IsVisible="{Binding ShouldShowTaskChecklist}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="28,8">
