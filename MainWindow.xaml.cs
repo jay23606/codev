@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private bool _isDarkTheme = true;
     private bool _completionNotificationsEnabled = true;
     private double _chatFontSize = 14;
+    private List<PromptTemplate> _promptTemplates = [];
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
     private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
@@ -90,6 +91,7 @@ public partial class MainWindow : Window
                 _isDarkTheme = !string.Equals(settings?.Theme, "light", StringComparison.OrdinalIgnoreCase);
                 _chatFontSize = settings?.ChatFontSize is double storedSize && double.IsFinite(storedSize) ? Math.Clamp(storedSize, 12, 22) : 14;
                 _completionNotificationsEnabled = settings?.CompletionNotifications ?? true;
+                _promptTemplates = PromptTemplateCatalog.Normalize(settings?.PromptTemplates);
             }
         }
         catch { _isDarkTheme = true; }
@@ -100,7 +102,7 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
-            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled), JsonOptions));
+            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled, _promptTemplates), JsonOptions));
         }
         catch { }
     }
@@ -2410,6 +2412,117 @@ public partial class MainWindow : Window
         editor.ShowDialog();
     }
 
+    private void PromptTemplates_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Window
+        {
+            Title = "Prompt templates", Width = 650, Height = 520,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.Children.Add(new TextBlock
+        {
+            Text = "Save prompts you reuse. Choose Use to place one in the composer, then edit it before sending. Templates stay on this device.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
+        });
+        var list = new ListBox
+        {
+            ItemsSource = _promptTemplates, DisplayMemberPath = "Name",
+            Background = ThemeBrush("MainSurfaceAltBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            BorderBrush = ThemeBrush("MainBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(4)
+        };
+        Grid.SetRow(list, 1); layout.Children.Add(list);
+        var status = new TextBlock { Text = "Select a template to preview its prompt.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 10, 0, 10), MaxHeight = 66 };
+        list.SelectionChanged += (_, _) => status.Text = list.SelectedItem is PromptTemplate selected ? selected.Prompt : "Select a template to preview its prompt.";
+        Grid.SetRow(status, 2); layout.Children.Add(status);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var add = new Button { Content = "Add…", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0) };
+        var edit = new Button { Content = "Edit…", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0) };
+        var remove = new Button { Content = "Remove", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0) };
+        var use = new Button { Content = "Use in composer", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+        var close = new Button { Content = "Close", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), IsCancel = true };
+        add.Click += (_, _) =>
+        {
+            if (_promptTemplates.Count >= PromptTemplateCatalog.MaxTemplates) { status.Text = $"You can save up to {PromptTemplateCatalog.MaxTemplates} templates."; return; }
+            var template = EditPromptTemplate(null);
+            if (template is null) return;
+            if (_promptTemplates.Any(item => item.Name.Equals(template.Name, StringComparison.OrdinalIgnoreCase))) { status.Text = "Template names must be unique."; return; }
+            _promptTemplates.Add(template);
+            list.Items.Refresh(); list.SelectedItem = template;
+            SaveThemePreference();
+        };
+        edit.Click += (_, _) =>
+        {
+            if (list.SelectedItem is not PromptTemplate selected) return;
+            var edited = EditPromptTemplate(selected);
+            if (edited is null) return;
+            if (_promptTemplates.Any(item => !ReferenceEquals(item, selected) && item.Name.Equals(edited.Name, StringComparison.OrdinalIgnoreCase))) { status.Text = "Template names must be unique."; return; }
+            var index = _promptTemplates.IndexOf(selected);
+            _promptTemplates[index] = edited;
+            list.Items.Refresh(); list.SelectedItem = edited;
+            SaveThemePreference();
+        };
+        remove.Click += (_, _) =>
+        {
+            if (list.SelectedItem is not PromptTemplate selected) return;
+            _promptTemplates.Remove(selected); list.Items.Refresh(); SaveThemePreference();
+        };
+        use.Click += (_, _) =>
+        {
+            if (list.SelectedItem is not PromptTemplate selected) { status.Text = "Choose a template first."; return; }
+            PromptBox.Text = string.IsNullOrWhiteSpace(PromptBox.Text) ? selected.Prompt : PromptBox.Text.TrimEnd() + Environment.NewLine + Environment.NewLine + selected.Prompt;
+            PromptBox.CaretIndex = PromptBox.Text.Length;
+            dialog.DialogResult = true;
+            dialog.Close();
+            PromptBox.Focus();
+        };
+        buttons.Children.Add(add); buttons.Children.Add(edit); buttons.Children.Add(remove); buttons.Children.Add(use); buttons.Children.Add(close);
+        Grid.SetRow(buttons, 3); layout.Children.Add(buttons);
+        dialog.Content = layout;
+        dialog.ShowDialog();
+    }
+
+    private PromptTemplate? EditPromptTemplate(PromptTemplate? original)
+    {
+        var editor = new Window
+        {
+            Title = original is null ? "Add prompt template" : "Edit prompt template", Width = 540, Height = 430,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.Children.Add(new TextBlock { Text = "Name", Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 4) });
+        var name = new TextBox { Text = original?.Name ?? "", MaxLength = PromptTemplateCatalog.MaxNameCharacters, Padding = new Thickness(8, 6, 8, 6), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1) };
+        Grid.SetRow(name, 1); layout.Children.Add(name);
+        var prompt = new TextBox { Text = original?.Prompt ?? "", MaxLength = PromptTemplateCatalog.MaxPromptCharacters, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(8), Margin = new Thickness(0, 12, 0, 12), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), FontSize = 13 };
+        Grid.SetRow(prompt, 2); layout.Children.Add(prompt);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var save = new Button { Content = "Save", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), IsDefault = true };
+        save.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(prompt.Text)) { MessageBox.Show(editor, "Enter both a name and a prompt.", "Incomplete template", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+            editor.Tag = new PromptTemplate(name.Text.Trim(), prompt.Text.Trim());
+            editor.DialogResult = true;
+            editor.Close();
+        };
+        buttons.Children.Add(cancel); buttons.Children.Add(save);
+        Grid.SetRow(buttons, 3); layout.Children.Add(buttons);
+        editor.Content = layout;
+        return editor.ShowDialog() == true ? editor.Tag as PromptTemplate : null;
+    }
+
     private void ApplyChatTextSize() => PromptBox.FontSize = Math.Clamp(_chatFontSize, 12, 22);
 
     private void ToggleTheme_Click(object sender, RoutedEventArgs e)
@@ -2481,7 +2594,7 @@ public partial class MainWindow : Window
     private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
         bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions);
-    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null);
+    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);

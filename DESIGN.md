@@ -104,7 +104,8 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 - Local skills/instructions for repeatable workflows, with project-level and user-level scope.
 - MCP-compatible tools with per-server enablement, visible permissions, and logs; keep local-only use straightforward.
-- Reusable task templates and optional recurring local jobs with an approval/review queue.
+- [x] Reusable local prompt templates with bounded name/prompt lengths; choosing a template inserts it into the composer for review before sending.
+- Optional recurring local jobs with an approval/review queue.
 - Notification controls are available for conversation completions; a run history for background tasks remains.
 - Optional cloud connectors only as opt-in integrations, clearly separated from the local-only default.
 
