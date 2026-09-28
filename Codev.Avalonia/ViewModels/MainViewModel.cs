@@ -74,6 +74,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand CancelQueuedCommand { get; }
     public ICommand ToggleThemeCommand { get; }
     public ICommand TogglePlanModeCommand { get; }
+    public ICommand ToggleCodeTaskCommand { get; }
     public ICommand RemoveContextFileCommand { get; }
     public ICommand ClearContextFilesCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
@@ -89,6 +90,7 @@ public sealed class MainViewModel : ViewModelBase
         ToggleArchiveViewCommand = new RelayCommand(_ => { ShowArchived = !ShowArchived; RebuildLists(); });
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
         TogglePlanModeCommand = new RelayCommand(_ => TogglePlanMode(), _ => ActiveConversation is not null && !IsGenerating);
+        ToggleCodeTaskCommand = new RelayCommand(_ => ToggleCodeTaskMode(), _ => CanToggleCodeTaskMode);
         RemoveContextFileCommand = new RelayCommand(value => { if (value is string path) RemoveContextFile(path); });
         ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
         SendCommand = new RelayCommand(_ =>
@@ -134,6 +136,9 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ProviderStatusLabel));
                 OnPropertyChanged(nameof(IsPlanMode));
                 OnPropertyChanged(nameof(PlanModeLabel));
+                OnPropertyChanged(nameof(IsCodeTask));
+                OnPropertyChanged(nameof(CodeTaskLabel));
+                OnPropertyChanged(nameof(CanToggleCodeTaskMode));
                 OnPropertyChanged(nameof(IncludeProjectContextForHosted));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
@@ -142,6 +147,8 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)ArchiveConversationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)CancelQueuedCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
+                OnPropertyChanged(nameof(CanToggleCodeTaskMode));
             }
         }
     }
@@ -175,9 +182,15 @@ public sealed class MainViewModel : ViewModelBase
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Count > 0;
     public bool IsModelPickerPlaceholderVisible => !HasModels;
-    public string ProviderStatusLabel => $"{(IsPlanMode ? "Plan" : "Chat")} · {(IsLocalModel ? "local Ollama streaming" : $"{Provider} hosted model")}";
+    public string ProviderStatusLabel => $"{(IsCodeTask ? "Code task" : IsPlanMode ? "Plan" : "Chat")} · {(IsLocalModel ? "local Ollama" : $"{Provider} hosted model")}";
     public bool IsPlanMode => ActiveConversation?.IsPlanMode ?? false;
     public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
+    public bool IsCodeTask => ActiveConversation?.IsCodeTask ?? false;
+    public string CodeTaskLabel => IsCodeTask ? "Code task on" : "Code task";
+    public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (IsLocalModel && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted && !IsPlanMode));
+    public Func<string, string, string, bool, Task<bool>>? ReviewFileChangeAsync { get; set; }
+    public Func<string, string, string, Task<bool>>? ApproveProjectCommandAsync { get; set; }
+    public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading local models…" :
         ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase) ? "No local models installed" : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
@@ -196,6 +209,8 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)StopGenerationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
+                OnPropertyChanged(nameof(CanToggleCodeTaskMode));
             }
         }
     }
@@ -236,9 +251,36 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (ActiveConversation is not { } conversation || IsGenerating) return;
         conversation.IsPlanMode = !conversation.IsPlanMode;
+        if (conversation.IsPlanMode) conversation.IsCodeTask = false;
         OnPropertyChanged(nameof(IsPlanMode));
         OnPropertyChanged(nameof(PlanModeLabel));
+        OnPropertyChanged(nameof(IsCodeTask));
+        OnPropertyChanged(nameof(CodeTaskLabel));
+        OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         OnPropertyChanged(nameof(ProviderStatusLabel));
+        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
+        Persist();
+    }
+
+    private void ToggleCodeTaskMode()
+    {
+        if (ActiveConversation is not { } conversation || IsGenerating) return;
+        if (conversation.IsCodeTask) conversation.IsCodeTask = false;
+        else if (!CanToggleCodeTaskMode)
+        {
+            ReportContextActionStatus("Code task mode requires a trusted project folder and a local Ollama model. Trust the attached folder first.");
+            return;
+        }
+        else { conversation.IsCodeTask = true; conversation.IsPlanMode = false; }
+        OnPropertyChanged(nameof(IsCodeTask));
+        OnPropertyChanged(nameof(CodeTaskLabel));
+        OnPropertyChanged(nameof(IsPlanMode));
+        OnPropertyChanged(nameof(PlanModeLabel));
+        OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+        OnPropertyChanged(nameof(ProviderStatusLabel));
+        ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         Persist();
     }
     public bool CloudRequestsEnabled => _cloudRequestsEnabled;
@@ -267,6 +309,12 @@ public sealed class MainViewModel : ViewModelBase
 
     private void SelectModel(ModelChoice choice)
     {
+        if (IsCodeTask && choice.Provider != "ollama")
+        {
+            ReportContextActionStatus("Code task mode requires a local Ollama model. Turn Code task mode off before selecting a hosted model.");
+            OnPropertyChanged(nameof(SelectedModel));
+            return;
+        }
         if (string.Equals(Provider, choice.Provider, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(Model, choice.Name, StringComparison.OrdinalIgnoreCase)) return;
         if (ActiveConversation is null)
@@ -279,6 +327,8 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
+            OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+            ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         }
         else
         {
@@ -290,6 +340,8 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
+            OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+            ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
             Persist();
         }
         RefreshContextSizes(choice.Name);
@@ -438,8 +490,12 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IncludeProjectContextForHosted));
         OnPropertyChanged(nameof(IsPlanMode));
         OnPropertyChanged(nameof(PlanModeLabel));
+        OnPropertyChanged(nameof(IsCodeTask));
+        OnPropertyChanged(nameof(CodeTaskLabel));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ProjectTrustRoot));
         OnPropertyChanged(nameof(IsProjectTrustInherited));
         OnPropertyChanged(nameof(CanManageProjectTrust));
@@ -470,6 +526,8 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ProjectLabel));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ProjectTrustRoot));
         OnPropertyChanged(nameof(IsProjectTrustInherited));
         OnPropertyChanged(nameof(CanManageProjectTrust));
@@ -614,6 +672,7 @@ public sealed class MainViewModel : ViewModelBase
         await _projectFolderTrust.TrustAsync(folder);
         await _projectFolderTrust.MarkKnownAsync(path);
         RefreshProjectTrustState();
+        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         ReportContextActionStatus(includeSubfolders
             ? $"Trusted {folder} and its subfolders on this device. Automatic bounded context is enabled."
             : "Project folder trusted on this device. Automatic bounded source context is enabled.");
@@ -642,6 +701,8 @@ public sealed class MainViewModel : ViewModelBase
     private void RefreshProjectTrustState()
     {
         OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ProjectTrustRoot));
         OnPropertyChanged(nameof(IsProjectTrustInherited));
         OnPropertyChanged(nameof(CanManageProjectTrust));
@@ -707,6 +768,11 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("Connect the selected provider and acknowledge that prompts and selected project context will be sent off-device before sending.");
             return;
         }
+        if (conversation.IsCodeTask && (conversation.Provider != "ollama" || string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath)))
+        {
+            ReportContextActionStatus("Code task was not queued: it requires a local Ollama model and a currently trusted project folder.");
+            return;
+        }
         if (conversation.Title == "New conversation") conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
         else if (conversation.Messages.Count == 0) conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
         var userMessage = new Codev.ChatMessage("user", text);
@@ -723,7 +789,7 @@ public sealed class MainViewModel : ViewModelBase
         var contextProjectPath = Codev.ProjectContextPolicy.GetProjectPathForQueuedTurn(
             conversation.ProjectPath, hasExplicitProjectFiles, projectTrusted);
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
-            false, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
+            conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
             conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
@@ -795,6 +861,121 @@ public sealed class MainViewModel : ViewModelBase
         });
     }
 
+    private async Task RunCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
+        List<OllamaChatMessage> history, Codev.WorkspaceFileService files, Codev.PersistedQueuedTurn turn,
+        CancellationToken cancellationToken)
+    {
+        var shell = Codev.ShellCommandResolver.ResolveCurrent();
+        object[] tools =
+        [
+            Tool("list_files", "List project files; pass a project-relative directory or an empty string for the root.", new { relative_directory = new { type = "string" } }, ["relative_directory"]),
+            Tool("read_file", "Read a supported project text/source file using a project-relative path.", new { relative_path = new { type = "string" } }, ["relative_path"]),
+            Tool("search_files", "Search supported project source files for a literal string.", new { query = new { type = "string" } }, ["query"]),
+            Tool("create_file", "Propose a new supported source, text, or configuration file. Codev shows the full contents for approval before creating it.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
+            Tool("write_file", "Propose a complete replacement for one existing project file. Codev shows the change and requires approval before applying it.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
+            Tool("run_command", $"Request approval to run one {shell.DisplayName} command in the project folder. Every invocation requires individual approval.", new { command = new { type = "string" } }, ["command"])
+        ];
+        var repeatedCalls = new Codev.RepeatedToolCallGuard();
+        var executor = new Codev.CodeTaskToolExecutor(files, conversation,
+            async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
+                (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After, proposal.IsNewFile) ?? Task.FromResult(false))),
+            async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
+                (ApproveProjectCommandAsync?.Invoke(proposal.Command, proposal.ProjectPath, proposal.ShellName) ?? Task.FromResult(false))),
+            status: message => _ = SetConnectionStatusAsync(message));
+        var transcript = new System.Text.StringBuilder();
+        for (var round = 0; round < 8; round++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await SetConnectionStatusAsync($"Code task · thinking · step {round + 1}/8");
+            var payload = new Dictionary<string, object>
+            {
+                ["model"] = turn.Model,
+                ["messages"] = history,
+                ["tools"] = tools,
+                ["stream"] = false
+            };
+            var options = new Dictionary<string, object>();
+            if (turn.NumCtx > 0) options["num_ctx"] = turn.NumCtx;
+            if (turn.Temperature is { } temperature) options["temperature"] = temperature;
+            if (options.Count > 0) payload["options"] = options;
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/chat")) { Content = JsonContent.Create(payload) };
+            using var response = await _http.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).\n{body}");
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.TryGetProperty("error", out var apiError)) throw new InvalidOperationException(apiError.GetString() ?? apiError.ToString());
+            if (root.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
+            {
+                conversation.LastPromptTokens = promptTokens;
+                conversation.LastPromptContext = turn.NumCtx;
+                conversation.LastPromptModel = turn.Model;
+            }
+            var message = root.GetProperty("message");
+            var text = message.TryGetProperty("content", out var content) ? content.GetString() ?? "" : "";
+            var calls = message.TryGetProperty("tool_calls", out var callArray) && callArray.ValueKind == JsonValueKind.Array
+                ? callArray.EnumerateArray().Select(call => call.Clone()).ToArray() : [];
+            if (calls.Length == 0)
+            {
+                if (!string.IsNullOrWhiteSpace(text)) transcript.Append(text);
+                await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
+                return;
+            }
+
+            history.Add(new OllamaChatMessage("assistant", text, calls.Length == 0 ? null : JsonSerializer.SerializeToElement(calls)));
+            if (!string.IsNullOrWhiteSpace(text)) transcript.AppendLine(text);
+            foreach (var call in calls)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var function = call.GetProperty("function");
+                var name = function.GetProperty("name").GetString() ?? "";
+                var arguments = function.TryGetProperty("arguments", out var args) ? args : default;
+                if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !_projectFolderTrust.IsTrusted(turn.ProjectPath))
+                    throw new InvalidOperationException("Project trust was revoked during the Code task. No further tools will run until it is trusted again.");
+                await SetConnectionStatusAsync($"Code task · {name.Replace('_', ' ')}");
+                if (repeatedCalls.Record(name, arguments) >= Codev.RepeatedToolCallGuard.ConfirmationThreshold)
+                {
+                    var confirmed = await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
+                    if (!confirmed)
+                    {
+                        transcript.AppendLine().AppendLine("Code task stopped because the same tool call repeated. Send a follow-up with more guidance to continue.");
+                        await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
+                        return;
+                    }
+                    repeatedCalls.AllowOneMore();
+                }
+                var result = await executor.ExecuteAsync(name, arguments, cancellationToken);
+                Persist();
+                history.Add(new OllamaChatMessage("tool", result, null, name));
+                transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**").AppendLine(TruncateToolOutput(result));
+                await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
+            }
+            await SetConnectionStatusAsync("Code task · Thinking…");
+        }
+        throw new InvalidOperationException("Code task reached the eight-step tool limit. Send a follow-up to continue.");
+    }
+
+    private async Task SetConnectionStatusAsync(string status) => await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = status);
+
+    private async Task SetAssistantTranscriptAsync(Codev.Conversation conversation, int assistantIndex, string content)
+    {
+        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", content);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+        });
+    }
+
+    private static object Tool(string name, string description, object properties, string[] required) => new
+    {
+        type = "function",
+        function = new { name, description, parameters = new { type = "object", properties, required } }
+    };
+
+    private static string TruncateToolOutput(string value, int max = 6000) => value.Length <= max ? value : value[..max] + "\n… [tool output truncated]";
+
     private async Task ExecuteQueuedTurnAsync(QueuedChatTurn turn)
     {
         var conversation = turn.Conversation;
@@ -812,7 +993,9 @@ public sealed class MainViewModel : ViewModelBase
         await _persistenceTask;
         try
         {
-            var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsPlanMode, savedTurn.Provider == "ollama");
+            if (savedTurn.IsCodeTask && savedTurn.Provider != "ollama")
+                throw new InvalidOperationException("Code task turns can only run through local Ollama. Re-select a local model and queue the task again.");
+            var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama");
             var priorMessages = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
                 .Prepend(new Codev.ChatMessage("system", systemPrompt))
@@ -832,6 +1015,15 @@ public sealed class MainViewModel : ViewModelBase
             if (savedTurn.Provider == "ollama")
             {
                 var history = normalizedHistory.Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
+                if (savedTurn.IsCodeTask)
+                {
+                    if (string.IsNullOrWhiteSpace(savedTurn.ProjectPath) || !_projectFolderTrust.IsTrusted(savedTurn.ProjectPath) || !Directory.Exists(savedTurn.ProjectPath))
+                        throw new InvalidOperationException("The project folder is no longer trusted. Re-trust it before resuming this Code task.");
+                    await RunCodeTaskTurnAsync(conversation, assistantIndex, history,
+                        new Codev.WorkspaceFileService(savedTurn.ProjectPath, savedTurn.ContextExclusions), savedTurn, token.Token);
+                }
+                else
+                {
                 var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["stream"] = true };
                 var options = new Dictionary<string, object>();
                 if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
@@ -853,6 +1045,7 @@ public sealed class MainViewModel : ViewModelBase
                     if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
                     if (json.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var chunk))
                         await AppendAssistantDeltaAsync(conversation, assistantIndex, output, chunk.GetString() ?? "");
+                }
                 }
             }
             else
@@ -882,6 +1075,15 @@ public sealed class MainViewModel : ViewModelBase
         }
         finally
         {
+            if (savedTurn.IsCodeTask)
+            {
+                var displayName = Models.FirstOrDefault(choice => choice.Provider == "ollama" && choice.Name.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? savedTurn.Model;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (Provider == "ollama" && Model.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))
+                        ConnectionStatus = $"Ready · {displayName}";
+                });
+            }
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
@@ -1027,6 +1229,8 @@ public sealed class MainViewModel : ViewModelBase
                     Models.Add(new ModelChoice(Model, $"{Provider} · {Model} (connect key)", Provider));
                 OnPropertyChanged(nameof(HasModels));
                 OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
+                OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+                ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
                 if (Provider == "ollama" && allChoices.Length > 0)
                 {
                     var resolved = Codev.OllamaModelSelection.ResolveInstalledTag(Model, allChoices.Select(item => item.Name));
@@ -1364,7 +1568,9 @@ public sealed class MainViewModel : ViewModelBase
     private sealed class OllamaRunningModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record OllamaChatMessage(
         [property: JsonPropertyName("role")] string Role,
-        [property: JsonPropertyName("content")] string Content);
+        [property: JsonPropertyName("content")] string Content,
+        [property: JsonPropertyName("tool_calls"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? ToolCalls = null,
+        [property: JsonPropertyName("tool_name"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolName = null);
     private sealed record QueuedChatTurn(Codev.Conversation Conversation, Codev.PersistedQueuedTurn Turn);
     private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;
 }

@@ -41,13 +41,13 @@ public static class ConversationStatusReport
             $"Model: {provider} · {conversation.Model}",
             $"Context window: {context}",
             $"Temperature: {temperature}",
-            $"Mode: {(conversation.IsPlanMode ? "Plan" : "Chat")}",
+            $"Mode: {(conversation.IsCodeTask ? "Code task" : conversation.IsPlanMode ? "Plan" : "Chat")}",
             $"Project: {project}",
             $"Folder trust: {folderTrust}",
             $"Project context: {projectContext}",
             $"Queue: {queue}",
             $"Hosted requests: {(CloudModelProviders.IsCloud(conversation.Provider) ? hostedRequestsEnabled ? "enabled for this session" : "disabled" : "not in use")}",
-            "Tools and file changes: unavailable in Avalonia chat mode");
+            $"Tools and file changes: {(conversation.IsCodeTask ? "available with per-change and per-command approval" : "unavailable outside Code task mode")}");
     }
 
     private static string FolderName(string path)

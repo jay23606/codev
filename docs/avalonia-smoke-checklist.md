@@ -18,6 +18,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [x] In a new disposable conversation, send a short prompt; verify streaming, right-aligned user bubble, left-aligned assistant response without role labels or Copy buttons, and selectable Markdown.
 - [ ] Send `/status`; verify the report describes the current provider/model, context, mode, project and queue without invoking the model or disclosing an API key.
 - [ ] With valid OpenAI and Anthropic API credentials available, connect each provider, verify model discovery and a streamed reply, then verify disabling hosted requests blocks further hosted turns while local Ollama remains available; confirm keys never appear in settings, chat history, backups, or /status, and project files remain excluded until separately opted in.
+- [ ] In a trusted disposable project, enable Code task mode with a local Ollama model; verify read/list/search tools work, hosted-model selection is blocked, new-file and replacement proposals require review, rejecting leaves files unchanged, approving a replacement creates a checkpoint, and each shell command requires approval with a visible timeout/output result. Revoke trust during a queued Code task and verify it refuses to resume tools.
 - [ ] Toggle Plan mode; verify it is visibly selected, persists after restart, produces a read-only ordered plan, and is captured per queued turn.
 - [ ] Type `@` in the composer with a project attached; verify safe project-relative suggestions appear, selecting one adds it to context and replaces the mention, and sensitive/excluded/outside-project files never appear.
 - [ ] Send a follow-up while a response is running; verify it queues, the first answer completes, and the follow-up then runs.
@@ -37,7 +38,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 
 ## Not yet supported in Avalonia
 
-Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Project file browsing and read-only previews are implemented but still need the manual interaction check above. Avalonia Plan mode is implemented but still needs the manual interaction check above. Keep the Windows WPF release checklist separate until those workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
+Reviewed diff navigation and rollback history, Git integration, endpoint settings, and the remaining WPF feature-parity workflows are not implemented in Avalonia yet. Code task mode, project file browsing, and read-only Plan mode are implemented but still need the manual interaction checks above. Keep the Windows WPF release checklist separate until its remaining workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
 
 ## Run record
 

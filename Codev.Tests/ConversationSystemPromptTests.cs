@@ -22,4 +22,15 @@ public sealed class ConversationSystemPromptTests
         Assert.Contains("Ordinary chat is read-only", prompt, StringComparison.Ordinal);
         Assert.Contains("you have no tools", prompt, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Code_task_prompt_explains_approval_and_command_privileges()
+    {
+        var prompt = ConversationSystemPrompt.Build(isCodeTask: true, isPlanMode: false, isLocal: true);
+
+        Assert.Contains("trusted project", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("explicit user approval", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("full account permissions", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("without a sandbox", prompt, StringComparison.OrdinalIgnoreCase);
+    }
 }

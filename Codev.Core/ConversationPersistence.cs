@@ -14,6 +14,7 @@ public static class ConversationPersistence
             Model = conversation.Model,
             Provider = conversation.Provider,
             IsPlanMode = conversation.IsPlanMode,
+            IsCodeTask = conversation.IsCodeTask,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             NumCtx = conversation.NumCtx,
             Temperature = conversation.Temperature,

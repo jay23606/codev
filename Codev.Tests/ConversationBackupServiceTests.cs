@@ -16,8 +16,9 @@ public sealed class ConversationBackupServiceTests
             Title = "Debug session",
             Draft = "an unsent prompt draft",
             Model = "qwen3-coder:30b",
-            Provider = CloudModelProviders.OpenAI,
-            IsPlanMode = true,
+            Provider = "ollama",
+            IsPlanMode = false,
+            IsCodeTask = true,
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
             PendingRequestCount = 3,
@@ -31,12 +32,23 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(source.Title, imported.Title);
         Assert.Equal(source.Draft, imported.Draft);
         Assert.Equal(source.Model, imported.Model);
-        Assert.Equal(source.Provider, imported.Provider);
-        Assert.True(imported.IsPlanMode);
+        Assert.Equal("ollama", imported.Provider);
+        Assert.False(imported.IsPlanMode);
+        Assert.True(imported.IsCodeTask);
         Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
         Assert.Equal(0, imported.PendingRequestCount);
+    }
+
+    [Fact]
+    public void Imported_code_task_is_disabled_for_hosted_or_plan_conversations()
+    {
+        var json = """[{"Provider":"anthropic","IsCodeTask":true},{"Provider":"ollama","IsPlanMode":true,"IsCodeTask":true}]""";
+
+        var imported = ConversationBackupService.Import(json, Options);
+
+        Assert.All(imported, conversation => Assert.False(conversation.IsCodeTask));
     }
 
     [Fact]

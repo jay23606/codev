@@ -24,7 +24,9 @@ public partial class MainWindow : Window
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         Closed += (_, _) => _fileMentionSearch?.Cancel();
         DataContextChanged += (_, _) => ObserveMessages();
+        DataContextChanged += (_, _) => ConfigureAgentInteractions();
         ObserveMessages();
+        ConfigureAgentInteractions();
         Opened += (_, _) => ScheduleScrollToLatest();
         Closed += async (_, _) =>
         {
@@ -71,6 +73,125 @@ public partial class MainWindow : Window
             _followOutput = false;
         else if (ConversationScrollViewer.Extent.Height - ConversationScrollViewer.Offset.Y - ConversationScrollViewer.Viewport.Height <= 64)
             _followOutput = true;
+    }
+
+    private void ConfigureAgentInteractions()
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        viewModel.ReviewFileChangeAsync = ReviewAgentFileChangeAsync;
+        viewModel.ApproveProjectCommandAsync = ApproveAgentCommandAsync;
+        viewModel.ConfirmRepeatedToolCallAsync = ConfirmRepeatedToolCallAsync;
+    }
+
+    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile)
+    {
+        var layout = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
+        layout.Children.Add(new TextBlock
+        {
+            Text = isNewFile
+                ? $"The model proposes creating {relativePath}. Review the complete file before approving."
+                : $"The model proposes replacing {relativePath}. Review both versions before approving; Codev will save a local checkpoint first.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        });
+        var panes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*") };
+        var oldPane = new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 6, 0) };
+        var newPane = new StackPanel { Spacing = 5, Margin = new Thickness(6, 0, 0, 0) };
+        oldPane.Children.Add(new TextBlock { Text = isNewFile ? "CURRENT · new file" : "CURRENT", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+        newPane.Children.Add(new TextBlock { Text = "PROPOSED", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+        TextBox ReviewBox(string content) => new()
+        {
+            Text = content,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+            FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+            FontSize = 12,
+            MinHeight = 460,
+            MinWidth = 430,
+            Background = this.FindResource("ComposerBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+        };
+        oldPane.Children.Add(new ScrollViewer { Content = ReviewBox(before), HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Height = 490 });
+        newPane.Children.Add(new ScrollViewer { Content = ReviewBox(after), HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Height = 490 });
+        Grid.SetColumn(newPane, 1);
+        panes.Children.Add(oldPane);
+        panes.Children.Add(newPane);
+        layout.Children.Add(panes);
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var dialog = new Window
+        {
+            Title = isNewFile ? "Review new project file" : "Review project change",
+            Width = 1000,
+            Height = 650,
+            MinWidth = 740,
+            MinHeight = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = layout
+        };
+        var reject = new Button { Content = "Keep unchanged" };
+        var approve = new Button { Content = isNewFile ? "Approve & create" : "Approve & apply" };
+        reject.Click += (_, _) => dialog.Close(false);
+        approve.Click += (_, _) => dialog.Close(true);
+        buttons.Children.Add(reject);
+        buttons.Children.Add(approve);
+        layout.Children.Add(buttons);
+        return await dialog.ShowDialog<bool>(this);
+    }
+
+    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName)
+    {
+        var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
+        layout.Children.Add(new TextBlock
+        {
+            Text = $"This command runs through {shellName} with your account permissions. It can access files and services available to your account; Codev cannot sandbox it to the project folder. Review the exact command before approving.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        });
+        layout.Children.Add(new TextBlock { Text = "Working directory: " + projectPath, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        layout.Children.Add(new TextBox
+        {
+            Text = command, IsReadOnly = true, AcceptsReturn = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MinHeight = 220, FontFamily = new global::Avalonia.Media.FontFamily("Consolas"), Background = this.FindResource("ComposerBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+        });
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var dialog = new Window { Title = "Approve project command", Width = 720, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        var reject = new Button { Content = "Cancel" };
+        var approve = new Button { Content = "Approve & run" };
+        reject.Click += (_, _) => dialog.Close(false);
+        approve.Click += (_, _) => dialog.Close(true);
+        buttons.Children.Add(reject);
+        buttons.Children.Add(approve);
+        layout.Children.Add(buttons);
+        return await dialog.ShowDialog<bool>(this);
+    }
+
+    private async Task<bool> ConfirmRepeatedToolCallAsync(string toolName)
+    {
+        var dialog = new Window
+        {
+            Title = "Repeated code task operation",
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock { Text = $"The model requested the same {toolName.Replace('_', ' ')} operation repeatedly with identical arguments. Allow this operation once more? Choose Stop to end the code task.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                    new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 }
+                }
+            }
+        };
+        var buttonPanel = (StackPanel)((StackPanel)dialog.Content!).Children[1];
+        var stop = new Button { Content = "Stop code task" };
+        var allow = new Button { Content = "Allow once" };
+        stop.Click += (_, _) => dialog.Close(false);
+        allow.Click += (_, _) => dialog.Close(true);
+        buttonPanel.Children.Add(stop);
+        buttonPanel.Children.Add(allow);
+        return await dialog.ShowDialog<bool>(this);
     }
 
     private async void ConfigureCloudProvider_Click(object? sender, RoutedEventArgs e)

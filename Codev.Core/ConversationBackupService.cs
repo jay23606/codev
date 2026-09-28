@@ -16,6 +16,7 @@ public static class ConversationBackupService
             Model = conversation.Model,
             Provider = conversation.Provider,
             IsPlanMode = conversation.IsPlanMode,
+            IsCodeTask = conversation.IsCodeTask,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             NumCtx = conversation.NumCtx,
             Temperature = conversation.Temperature,
@@ -60,6 +61,7 @@ public static class ConversationBackupService
             item.Title = Limit(item.Title, 300, "Imported conversation");
             item.Model = Limit(item.Model, 200, "qwen3-coder:30b");
             if (item.Provider is not ("ollama" or CloudModelProviders.OpenAI or CloudModelProviders.Anthropic)) item.Provider = "ollama";
+            if (item.Provider != "ollama" || item.IsPlanMode) item.IsCodeTask = false;
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
             item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];

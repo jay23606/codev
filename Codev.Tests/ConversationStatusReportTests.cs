@@ -67,4 +67,13 @@ public sealed class ConversationStatusReportTests
         Assert.DoesNotContain(@"C:\work", report, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Project context: bounded source files included automatically", report);
     }
+
+    [Fact]
+    public void Code_task_status_reports_approval_gated_tools()
+    {
+        var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true, ProjectPath = @"C:\work\repo" }, false, 0, false, false, projectFolderTrusted: true);
+
+        Assert.Contains("Mode: Code task", report);
+        Assert.Contains("Tools and file changes: available with per-change and per-command approval", report);
+    }
 }

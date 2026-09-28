@@ -13,6 +13,7 @@ public sealed class Conversation
     public string Model { get; set; } = "qwen3-coder:30b";
     public string Provider { get; set; } = "ollama";
     public bool IsPlanMode { get; set; }
+    public bool IsCodeTask { get; set; }
     public bool IncludeProjectContextForHosted { get; set; }
     public int NumCtx { get; set; }
     public double? Temperature { get; set; }
