@@ -199,7 +199,7 @@ public partial class MainWindow : Window
             var unreadablePath = _historyStorePath;
             string? preservedPath = null;
             string? backupErrorMessage = null;
-            try { preservedPath = ConversationStoreRecovery.PreserveUnreadableStore(unreadablePath); }
+            try { preservedPath = LocalJsonStoreRecovery.PreserveUnreadableStore(unreadablePath); }
             catch (Exception backupError) { backupErrorMessage = backupError.Message; }
 
             _historyStorePath = RecoveryStorePath;
@@ -217,7 +217,7 @@ public partial class MainWindow : Window
                     _conversations.Clear();
                     if (preservedPath is null)
                     {
-                        try { preservedPath = ConversationStoreRecovery.PreserveUnreadableStore(_historyStorePath); }
+                        try { preservedPath = LocalJsonStoreRecovery.PreserveUnreadableStore(_historyStorePath); }
                         catch (Exception backupError) { backupErrorMessage = backupError.Message; }
                     }
                     ex = new InvalidDataException($"History failed to load: {ex.Message}; recovery history failed to load: {recoveryError.Message}");
@@ -275,10 +275,23 @@ public partial class MainWindow : Window
         {
             if (!File.Exists(ProjectsPath)) return;
             var saved = JsonSerializer.Deserialize<List<WorkspaceProject>>(File.ReadAllText(ProjectsPath), JsonOptions);
-            if (saved is null) return;
+            if (saved is null) throw new InvalidDataException("The project list does not contain a project list.");
             foreach (var project in saved.Where(p => !string.IsNullOrWhiteSpace(p.Path)).OrderByDescending(p => p.LastOpenedAt)) _projects.Add(project);
         }
-        catch (Exception ex) { ConnectionLabel.Text = $"Project list could not be loaded: {ex.Message}"; }
+        catch (Exception ex)
+        {
+            try
+            {
+                var preserved = LocalJsonStoreRecovery.PreserveUnreadableStore(ProjectsPath);
+                ConnectionLabel.Text = "The project list could not be read. Its original was preserved before Codev updates it.";
+                ConnectionLabel.ToolTip = $"Load error: {ex.Message}\nPreserved project list: {preserved}";
+            }
+            catch (Exception backupError)
+            {
+                ConnectionLabel.Text = $"Project list could not be loaded or backed up: {ex.Message}";
+                ConnectionLabel.ToolTip = $"Backup error: {backupError.Message}\nProject list: {ProjectsPath}";
+            }
+        }
     }
 
     private async Task SaveProjectsAsync()

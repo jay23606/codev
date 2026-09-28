@@ -2,13 +2,13 @@ using System.IO;
 
 namespace Codev;
 
-public static class ConversationStoreRecovery
+public static class LocalJsonStoreRecovery
 {
     public static string PreserveUnreadableStore(string storePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storePath);
         var fullPath = Path.GetFullPath(storePath);
-        if (!File.Exists(fullPath)) throw new FileNotFoundException("Conversation history store not found.", fullPath);
+        if (!File.Exists(fullPath)) throw new FileNotFoundException("Local JSON store not found.", fullPath);
 
         var directory = Path.GetDirectoryName(fullPath) ?? throw new ArgumentException("A store directory is required.", nameof(storePath));
         var name = Path.GetFileNameWithoutExtension(fullPath);

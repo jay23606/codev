@@ -33,7 +33,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Choose a project folder and include bounded source/config excerpts | Select up to 24 project-relative chat context files, remove individual selections, or use safe bounded excerpts; token estimates and sent context use the same file limit |
 | Attach local source files | Project files can be dragged onto the composer and added as context; attachment bytes are not sent until the user sends the prompt |
 | File explorer and preview | Project context menu opens a safe text-file browser with filtering, read-only preview, and Add to chat context |
-| Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and bounded reusable project knowledge included in local model context |
+| Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and bounded reusable project knowledge included in local model context; project metadata writes are atomic and unreadable JSON is preserved |
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file history grouped by path, scoped rollback/review, and unified text diffs; created files can be undone with a reviewed delete and redone from a checkpoint |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, elapsed progress, active-turn stop, and process-tree termination; no sandbox |
