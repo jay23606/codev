@@ -37,7 +37,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, tool status, retry/edit-resend, and branch-from-message implemented; resume and richer plans remain |
 | Conversation request scheduling | Serial Ollama queue with per-conversation running/queued indicators; true parallel agents and isolated worktrees remain pending |
 | Git status, branch, staging, and review workflow | Not implemented |
-| Markdown/code rendering, attachments, and session export | Basic Markdown and fenced code rendering with clickable web links and one-click code copying; file/image/PDF attachments and export pending |
+| Markdown/code rendering, attachments, and session export | Basic Markdown and fenced code rendering with clickable web links and one-click code copying; conversation export to Markdown; file/image/PDF attachments and import pending |
 | Skills, MCP tools, recurring tasks, and notifications | Not implemented |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
@@ -95,7 +95,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - [x] Markdown headings, emphasis, lists, quotes, inline code, safe clickable HTTP(S) links, and fenced code blocks with Copy; syntax highlighting and tables remain.
 - [x] Read-only Plan mode, stop generation while keeping partial response, visible agent-tool status, retry/edit-resend, and branch from an earlier message. Resume and richer plans remain.
 - [x] Core shortcuts: Ctrl+N new conversation, Ctrl+F search, F2 rename, Esc stop. Accessible focus order, adjustable text size, and broader shortcut customization remain.
-- [x] Conversation rename, archive, restore, and explicit permanent delete from the archive view; export/import and local backup controls remain.
+- [x] Conversation rename, archive, restore, and explicit permanent delete from the archive view; Markdown export is available. Import and local backup controls remain.
 - Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
 
 ### 6. Extensibility and automation

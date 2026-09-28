@@ -277,6 +277,7 @@ public partial class MainWindow : Window
     private void SelectConversation(Conversation conversation)
     {
         _active = conversation;
+        ExportConversationButton.IsEnabled = true;
         _codeTaskMode = false;
         _planMode = false;
         _codeTaskConversationId = null;
@@ -686,10 +687,13 @@ public partial class MainWindow : Window
             pin.Click += (_, _) => { item.IsPinned = !item.IsPinned; RefreshConversationLists(); _ = SaveAsync(); };
             var rename = new MenuItem { Header = "Rename…" };
             rename.Click += async (_, _) => await RenameConversationAsync(item);
+            var export = new MenuItem { Header = "Export as Markdown…" };
+            export.Click += async (_, _) => await ExportConversationAsync(item);
             var archive = new MenuItem { Header = item.IsArchived ? "Restore to conversations" : "Archive conversation" };
             archive.Click += async (_, _) => await SetConversationArchivedAsync(item, !item.IsArchived);
             menu.Items.Add(pin);
             menu.Items.Add(rename);
+            menu.Items.Add(export);
             menu.Items.Add(new Separator());
             menu.Items.Add(archive);
             if (item.IsArchived)
@@ -1392,6 +1396,43 @@ public partial class MainWindow : Window
         PinButton.Content = _active.IsPinned ? "★  Pinned" : "☆  Pin";
         RefreshConversationLists();
         _ = SaveAsync();
+    }
+
+    private async void ExportConversation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active is not null) await ExportConversationAsync(_active);
+    }
+
+    private async Task ExportConversationAsync(Conversation conversation)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export conversation",
+            Filter = "Markdown document (*.md)|*.md|Text file (*.txt)|*.txt",
+            DefaultExt = ".md",
+            AddExtension = true,
+            FileName = MakeExportFileName(conversation.Title),
+            OverwritePrompt = true
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            await File.WriteAllTextAsync(dialog.FileName, ConversationMarkdownExporter.Export(conversation), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            SetAgentStatus(conversation, $"Exported · {Path.GetFileName(dialog.FileName)}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not export the conversation.\n\n{ex.Message}", "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static string MakeExportFileName(string title)
+    {
+        var invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        var safe = new string((string.IsNullOrWhiteSpace(title) ? "conversation" : title.Trim())
+            .Select(character => invalid.Contains(character) || char.IsControl(character) ? '-' : character).ToArray()).Trim(' ', '.');
+        if (safe.Length > 100) safe = safe[..100].TrimEnd(' ', '.');
+        return string.IsNullOrWhiteSpace(safe) ? "conversation" : safe;
     }
 
     private void ModelPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
