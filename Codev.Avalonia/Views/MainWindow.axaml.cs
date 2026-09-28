@@ -1197,7 +1197,8 @@ public partial class MainWindow : Window
                 viewModel.Draft = "";
                 ComposerTextBox.Text = "";
                 if (viewModel.ToggleCodeTaskCommand.CanExecute(null)) viewModel.ToggleCodeTaskCommand.Execute(null);
-                else viewModel.ReportContextActionStatus("Code task needs a trusted project, loopback Ollama, and no active response. Check the project trust and selected model first.");
+                else if (viewModel.GetCodeTaskUnavailableReason() is { } codeTaskReason) viewModel.ReportContextActionStatus(codeTaskReason);
+                else viewModel.ReportContextActionStatus("Wait for the current response to finish before changing conversation mode.");
                 break;
             case Codev.SlashCommandAction.ShowStatus:
                 if (viewModel.PendingDiffComments.Count > 0)

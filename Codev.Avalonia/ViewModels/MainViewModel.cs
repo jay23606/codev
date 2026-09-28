@@ -304,8 +304,11 @@ public sealed class MainViewModel : ViewModelBase
     public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
     public bool IsCodeTask => ActiveConversation?.IsCodeTask ?? false;
     public string CodeTaskLabel => IsCodeTask ? "Code task on" : "Code task";
-    public bool CanEnterCodeTaskMode => !IsGenerating && IsLocalModel && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted;
-    public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (CanEnterCodeTaskMode && !IsPlanMode));
+    public bool CanEnterCodeTaskMode => GetCodeTaskUnavailableReason() is null;
+    public bool CanToggleCodeTaskMode => ActiveConversation is not null && !IsGenerating;
+    public string CodeTaskTooltip => IsCodeTask
+        ? "Code task is on. Click to return to Chat mode. File changes and every shell command still need approval."
+        : GetCodeTaskUnavailableReason() ?? "Enable Code task. File changes and every shell command still need approval.";
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
     public Func<int, string, Task<string?>>? EditConversationPromptAsync { get; set; }
@@ -584,12 +587,26 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (ActiveConversation is not { } conversation || IsGenerating) return;
         if (conversation.IsCodeTask) SetConversationMode(ConversationMode.Chat);
-        else if (!CanToggleCodeTaskMode)
+        else if (GetCodeTaskUnavailableReason() is { } reason)
         {
-            ReportContextActionStatus("Code task mode requires a trusted project folder and a loopback Ollama endpoint. Trust the attached folder and use local Ollama first.");
+            ReportContextActionStatus(reason);
             return;
         }
         else SetConversationMode(ConversationMode.CodeTask);
+    }
+
+    public string? GetCodeTaskUnavailableReason()
+    {
+        if (ActiveConversation is null) return "Start or select a conversation first.";
+        if (IsGenerating) return "Wait for the current response to finish before changing conversation mode.";
+        if (IsPlanMode) return "Switch from Plan mode to Chat mode before enabling Code task.";
+        if (!HasProject) return "Attach a project folder before enabling Code task.";
+        if (!IsProjectTrusted) return "Trust the attached project folder before enabling Code task.";
+        if (!IsLocalModel) return "Select an installed local Ollama model for Code task.";
+        if (!Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint)) return "Code task requires Ollama at a local loopback address (127.0.0.1 or localhost).";
+        if (!Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)))
+            return "Select an installed Ollama model; the current model is not in the available local model list.";
+        return null;
     }
     public bool CloudRequestsEnabled => _cloudRequestsEnabled;
     public bool IncludeProjectContextForHosted
