@@ -35,6 +35,14 @@ public sealed class OllamaModelSelectionTests
     }
 
     [Fact]
+    public void Selects_the_first_valid_installed_tag_when_no_default_is_configured()
+    {
+        var resolved = OllamaModelSelection.ResolveInstalledTag("", ["qwen3.8:27b", "devstral-small-2:24b"]);
+
+        Assert.Equal("qwen3.8:27b", resolved);
+    }
+
+    [Fact]
     public void Returns_null_when_no_nonblank_models_are_installed() =>
         Assert.Null(OllamaModelSelection.ResolveInstalledTag("model", ["", "  "]));
 }

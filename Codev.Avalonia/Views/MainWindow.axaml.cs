@@ -1252,6 +1252,12 @@ public partial class MainWindow : Window
                 ComposerTextBox.CaretIndex = ComposerTextBox.Text?.Length ?? 0;
                 ComposerTextBox.Focus();
                 break;
+            case Codev.SlashCommandAction.ReviewWorkingTree:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (await viewModel.ReviewUncommittedChangesAsync() is { } review)
+                    await ShowReadOnlyReviewAsync(review, this);
+                break;
             case Codev.SlashCommandAction.UserPrompt:
                 if (command.ArgumentNames is { Count: > 0 } argumentNames &&
                     Codev.SlashCommandCatalog.TryGetCommandToken(ComposerTextBox.Text, ComposerTextBox.CaretIndex, out var token, out var hasArguments) &&
@@ -2340,6 +2346,30 @@ public partial class MainWindow : Window
         var panel = (StackPanel)dialog.Content!;
         ((Button)panel.Children[1]).Click += (_, _) => dialog.Close();
         await dialog.ShowDialog(owner ?? this);
+    }
+
+    private static async Task ShowReadOnlyReviewAsync(string report, Window owner)
+    {
+        var text = new TextBox
+        {
+            Text = report,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MinHeight = 360,
+            VerticalContentAlignment = global::Avalonia.Layout.VerticalAlignment.Top
+        };
+        var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, IsCancel = true };
+        var layout = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
+        {
+            new TextBlock { Text = "Read-only model review · second opinion", FontSize = 15, FontWeight = global::Avalonia.Media.FontWeight.SemiBold },
+            new TextBlock { Text = "The model reviewed a bounded local Git diff. No project files or Git state were changed.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+            text,
+            close
+        }};
+        var dialog = new Window { Title = "Uncommitted changes review", Width = 760, Height = 620, MinWidth = 560, MinHeight = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        close.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(owner);
     }
 
     private async void AddContextFiles_Click(object? sender, RoutedEventArgs e)

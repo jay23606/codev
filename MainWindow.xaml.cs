@@ -374,7 +374,7 @@ public partial class MainWindow : Window
             ModelPicker.ItemsSource = _models;
             if (_models.Count > 0)
             {
-                var wanted = _active?.Model ?? "qwen3-coder:30b";
+                var wanted = _active?.Model ?? "";
                 ModelPicker.SelectedValue = FindModelOption(wanted, _active?.Provider)?.Name ?? _models[0].Name;
             }
             _loadingModel = false;
@@ -544,7 +544,7 @@ public partial class MainWindow : Window
 
     private void NewChat_Click(object sender, RoutedEventArgs e)
     {
-        var model = ModelPicker.SelectedValue as string ?? "qwen3-coder:30b";
+        var model = ModelPicker.SelectedValue as string ?? "";
         var projectPath = _activeProject?.Path ?? _active?.ProjectPath;
         var conversation = new Conversation { Model = model, Provider = (ModelPicker.SelectedItem as ModelOption)?.Provider ?? "ollama", ProjectPath = projectPath, UpdatedAt = DateTimeOffset.Now };
         _conversations.Insert(0, conversation);
@@ -1085,7 +1085,7 @@ public partial class MainWindow : Window
         {
             var conversation = new Conversation
             {
-                Model = ModelPicker.SelectedValue as string ?? "qwen3-coder:30b",
+                Model = ModelPicker.SelectedValue as string ?? "",
                 Provider = (ModelPicker.SelectedItem as ModelOption)?.Provider ?? "ollama",
                 ProjectPath = project?.Path,
                 UpdatedAt = DateTimeOffset.Now
@@ -2620,7 +2620,7 @@ public partial class MainWindow : Window
     private void RefreshContextPicker(Conversation? conversation)
     {
         _updatingContext = true;
-        var model = conversation?.Model ?? ModelPicker.SelectedValue as string ?? "qwen3-coder:30b";
+        var model = conversation?.Model ?? ModelPicker.SelectedValue as string ?? "";
         var max = MaxContextForModel(model);
         if (conversation is not null && conversation.NumCtx > max)
         {

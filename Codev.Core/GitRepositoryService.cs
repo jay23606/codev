@@ -16,10 +16,13 @@ public sealed record GitRepositoryStatus(string Root, string Branch, string? Ups
 }
 
 public sealed record GitStagedReview(string TreeId, string Diff);
+public sealed record GitWorkingTreeReview(string Branch, IReadOnlyList<string> Files, string Diff, bool Truncated);
 
 /// <summary>Reads Git state and switches only between existing local branches on a clean worktree.</summary>
 public sealed class GitRepositoryService
 {
+    public const int MaxReviewDiffCharacters = 40_000;
+    public const int MaxReviewFiles = 40;
     private readonly string _workingDirectory;
 
     public GitRepositoryService(string workingDirectory) => _workingDirectory = Path.GetFullPath(workingDirectory);
@@ -109,6 +112,9 @@ public sealed class GitRepositoryService
     }
 
     public async Task<string> GetFileDiffAsync(GitFileStatus file, CancellationToken cancellationToken = default)
+        => await GetFileDiffAsync(file, int.MaxValue, cancellationToken);
+
+    private async Task<string> GetFileDiffAsync(GitFileStatus file, int maxCharacters, CancellationToken cancellationToken)
     {
         var status = await GetStatusAsync(cancellationToken);
         var current = status.Files.FirstOrDefault(candidate => string.Equals(candidate.Path, file.Path, StringComparison.Ordinal));
@@ -118,21 +124,54 @@ public sealed class GitRepositoryService
         if (current.Staged != " ")
         {
             output.AppendLine("STAGED CHANGES");
-            output.AppendLine(await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken));
+            output.AppendLine(await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken, maxCharacters));
         }
         if (current.WorkingTree == "?")
         {
             output.AppendLine("UNTRACKED FILE");
-            var diff = await RunGitAsync(["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", current.Path], cancellationToken);
+            var boundedOutput = maxCharacters == int.MaxValue ? int.MaxValue : maxCharacters + 1;
+            var diff = await RunGitAsync(["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", current.Path], cancellationToken, boundedOutput);
             if (diff.ExitCode is not 0 and not 1) EnsureSuccess(diff, "Git could not read this untracked file.");
             output.AppendLine(diff.Output);
         }
         else if (current.WorkingTree != " ")
         {
             output.AppendLine("UNSTAGED CHANGES");
-            output.AppendLine(await ReadDiffAsync(["diff", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken));
+            output.AppendLine(await ReadDiffAsync(["diff", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken, maxCharacters));
         }
-        return output.ToString().TrimEnd();
+        var value = output.ToString().TrimEnd();
+        return value.Length > maxCharacters ? value[..maxCharacters] + "\n[diff excerpt truncated]" : value;
+    }
+
+    public async Task<GitWorkingTreeReview> GetWorkingTreeReviewAsync(CancellationToken cancellationToken = default,
+        int maxCharacters = MaxReviewDiffCharacters, int maxFiles = MaxReviewFiles)
+    {
+        if (maxCharacters < 1 || maxFiles < 1) throw new ArgumentOutOfRangeException(nameof(maxCharacters));
+        var status = await GetStatusAsync(cancellationToken);
+        var selected = status.Files.Take(maxFiles).ToArray();
+        var output = new System.Text.StringBuilder();
+        var truncated = status.Files.Count > selected.Length;
+        foreach (var file in selected)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var heading = $"\n===== {file.State.Trim()} {file.DisplayPath} =====\n";
+            if (output.Length + heading.Length > maxCharacters) { truncated = true; break; }
+            output.Append(heading);
+            var remaining = maxCharacters - output.Length;
+            if (remaining <= 0) { truncated = true; break; }
+            var fileDiff = await GetFileDiffAsync(file, remaining, cancellationToken);
+            if (fileDiff.Length > remaining) { fileDiff = fileDiff[..remaining]; truncated = true; }
+            output.Append(fileDiff);
+            if (output.Length >= maxCharacters) { truncated = true; break; }
+        }
+        if (truncated)
+        {
+            var marker = "\n[Review input truncated at Codev's safety limit.]";
+            if (marker.Length > maxCharacters) marker = marker[..maxCharacters];
+            if (output.Length + marker.Length > maxCharacters) output.Length = Math.Max(0, maxCharacters - marker.Length);
+            output.Append(marker);
+        }
+        return new GitWorkingTreeReview(status.Branch, selected.Select(file => file.DisplayPath).ToArray(), output.ToString(), truncated);
     }
 
     public async Task<string> GetStagedDiffAsync(CancellationToken cancellationToken = default) =>
@@ -188,11 +227,11 @@ public sealed class GitRepositoryService
             ?? throw new InvalidOperationException("That file is no longer changed in the repository. Refresh Git status and select it again.");
     }
 
-    private async Task<string> ReadDiffAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private async Task<string> ReadDiffAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, int maxCharacters = int.MaxValue)
     {
-        var result = await RunGitAsync(arguments, cancellationToken);
+        var result = await RunGitAsync(arguments, cancellationToken, maxCharacters == int.MaxValue ? int.MaxValue : maxCharacters + 1);
         EnsureSuccess(result, "Git could not read the selected diff.");
-        return result.Output;
+        return result.Output.Length > maxCharacters ? result.Output[..maxCharacters] + "\n[diff excerpt truncated]" : result.Output;
     }
 
     private async Task<string> GetIndexTreeIdAsync(CancellationToken cancellationToken)
@@ -202,7 +241,7 @@ public sealed class GitRepositoryService
         return result.Output.Trim();
     }
 
-    private async Task<GitCommandResult> RunGitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private async Task<GitCommandResult> RunGitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, int maxOutputCharacters = int.MaxValue)
     {
         using var process = new Process
         {
@@ -229,7 +268,7 @@ public sealed class GitRepositoryService
             throw new InvalidOperationException("Git was not found. Install Git and ensure `git` is on PATH.", ex);
         }
 
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var outputTask = ReadOutputAsync(process.StandardOutput, maxOutputCharacters, cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
@@ -241,6 +280,21 @@ public sealed class GitRepositoryService
             throw new TimeoutException("The Git command took longer than 10 seconds.");
         }
         return new GitCommandResult(process.ExitCode, await outputTask, await errorTask);
+    }
+
+    private static async Task<string> ReadOutputAsync(StreamReader reader, int maxCharacters, CancellationToken cancellationToken)
+    {
+        if (maxCharacters == int.MaxValue) return await reader.ReadToEndAsync(cancellationToken);
+        var output = new System.Text.StringBuilder(Math.Min(maxCharacters, 4096));
+        var buffer = new char[4096];
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0) break;
+            var keep = Math.Min(read, maxCharacters - output.Length);
+            if (keep > 0) output.Append(buffer, 0, keep);
+        }
+        return output.ToString();
     }
 
     private static int ParseCount(string text, string key)

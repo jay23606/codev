@@ -72,7 +72,7 @@ public static class ConversationBackupService
 
             item.Id = Guid.NewGuid();
             item.Title = Limit(item.Title, 300, "Imported conversation");
-            item.Model = Limit(item.Model, 200, "qwen3-coder:30b");
+            item.Model = Limit(item.Model, 200, "");
             if (item.Provider is not ("ollama" or CloudModelProviders.OpenAI or CloudModelProviders.Anthropic)) item.Provider = "ollama";
             if (item.Provider != "ollama" || item.IsPlanMode) item.IsCodeTask = false;
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");

@@ -60,6 +60,20 @@ public sealed class GitRepositoryServiceTests
             Assert.Equal("??", untrackedStatus.State);
             Assert.Contains("new content", await service.GetFileDiffAsync(untrackedStatus), StringComparison.Ordinal);
 
+            var review = await service.GetWorkingTreeReviewAsync();
+            Assert.Equal("feature/test", review.Branch);
+            Assert.Equal(2, review.Files.Count);
+            Assert.Contains("modified", review.Diff, StringComparison.Ordinal);
+            Assert.Contains("new content", review.Diff, StringComparison.Ordinal);
+            var boundedReview = await service.GetWorkingTreeReviewAsync(maxCharacters: 180);
+            Assert.True(boundedReview.Truncated);
+            Assert.True(boundedReview.Diff.Length <= 180);
+            Assert.Contains("truncated", boundedReview.Diff, StringComparison.OrdinalIgnoreCase);
+            await service.StageFileAsync(modification.Path);
+            var stagedWorkingTreeReview = await service.GetWorkingTreeReviewAsync();
+            Assert.Contains("STAGED CHANGES", stagedWorkingTreeReview.Diff, StringComparison.Ordinal);
+            Assert.Contains("UNTRACKED FILE", stagedWorkingTreeReview.Diff, StringComparison.Ordinal);
+
             await service.StageFileAsync("read me.txt");
             await service.StageFileAsync("new file.txt");
             Assert.Contains("new content", await service.GetStagedDiffAsync(), StringComparison.Ordinal);

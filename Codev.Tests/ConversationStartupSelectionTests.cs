@@ -3,6 +3,10 @@ namespace Codev.Tests;
 public sealed class ConversationStartupSelectionTests
 {
     [Fact]
+    public void New_conversation_does_not_assume_a_model_that_may_not_be_installed() =>
+        Assert.Empty(new Conversation().Model);
+
+    [Fact]
     public void Restores_last_active_non_archived_conversation_even_if_another_was_updated_later()
     {
         var lastActive = new Conversation { UpdatedAt = DateTimeOffset.UnixEpoch };

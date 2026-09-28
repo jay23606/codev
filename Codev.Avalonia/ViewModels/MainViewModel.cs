@@ -38,7 +38,7 @@ public sealed class MainViewModel : ViewModelBase
     private Codev.Conversation? _active;
     private string _searchText = "";
     private string _draft = "";
-    private string _model = "qwen3-coder:30b";
+    private string _model = "";
     private string _provider = "ollama";
     private string _outputStyle = Codev.ConversationOutputStyles.Balanced;
     private bool _thinkEnabled;
@@ -62,6 +62,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly Dictionary<Guid, int> _lastPromptMessageCounts = [];
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
+    private bool _isReviewRunning;
     private bool _isUnloadingModel;
     private string _lastSlashCommandWarning = "";
     private readonly Queue<QueuedChatTurn> _requestQueue = new();
@@ -426,6 +427,115 @@ public sealed class MainViewModel : ViewModelBase
         CancellationToken cancellationToken = default) =>
         new Codev.OllamaModelParameterClient(_http, _ollamaEndpoint)
             .GetDeclaredDefaultsAsync(model, cancellationToken);
+
+    public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (ActiveConversation is not { } conversation || conversation.ProjectPath is not { Length: > 0 } projectPath || !IsProjectTrusted)
+        {
+            ReportContextActionStatus("/review needs an attached, trusted Git project.");
+            return null;
+        }
+        var reviewModel = conversation.Model;
+        var reviewEndpoint = _ollamaEndpoint;
+        var reviewContext = conversation.NumCtx;
+        var reviewTemperature = conversation.Temperature;
+        var reviewTopP = conversation.TopP;
+        var reviewTopK = conversation.TopK;
+        var reviewPresencePenalty = conversation.PresencePenalty;
+        var reviewRepeatPenalty = conversation.RepeatPenalty;
+        var reviewOutputTokens = Math.Min(conversation.NumPredict ?? 3000, 3000);
+        if (conversation.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(reviewEndpoint))
+        {
+            ReportContextActionStatus("/review uses only the selected local Ollama model and a loopback Ollama endpoint. Switch back to local Ollama to continue.");
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(reviewModel) || !Models.Any(choice => choice.Provider == "ollama" &&
+            RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(reviewModel), StringComparison.OrdinalIgnoreCase)))
+        {
+            ReportContextActionStatus("Choose an installed Ollama model before starting /review.");
+            return null;
+        }
+        if (IsGenerating || HasQueuedTurns || _queueProcessorRunning)
+        {
+            ReportContextActionStatus("Wait for active and queued requests to finish before starting a Git review.");
+            return null;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(3));
+        var reviewTimer = Stopwatch.StartNew();
+        _isReviewRunning = true;
+        _generationCancellation = timeout;
+        IsGenerating = true;
+        try
+        {
+            await SetConnectionStatusAsync("/review · reading local Git changes…");
+            var snapshot = await new Codev.GitRepositoryService(projectPath)
+                .GetWorkingTreeReviewAsync(timeout.Token);
+            if (!_projectFolderTrust.IsTrusted(projectPath))
+            {
+                ReportContextActionStatus("Project trust was revoked while preparing /review. No diff was sent to the model.");
+                return null;
+            }
+            if (snapshot.Files.Count == 0)
+            {
+                ReportContextActionStatus("/review found no uncommitted Git changes.");
+                return null;
+            }
+
+            var messages = Codev.GitReviewPromptBuilder.Build(snapshot);
+            if (!_projectFolderTrust.IsTrusted(projectPath))
+            {
+                ReportContextActionStatus("Project trust was revoked before /review could send its diff. No changes were sent to the model.");
+                return null;
+            }
+            var options = Codev.OllamaRequestOptions.Build(reviewContext, reviewTemperature, reviewTopP, reviewTopK,
+                reviewPresencePenalty, reviewRepeatPenalty, reviewOutputTokens) ?? new Dictionary<string, object>();
+            if (reviewContext > 0) options["num_ctx"] = reviewContext;
+            options["num_predict"] = reviewOutputTokens;
+            var payload = new Dictionary<string, object>
+            {
+                ["model"] = reviewModel,
+                ["messages"] = messages,
+                ["stream"] = false,
+                ["think"] = false,
+                ["options"] = options
+            };
+            await SetConnectionStatusAsync($"/review · {snapshot.Files.Count} changed files · local second opinion…");
+            using var response = await _http.PostAsJsonAsync(
+                Codev.OllamaEndpoint.ApiUri(reviewEndpoint, "api/chat"), payload, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
+            using var result = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
+            if (!result.RootElement.TryGetProperty("message", out var message) ||
+                !message.TryGetProperty("content", out var content) ||
+                string.IsNullOrWhiteSpace(content.GetString()))
+                throw new InvalidOperationException("The selected model returned no review findings.");
+            var truncationNote = snapshot.Truncated ? "\n\n_Codev capped the review input; some changed content may not have been included._" : "";
+            ReportContextActionStatus($"/review complete · {snapshot.Files.Count} files · read-only local second opinion");
+            return $"Read-only second opinion · {snapshot.Branch} · {snapshot.Files.Count} files" +
+                (snapshot.Truncated ? " · input capped" : "") + "\n\n" + content.GetString()?.Trim() + truncationNote;
+        }
+        catch (OperationCanceledException)
+        {
+            ReportContextActionStatus(reviewTimer.Elapsed >= TimeSpan.FromMinutes(3)
+                ? "/review timed out after three minutes. No project files were changed."
+                : "/review canceled. No project files were changed.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            ReportContextActionStatus($"Could not review local Git changes: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            _isReviewRunning = false;
+            _generationCancellation = null;
+            IsGenerating = false;
+            await SetConnectionStatusAsync("Ollama ready");
+        }
+    }
 
     private void TogglePlanMode()
     {
@@ -1330,6 +1440,11 @@ public sealed class MainViewModel : ViewModelBase
     private async Task SendDraftAsync()
     {
         if (ActiveConversation is not { } conversation || (string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0)) return;
+        if (_isReviewRunning)
+        {
+            ReportContextActionStatus("Wait for /review to finish or stop it before sending another prompt.");
+            return;
+        }
         if (_isUnloadingModel)
         {
             ReportContextActionStatus("Wait for the Ollama model unload operation to finish before sending a prompt.");

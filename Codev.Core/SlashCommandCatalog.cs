@@ -10,6 +10,7 @@ public enum SlashCommandAction
     SelectModel,
     TogglePlan,
     ReviewProject,
+    ReviewWorkingTree,
     ShowStatus,
     OpenCommandsFolder,
     OpenSkillsFolder,
@@ -37,8 +38,7 @@ public static class SlashCommandCatalog
             "Inspect this project and draft a concise AGENTS.md with its purpose, layout, build and test commands, and important conventions. Do not overwrite or edit any file automatically. If Code task mode is available, propose AGENTS.md as a new file for my review; otherwise show the complete draft in your response."),
         new("/model", "Choose a different model", SlashCommandAction.SelectModel),
         new("/plan", "Toggle read-only Plan mode", SlashCommandAction.TogglePlan),
-        new("/review", "Prepare a read-only project review prompt", SlashCommandAction.ReviewProject,
-            "Review the available project context and recent changes for correctness bugs, security risks, edge cases, and missing tests. Do not edit files. Return only actionable findings, prioritized by severity, with file and line references where possible."),
+        new("/review", "Review uncommitted Git changes with the selected local model", SlashCommandAction.ReviewWorkingTree),
         new("/skills", "Open user and trusted-project skill folders", SlashCommandAction.OpenSkillsFolder),
         new("/status", "Show local provider, model, mode, context, and queue status", SlashCommandAction.ShowStatus)
     ];

@@ -11,7 +11,7 @@ public sealed class Conversation
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = "";
     public string Draft { get; set; } = "";
-    public string Model { get; set; } = "qwen3-coder:30b";
+    public string Model { get; set; } = "";
     public string Provider { get; set; } = "ollama";
     public bool IsPlanMode { get; set; }
     public bool IsCodeTask { get; set; }

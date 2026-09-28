@@ -46,5 +46,8 @@ public sealed class SlashCommandCatalogTests
     {
         Assert.All(SlashCommandCatalog.All.Where(command => command.Action is SlashCommandAction.ReviewProject or SlashCommandAction.InitProject),
             command => Assert.False(string.IsNullOrWhiteSpace(command.Prompt)));
+        var review = Assert.Single(SlashCommandCatalog.All, command => command.Name == "/review");
+        Assert.Equal(SlashCommandAction.ReviewWorkingTree, review.Action);
+        Assert.Contains("local model", review.Description, StringComparison.OrdinalIgnoreCase);
     }
 }
