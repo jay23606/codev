@@ -7,6 +7,8 @@ Codev reads Markdown prompt files from two folders:
 
 Type `/` in the Avalonia composer to search built-in and custom commands. User commands are labeled **USER** and project commands **PROJECT**. A project command takes precedence over a user command with the same name; built-in names are reserved. Use `/commands` to open the folders and see this format.
 
+Prompt templates saved by the WPF app in `%LOCALAPPDATA%\Codev\settings.json` are also available in Avalonia as **SAVED** slash suggestions named `/template-<name>`. Selecting one inserts the existing prompt into the composer for review. The legacy settings file is read only; the prompt template manager remains in the WPF app, and templates can be moved to Markdown command files when you want them available as user or project commands.
+
 The filename without `.md` is the command name. Use lowercase letters, digits, hyphens, or underscores, up to 40 characters. Each file starts with frontmatter containing a short description and optional required named arguments:
 
 ```markdown

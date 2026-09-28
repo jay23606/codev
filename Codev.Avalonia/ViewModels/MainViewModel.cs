@@ -22,6 +22,8 @@ public sealed class MainViewModel : ViewModelBase
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-conversations.json");
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
+    private static readonly string LegacySettingsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
     private static readonly string ProjectTrustPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-trusted-folders.json");
     private static readonly string ActiveConversationPath = Path.Combine(
@@ -728,13 +730,26 @@ public sealed class MainViewModel : ViewModelBase
         var userCommands = loaded.Commands.Where(command => hasArguments
             ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
             : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
-        return builtIns.Concat(userCommands).ToArray();
+        var templates = LoadLegacyPromptTemplateCommands(loaded.Commands.Select(command => command.Name)).Where(command => hasArguments
+            ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
+            : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
+        return builtIns.Concat(userCommands).Concat(templates).ToArray();
     }
 
     public async Task<Codev.SlashCommandExpansionResult> ExpandSlashCommandAsync(
         Codev.SlashCommandDefinition command, string invocation, CancellationToken cancellationToken = default)
     {
         if (!command.IsCustom) return new(false, "", "The selected command is not user-defined.");
+        if (string.Equals(command.Scope, "template", StringComparison.OrdinalIgnoreCase))
+        {
+            var currentCustom = await Codev.CustomSlashCommandService.LoadAsync(UserSlashCommandsPath,
+                ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
+            var currentTemplate = LoadLegacyPromptTemplateCommands(currentCustom.Commands.Select(item => item.Name))
+                .FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase));
+            return currentTemplate is null
+                ? new(false, "", "That saved prompt template is no longer available.")
+                : Codev.CustomSlashCommandService.Expand(currentTemplate, invocation);
+        }
         var loaded = await Codev.CustomSlashCommandService.LoadAsync(UserSlashCommandsPath,
             ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
         var current = loaded.Commands.FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase) &&
@@ -743,6 +758,23 @@ public sealed class MainViewModel : ViewModelBase
             ? new(false, "", "That command is no longer available. Check its Markdown file and project trust setting.")
             : Codev.CustomSlashCommandService.Expand(current, invocation);
     }
+
+    private static IReadOnlyList<Codev.SlashCommandDefinition> LoadLegacyPromptTemplateCommands(IEnumerable<string>? reservedNames)
+    {
+        try
+        {
+            var info = new FileInfo(LegacySettingsPath);
+            if (!info.Exists || info.Length > 1024 * 1024) return [];
+            var settings = JsonSerializer.Deserialize<LegacyTemplateSettings>(File.ReadAllText(LegacySettingsPath), BackupJsonOptions);
+            return Codev.PromptTemplateCatalog.ToSlashCommands(settings?.PromptTemplates, reservedNames);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return [];
+        }
+    }
+
+    private sealed record LegacyTemplateSettings(List<Codev.PromptTemplate>? PromptTemplates);
 
     public async Task<string> ExportActiveConversationMarkdownAsync()
     {

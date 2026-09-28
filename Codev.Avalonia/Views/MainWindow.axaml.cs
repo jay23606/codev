@@ -669,6 +669,12 @@ public partial class MainWindow : Window
             Text = "Add a .md file to either folder. Its filename becomes the slash command, for example inspect.md creates /inspect. User commands work in every chat; project commands load only for an attached trusted project. Project commands override user commands with the same name. Markdown is treated as prompt text only; Codev never executes scripts from command files.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
+        content.Children.Add(new TextBlock
+        {
+            Text = "Saved prompt templates from the WPF app also appear as /template-… commands (SAVED) and insert into the composer for review. Manage those templates in the WPF app or migrate them to Markdown files here.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+        });
         content.Children.Add(new Border
         {
             Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
