@@ -245,8 +245,7 @@ public partial class MainWindow : Window
         {
             await _storeGate.WaitAsync();
             gateHeld = true;
-            Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
-            await File.WriteAllTextAsync(StorePath, JsonSerializer.Serialize(_conversations, JsonOptions));
+            await AtomicTextFile.WriteAsync(StorePath, JsonSerializer.Serialize(_conversations, JsonOptions));
             return true;
         }
         catch (Exception ex) { ConnectionLabel.Text = $"Could not save history: {ex.Message}"; return false; }
