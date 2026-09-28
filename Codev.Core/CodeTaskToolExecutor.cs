@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Codev;
 
-public sealed record CodeTaskFileProposal(string RelativePath, string Before, string After, bool IsNewFile);
+public sealed record CodeTaskFileProposal(string RelativePath, string Before, string After, bool IsNewFile, string? ProposedPatch = null);
 public sealed record CodeTaskCommandProposal(string Command, string ProjectPath, string ShellName);
 
 /// <summary>Executes the bounded Code task tools. Mutations and shell commands require UI-provided approval.</summary>
@@ -28,6 +28,7 @@ public sealed class CodeTaskToolExecutor(
                 "search_files" => string.Join("\n", await files.SearchFilesAsync(Arg("query"), cancellationToken)),
                 "create_file" => await CreateFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "write_file" => await WriteFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
+                "apply_patch" => await ApplyPatchAsync(Arg("relative_path"), Arg("patch"), cancellationToken),
                 "run_command" => await RunCommandAsync(Arg("command"), cancellationToken),
                 _ => "Error: this tool is not available."
             };
@@ -54,7 +55,23 @@ public sealed class CodeTaskToolExecutor(
         var fullPath = files.ResolvePath(relativePath);
         if (!File.Exists(fullPath)) return "Rejected: no file exists at this path. Use create_file to propose a new file.";
         var original = await files.ReadFileSnapshotAsync(relativePath, cancellationToken);
-        if (!await reviewFile(new CodeTaskFileProposal(relativePath, original.Content, content, IsNewFile: false)))
+        return await ReviewAndWriteAsync(relativePath, original, content, proposedPatch: null, cancellationToken);
+    }
+
+    private async Task<string> ApplyPatchAsync(string relativePath, string patch, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) return "Error: a project-relative file path is required.";
+        if (string.IsNullOrWhiteSpace(patch)) return "Error: a unified-diff patch is required.";
+        var fullPath = files.ResolvePath(relativePath);
+        if (!File.Exists(fullPath)) return "Rejected: no file exists at this path. Use create_file to propose a new file.";
+        var original = await files.ReadFileSnapshotAsync(relativePath, cancellationToken);
+        var content = UnifiedDiffApplier.Apply(original.Content, patch);
+        return await ReviewAndWriteAsync(relativePath, original, content, patch, cancellationToken);
+    }
+
+    private async Task<string> ReviewAndWriteAsync(string relativePath, FileSnapshot original, string content, string? proposedPatch, CancellationToken cancellationToken)
+    {
+        if (!await reviewFile(new CodeTaskFileProposal(relativePath, original.Content, content, IsNewFile: false, proposedPatch)))
             return "Rejected by user; the file was left unchanged.";
         var checkpoint = await files.CreateCheckpointAsync(relativePath, conversation.Id, cancellationToken, original.Sha256);
         await files.WriteFileAtomicAsync(relativePath, content, cancellationToken, original.Sha256);

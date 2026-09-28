@@ -94,21 +94,24 @@ public partial class MainWindow : Window
             $"Restore the conversation to before this prompt and put it back in the composer? This removes this prompt and every later message.\n\n{excerpt}\n\nProject files will be left unchanged. Review them separately in Files history.");
     }
 
-    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile)
+    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch)
     {
-        var layout = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
-        layout.Children.Add(new TextBlock
+        var layout = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto"), RowSpacing = 12 };
+        var content = new StackPanel { Spacing = 12 };
+        content.Children.Add(new TextBlock
         {
             Text = isNewFile
                 ? $"The model proposes creating {relativePath}. Review the complete file before approving."
-                : $"The model proposes replacing {relativePath}. Review both versions before approving; Codev will save a local checkpoint first.",
+                : proposedPatch is not null
+                    ? $"The model proposes a patch to {relativePath}. Review the patch and complete resulting file before approving; Codev will save a local checkpoint first."
+                    : $"The model proposes replacing {relativePath}. Review both versions before approving; Codev will save a local checkpoint first.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
         var panes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*") };
         var oldPane = new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 6, 0) };
         var newPane = new StackPanel { Spacing = 5, Margin = new Thickness(6, 0, 0, 0) };
         oldPane.Children.Add(new TextBlock { Text = isNewFile ? "CURRENT · new file" : "CURRENT", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
-        newPane.Children.Add(new TextBlock { Text = "PROPOSED", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+        newPane.Children.Add(new TextBlock { Text = proposedPatch is null ? "PROPOSED" : "RESULTING FILE", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
         TextBox ReviewBox(string content) => new()
         {
             Text = content,
@@ -127,13 +130,34 @@ public partial class MainWindow : Window
         Grid.SetColumn(newPane, 1);
         panes.Children.Add(oldPane);
         panes.Children.Add(newPane);
-        layout.Children.Add(panes);
+        content.Children.Add(panes);
+        if (proposedPatch is not null)
+        {
+            var patchBox = new TextBox
+            {
+                Text = proposedPatch,
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+                FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+                FontSize = 12,
+                MinHeight = 100,
+                MaxHeight = 180,
+                Background = this.FindResource("ComposerBrush") as global::Avalonia.Media.IBrush,
+                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+            };
+            content.Children.Add(new StackPanel
+            {
+                Spacing = 5,
+                Children = { new TextBlock { Text = "PROPOSED PATCH", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush }, new ScrollViewer { Content = patchBox, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto } }
+            });
+        }
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
         var dialog = new Window
         {
-            Title = isNewFile ? "Review new project file" : "Review project change",
+            Title = proposedPatch is not null ? "Review patch" : isNewFile ? "Review new project file" : "Review project change",
             Width = 1000,
-            Height = 650,
+            Height = 760,
             MinWidth = 740,
             MinHeight = 500,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -145,7 +169,14 @@ public partial class MainWindow : Window
         approve.Click += (_, _) => dialog.Close(true);
         buttons.Children.Add(reject);
         buttons.Children.Add(approve);
+        layout.Children.Add(new ScrollViewer
+        {
+            Content = content,
+            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+        });
         layout.Children.Add(buttons);
+        Grid.SetRow(buttons, 2);
         return await dialog.ShowDialog<bool>(this);
     }
 

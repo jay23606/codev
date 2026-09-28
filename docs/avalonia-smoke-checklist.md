@@ -52,3 +52,17 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 |---|---|---|---|---|---|
 | 2026-09-28 | working tree after `b180f46` | Windows 11 | Qwen3.6 35B-A3B | Partial pass | Avalonia restored the active conversation/model and had no blank model entries. New chats inherited Qwen3.6. Attached a disposable project, selected one JS file and verified the local response returned its exact test value; Ollama CPU inference took about two minutes. Remaining checklist items are unverified. |
 | 2026-09-28 | working tree after `a34594e` | Windows 11 | Qwen3.6 35B-A3B | Partial pass | Exported a disposable empty conversation as Markdown and verified its title/model metadata. Imported a synthetic backup through the native file picker; it received a new ID and existing conversations remained present. Core backup tests verify checkpoint paths are stripped. Full-history JSON export and remaining checklist items are unverified. |
+
+## Strict patch-based Code task edits
+
+- In a trusted project, ask Code task mode to make a small change to an existing source file using a unified hunk patch.
+- Confirm the review dialog shows the patch, current file, and complete resulting file; reject it and verify no workspace change or history entry.
+- Repeat and approve; verify a checkpointed edit appears in Files history and can be restored.
+- Change the hunk context so it no longer matches, or provide malformed hunk counts; verify Codev reports a patch error before opening review and leaves the file unchanged.
+
+## Strict patch-based Code task edits
+
+- In a trusted project, ask Code task mode to make a small change to an existing source file using a unified hunk patch.
+- Confirm the review dialog shows the patch, current file, and complete resulting file; reject it and verify no workspace change or history entry.
+- Repeat and approve; verify a checkpointed edit appears in Files history and can be restored.
+- Change the hunk context so it no longer matches, or provide malformed hunk counts; verify Codev reports a patch error before opening review and leaves the file unchanged.

@@ -80,6 +80,69 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Strict_patch_is_reviewed_then_checkpointed_and_applied()
+    {
+        var filePath = Path.Combine(_root, "Program.cs");
+        File.WriteAllText(filePath, "class Old {}\r\nclass Keep {}\r\n");
+        CodeTaskFileProposal? reviewed = null;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            proposal => { reviewed = proposal; return Task.FromResult(true); },
+            _ => Task.FromResult(false));
+
+        var result = await ExecuteAsync(executor, "apply_patch", """{"relative_path":"Program.cs","patch":"@@ -1,2 +1,2 @@\n-class Old {}\n+class New {}\n class Keep {}"}""");
+
+        Assert.Contains("checkpoint was saved", result);
+        Assert.Equal("class Old {}\r\nclass Keep {}\r\n", reviewed!.Before);
+        Assert.Equal("class New {}\r\nclass Keep {}\r\n", reviewed.After);
+        Assert.Contains("-class Old {}", reviewed.ProposedPatch);
+        Assert.Equal("class New {}\r\nclass Keep {}\r\n", File.ReadAllText(filePath));
+        var change = Assert.Single(_conversation.FileChanges);
+        Assert.Equal("Edit", change.Kind);
+        Assert.NotNull(change.CheckpointPath);
+    }
+
+    [Fact]
+    public async Task Patch_with_mismatched_context_is_rejected_before_review()
+    {
+        var filePath = Path.Combine(_root, "Program.cs");
+        File.WriteAllText(filePath, "class Actual {}\n");
+        var reviewed = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => { reviewed = true; return Task.FromResult(true); }, _ => Task.FromResult(false));
+
+        var result = await ExecuteAsync(executor, "apply_patch", """{"relative_path":"Program.cs","patch":"@@ -1 +1 @@\n-class Expected {}\n+class New {}"}""");
+
+        Assert.StartsWith("Error:", result);
+        Assert.Contains("context does not match", result);
+        Assert.False(reviewed);
+        Assert.Equal("class Actual {}\n", File.ReadAllText(filePath));
+        Assert.Empty(_conversation.FileChanges);
+    }
+
+    [Fact]
+    public async Task Rejected_patch_leaves_original_file_and_history_unchanged()
+    {
+        var filePath = Path.Combine(_root, "Program.cs");
+        File.WriteAllText(filePath, "class Old {}\n");
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false));
+
+        var result = await ExecuteAsync(executor, "apply_patch", """{"relative_path":"Program.cs","patch":"@@ -1 +1 @@\n-class Old {}\n+class New {}"}""");
+
+        Assert.Contains("Rejected by user", result);
+        Assert.Equal("class Old {}\n", File.ReadAllText(filePath));
+        Assert.Empty(_conversation.FileChanges);
+    }
+
+    [Fact]
+    public void Patch_requires_valid_hunks_and_rejects_file_headers()
+    {
+        Assert.Throws<InvalidOperationException>(() => UnifiedDiffApplier.Apply("one\n", "--- a/file.cs\n+++ b/file.cs\n@@ -1 +1 @@\n-one\n+two"));
+        Assert.Throws<InvalidOperationException>(() => UnifiedDiffApplier.Apply("one\n", "@@ -1,2 +1 @@\n-one\n+two"));
+        Assert.Equal("two\n", UnifiedDiffApplier.Apply("one\n", "@@ -1 +1 @@\n-one\n+two"));
+    }
+
+    [Fact]
     public async Task File_change_during_review_is_not_overwritten()
     {
         var filePath = Path.Combine(_root, "Program.cs");

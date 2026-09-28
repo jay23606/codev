@@ -42,8 +42,8 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Attach local source files | Project files can be dragged onto the composer and added as context; attachment bytes are not sent until the user sends the prompt |
 | File explorer and preview | Project context menu opens a safe text-file browser with filtering, read-only preview, and Add to chat context |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and bounded reusable project knowledge included in local model context; project metadata writes are atomic and unreadable JSON is preserved |
-| Agent reads/searches files on request and edits files | WPF supports bounded project tools; Avalonia now has a local-only Code task mode with bounded list/read/search, reviewed create/replace proposals, checkpointed writes, and individually approved shell commands |
-| Diff review, approve/reject, checkpoints, and undo | WPF has per-conversation change history, rollback, and unified text diffs; Avalonia shows side-by-side proposals, checkpoint history, reviewed single-file restore, and conversation-only rewind before a user prompt; reviewed code rewind, diff navigation, and hunk review remain |
+| Agent reads/searches files on request and edits files | WPF supports bounded project tools; Avalonia now has a local-only Code task mode with bounded list/read/search, reviewed create/replace/strict-patch proposals, checkpointed writes, and individually approved shell commands |
+| Diff review, approve/reject, checkpoints, and undo | WPF has per-conversation change history, rollback, and unified text diffs; Avalonia shows side-by-side proposals, patch text plus resulting-file review, checkpoint history, reviewed single-file restore, and conversation-only rewind before a user prompt; reviewed code rewind, diff navigation, and hunk review remain |
 | Terminal commands, tests, and build output | WPF approval-gated PowerShell and Avalonia individually approved local-shell commands use a 3-minute timeout and bounded output; commands are not sandboxed |
 | Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, tool status, retry/edit-resend, branch-from-message, and between-turn queue pause/resume implemented; request resume and richer plans remain |
 | Conversation request scheduling | Serial Ollama queue with per-conversation running/queued indicators and pause/resume; true parallel agents and isolated worktrees remain pending |
@@ -51,6 +51,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Git status, branch, staging, and review workflow | WPF and Avalonia show local status and per-file diffs, append selected diff lines to the composer for questions, and stage/unstage selected files; Avalonia also supports persistent comments attached to selected diff excerpts, staged-diff commit review, and clean-tree branch operations; worktree merge/recovery and hunk-level stage/revert remain |
 | Markdown/code rendering, attachments, and session export | Markdown tables, lightweight syntax coloring, clickable web links, copyable code blocks, Markdown export, and JSON conversation backup/import; file/image/PDF attachments remain pending |
 | Skills, MCP tools, recurring tasks, and notifications | Not implemented |
+| Patch-based agent file edits | Avalonia Code task can apply strict unified-diff hunks, review the patch and resulting file, and use the same approval, checkpoint, and concurrency protection as full replacements |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
 
@@ -219,7 +220,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 |---|---|---|---|---|
 | B1 | Permission modes and allowlist | M | none | Core |
 | B2 | Structured tool calls | M | none | Later |
-| B3 | Diff edits alongside whole-file edits | M | none | Later |
+| B3 | Diff edits alongside whole-file edits | M | none | Done |
 | B4 | Step limit and loop detection | S | none | Core |
 | B5 | Test and lint loop | M | B1 | Later |
 | B6 | Show model reasoning | S | none | Later |
@@ -232,7 +233,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 - **B1 Permission modes and allowlist.** Modes for the command tool: *ask every time* (today's behavior and the default), *auto-approve read-only commands*, and a per-project *allowlist* of exact commands. File writes are never auto-approved. Rules, from Claude Code's [permission system](https://code.claude.com/docs/en/permissions): evaluate deny first, then ask, then allow, so a deny always wins; judge compound commands (`a && b`, pipes) piece by piece; treat output redirects (`>`, `tee`) as file writes and check their targets; resolve symlinks before judging a path; treat `.git` and Codev's own data folder as protected. Because rules on command text can be bypassed (for example through `sh -c`), the UI must keep saying commands are not sandboxed until B7 exists. Refuse the combination "never ask" plus "full access" if B7 ever adds full access.
 - **B2 Structured tool calls.** Use Ollama's native tool calling and [JSON-schema structured outputs](https://docs.ollama.com/capabilities/structured-outputs) where the model supports them, so plans, tool arguments and summaries are validated before use. Keep the current text parsing as the fallback for models that lack support, and record which path was used in the tool status.
-- **B3 Diff edits.** Let the agent propose either a patch or a whole-file replacement, whichever costs fewer tokens for the change. Today only whole-file replacements exist, which is expensive for small edits on small models. [Aider supports several edit formats](https://aider.chat/docs/) for this reason. Both formats go through the same review and checkpoint; a patch that does not apply cleanly is rejected with a clear message, never guessed at.
+- **B3 Diff edits (implemented for Avalonia Code task).** The agent can propose a strict, single-file unified-hunk patch or a whole-file replacement. Patches are applied in memory with exact line/context checks and no fuzzy matching; malformed, mismatched, or file-header patches fail before review and leave the workspace unchanged. Valid patches show the original, proposed patch, and complete resulting file in one review, then use the same approval, checkpoint, and hash concurrency check as replacement edits. [Aider supports several edit formats](https://aider.chat/docs/) for the same token-efficiency motivation.
 - **B4 Step limit and loop detection (implemented for both the WPF and Avalonia Code task runners).** Codev caps a task at eight tool rounds and now pauses for a user decision when the same tool name and canonicalized arguments repeat three consecutive times. Choosing Yes permits that call once and restarts the detector; No stops the task with an explanation. Tests cover reordered JSON properties, changed calls, and the continue-once reset. OpenCode's `doom_loop` permission fires when the same tool call repeats 3 times with identical input and defaults to *ask* ([permissions docs](https://opencode.ai/docs/permissions/)).
 - **B5 Test and lint loop.** After an approved edit, optionally run a configured test or lint command and give failures back to the model for another attempt, capped at a small number of rounds. Each command still needs approval or an allowlist entry, each round is shown, and success is claimed only on a passing run.
 - **B6 Show model reasoning.** For Ollama models with a thinking mode, show the reasoning as a collapsible block and let the user turn thinking off per conversation.
@@ -347,7 +348,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B3, B5, B6, B8, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E1, E3, E4, E6, E7, E10, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B5, B6, B8, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E1, E3, E4, E6, E7, E10, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.
