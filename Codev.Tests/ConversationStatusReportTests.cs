@@ -157,4 +157,28 @@ public sealed class ConversationStatusReportTests
 
         Assert.Contains("Last request usage: not available for the selected model yet", report);
     }
+
+    [Fact]
+    public void Status_lists_only_instruction_file_paths_from_the_last_request()
+    {
+        var report = ConversationStatusReport.Build(new Conversation { ProjectPath = @"C:\work\repo" }, false, 0, false, false,
+            lastPromptInstructionFiles: ["AGENTS.md", ".codev/rules/tests.md"]);
+
+        Assert.Contains("Project instruction files (last request): AGENTS.md, .codev/rules/tests.md", report);
+        Assert.DoesNotContain("instruction contents", report);
+    }
+
+    [Fact]
+    public void Instruction_file_names_are_extracted_from_assembled_project_guidance()
+    {
+        var instructions = """
+            Applicable project guidance:
+            --- AGENTS.md (project guidance; user-provided) ---
+            private instruction contents
+            --- .codev/rules/tests.md (project guidance; user-provided) ---
+            more private contents
+            """;
+
+        Assert.Equal(["AGENTS.md", ".codev/rules/tests.md"], ProjectAgentInstructions.GetIncludedRelativePaths(instructions));
+    }
 }

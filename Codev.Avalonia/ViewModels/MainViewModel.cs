@@ -1203,10 +1203,19 @@ public sealed class MainViewModel : ViewModelBase
     {
         var userMessage = new Codev.ChatMessage("user", Draft.Trim()) { MessageIndex = conversation.Messages.Count };
         var trustRoot = string.IsNullOrWhiteSpace(conversation.ProjectPath) ? null : _projectFolderTrust.FindTrustedRoot(conversation.ProjectPath);
+        IReadOnlyList<string>? instructionFiles = null;
+        if (_lastPromptContexts.TryGetValue(conversation.Id, out var promptContext) &&
+            promptContext.Provider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase) &&
+            promptContext.Model.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase))
+        {
+            var instructions = promptContext.Sections.FirstOrDefault(section =>
+                section.Name.Equals("Project instructions (AGENTS.md and selected rules)", StringComparison.Ordinal))?.Content;
+            instructionFiles = Codev.ProjectAgentInstructions.GetIncludedRelativePaths(instructions);
+        }
         var assistantMessage = new Codev.ChatMessage("assistant", Codev.ConversationStatusReport.Build(
             conversation, ReferenceEquals(_generationConversation, conversation) && IsGenerating,
             conversation.PendingRequestCount, _queuePaused, _cloudRequestsEnabled,
-            trustRoot is not null, trustRoot, OllamaEndpointDisplay, Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint)));
+            trustRoot is not null, trustRoot, OllamaEndpointDisplay, Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint), instructionFiles));
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(assistantMessage);
         conversation.Draft = "";

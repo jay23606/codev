@@ -5,7 +5,8 @@ public static class ConversationStatusReport
 {
     public static string Build(Conversation conversation, bool isGenerating, int queuedTurns, bool queuePaused,
         bool hostedRequestsEnabled, bool projectFolderTrusted = false, string? projectFolderTrustRoot = null,
-        string? ollamaEndpoint = null, bool ollamaEndpointIsLocal = true)
+        string? ollamaEndpoint = null, bool ollamaEndpointIsLocal = true,
+        IReadOnlyList<string>? lastPromptInstructionFiles = null)
     {
         ArgumentNullException.ThrowIfNull(conversation);
 
@@ -52,6 +53,15 @@ public static class ConversationStatusReport
         var compaction = string.IsNullOrWhiteSpace(conversation.CompactionSummary)
             ? "off"
             : $"active · first {Math.Max(0, conversation.CompactionThroughMessageCount):N0} messages summarized for future prompts";
+        var instructionFiles = string.IsNullOrWhiteSpace(conversation.ProjectPath)
+            ? "none · no project attached"
+            : CloudModelProviders.IsCloud(conversation.Provider) && !conversation.IncludeProjectContextForHosted
+                ? "excluded from hosted requests"
+                : lastPromptInstructionFiles is null
+                    ? "not captured for this session"
+                    : lastPromptInstructionFiles.Count == 0
+                        ? "none in the last captured request"
+                        : string.Join(", ", lastPromptInstructionFiles);
 
         return string.Join('\n',
             $"Model: {provider} · {conversation.Model}",
@@ -64,6 +74,7 @@ public static class ConversationStatusReport
             $"Project: {project}",
             $"Folder trust: {folderTrust}",
             $"Project context: {projectContext}",
+            $"Project instruction files (last request): {instructionFiles}",
             $"Repository map: {(!conversation.IncludeRepoMap ? "off" : canIncludeRepoMap ? "included" : "unavailable under the current context policy")}",
             $"Queue: {queue}",
             $"Hosted requests: {(CloudModelProviders.IsCloud(conversation.Provider) ? hostedRequestsEnabled ? "enabled for this session" : "disabled" : "not in use")}",

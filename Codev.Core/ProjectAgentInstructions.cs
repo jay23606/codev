@@ -7,6 +7,22 @@ public static class ProjectAgentInstructions
 {
     public const int MaxCharacters = 20_000;
     public const string RelativePath = "AGENTS.md";
+    private const string GuidanceHeader = " (project guidance; user-provided) ---";
+
+    /// <summary>Returns only the relative file names from a previously assembled guidance block.</summary>
+    public static IReadOnlyList<string> GetIncludedRelativePaths(string? instructions)
+    {
+        if (string.IsNullOrWhiteSpace(instructions)) return [];
+        var paths = new List<string>();
+        foreach (var line in instructions.Split('\n'))
+        {
+            var trimmed = line.TrimEnd('\r');
+            if (!trimmed.StartsWith("--- ", StringComparison.Ordinal) || !trimmed.EndsWith(GuidanceHeader, StringComparison.Ordinal)) continue;
+            var path = trimmed[4..^GuidanceHeader.Length];
+            if (!string.IsNullOrWhiteSpace(path)) paths.Add(path);
+        }
+        return paths;
+    }
 
     public static async Task<string> LoadAsync(WorkspaceFileService service,
         IReadOnlyList<string>? applicableFiles = null, int maxCharacters = MaxCharacters,
