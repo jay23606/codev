@@ -14,7 +14,15 @@ public sealed class WorkspaceFileService
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "dist", "build", "coverage" };
     private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase)
-    { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
+    {
+        // .NET, JavaScript/TypeScript, and common web/configuration files.
+        ".cs", ".xaml", ".csproj", ".sln", ".cshtml", ".razor", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
+        ".html", ".css", ".scss", ".sass", ".less", ".vue", ".svelte", ".md", ".mdx", ".txt", ".json", ".xml", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf", ".properties", ".props", ".targets",
+        // Common compiled and interpreted languages.
+        ".py", ".pyi", ".go", ".rs", ".java", ".kt", ".kts", ".swift", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".m", ".mm",
+        ".php", ".rb", ".lua", ".pl", ".pm", ".scala", ".sc", ".dart", ".ex", ".exs", ".erl", ".hrl", ".clj", ".cljs", ".cljc", ".hs", ".lhs", ".elm", ".r", ".jl",
+        ".f", ".f90", ".for", ".pas", ".pp", ".asm", ".s", ".sql", ".proto", ".graphql", ".gql", ".tf", ".hcl", ".nix", ".ps1", ".sh", ".bat"
+    };
 
     private readonly string _root;
     private readonly string[] _contextExclusions;

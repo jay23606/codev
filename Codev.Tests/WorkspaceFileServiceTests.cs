@@ -101,6 +101,46 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         Assert.False(WorkspaceFileService.IsValidContextExclusion("C:\\outside"));
     }
 
+    [Theory]
+    [InlineData("Main.java")]
+    [InlineData("server.go")]
+    [InlineData("lib.rs")]
+    [InlineData("native.cpp")]
+    [InlineData("Screen.kt")]
+    [InlineData("View.swift")]
+    [InlineData("component.vue")]
+    [InlineData("widget.svelte")]
+    public async Task Common_source_languages_are_available_to_context_search_and_file_reads(string fileName)
+    {
+        var relativePath = Path.Combine("src", fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(_root, relativePath))!);
+        await File.WriteAllTextAsync(Path.Combine(_root, relativePath), "class Sample { } // language-marker");
+
+        var service = Service;
+        Assert.Contains(relativePath, service.ListContextFiles());
+        Assert.Equal("class Sample { } // language-marker", await service.ReadFileAsync(relativePath));
+        Assert.Contains(await service.SearchFilesAsync("language-marker"), match => match.Contains("language-marker", StringComparison.Ordinal));
+        await service.WriteFileAtomicAsync(relativePath, "updated source");
+        Assert.Equal("updated source", await File.ReadAllTextAsync(Path.Combine(_root, relativePath)));
+        var newRelativePath = Path.Combine("src", "new-" + fileName);
+        await service.CreateFileAtomicAsync(newRelativePath, "new source");
+        Assert.Equal("new source", await service.ReadFileAsync(newRelativePath));
+    }
+
+    [Theory]
+    [InlineData("archive.zip")]
+    [InlineData("program.exe")]
+    [InlineData("model.wasm")]
+    public async Task Binary_and_archive_files_remain_outside_the_agent_allowlist(string fileName)
+    {
+        Assert.False(Service.IsSupportedContextFile(fileName));
+        await File.WriteAllTextAsync(Path.Combine(_root, fileName), "not a source file");
+        Assert.DoesNotContain(fileName, Service.ListFiles());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Service.ReadFileAsync(fileName));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Service.WriteFileAtomicAsync(fileName, "replacement"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Service.CreateFileAtomicAsync(Path.Combine("new-" + fileName), "new file"));
+    }
+
     [Fact]
     public async Task Chat_content_search_returns_line_matches_and_respects_context_exclusions()
     {
