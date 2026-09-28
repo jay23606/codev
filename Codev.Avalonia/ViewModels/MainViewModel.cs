@@ -21,6 +21,8 @@ public sealed class MainViewModel : ViewModelBase
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-conversations.json");
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
+    private static readonly string ActiveConversationPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-active-conversation.json");
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
     private Codev.Conversation? _active;
     private string _searchText = "";
@@ -31,7 +33,10 @@ public sealed class MainViewModel : ViewModelBase
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private Task _persistenceTask = Task.CompletedTask;
     private Task _themePersistenceTask = Task.CompletedTask;
+    private Task _activeConversationPersistenceTask = Task.CompletedTask;
+    private readonly SemaphoreSlim _activeConversationPersistGate = new(1, 1);
     private long _persistenceRevision;
+    private long _activeConversationRevision;
     private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
@@ -86,7 +91,8 @@ public sealed class MainViewModel : ViewModelBase
         }
         RebuildLists();
         RestoreQueuedTurns();
-        SelectConversation(_conversations.FirstOrDefault(c => !c.IsArchived) ?? _conversations[0]);
+        var startupConversation = Codev.ConversationStartupSelection.Choose(_conversations, LoadLastActiveConversationId());
+        if (startupConversation is not null) SelectConversation(startupConversation);
         LoadTheme();
         _ = LoadModelsAsync();
     }
@@ -105,10 +111,12 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ContextLabel));
                 OnPropertyChanged(nameof(ArchiveLabel));
                 OnPropertyChanged(nameof(Model));
+                OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
                 RefreshContextSizes(Model);
                 ((RelayCommand)TogglePinCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ArchiveConversationCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)CancelQueuedCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -122,6 +130,10 @@ public sealed class MainViewModel : ViewModelBase
     public string ThemeLabel => _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
     public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) ? "■" : "↑";
     public bool HasQueuedTurns => _requestQueue.Count > 0;
+    public bool HasModels => Models.Count > 0;
+    public bool IsModelPickerPlaceholderVisible => !HasModels;
+    public string ModelPickerPlaceholder => _isLoadingModels ? "Loading local models…" :
+        ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase) ? "No local models installed" : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
     public string QueueStatusLabel => HasQueuedTurns
         ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · resume when ready" : $"{_requestQueue.Count} request(s) queued"
@@ -161,9 +173,18 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (string.IsNullOrWhiteSpace(value) || string.Equals(Model, value, StringComparison.OrdinalIgnoreCase)) return;
             if (ActiveConversation is null) SetProperty(ref _model, value);
-            else { ActiveConversation.Model = value; OnPropertyChanged(); Persist(); }
+            else { ActiveConversation.Model = value; OnPropertyChanged(); OnPropertyChanged(nameof(SelectedModel)); Persist(); }
             RefreshContextSizes(value);
             _ = WarmModelAsync(value);
+        }
+    }
+
+    public ModelChoice? SelectedModel
+    {
+        get => Models.FirstOrDefault(choice => RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase));
+        set
+        {
+            if (value is not null && !string.Equals(Model, value.Name, StringComparison.OrdinalIgnoreCase)) Model = value.Name;
         }
     }
 
@@ -217,6 +238,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ContextLabel));
         OnPropertyChanged(nameof(PinLabel));
         OnPropertyChanged(nameof(ArchiveLabel));
+        PersistLastActiveConversationId(conversation.Id);
     }
 
     private void TogglePin()
@@ -482,10 +504,13 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (_isLoadingModels) return;
         _isLoadingModels = true;
+        OnPropertyChanged(nameof(ModelPickerPlaceholder));
         try
         {
             var response = await _http.GetFromJsonAsync<OllamaTags>(Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/tags"));
-            var installed = response?.Models?.Select(model => model.Name).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+            var installed = response?.Models?.Select(model => model.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
             var known = new (string Display, string[] Aliases)[]
             {
                 ("Devstral Small 2 · Q4 · 64K", ["devstral-small-2-64k", "devstral-small-2:q4_k_m", "hf.co/bartowski/mistralai_Devstral-Small-2-24B-Instruct-2512-GGUF:Q4_K_M"]),
@@ -497,12 +522,23 @@ public sealed class MainViewModel : ViewModelBase
             var knownNames = known.SelectMany(item => item.Aliases).Select(RemoveLatestTag).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var allChoices = choices.Concat(installed.Where(name => !knownNames.Contains(RemoveLatestTag(name)))
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .Select(name => new ModelChoice(name, Codev.OllamaModelDisplayName.Format(name)))).ToArray();
+                .Select(name => new ModelChoice(name, Codev.OllamaModelDisplayName.Format(name))))
+                .Where(choice => !string.IsNullOrWhiteSpace(choice.Name) && !string.IsNullOrWhiteSpace(choice.DisplayName))
+                .GroupBy(choice => choice.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First()).ToArray();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 Models.Clear();
                 foreach (var model in allChoices) Models.Add(model);
-                if (Models.Count > 0 && Models.All(m => !m.Name.Equals(Model, StringComparison.OrdinalIgnoreCase))) Model = Models[0].Name;
+                OnPropertyChanged(nameof(HasModels));
+                OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
+                if (Models.Count > 0)
+                {
+                    var resolved = Codev.OllamaModelSelection.ResolveInstalledTag(Model, Models.Select(item => item.Name));
+                    if (resolved is not null && !resolved.Equals(Model, StringComparison.Ordinal)) Model = resolved;
+                    else OnPropertyChanged(nameof(Model));
+                }
+                OnPropertyChanged(nameof(SelectedModel));
                 RefreshContextSizes(Model);
                 if (Models.Count == 0) ConnectionStatus = "Ollama connected · no local models installed";
                 else
@@ -516,7 +552,11 @@ public sealed class MainViewModel : ViewModelBase
         {
             await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = "Ollama is not reachable at 127.0.0.1:11434");
         }
-        finally { _isLoadingModels = false; }
+        finally
+        {
+            _isLoadingModels = false;
+            await Dispatcher.UIThread.InvokeAsync(() => OnPropertyChanged(nameof(ModelPickerPlaceholder)));
+        }
     }
 
     public Task RefreshModelsAsync() => LoadModelsAsync();
@@ -556,6 +596,8 @@ public sealed class MainViewModel : ViewModelBase
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         try { await _themePersistenceTask; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        try { await _activeConversationPersistenceTask; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     private static void Reset<T>(ObservableCollection<T> target, IEnumerable<T> source)
@@ -573,6 +615,36 @@ public sealed class MainViewModel : ViewModelBase
                 _conversations.Add(conversation);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+    }
+
+    private static Guid? LoadLastActiveConversationId()
+    {
+        try
+        {
+            if (!File.Exists(ActiveConversationPath)) return null;
+            var saved = JsonSerializer.Deserialize<string>(File.ReadAllText(ActiveConversationPath));
+            return Guid.TryParse(saved, out var id) ? id : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private void PersistLastActiveConversationId(Guid id)
+    {
+        var revision = Interlocked.Increment(ref _activeConversationRevision);
+        var json = JsonSerializer.Serialize(id.ToString("D"));
+        _activeConversationPersistenceTask = Task.Run(async () =>
+        {
+            await _activeConversationPersistGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (revision < Interlocked.Read(ref _activeConversationRevision)) return;
+                await Codev.AtomicTextFile.WriteAsync(ActiveConversationPath, json).ConfigureAwait(false);
+            }
+            finally { _activeConversationPersistGate.Release(); }
+        });
     }
 
     private void Persist()
@@ -619,25 +691,67 @@ public sealed class MainViewModel : ViewModelBase
         if (!Models.Any(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase))) return;
         var revision = Interlocked.Increment(ref _modelSelectionRevision);
         var next = new CancellationTokenSource();
+        next.CancelAfter(TimeSpan.FromMinutes(5));
         var previous = Interlocked.Exchange(ref _modelLoadCancellation, next);
         previous?.Cancel();
         previous?.Dispose();
         await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = $"Loading {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName}…");
         try
         {
-            var payload = new Dictionary<string, object> { ["model"] = model, ["keep_alive"] = "5m" };
-            using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/generate"), payload, next.Token);
-            if (!response.IsSuccessStatusCode)
+            if (await IsModelLoadedAsync(model, next.Token))
             {
-                var details = await response.Content.ReadAsStringAsync(next.Token);
-                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {details}");
+                await SetModelReadyAsync(model, revision);
+                return;
             }
+
+            var payload = new Dictionary<string, object> { ["model"] = model, ["keep_alive"] = "5m", ["stream"] = true };
+            using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/generate"))
+            {
+                Content = JsonContent.Create(payload)
+            };
+            var loadRequest = _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, next.Token);
+            HttpResponseMessage? loadResponse = null;
+            var ready = false;
+            while (!next.IsCancellationRequested)
+            {
+                if (await IsModelLoadedAsync(model, next.Token))
+                {
+                    ready = true;
+                    break;
+                }
+                if (loadRequest.IsCompleted && loadResponse is null)
+                {
+                    loadResponse = await loadRequest;
+                    if (!loadResponse.IsSuccessStatusCode)
+                    {
+                        var details = await loadResponse.Content.ReadAsStringAsync(next.Token);
+                        throw new InvalidOperationException($"Ollama returned HTTP {(int)loadResponse.StatusCode} ({loadResponse.ReasonPhrase}). {details}");
+                    }
+                }
+                await Task.Delay(TimeSpan.FromMilliseconds(750), next.Token);
+            }
+            if (!ready) throw new OperationCanceledException(next.Token);
+
+            // A load-only /api/generate request may keep streaming an empty-prompt completion.
+            // Ollama's /api/ps endpoint is the authoritative readiness signal, so stop that stream
+            // as soon as the selected model is resident and keep its requested keep-alive period.
+            next.Cancel();
+            if (loadResponse is null)
+            {
+                try { loadResponse = await loadRequest; }
+                catch (OperationCanceledException) when (next.IsCancellationRequested) { }
+            }
+            loadResponse?.Dispose();
+            await SetModelReadyAsync(model, revision);
+        }
+        catch (OperationCanceledException) when (next.IsCancellationRequested)
+        {
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (revision == Interlocked.Read(ref _modelSelectionRevision)) ConnectionStatus = $"Ready · {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName}";
+                if (revision == Interlocked.Read(ref _modelSelectionRevision))
+                    ConnectionStatus = $"Model load timed out · {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName} may still be loading in Ollama";
             });
         }
-        catch (OperationCanceledException) when (next.IsCancellationRequested) { }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException)
         {
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -651,8 +765,27 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+    private async Task<bool> IsModelLoadedAsync(string model, CancellationToken cancellationToken)
+    {
+        var running = await _http.GetFromJsonAsync<OllamaRunningModels>(
+            Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/ps"), cancellationToken);
+        return running?.Models?.Any(item => !string.IsNullOrWhiteSpace(item.Name) &&
+            RemoveLatestTag(item.Name).Equals(RemoveLatestTag(model), StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
+    private async Task SetModelReadyAsync(string model, long revision)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (revision == Interlocked.Read(ref _modelSelectionRevision))
+                ConnectionStatus = $"Ready · {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName}";
+        });
+    }
+
     private sealed class OllamaTags { [JsonPropertyName("models")] public List<OllamaTag>? Models { get; set; } }
     private sealed class OllamaTag { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
+    private sealed class OllamaRunningModels { [JsonPropertyName("models")] public List<OllamaRunningModel>? Models { get; set; } }
+    private sealed class OllamaRunningModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record OllamaChatMessage(
         [property: JsonPropertyName("role")] string Role,
         [property: JsonPropertyName("content")] string Content);

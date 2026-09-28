@@ -102,13 +102,14 @@
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
                     </StackPanel>
-                    <ComboBox Grid.Column="1" Width="250" ItemsSource="{Binding Models}" SelectedValue="{Binding Model, Mode=TwoWay}" SelectedValueBinding="{Binding Name}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
+                    <ComboBox Grid.Column="1" Width="250" IsVisible="{Binding HasModels}" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel, Mode=TwoWay}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ModelChoice">
                                 <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
+                    <TextBlock Grid.Column="1" Width="250" IsVisible="{Binding IsModelPickerPlaceholderVisible}" Text="{Binding ModelPickerPlaceholder}" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="The model picker appears after Ollama's installed models are loaded." />
                     <ComboBox Grid.Column="2" Width="112" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context sent to Ollama; larger values use more memory.">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ContextSizeChoice">

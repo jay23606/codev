@@ -22,7 +22,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 |---|---|
 | Standalone Windows desktop app, no editor dependency | Done |
 | Dark/light appearance with persistent preference | Done |
-| Ollama model discovery and per-conversation model choice | Done; curated labels for the original three plus automatic discovery of all other installed tags, refreshed when the model picker opens |
+| Ollama model discovery and per-conversation model choice | Done; curated labels for the original three plus automatic discovery of non-empty installed tags, refreshed when the model picker opens; Avalonia restores the last active conversation/model and shows loading/empty status instead of a blank selector |
 | Avalonia conversation layout and context size | User messages use right-aligned bubbles; assistant messages stay left aligned without role labels or per-message Copy buttons; Markdown remains selectable; per-chat context choices are model-capped and persisted |
 | Avalonia queued follow-ups | Prompts can be queued during generation; each turn snapshots its model/context, queued turns persist and restore paused with explicit resume, and queued turns can be canceled |
 | Ollama endpoint, per-conversation context size, and temperature | Configurable HTTP(S) endpoint defaults to localhost, warns before a changed non-local server; context choices run through the model's max and temperature is optional (0–2), preserving Ollama's model default when unset |
@@ -396,7 +396,7 @@ Many items assume a model can do something reliably: call tools with valid argum
 **Outcome:** the current features are checked on every supported platform, and real friction feeds back into the backlog.
 
 - **V4a. CI baseline.** Recorded in section 7: the hosted matrix passes the portable suite on Windows, Linux and macOS. Keep it green, and record any new platform-specific failure with its cause instead of skipping the test.
-- **V4b. Manual smoke checklist.** Commit a checklist (for example `docs/manual-checklist.md`) and run it before each release: streaming chat; project context and file selection; a Code task edit, approval and undo; a command approval, timeout and stop; queue pause, resume and crash recovery; backup export and import; Ollama endpoint change warning. Run it on Windows now, and on Linux and macOS once the Avalonia port (X6) exists.
+- **V4b. Manual smoke checklist.** Commit and run `docs/avalonia-smoke-checklist.md` for the active Avalonia UI on Windows; run the same checklist on Linux and macOS as those builds become available. Keep WPF-only release checks separate until those workflows are ported. The Avalonia checklist currently covers streaming, chat layout and selection, model/context choice, queue/restart recovery, stop, keyboard input, scroll-follow, theme persistence, and conversation organization. Project context, reviewed edits, approved commands, Git, export, backup/import and endpoint settings remain parity work and must join the Avalonia checklist when implemented.
 - **V4c. Real-use log.** Use Codev on a real project for a stretch of time and write down every point of friction, wrong answer and confusing moment. These notes feed V1 and are usually more valuable than another comparison with a competitor.
 
 **Done when:** V4a stays green, the checklist is committed and has been run at least once, and the first real-use log has been read and its items triaged.
