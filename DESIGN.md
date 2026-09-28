@@ -27,6 +27,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Context use visibility | Last request's prompt/history token count from Ollama and selected context limit; bounded source-context estimate shown before sending |
 | Streaming chat and independent persistent conversations | Done |
 | Unsent composer drafts | Each conversation retains its own draft across chat switches and restarts; drafts are debounced into local history and included in portable backups |
+| Find in the active conversation | Search message text, inspect matching excerpts, and jump directly to a result with Ctrl+Shift+F |
 | Pinning and conversation search | Title and message text search, matching excerpts, project/archive scope, and debounced input are implemented |
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
 | Choose a project folder and include bounded source/config excerpts | Select project-relative chat context files or use safe bounded excerpts; Code task mode can list/read/search supported text files |

@@ -31,6 +31,24 @@ public static class ConversationSearch
         catch { return string.Equals(conversation.ProjectPath, activeWorkspacePath, StringComparison.OrdinalIgnoreCase); }
     }
 
+    public static List<ConversationMessageMatch> FindMessageMatches(Conversation conversation, string? query, int maxExcerptLength = 180)
+    {
+        var search = query?.Trim();
+        if (string.IsNullOrWhiteSpace(search)) return [];
+        var terms = search.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var matches = new List<ConversationMessageMatch>();
+        for (var index = 0; index < conversation.Messages.Count; index++)
+        {
+            var message = conversation.Messages[index];
+            var content = message.Content ?? "";
+            if (!content.Contains(search, StringComparison.OrdinalIgnoreCase) &&
+                (terms.Length < 2 || !terms.All(term => content.Contains(term, StringComparison.OrdinalIgnoreCase)))) continue;
+            var excerpt = FindMessageExcerpt(new Conversation { Messages = [message] }, search, maxExcerptLength) ?? content;
+            matches.Add(new ConversationMessageMatch(index, message.Role, excerpt));
+        }
+        return matches;
+    }
+
     public static string? FindMessageExcerpt(Conversation conversation, string? query, int maxLength = 120)
     {
         var search = query?.Trim();
@@ -52,4 +70,9 @@ public static class ConversationSearch
         }
         return null;
     }
+}
+
+public sealed record ConversationMessageMatch(int MessageIndex, string Role, string Excerpt)
+{
+    public string DisplayText => $"{(Role == "user" ? "You" : "Codev")} · {Excerpt}";
 }

@@ -336,6 +336,7 @@ public partial class MainWindow : Window
         PromptBox.Text = conversation.Draft ?? "";
         PromptBox.CaretIndex = PromptBox.Text.Length;
         ExportConversationButton.IsEnabled = true;
+        FindInConversationButton.IsEnabled = true;
         _codeTaskMode = false;
         _planMode = false;
         _codeTaskConversationId = null;
@@ -2177,6 +2178,11 @@ public partial class MainWindow : Window
             NewChat_Click(this, new RoutedEventArgs());
             e.Handled = true;
         }
+        else if (control && e.Key == Key.F && (Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        {
+            FindInConversation_Click(this, new RoutedEventArgs());
+            e.Handled = true;
+        }
         else if (control && e.Key == Key.F)
         {
             SearchFocus_Click(this, new RoutedEventArgs());
@@ -2206,7 +2212,7 @@ public partial class MainWindow : Window
     }
 
     private void ShowKeyboardShortcuts() => MessageBox.Show(this,
-        "Ctrl+N  New conversation\nCtrl+F  Search conversations\nCtrl+L  Focus composer\nCtrl+,  Settings\nF2  Rename current conversation\nEsc  Clear/close focused search, or stop the active request\nEnter  Send from the composer\nCtrl+Enter  Insert a line break\nF1  Show keyboard shortcuts\n\nRight-click a message for Copy, branch, edit/resend, regenerate, or continue actions.",
+        "Ctrl+N  New conversation\nCtrl+F  Search conversations\nCtrl+Shift+F  Find in this conversation\nCtrl+L  Focus composer\nCtrl+,  Settings\nF2  Rename current conversation\nEsc  Clear/close focused search, or stop the active request\nEnter  Send from the composer\nCtrl+Enter  Insert a line break\nF1  Show keyboard shortcuts\n\nRight-click a message for Copy, branch, edit/resend, regenerate, or continue actions.",
         "Keyboard shortcuts", MessageBoxButton.OK, MessageBoxImage.Information);
 
     private void Pin_Click(object sender, RoutedEventArgs e)
@@ -2361,6 +2367,65 @@ public partial class MainWindow : Window
         _active.Draft = PromptBox.Text;
         _draftSaveDebounce.Stop();
         _draftSaveDebounce.Start();
+    }
+
+    private void FindInConversation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active is null) return;
+        var conversation = _active;
+        var dialog = new Window
+        {
+            Title = "Find in conversation", Width = 680, Height = 500, MinWidth = 480, MinHeight = 320,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new DockPanel { Margin = new Thickness(16) };
+        var query = new TextBox { Padding = new Thickness(9, 7, 9, 7), FontSize = 13, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), ToolTip = "Find a phrase or all words in one message" };
+        DockPanel.SetDock(query, Dock.Top);
+        layout.Children.Add(query);
+        var status = new TextBlock { Text = "Searches messages in this conversation.", Foreground = ThemeBrush("MutedTextBrush"), FontSize = 11, Margin = new Thickness(1, 8, 0, 8) };
+        DockPanel.SetDock(status, Dock.Top);
+        layout.Children.Add(status);
+        var results = new ListBox { DisplayMemberPath = nameof(ConversationMessageMatch.DisplayText), Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), Padding = new Thickness(5) };
+        layout.Children.Add(results);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var goTo = new Button { Content = "Go to message", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 8, 0), IsDefault = true, IsEnabled = false };
+        var close = new Button { Content = "Close", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(12, 7, 12, 7), IsCancel = true };
+        void NavigateToSelection()
+        {
+            if (results.SelectedItem is not ConversationMessageMatch match) return;
+            dialog.Tag = match.MessageIndex;
+            dialog.DialogResult = true;
+            dialog.Close();
+        }
+        goTo.Click += (_, _) => NavigateToSelection();
+        results.MouseDoubleClick += (_, _) => NavigateToSelection();
+        results.SelectionChanged += (_, _) => goTo.IsEnabled = results.SelectedItem is ConversationMessageMatch;
+        buttons.Children.Add(goTo);
+        buttons.Children.Add(close);
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        layout.Children.Add(buttons);
+        dialog.Content = layout;
+        void RefreshResults()
+        {
+            var matches = ConversationSearch.FindMessageMatches(conversation, query.Text);
+            results.ItemsSource = matches;
+            status.Text = string.IsNullOrWhiteSpace(query.Text) ? "Searches messages in this conversation." : matches.Count == 0 ? "No messages match this search." : $"{matches.Count} matching message(s). Double-click a result to jump to it.";
+            goTo.IsEnabled = false;
+        }
+        query.TextChanged += (_, _) => RefreshResults();
+        query.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter && results.Items.Count > 0)
+            {
+                if (results.SelectedIndex < 0) results.SelectedIndex = 0;
+                NavigateToSelection();
+                e.Handled = true;
+            }
+        };
+        dialog.Loaded += (_, _) => query.Focus();
+        if (dialog.ShowDialog() == true && dialog.Tag is int messageIndex && messageIndex >= 0 && messageIndex < MessagesList.Items.Count && MessagesList.Items[messageIndex] is FrameworkElement message)
+            message.BringIntoView();
     }
 
     private void PromptBox_PreviewDragOver(object sender, DragEventArgs e)

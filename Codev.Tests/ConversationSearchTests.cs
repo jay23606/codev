@@ -62,6 +62,31 @@ public sealed class ConversationSearchTests
     }
 
     [Fact]
+    public void In_conversation_find_returns_message_indices_and_matches_all_words_in_each_message()
+    {
+        var conversation = new Conversation
+        {
+            Messages = [new("user", "Show the request"), new("assistant", "There is a scheduling issue in the queue.")]
+        };
+
+        var matches = ConversationSearch.FindMessageMatches(conversation, "scheduling queue");
+
+        var match = Assert.Single(matches);
+        Assert.Equal(1, match.MessageIndex);
+        Assert.Equal("assistant", match.Role);
+        Assert.Contains("scheduling", match.Excerpt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void In_conversation_find_returns_no_results_for_blank_or_partial_word_sets()
+    {
+        var conversation = new Conversation { Messages = [new("assistant", "The queue is ready.")] };
+
+        Assert.Empty(ConversationSearch.FindMessageMatches(conversation, " "));
+        Assert.Empty(ConversationSearch.FindMessageMatches(conversation, "queue missing"));
+    }
+
+    [Fact]
     public void Scope_is_current_workspace_by_default_and_can_include_every_project()
     {
         var projectConversation = new Conversation { ProjectPath = Path.Combine(Path.GetTempPath(), "codev-project") };
