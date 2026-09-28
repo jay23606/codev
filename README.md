@@ -14,6 +14,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Per-conversation Ollama context selection, limited to each model's configured maximum
 - Last request token count compared with the selected context size, reported by Ollama
 - Streaming responses from Ollama
+- Hardware-aware serial request queue with pause/resume controls; unsent turns survive app restart and wait for an explicit **Resume saved queue** action
 - Assistant Markdown formatting with scrollable tables, clickable HTTP(S) links, and fenced code blocks with syntax coloring and a Copy button
 - Read-only Plan mode, explicit Code task mode, Stop control that retains partial output, and current agent-tool status
 - Project switcher with pinned projects, project-specific instructions, and conversations scoped to each project

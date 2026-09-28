@@ -24,7 +24,8 @@ public static class ConversationBackupService
             Messages = [.. conversation.Messages],
             FileChanges = conversation.FileChanges.Where(change => change is not null)
                 .Select(change => change with { CheckpointPath = null }).ToList(),
-            ContextFiles = [.. conversation.ContextFiles]
+            ContextFiles = [.. conversation.ContextFiles],
+            PendingTurns = null!
         }).ToList();
         return JsonSerializer.Serialize(snapshot, options);
     }
@@ -55,6 +56,7 @@ public static class ConversationBackupService
             item.Model = Limit(item.Model, 200, "devstral-small-2-64k");
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
             item.PendingRequestCount = 0;
+            item.PendingTurns = [];
             item.ContextFiles ??= [];
             item.FileChanges = item.FileChanges?.Where(change => change is not null)
                 .Select(change => change with { CheckpointPath = null }).ToList() ?? [];

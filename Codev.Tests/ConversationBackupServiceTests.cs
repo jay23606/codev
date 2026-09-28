@@ -32,6 +32,23 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Backup_export_does_not_include_runtime_queue_recovery_state()
+    {
+        var conversation = new Conversation
+        {
+            Messages = [new("user", "hello"), new("assistant", "")],
+            PendingTurns = [new PersistedQueuedTurn(1, "model-a", 8192, true, false, @"C:\project", ["secret.cs"], [], DateTimeOffset.UnixEpoch)]
+        };
+
+        var backup = ConversationBackupService.Export([conversation], Options);
+        var imported = Assert.Single(ConversationBackupService.Import(backup, Options));
+
+        Assert.DoesNotContain("PendingTurns", backup, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(imported.PendingTurns);
+        Assert.Equal("This request did not finish before it was imported.", imported.Messages[1].Content);
+    }
+
+    [Fact]
     public void Backup_omits_local_checkpoint_file_paths()
     {
         var conversation = new Conversation

@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.ComponentModel;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Net.Http;
@@ -28,12 +29,14 @@ public partial class MainWindow : Window
     private Conversation? _active;
     private WorkspaceProject? _activeProject;
     private readonly SerialAsyncQueue<QueuedTurn> _requestQueue = new();
+    private Task _queueProcessorTask = Task.CompletedTask;
     private readonly SemaphoreSlim _storeGate = new(1, 1);
     private string? _projectPath;
     private CancellationTokenSource? _requestCancellation;
     private Conversation? _activeRequestConversation;
     private bool _isClosing;
     private bool _queuePaused;
+    private bool _hasRestoredQueue;
     private bool _activeRequestIsCodeTask;
     private bool _loadingModel;
     private bool _updatingContext;
@@ -69,6 +72,7 @@ public partial class MainWindow : Window
         ApplyChatTextSize();
         LoadProjects();
         LoadConversations();
+        RestoreQueuedTurns();
         foreach (var path in _conversations.Select(c => c.ProjectPath).Where(p => !string.IsNullOrWhiteSpace(p))) EnsureProject(path!);
         RefreshConversationLists();
         if (_conversations.Count > 0) SelectConversation(_conversations.OrderByDescending(c => c.UpdatedAt).First());
@@ -155,6 +159,10 @@ public partial class MainWindow : Window
             if (saved is null) return;
             foreach (var item in saved)
             {
+                item.Messages ??= [];
+                item.PendingTurns ??= [];
+                item.FileChanges ??= [];
+                item.ContextFiles ??= [];
                 for (var index = 0; index < item.Messages.Count; index++)
                     if (item.Messages[index].Role == "assistant" && string.IsNullOrWhiteSpace(item.Messages[index].Content))
                         item.Messages[index] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
@@ -162,6 +170,24 @@ public partial class MainWindow : Window
             }
         }
         catch (Exception ex) { ConnectionLabel.Text = $"History could not be loaded: {ex.Message}"; }
+    }
+
+    private void RestoreQueuedTurns()
+    {
+        foreach (var restored in ConversationQueueRecovery.Restore(_conversations))
+        {
+            var conversation = restored.Conversation;
+            var saved = restored.Turn;
+            conversation.Messages[saved.AssistantIndex] = new ChatMessage("assistant", "Queued request is ready to resume.");
+            conversation.PendingRequestCount++;
+            _requestQueue.Enqueue(new QueuedTurn(conversation, saved.AssistantIndex, saved.Model, saved.NumCtx,
+                saved.IsCodeTask, saved.IsPlanMode, saved.ProjectPath, [.. saved.ContextFiles ?? []], [.. saved.ContextExclusions ?? []]));
+        }
+        if (_requestQueue.Count > 0)
+        {
+            _queuePaused = true;
+            _hasRestoredQueue = true;
+        }
     }
 
     private void LoadProjects()
@@ -300,6 +326,7 @@ public partial class MainWindow : Window
         UpdateChangesButton(conversation);
         UpdateSendControl();
         UpdateActiveRequestStatus();
+        UpdateQueueControl();
         if (_activeProject is not null) _activeProject.LastOpenedAt = DateTimeOffset.Now;
         ConversationTitle.Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
         PinButton.Content = conversation.IsPinned ? "★  Pinned" : "☆  Pin";
@@ -1270,6 +1297,11 @@ public partial class MainWindow : Window
         List<string> exclusions = conversation.ProjectPath is null ? [] : [.. EnsureProject(conversation.ProjectPath).ContextExclusions];
         var turn = new QueuedTurn(conversation, assistantIndex, conversation.Model, conversation.NumCtx,
             isCodeTask, isPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles], exclusions);
+        conversation.PendingTurns ??= [];
+        var persistedTurn = new PersistedQueuedTurn(turn.AssistantIndex, turn.Model, turn.NumCtx, turn.IsCodeTask, turn.IsPlanMode,
+            turn.ProjectPath, [.. turn.ContextFiles], [.. turn.ContextExclusions], DateTimeOffset.Now);
+        conversation.PendingTurns.Add(persistedTurn);
+        conversation.Messages[assistantIndex] = new ChatMessage("assistant", "Queued locally · waiting for the model");
         PromptBox.Clear();
         WelcomePanel.Visibility = Visibility.Collapsed;
         RenderMessages();
@@ -1280,6 +1312,7 @@ public partial class MainWindow : Window
         if (_isClosing)
         {
             conversation.Messages[assistantIndex] = new ChatMessage("assistant", "Queued request was not sent before Codev closed.");
+            await SaveAsync();
             return;
         }
         _requestQueue.Enqueue(turn);
@@ -1287,15 +1320,34 @@ public partial class MainWindow : Window
         await ProcessQueuedTurnsAsync();
     }
 
-    private async Task ProcessQueuedTurnsAsync()
+    private Task ProcessQueuedTurnsAsync()
     {
         UpdateQueueControl();
-        if (_isClosing || _queuePaused) { UpdateActiveRequestStatus(); return; }
+        if (_isClosing || _queuePaused) { UpdateActiveRequestStatus(); return Task.CompletedTask; }
+        if (!_queueProcessorTask.IsCompleted) return _queueProcessorTask;
+        _queueProcessorTask = ProcessQueuedTurnsCoreAsync();
+        return _queueProcessorTask;
+    }
+
+    private async Task ProcessQueuedTurnsCoreAsync()
+    {
         try
         {
             await _requestQueue.ProcessPendingAsync(async turn =>
             {
                 turn.Conversation.PendingRequestCount = Math.Max(0, turn.Conversation.PendingRequestCount - 1);
+                var savedTurns = turn.Conversation.PendingTurns?.Where(saved => saved.AssistantIndex == turn.AssistantIndex).ToList() ?? [];
+                turn.Conversation.PendingTurns?.RemoveAll(saved => saved.AssistantIndex == turn.AssistantIndex);
+                await SaveAsync();
+                if (_isClosing)
+                {
+                    turn.Conversation.PendingTurns ??= [];
+                    turn.Conversation.PendingTurns.AddRange(savedTurns);
+                    turn.Conversation.PendingRequestCount++;
+                    if (turn.AssistantIndex < turn.Conversation.Messages.Count)
+                        turn.Conversation.Messages[turn.AssistantIndex] = new ChatMessage("assistant", "Queued request was not sent before Codev closed.");
+                    return;
+                }
                 RefreshConversationLists();
                 UpdateQueueControl();
                 await ExecuteQueuedTurnAsync(turn);
@@ -1309,7 +1361,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (_requestQueue.Count == 0) _queuePaused = false;
+            if (_requestQueue.Count == 0) { _queuePaused = false; _hasRestoredQueue = false; }
             UpdateSendControl();
             UpdateActiveRequestStatus();
             UpdateQueueControl();
@@ -1320,6 +1372,7 @@ public partial class MainWindow : Window
     {
         if (_requestQueue.Count == 0 || _isClosing) return;
         _queuePaused = !_queuePaused;
+        if (!_queuePaused) _hasRestoredQueue = false;
         UpdateQueueControl();
         UpdateActiveRequestStatus();
         if (!_queuePaused) _ = ProcessQueuedTurnsAsync();
@@ -1420,7 +1473,7 @@ public partial class MainWindow : Window
     {
         if (_requestQueue.Count == 0) _queuePaused = false;
         QueueControlButton.Visibility = _requestQueue.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        QueueControlButton.Content = _queuePaused ? "▶ Resume queue" : "Ⅱ Pause queue";
+        QueueControlButton.Content = _queuePaused ? (_hasRestoredQueue ? "▶ Resume saved queue" : "▶ Resume queue") : "Ⅱ Pause queue";
         QueueControlButton.ToolTip = _queuePaused
             ? "Resume queued local model requests"
             : "Let the current Ollama response finish, then pause queued requests";
@@ -2031,6 +2084,8 @@ public partial class MainWindow : Window
     {
         var removed = _requestQueue.RemoveWhere(turn => ReferenceEquals(turn.Conversation, conversation));
         if (removed.Count == 0) return;
+        var removedIndexes = removed.Select(turn => turn.AssistantIndex).ToHashSet();
+        conversation.PendingTurns?.RemoveAll(turn => removedIndexes.Contains(turn.AssistantIndex));
         foreach (var turn in removed)
         {
             conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
@@ -2285,12 +2340,21 @@ public partial class MainWindow : Window
 
     private Brush ThemeBrush(string key) => (Brush)FindResource(key);
 
-    protected override void OnClosed(EventArgs e)
+    private bool _closeFinalizing;
+    private bool _allowClose;
+
+    protected override async void OnClosing(CancelEventArgs e)
     {
+        base.OnClosing(e);
+        if (_allowClose) return;
+        e.Cancel = true;
+        if (_closeFinalizing) return;
+        _closeFinalizing = true;
         _isClosing = true;
-        _conversationSearchDebounce.Stop();
-        foreach (var toast in _completionToasts.Keys.ToArray()) CloseCompletionToast(toast);
+        IsEnabled = false;
         _requestCancellation?.Cancel();
+        try { await _queueProcessorTask; }
+        catch { /* The queue's error handler records request failures. */ }
         while (_requestQueue.TryDequeuePending(out var turn))
         {
             turn.Conversation.PendingRequestCount = Math.Max(0, turn.Conversation.PendingRequestCount - 1);
@@ -2298,10 +2362,24 @@ public partial class MainWindow : Window
                 turn.Conversation.Messages[turn.AssistantIndex] = new ChatMessage("assistant", "Queued request was not sent before Codev closed.");
         }
         foreach (var conversation in _conversations)
+        {
             for (var i = 0; i < conversation.Messages.Count; i++)
-                if (conversation.Messages[i].Role == "assistant" && string.IsNullOrWhiteSpace(conversation.Messages[i].Content))
-                    conversation.Messages[i] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
-        _ = SaveAsync();
+            {
+                if (conversation.Messages[i].Role != "assistant" || !string.IsNullOrWhiteSpace(conversation.Messages[i].Content)) continue;
+                if (conversation.PendingTurns?.Any(saved => saved.AssistantIndex == i) == true) continue;
+                conversation.Messages[i] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
+            }
+        }
+        await SaveAsync();
+        _allowClose = true;
+        Close();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _isClosing = true;
+        _conversationSearchDebounce.Stop();
+        foreach (var toast in _completionToasts.Keys.ToArray()) CloseCompletionToast(toast);
         base.OnClosed(e);
     }
 
@@ -2320,6 +2398,9 @@ public partial class MainWindow : Window
     private sealed record ContextOption(int Value, string DisplayName);
 }
 
+public sealed record PersistedQueuedTurn(int AssistantIndex, string Model, int NumCtx, bool IsCodeTask, bool IsPlanMode,
+    string? ProjectPath, List<string>? ContextFiles, List<string>? ContextExclusions, DateTimeOffset EnqueuedAt);
+
 public sealed class Conversation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -2336,6 +2417,8 @@ public sealed class Conversation
     public List<ChatMessage> Messages { get; set; } = [];
     public List<FileChangeRecord> FileChanges { get; set; } = [];
     public List<string> ContextFiles { get; set; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PersistedQueuedTurn> PendingTurns { get; set; } = [];
     [JsonIgnore] public int PendingRequestCount { get; set; }
 }
 
