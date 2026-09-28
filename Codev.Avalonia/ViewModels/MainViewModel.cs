@@ -131,6 +131,9 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(MessageCountLabel));
                 OnPropertyChanged(nameof(ProjectLabel));
                 OnPropertyChanged(nameof(ContextLabel));
+                OnPropertyChanged(nameof(FileChangesCount));
+                OnPropertyChanged(nameof(FileChangesLabel));
+                OnPropertyChanged(nameof(CanReviewFileChanges));
                 OnPropertyChanged(nameof(ArchiveLabel));
                 OnPropertyChanged(nameof(Model));
                 OnPropertyChanged(nameof(Provider));
@@ -160,6 +163,9 @@ public sealed class MainViewModel : ViewModelBase
     public string ArchiveLabel => ActiveConversation?.IsArchived == true ? "Restore" : "Archive";
     public string MessageCountLabel => $"Local conversation · {Messages.Count} messages";
     public string ProjectLabel => ActiveConversation?.ProjectPath is { Length: > 0 } path ? Path.GetFileName(path) + " · " + path : "No project folder attached";
+    public int FileChangesCount => ActiveConversation?.FileChanges?.Count ?? 0;
+    public string FileChangesLabel => FileChangesCount == 0 ? "Files" : $"Files · {FileChangesCount}";
+    public bool CanReviewFileChanges => HasProject && FileChangesCount > 0 && !IsGenerating && ActiveConversation?.PendingRequestCount == 0;
     public bool HasProject => ActiveConversation?.ProjectPath is { Length: > 0 } path && Directory.Exists(path);
     public bool IsProjectTrusted => ActiveConversation?.ProjectPath is { Length: > 0 } path && _projectFolderTrust.IsTrusted(path);
     public string? ProjectTrustRoot => ActiveConversation?.ProjectPath is { Length: > 0 } path ? _projectFolderTrust.FindTrustedRoot(path) : null;
@@ -212,6 +218,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(SendButtonLabel));
                 OnPropertyChanged(nameof(QueueStatusLabel));
+                OnPropertyChanged(nameof(CanReviewFileChanges));
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)StopGenerationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
@@ -800,6 +807,7 @@ public sealed class MainViewModel : ViewModelBase
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
+        OnPropertyChanged(nameof(CanReviewFileChanges));
         var turn = new QueuedChatTurn(conversation, queuedTurn);
         _requestQueue.Enqueue(turn);
         conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued locally · waiting for the current response");
@@ -954,6 +962,12 @@ public sealed class MainViewModel : ViewModelBase
                 }
                 var result = await executor.ExecuteAsync(name, arguments, cancellationToken);
                 Persist();
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    OnPropertyChanged(nameof(FileChangesCount));
+                    OnPropertyChanged(nameof(FileChangesLabel));
+                    OnPropertyChanged(nameof(CanReviewFileChanges));
+                });
                 history.Add(new OllamaChatMessage("tool", result, null, name));
                 transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**").AppendLine(TruncateToolOutput(result));
                 await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
@@ -1127,6 +1141,7 @@ public sealed class MainViewModel : ViewModelBase
         _queuePaused = _requestQueue.Count > 0;
         OnPropertyChanged(nameof(QueueStatusLabel));
         OnPropertyChanged(nameof(HasQueuedTurns));
+        OnPropertyChanged(nameof(CanReviewFileChanges));
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
         Persist();
     }
@@ -1160,6 +1175,7 @@ public sealed class MainViewModel : ViewModelBase
         }
         if (_requestQueue.Count == 0) _queuePaused = false;
         OnPropertyChanged(nameof(HasQueuedTurns));
+        OnPropertyChanged(nameof(CanReviewFileChanges));
         OnPropertyChanged(nameof(IsQueuePaused));
         OnPropertyChanged(nameof(QueueStatusLabel));
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
@@ -1169,6 +1185,15 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     private void StopGeneration() => _generationCancellation?.Cancel();
+
+    public async Task SaveFileChangesAsync()
+    {
+        OnPropertyChanged(nameof(FileChangesCount));
+        OnPropertyChanged(nameof(FileChangesLabel));
+        OnPropertyChanged(nameof(CanReviewFileChanges));
+        Persist();
+        await _persistenceTask;
+    }
 
     private void ToggleTheme()
     {

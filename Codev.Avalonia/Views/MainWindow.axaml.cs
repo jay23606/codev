@@ -515,6 +515,134 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ReviewFileChanges_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || !viewModel.CanReviewFileChanges || viewModel.ActiveConversation is not { } conversation) return;
+        var entries = conversation.FileChanges.OrderByDescending(change => change.ChangedAt).ToArray();
+        var list = new ListBox();
+        foreach (var change in entries)
+        {
+            var canRestore = !change.PreviousFileExisted || !string.IsNullOrWhiteSpace(change.CheckpointPath);
+            var item = new ListBoxItem
+            {
+                Tag = change,
+                Content = new TextBlock { Text = $"{change.RelativePath}\n{change.Kind} · {change.ChangedAt.LocalDateTime:g}", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                IsEnabled = canRestore,
+                Padding = new Thickness(10, 7)
+            };
+            if (!canRestore) ToolTip.SetTip(item, "This history entry came from a backup, which does not include its local rollback checkpoint.");
+            list.Items.Add(item);
+        }
+        var restore = new Button { Content = "Review & restore…", Classes = { "soft" }, IsEnabled = false };
+        var close = new Button { Content = "Close", Classes = { "soft" } };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { close, restore } };
+        var dialog = new Window
+        {
+            Title = "Changed files",
+            Width = 560,
+            Height = 480,
+            MinWidth = 430,
+            MinHeight = 340,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new Grid
+            {
+                Margin = new Thickness(18),
+                RowDefinitions = new RowDefinitions("Auto,*,Auto"),
+                Children =
+                {
+                    new TextBlock { Text = $"{entries.Length} change record(s) across {entries.Select(change => change.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()} file(s). Newest first. Restores show the complete replacement and save the current file as a new checkpoint.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10), Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush },
+                    list,
+                    buttons
+                }
+            }
+        };
+        var content = (Grid)dialog.Content!;
+        Grid.SetRow(list, 1);
+        Grid.SetRow(buttons, 2);
+        list.SelectionChanged += (_, _) => restore.IsEnabled = list.SelectedItem is ListBoxItem { Tag: Codev.FileChangeRecord } && viewModel.CanReviewFileChanges;
+        close.Click += (_, _) => dialog.Close();
+        restore.Click += async (_, _) =>
+        {
+            if (list.SelectedItem is not ListBoxItem { Tag: Codev.FileChangeRecord change }) return;
+            dialog.Close();
+            await ReviewAndRestoreChangeAsync(viewModel, conversation, change);
+        };
+        await dialog.ShowDialog(this);
+    }
+
+    private async Task ReviewAndRestoreChangeAsync(ViewModels.MainViewModel viewModel, Codev.Conversation conversation, Codev.FileChangeRecord change)
+    {
+        if (conversation.ProjectPath is not { } projectPath) return;
+        try
+        {
+            var files = new Codev.WorkspaceFileService(projectPath);
+            var currentExists = File.Exists(files.ResolvePath(change.RelativePath));
+            var current = currentExists ? await files.ReadFileSnapshotAsync(change.RelativePath) : null;
+            if (!change.PreviousFileExisted && !currentExists)
+            {
+                await ShowGitInfoAsync("Already restored", $"{change.RelativePath} is already absent. No file changes were made.");
+                return;
+            }
+            var previous = change.PreviousFileExisted
+                ? await files.ReadCheckpointAsync(change.RelativePath, conversation.Id, change.CheckpointPath ?? "")
+                : "[This restore will delete the file]";
+            if (!await ReviewFileRestoreAsync(change.RelativePath, current?.Content ?? "[The file does not currently exist]", previous,
+                    change.PreviousFileExisted, currentExists)) return;
+
+            var rollback = await files.RestoreFileStateAsync(change.RelativePath, conversation.Id, change.PreviousFileExisted,
+                change.CheckpointPath, current?.Sha256);
+            conversation.FileChanges.Remove(change);
+            conversation.FileChanges.Add(new Codev.FileChangeRecord(change.RelativePath, rollback, DateTimeOffset.Now, "Restore", currentExists));
+            await viewModel.SaveFileChangesAsync();
+            await ShowGitInfoAsync("File restored", $"Restored {change.RelativePath}. A checkpoint of the replaced version is available in this history.");
+        }
+        catch (Exception ex)
+        {
+            await ShowGitInfoAsync("Could not restore checkpoint", $"The current file was left unchanged.\n\n{ex.Message}");
+        }
+    }
+
+    private async Task<bool> ReviewFileRestoreAsync(string relativePath, string current, string restored, bool previousFileExisted, bool currentFileExists)
+    {
+        var layout = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
+        layout.Children.Add(new TextBlock
+        {
+            Text = previousFileExisted
+                ? $"Review restoring {relativePath}. Approving replaces this one file with its checkpoint and saves the current version as a new checkpoint."
+                : $"Review deleting {relativePath}. Approving removes this one file and saves it as a checkpoint first.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        });
+        var panes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 12 };
+        TextBox ReviewBox(string content) => new()
+        {
+            Text = content,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+            FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+            FontSize = 12,
+            MinWidth = 360,
+            Background = this.FindResource("ComposerBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+        };
+        var currentPane = new StackPanel { Spacing = 5, Children = { new TextBlock { Text = "CURRENT", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush }, new ScrollViewer { Content = ReviewBox(current), Height = 440, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto } } };
+        var restoredPane = new StackPanel { Spacing = 5, Children = { new TextBlock { Text = previousFileExisted ? "RESTORED CHECKPOINT" : "AFTER RESTORE", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush }, new ScrollViewer { Content = ReviewBox(restored), Height = 440, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto } } };
+        Grid.SetColumn(restoredPane, 1);
+        panes.Children.Add(currentPane);
+        panes.Children.Add(restoredPane);
+        layout.Children.Add(panes);
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var keep = new Button { Content = "Keep current version", Classes = { "soft" } };
+        var approve = new Button { Content = previousFileExisted ? "Approve & restore file" : "Approve & delete file", Classes = { "soft" }, IsEnabled = currentFileExists || previousFileExisted };
+        var dialog = new Window { Title = "Review file restore", Width = 900, Height = 600, MinWidth = 740, MinHeight = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        keep.Click += (_, _) => dialog.Close(false);
+        approve.Click += (_, _) => dialog.Close(true);
+        buttons.Children.Add(keep);
+        buttons.Children.Add(approve);
+        layout.Children.Add(buttons);
+        return await dialog.ShowDialog<bool>(this);
+    }
+
     private async void GitStatus_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation?.ProjectPath is not { } projectPath || !Directory.Exists(projectPath)) return;

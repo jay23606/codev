@@ -110,6 +110,7 @@
                         <TextBlock Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
                         <Button Classes="soft" Content="Git status &amp; changes…" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding HasProject}" Click="GitStatus_Click" ToolTip.Tip="Review local branch and project changes; Codev never pushes commits." />
+                        <Button Classes="soft" Content="{Binding FileChangesLabel}" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding CanReviewFileChanges}" Click="ReviewFileChanges_Click" ToolTip.Tip="Review or restore files changed by this conversation." />
                         <Button Classes="soft" Content="{Binding ProjectTrustLabel}" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />
                         <TextBlock Text="{Binding ConnectionStatus}" Foreground="#89B895" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" />
                     </StackPanel>
