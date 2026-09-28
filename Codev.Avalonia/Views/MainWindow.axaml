@@ -246,7 +246,7 @@
             </ScrollViewer>
             <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,14,22,18">
                 <Grid>
-                    <StackPanel MaxWidth="790" HorizontalAlignment="Center" Spacing="7">
+                    <StackPanel MaxWidth="1050" HorizontalAlignment="Stretch" Spacing="7">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
