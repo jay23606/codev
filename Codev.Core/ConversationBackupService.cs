@@ -26,6 +26,8 @@ public static class ConversationBackupService
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptContext = conversation.LastPromptContext,
             LastPromptModel = conversation.LastPromptModel,
+            CompactionSummary = conversation.CompactionSummary,
+            CompactionThroughMessageCount = conversation.CompactionThroughMessageCount,
             IsPinned = conversation.IsPinned,
             IsArchived = conversation.IsArchived,
             UpdatedAt = conversation.UpdatedAt,
@@ -67,6 +69,10 @@ public static class ConversationBackupService
             if (item.Provider is not ("ollama" or CloudModelProviders.OpenAI or CloudModelProviders.Anthropic)) item.Provider = "ollama";
             if (item.Provider != "ollama" || item.IsPlanMode) item.IsCodeTask = false;
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
+            item.CompactionSummary = Limit(item.CompactionSummary, ConversationCompactionService.MaxSummaryCharacters, "");
+            item.CompactionThroughMessageCount = string.IsNullOrWhiteSpace(item.CompactionSummary) ||
+                !ConversationCompactionService.IsValidBoundary(item.Messages, item.CompactionThroughMessageCount)
+                ? 0 : item.CompactionThroughMessageCount;
             item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;

@@ -155,6 +155,8 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(PinLabel));
                 OnPropertyChanged(nameof(MessageCountLabel));
+                OnPropertyChanged(nameof(HasCompactionSummary));
+                OnPropertyChanged(nameof(CompactionStatusLabel));
                 OnPropertyChanged(nameof(ProjectLabel));
                 OnPropertyChanged(nameof(ContextLabel));
                 OnPropertyChanged(nameof(HasLastPromptContext));
@@ -194,6 +196,10 @@ public sealed class MainViewModel : ViewModelBase
     public string PinLabel => ActiveConversation?.IsPinned == true ? "★  Pinned" : "☆  Pin";
     public string ArchiveLabel => ActiveConversation?.IsArchived == true ? "Restore" : "Archive";
     public string MessageCountLabel => $"Local conversation · {Messages.Count} messages";
+    public bool HasCompactionSummary => ActiveConversation is { } conversation && !string.IsNullOrWhiteSpace(conversation.CompactionSummary);
+    public string CompactionStatusLabel => HasCompactionSummary && ActiveConversation is { } conversation
+        ? $"Earlier {conversation.CompactionThroughMessageCount} messages summarized for future prompts · original transcript preserved"
+        : "";
     public string ProjectLabel => ActiveConversation?.ProjectPath is { Length: > 0 } path ? Path.GetFileName(path) + " · " + path : "No project folder attached";
     public int FileChangesCount => ActiveConversation?.FileChanges?.Count ?? 0;
     public string FileChangesLabel => FileChangesCount == 0 ? "Files" : $"Files · {FileChangesCount}";
@@ -1202,6 +1208,8 @@ public sealed class MainViewModel : ViewModelBase
         Draft = "";
         OnPropertyChanged(nameof(ConversationTitle));
         OnPropertyChanged(nameof(MessageCountLabel));
+        OnPropertyChanged(nameof(HasCompactionSummary));
+        OnPropertyChanged(nameof(CompactionStatusLabel));
         OnPropertyChanged(nameof(HasPendingDiffComments));
         OnPropertyChanged(nameof(SendButtonLabel));
         OnPropertyChanged(nameof(QueueStatusLabel));
@@ -1209,6 +1217,111 @@ public sealed class MainViewModel : ViewModelBase
         Persist();
         RebuildLists();
         ReportContextActionStatus("Conversation messages cleared. Project selection and file-change history were kept.");
+        return true;
+    }
+
+    public async Task<Codev.ConversationCompactionProposal?> CreateCompactionProposalAsync(CancellationToken cancellationToken = default)
+    {
+        var conversation = ActiveConversation;
+        if (!Codev.ConversationCompactionService.CanCompact(conversation, IsGenerating) || _queueProcessorRunning || _requestQueue.Count > 0)
+        {
+            ReportContextActionStatus("Wait until all conversations finish their queued turns before compacting history.");
+            return null;
+        }
+        var boundary = Codev.ConversationCompactionService.FindBoundary(conversation!.Messages, conversation.CompactionThroughMessageCount);
+        if (boundary == 0)
+        {
+            ReportContextActionStatus("There are not enough complete turns to compact while keeping the four most recent exchanges.");
+            return null;
+        }
+
+        try
+        {
+            var sourceMessages = Codev.ConversationCompactionService.BuildSummaryMessages(conversation, boundary);
+            var summary = new System.Text.StringBuilder();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromMinutes(3));
+            if (Codev.CloudModelProviders.IsCloud(conversation.Provider))
+            {
+                if (!_cloudRequestsEnabled || !_cloudApiKeys.TryGetValue(conversation.Provider, out var key))
+                    throw new InvalidOperationException("Reconnect the hosted provider before compacting with its model.");
+                var messages = sourceMessages.Select(message => new Codev.CloudChatMessage(message.Role, message.Content)).ToArray();
+                await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
+                    conversation.Provider, key, conversation.Model, messages, timeout.Token, maxOutputTokens: 1500))
+                {
+                    summary.Append(delta);
+                    if (summary.Length > Codev.ConversationCompactionService.MaxSummaryCharacters)
+                        throw new InvalidOperationException("The generated summary exceeded the safe size limit.");
+                }
+            }
+            else
+            {
+                var payload = new Dictionary<string, object>
+                {
+                    ["model"] = conversation.Model,
+                    ["messages"] = sourceMessages,
+                    ["stream"] = false,
+                    ["think"] = false,
+                    ["options"] = new Dictionary<string, object>
+                    {
+                        ["num_predict"] = 1500,
+                        ["num_ctx"] = conversation.NumCtx > 0 ? conversation.NumCtx : 32768
+                    }
+                };
+                using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"), payload, timeout.Token);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
+                using var result = await System.Text.Json.JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
+                if (!result.RootElement.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var content))
+                    throw new InvalidOperationException("Ollama returned no summary text.");
+                summary.Append(content.GetString());
+            }
+
+            if (string.IsNullOrWhiteSpace(summary.ToString())) throw new InvalidOperationException("The selected model returned an empty summary.");
+            return new Codev.ConversationCompactionProposal(conversation.Id, boundary, summary.ToString().Trim(),
+                (boundary - conversation.CompactionThroughMessageCount) / 2,
+                Math.Max(0, (conversation.Messages.Count - boundary) / 2));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            ReportContextActionStatus("Compaction timed out after three minutes. The conversation is unchanged.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            ReportContextActionStatus($"Could not summarize conversation: {ex.Message}");
+            return null;
+        }
+    }
+
+    public bool ApplyCompactionProposal(Codev.ConversationCompactionProposal proposal, string editedSummary)
+    {
+        if (!string.Equals(editedSummary, proposal.Summary, StringComparison.Ordinal)) proposal = proposal with { Summary = editedSummary };
+        if (_queueProcessorRunning || _requestQueue.Count > 0 || ActiveConversation is not { } conversation || !Codev.ConversationCompactionService.Apply(conversation, proposal, IsGenerating))
+        {
+            ReportContextActionStatus("The conversation changed or a request was queued. The proposed summary was not applied.");
+            return false;
+        }
+        OnPropertyChanged(nameof(HasCompactionSummary));
+        OnPropertyChanged(nameof(CompactionStatusLabel));
+        Persist();
+        ReportContextActionStatus("Summary applied to future prompts. The full transcript remains saved and visible.");
+        return true;
+    }
+
+    public bool ClearActiveCompaction()
+    {
+        if (ActiveConversation is not { } conversation || !HasCompactionSummary) return false;
+        if (!Codev.ConversationCompactionService.CanCompact(conversation, IsGenerating) || _queueProcessorRunning || _requestQueue.Count > 0)
+        {
+            ReportContextActionStatus("Wait until all conversations finish their queued turns before restoring full history.");
+            return false;
+        }
+        Codev.ConversationCompactionService.Clear(conversation);
+        OnPropertyChanged(nameof(HasCompactionSummary));
+        OnPropertyChanged(nameof(CompactionStatusLabel));
+        Persist();
+        ReportContextActionStatus("Future prompts will use the full conversation history again.");
         return true;
     }
 
@@ -1560,9 +1673,10 @@ public sealed class MainViewModel : ViewModelBase
                 throw new InvalidOperationException("Code task turns can only run through a loopback Ollama endpoint. Switch to local Ollama before resuming this task.");
             if (savedTurn.IsCodeTask) await ClearLastPromptContextAsync(conversation);
             var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama", savedTurn.OutputStyle);
-            var conversationHistory = conversation.Messages.Take(assistantIndex)
+            var fullConversationHistory = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
                 .ToList();
+            var conversationHistory = Codev.ConversationCompactionService.BuildPromptHistory(conversation, fullConversationHistory);
             var priorMessages = conversationHistory.Prepend(new Codev.ChatMessage("system", systemPrompt)).ToList();
             var hasSelectedProjectFiles = savedTurn.ContextFiles is { Count: > 0 };
             var projectStillTrusted = !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath);

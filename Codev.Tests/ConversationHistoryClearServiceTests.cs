@@ -17,6 +17,8 @@ public sealed class ConversationHistoryClearServiceTests
             LastPromptTokens = 1200,
             LastPromptContext = 8192,
             LastPromptModel = "claude-sonnet",
+            CompactionSummary = "Old summary",
+            CompactionThroughMessageCount = 2,
             Messages = [new("user", "hello"), new("assistant", "world")],
             FileChanges = [new("src/App.cs", "checkpoint.json", DateTimeOffset.UnixEpoch, "Edit")]
         };
@@ -29,6 +31,8 @@ public sealed class ConversationHistoryClearServiceTests
         Assert.Equal(0, conversation.LastPromptTokens);
         Assert.Equal(0, conversation.LastPromptContext);
         Assert.Empty(conversation.LastPromptModel);
+        Assert.Empty(conversation.CompactionSummary);
+        Assert.Equal(0, conversation.CompactionThroughMessageCount);
         Assert.Equal("claude-sonnet", conversation.Model);
         Assert.Equal(CloudModelProviders.Anthropic, conversation.Provider);
         Assert.Equal(@"C:\work\repo", conversation.ProjectPath);

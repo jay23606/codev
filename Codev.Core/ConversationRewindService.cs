@@ -21,6 +21,9 @@ public static class ConversationRewindService
         conversation.LastPromptTokens = 0;
         conversation.LastPromptContext = 0;
         conversation.LastPromptModel = "";
+        if (userMessageIndex < conversation.CompactionThroughMessageCount ||
+            conversation.CompactionThroughMessageCount >= conversation.Messages.Count)
+            ConversationCompactionService.Clear(conversation);
         conversation.UpdatedAt = DateTimeOffset.Now;
         return draft;
     }

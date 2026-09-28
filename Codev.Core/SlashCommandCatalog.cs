@@ -3,6 +3,7 @@ namespace Codev;
 public enum SlashCommandAction
 {
     ClearConversation,
+    CompactConversation,
     ToggleCodeTask,
     ExportConversation,
     InitProject,
@@ -28,6 +29,7 @@ public static class SlashCommandCatalog
     private static readonly SlashCommandDefinition[] Commands =
     [
         new("/clear", "Clear this conversation's messages", SlashCommandAction.ClearConversation),
+        new("/compact", "Summarize older turns and keep the original transcript", SlashCommandAction.CompactConversation),
         new("/code", "Toggle trusted-project Code task mode", SlashCommandAction.ToggleCodeTask),
         new("/commands", "Open the folders for user and trusted-project commands", SlashCommandAction.OpenCommandsFolder),
         new("/export", "Export this conversation as Markdown", SlashCommandAction.ExportConversation),

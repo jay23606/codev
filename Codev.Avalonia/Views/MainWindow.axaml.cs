@@ -605,6 +605,11 @@ public partial class MainWindow : Window
         _activeFileMention = null;
         switch (command.Action)
         {
+            case Codev.SlashCommandAction.CompactConversation:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                await CompactConversationAsync(viewModel);
+                break;
             case Codev.SlashCommandAction.ClearConversation:
                 viewModel.Draft = "";
                 ComposerTextBox.Text = "";
@@ -690,6 +695,65 @@ public partial class MainWindow : Window
                 ComposerTextBox.Focus();
                 break;
         }
+    }
+
+    private async Task CompactConversationAsync(ViewModels.MainViewModel viewModel)
+    {
+        var proposal = await viewModel.CreateCompactionProposalAsync();
+        if (proposal is null) return;
+        var summary = new TextBox
+        {
+            Text = proposal.Summary,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Stretch,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Stretch,
+            MinHeight = 280
+        };
+        var status = new TextBlock
+        {
+            Text = $"This summarizes {proposal.CompactedTurns} earlier complete exchange(s), keeping the latest {proposal.KeptTurns} exchange(s) verbatim. The original transcript stays visible, saved, and in exports. Review or edit the summary before applying it.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+        };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" }, MinWidth = 84 };
+        var apply = new Button { Content = "Apply summary", MinWidth = 120 };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { cancel, apply } };
+        var dialog = new Window
+        {
+            Title = "Review conversation summary",
+            Width = 720,
+            Height = 540,
+            MinWidth = 520,
+            MinHeight = 400,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new Grid
+            {
+                RowDefinitions = new RowDefinitions("Auto,*,Auto"),
+                Margin = new Thickness(18),
+                RowSpacing = 12,
+                Children = { status, summary, buttons }
+            }
+        };
+        Grid.SetRow(summary, 1);
+        Grid.SetRow(buttons, 2);
+        cancel.Click += (_, _) => dialog.Close();
+        apply.Click += (_, _) =>
+        {
+            if (viewModel.ApplyCompactionProposal(proposal, summary.Text ?? "")) dialog.Close();
+            else status.Text = viewModel.ContextActionStatus;
+        };
+        await dialog.ShowDialog(this);
+    }
+
+    private async void CompactConversation_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel) await CompactConversationAsync(viewModel);
+    }
+
+    private void RestoreFullHistory_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel) viewModel.ClearActiveCompaction();
     }
 
     private async Task ShowSlashCommandFoldersAsync(ViewModels.MainViewModel viewModel)

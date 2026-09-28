@@ -16,6 +16,7 @@ public static class ConversationHistoryClearService
         conversation.LastPromptTokens = 0;
         conversation.LastPromptContext = 0;
         conversation.LastPromptModel = "";
+        ConversationCompactionService.Clear(conversation);
         conversation.UpdatedAt = DateTimeOffset.Now;
         return true;
     }

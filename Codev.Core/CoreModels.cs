@@ -24,6 +24,8 @@ public sealed class Conversation
     public int LastPromptTokens { get; set; }
     public int LastPromptContext { get; set; }
     public string LastPromptModel { get; set; } = "";
+    public string CompactionSummary { get; set; } = "";
+    public int CompactionThroughMessageCount { get; set; }
     public bool IsPinned { get; set; }
     public bool IsArchived { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;

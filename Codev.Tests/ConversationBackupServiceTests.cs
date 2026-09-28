@@ -22,11 +22,13 @@ public sealed class ConversationBackupServiceTests
             ThinkEnabled = true,
             OutputStyle = ConversationOutputStyles.Concise,
             IncludeRepoMap = true,
+            CompactionSummary = "Earlier decisions and user goal.",
+            CompactionThroughMessageCount = 2,
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
             PendingDiffComments = [new("src/app.cs", "+ change", "Check the error path.")],
             PendingRequestCount = 3,
-            Messages = [new("user", "Why does this fail?"), new ChatMessage("assistant", "I will trace the cause.") { Thinking = "I will inspect the failing path." }]
+            Messages = [new("user", "Why does this fail?"), new ChatMessage("assistant", "I will trace the cause.") { Thinking = "I will inspect the failing path." }, new("user", "second question"), new("assistant", "second answer")]
         };
 
         var backup = ConversationBackupService.Export([source], Options);
@@ -42,6 +44,8 @@ public sealed class ConversationBackupServiceTests
         Assert.True(imported.ThinkEnabled);
         Assert.Equal(ConversationOutputStyles.Concise, imported.OutputStyle);
         Assert.True(imported.IncludeRepoMap);
+        Assert.Equal("Earlier decisions and user goal.", imported.CompactionSummary);
+        Assert.Equal(2, imported.CompactionThroughMessageCount);
         Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
@@ -123,6 +127,22 @@ public sealed class ConversationBackupServiceTests
         var imported = Assert.Single(ConversationBackupService.Import(JsonSerializer.Serialize(new[] { source }, Options), Options));
 
         Assert.Equal(WorkspaceFileService.MaxContextFiles, imported.ContextFiles.Count);
+    }
+
+    [Fact]
+    public void Backup_import_discards_compaction_cutoffs_that_do_not_match_the_transcript()
+    {
+        var invalid = new Conversation
+        {
+            CompactionSummary = "stale summary",
+            CompactionThroughMessageCount = 1,
+            Messages = [new("user", "hello"), new("assistant", "answer")]
+        };
+
+        var imported = Assert.Single(ConversationBackupService.Import(JsonSerializer.Serialize(new[] { invalid }, Options), Options));
+
+        Assert.Equal("stale summary", imported.CompactionSummary);
+        Assert.Equal(0, imported.CompactionThroughMessageCount);
     }
 
     [Fact]

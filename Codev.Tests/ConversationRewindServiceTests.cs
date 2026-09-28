@@ -38,4 +38,20 @@ public sealed class ConversationRewindServiceTests
         Assert.Throws<InvalidOperationException>(() => ConversationRewindService.RestoreConversationOnly(conversation, 0));
         Assert.Equal(2, conversation.Messages.Count);
     }
+
+    [Fact]
+    public void Rewind_before_compacted_boundary_restores_uncompacted_history_mode()
+    {
+        var conversation = new Conversation
+        {
+            Messages = [new("user", "first"), new("assistant", "answer 1"), new("user", "second"), new("assistant", "answer 2"), new("user", "third"), new("assistant", "answer 3")],
+            CompactionSummary = "Summary of first two exchanges.",
+            CompactionThroughMessageCount = 4
+        };
+
+        ConversationRewindService.RestoreConversationOnly(conversation, 2);
+
+        Assert.Empty(conversation.CompactionSummary);
+        Assert.Equal(0, conversation.CompactionThroughMessageCount);
+    }
 }

@@ -18,6 +18,7 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with friendly quick choices for the original three and automatic discovery of other installed models
 - Optional OpenAI API and Anthropic API (Claude) chat models, with model discovery and streaming; connect from the model bar
+- Explicit `/compact` flow in Avalonia: review and edit a summary of older turns, keep the full transcript, and restore full-history prompts at any time
 - Per-conversation Ollama context selection, limited to each model's configured maximum
 - Per-conversation temperature control (0–2), with Ollama's model default preserved unless you set a value
 - Last request token count compared with the selected context size, reported by Ollama
@@ -53,7 +54,7 @@ Prefer named exports and keep functions small.
 
 ## Hosted models
 
-In the WPF app, choose **Connect** beside the model picker, select OpenAI or Anthropic (Claude), and enter an API key. You can instead set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Codev discovers the text models available to that API account and streams hosted chat replies. Connecting asks you to acknowledge that chat is sent to the provider and API usage may be billed. API access and billing are separate from ChatGPT and Claude subscriptions. Keys stay in memory for the current app session and are not saved in settings, conversations, or backups; reconnect after restarting Codev. Hosted requests do not automatically include project files or local project instructions. Hosted models support chat and read-only planning; Code task tools continue to use local Ollama only.
+In the WPF app, choose **Connect** beside the model picker; in Avalonia, choose **Connect hosted models…**. Select OpenAI or Anthropic (Claude) and enter an API key, or set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. Codev discovers the text models available to that API account and streams hosted chat replies. Connecting asks you to acknowledge that chat is sent to the provider and API usage may be billed. API access and billing are separate from ChatGPT and Claude subscriptions. Keys stay in memory for the current app session and are not saved in settings, conversations, or backups; reconnect after restarting Codev. Hosted requests do not automatically include project files or local project instructions. Hosted models support chat and read-only planning; Code task tools continue to use local Ollama only.
 
 ## Run
 
@@ -93,6 +94,8 @@ When you attach a folder that already has conversations, Codev offers to resume 
 For local Ollama models, the **Think** control requests a separate model thinking trace when supported. It appears collapsed beneath the answer, is saved with the message, and is excluded from later prompts. Each queued turn retains the conversation’s Think setting.
 
 The Avalonia Git review dialog also lets you attach an unsent comment to selected diff lines. Comments persist with the conversation, appear above the composer, can be removed before sending, and are included with the diff excerpt in the sent prompt. They are preserved in conversation backups; broad hunk staging/revert and worktree merge/recovery remain roadmap items.
+
+Type `/compact` or choose **Compact** in the conversation bar to ask the selected model to summarize older complete exchanges. Review and edit the draft before applying; Codev preserves the original visible transcript and backups, and future prompts use the accepted summary plus the four newest exchanges. **Full history** removes the summary from future prompts. Automatic offers near the context limit and per-message summarize controls remain on the roadmap.
 
 For compact project orientation, enable **Include repo map** beside the project context controls. Codev adds a bounded outline of safe project files and common declarations (up to 160 files and 8,000 characters), scoped to the trusted folder or explicitly selected files. It follows hosted-context consent, persists per conversation and queued turn, and shows an approximate maximum token cost before sending.
 

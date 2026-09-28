@@ -26,10 +26,12 @@ public sealed class ConversationPersistenceTests
             OutputStyle = ConversationOutputStyles.Explanatory,
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
+            CompactionSummary = "Accepted older context.",
+            CompactionThroughMessageCount = 2,
             Messages = [new("user", "before"), new ChatMessage("assistant", "reply")
             {
                 GenerationStats = new OllamaGenerationStats(TimeSpan.FromMilliseconds(90), 32, 16d, TimeSpan.FromSeconds(1))
-            }],
+            }, new("user", "next"), new("assistant", "next reply")],
             ContextFiles = ["src/a.cs"],
             PendingDiffComments = [new("src/a.cs", "+ updated", "Check null handling.")],
             PendingTurns = [turn]
@@ -51,6 +53,8 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(ConversationOutputStyles.Explanatory, snapshot.OutputStyle);
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.True(snapshot.IncludeRepoMap);
+        Assert.Equal("Accepted older context.", snapshot.CompactionSummary);
+        Assert.Equal(2, snapshot.CompactionThroughMessageCount);
         Assert.Equal("unsent prompt", snapshot.Draft);
         Assert.Equal("before", snapshot.Messages[0].Content);
         Assert.Equal(source.Messages[1].GenerationStats, snapshot.Messages[1].GenerationStats);
