@@ -1,0 +1,40 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore test project and application
+        run: dotnet restore Codev.Tests\Codev.Tests.csproj
+
+      - name: Build application
+        run: dotnet build Codev.csproj --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-tests.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codev-test-results
+          path: Codev.Tests/TestResults/*.trx
+          if-no-files-found: ignore
