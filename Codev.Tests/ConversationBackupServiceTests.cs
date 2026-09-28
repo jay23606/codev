@@ -14,6 +14,7 @@ public sealed class ConversationBackupServiceTests
         {
             Id = Guid.NewGuid(),
             Title = "Debug session",
+            Draft = "an unsent prompt draft",
             Model = "devstral-small-2-64k",
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
@@ -26,6 +27,7 @@ public sealed class ConversationBackupServiceTests
 
         Assert.NotEqual(source.Id, imported.Id);
         Assert.Equal(source.Title, imported.Title);
+        Assert.Equal(source.Draft, imported.Draft);
         Assert.Equal(source.Model, imported.Model);
         Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);

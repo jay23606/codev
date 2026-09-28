@@ -12,6 +12,7 @@ public static class ConversationBackupService
         {
             Id = conversation.Id,
             Title = conversation.Title,
+            Draft = conversation.Draft,
             Model = conversation.Model,
             NumCtx = conversation.NumCtx,
             Temperature = conversation.Temperature,
@@ -57,6 +58,7 @@ public static class ConversationBackupService
             item.Model = Limit(item.Model, 200, "devstral-small-2-64k");
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
             item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
+            item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;
             item.PendingTurns = [];
             item.ContextFiles ??= [];

@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
     private readonly Dictionary<Window, DispatcherTimer> _completionToasts = [];
     private readonly DispatcherTimer _conversationSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly DispatcherTimer _draftSaveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private Conversation? _active;
     private WorkspaceProject? _activeProject;
     private readonly SerialAsyncQueue<QueuedTurn> _requestQueue = new();
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
         contextMenu.Items.Add(clearContext);
         AddContextButton.ContextMenu = contextMenu;
         _conversationSearchDebounce.Tick += (_, _) => { _conversationSearchDebounce.Stop(); RefreshConversationLists(); };
+        _draftSaveDebounce.Tick += async (_, _) => { _draftSaveDebounce.Stop(); await SaveAsync(); };
         LoadThemePreference();
         SearchAllProjectsCheck.IsChecked = _searchAllProjects;
         ApplyTheme();
@@ -329,6 +331,8 @@ public partial class MainWindow : Window
     private void SelectConversation(Conversation conversation)
     {
         _active = conversation;
+        PromptBox.Text = conversation.Draft ?? "";
+        PromptBox.CaretIndex = PromptBox.Text.Length;
         ExportConversationButton.IsEnabled = true;
         _codeTaskMode = false;
         _planMode = false;
@@ -2349,6 +2353,14 @@ public partial class MainWindow : Window
         else _conversationSearchDebounce.Start();
     }
 
+    private void PromptBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_active is null || _isClosing) return;
+        _active.Draft = PromptBox.Text;
+        _draftSaveDebounce.Stop();
+        _draftSaveDebounce.Start();
+    }
+
     private void Suggestion_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string text }) { PromptBox.Text = text; PromptBox.CaretIndex = PromptBox.Text.Length; PromptBox.Focus(); }
@@ -2755,6 +2767,7 @@ public partial class MainWindow : Window
         if (_closeFinalizing) return;
         _closeFinalizing = true;
         _isClosing = true;
+        _draftSaveDebounce.Stop();
         IsEnabled = false;
         _requestCancellation?.Cancel();
         try { await _queueProcessorTask; }
@@ -2790,6 +2803,7 @@ public partial class MainWindow : Window
     {
         _isClosing = true;
         _conversationSearchDebounce.Stop();
+        _draftSaveDebounce.Stop();
         foreach (var toast in _completionToasts.Keys.ToArray()) CloseCompletionToast(toast);
         base.OnClosed(e);
     }
@@ -2815,6 +2829,7 @@ public sealed class Conversation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = "";
+    public string Draft { get; set; } = "";
     public string Model { get; set; } = "devstral-small-2-64k";
     public int NumCtx { get; set; }
     public double? Temperature { get; set; }
