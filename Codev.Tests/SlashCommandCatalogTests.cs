@@ -58,6 +58,8 @@ public sealed class SlashCommandCatalogTests
             Assert.Single(SlashCommandCatalog.All, command => command.Name == "/review-branch").Action);
         Assert.Equal(SlashCommandAction.SecurityReviewBranch,
             Assert.Single(SlashCommandCatalog.All, command => command.Name == "/security-review-branch").Action);
+        Assert.Equal(SlashCommandAction.DraftPullRequestDescription,
+            Assert.Single(SlashCommandCatalog.All, command => command.Name == "/pr-description").Action);
         Assert.Contains("local model", review.Description, StringComparison.OrdinalIgnoreCase);
     }
 }

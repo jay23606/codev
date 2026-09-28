@@ -493,6 +493,62 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+    public async Task<string> DraftPullRequestDescriptionAsync(string baseBranch, CancellationToken cancellationToken = default)
+    {
+        if (ActiveConversation is not { ProjectPath: { Length: > 0 } projectPath } conversation || !IsProjectTrusted)
+            throw new InvalidOperationException("Attach and trust a project folder before drafting a pull request description.");
+        if (conversation.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ||
+            !Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(conversation.Model), StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Pull request drafts use only an installed local Ollama model on a loopback endpoint.");
+        if (IsGenerating || HasQueuedTurns || _queueProcessorRunning)
+            throw new InvalidOperationException("Wait for active and queued requests to finish before drafting a pull request description.");
+
+        var model = conversation.Model;
+        var endpoint = _ollamaEndpoint;
+        var repository = new Codev.GitRepositoryService(projectPath);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        _generationCancellation = timeout;
+        IsGenerating = true;
+        try
+        {
+            await SetConnectionStatusAsync("Reading branch diff for local PR draft…");
+            if (!_projectFolderTrust.IsTrusted(projectPath)) throw new InvalidOperationException("Project trust was revoked. No branch diff was sent to the model.");
+            var snapshot = await repository.GetBranchReviewAsync(baseBranch, timeout.Token);
+            if (snapshot.Files.Count == 0) throw new InvalidOperationException("The current branch has no changes relative to that base branch.");
+            var boundedDiff = snapshot.Diff.Length > Codev.GitPullRequestPromptBuilder.MaxDiffCharacters
+                ? snapshot.Diff[..Codev.GitPullRequestPromptBuilder.MaxDiffCharacters]
+                : snapshot.Diff;
+            var boundedSnapshot = snapshot with { Diff = boundedDiff, Truncated = snapshot.Truncated || boundedDiff.Length < snapshot.Diff.Length };
+            if (!_projectFolderTrust.IsTrusted(projectPath)) throw new InvalidOperationException("Project trust was revoked. No branch diff was sent to the model.");
+            var messages = Codev.GitPullRequestPromptBuilder.Build(boundedSnapshot);
+            var options = Codev.OllamaRequestOptions.Build(conversation.NumCtx, conversation.Temperature, conversation.TopP,
+                conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, 500) ?? new Dictionary<string, object>();
+            if (conversation.NumCtx > 0) options["num_ctx"] = conversation.NumCtx;
+            options["num_predict"] = 500;
+            var payload = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages, ["stream"] = false, ["think"] = false, ["options"] = options };
+            await SetConnectionStatusAsync("Drafting PR title and description with local Ollama…");
+            using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(endpoint, "api/chat"), payload, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
+            using var result = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
+            if (!result.RootElement.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var content) || string.IsNullOrWhiteSpace(content.GetString()))
+                throw new InvalidOperationException("The selected model returned no pull request draft.");
+            if (!_projectFolderTrust.IsTrusted(projectPath)) throw new InvalidOperationException("Project trust was revoked while drafting. No PR was created or sent.");
+            var current = await repository.GetBranchReviewAsync(baseBranch, timeout.Token);
+            if (!string.Equals(current.Branch, snapshot.Branch, StringComparison.Ordinal) || !string.Equals(current.Diff, snapshot.Diff, StringComparison.Ordinal))
+                throw new InvalidOperationException("The branch diff changed while drafting. Review the updated branch before using this draft.");
+            ReportContextActionStatus("PR title and description draft is ready to copy and edit. No PR was created or sent.");
+            return content.GetString()!.Trim().Trim('`');
+        }
+        finally
+        {
+            _generationCancellation = null;
+            IsGenerating = false;
+            await SetConnectionStatusAsync("Ollama ready");
+        }
+    }
+
     public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default, bool securityFocused = false, string? commit = null, string? baseBranch = null)
     {
         if (ActiveConversation is not { } conversation || conversation.ProjectPath is not { Length: > 0 } projectPath || !IsProjectTrusted)

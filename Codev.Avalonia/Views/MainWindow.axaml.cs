@@ -1280,6 +1280,13 @@ public partial class MainWindow : Window
                         baseBranch: baseBranch) is { } branchReview)
                     await ShowReadOnlyReviewAsync(branchReview, this);
                 break;
+            case Codev.SlashCommandAction.DraftPullRequestDescription:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (await ShowBaseBranchDialogAsync(this) is { Length: > 0 } prBase &&
+                    await DraftPullRequestDescriptionAsync(viewModel, prBase) is { } prDraft)
+                    await ShowReadOnlyReviewAsync($"Pull request draft · {prBase}...HEAD\n\n{prDraft}", this);
+                break;
             case Codev.SlashCommandAction.UserPrompt:
                 if (command.ArgumentNames is { Count: > 0 } argumentNames &&
                     Codev.SlashCommandCatalog.TryGetCommandToken(ComposerTextBox.Text, ComposerTextBox.CaretIndex, out var token, out var hasArguments) &&
@@ -2463,6 +2470,17 @@ public partial class MainWindow : Window
         review.Click += (_, _) => dialog.Close(branch.Text?.Trim());
         dialog.Opened += (_, _) => branch.Focus();
         return await dialog.ShowDialog<string?>(owner);
+    }
+
+    private async Task<string?> DraftPullRequestDescriptionAsync(ViewModels.MainViewModel viewModel, string baseBranch)
+    {
+        try { return await viewModel.DraftPullRequestDescriptionAsync(baseBranch); }
+        catch (OperationCanceledException) { return null; }
+        catch (Exception ex)
+        {
+            await ShowGitInfoAsync("Could not draft pull request description", ex.Message, this);
+            return null;
+        }
     }
 
     private async void AddContextFiles_Click(object? sender, RoutedEventArgs e)

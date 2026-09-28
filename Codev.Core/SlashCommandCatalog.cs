@@ -16,6 +16,7 @@ public enum SlashCommandAction
     SecurityReviewCommit,
     ReviewBranch,
     SecurityReviewBranch,
+    DraftPullRequestDescription,
     ShowStatus,
     OpenCommandsFolder,
     OpenSkillsFolder,
@@ -49,6 +50,7 @@ public static class SlashCommandCatalog
         new("/security-review-commit", "Scan a commit for likely security issues and exposed secrets", SlashCommandAction.SecurityReviewCommit),
         new("/review-branch", "Review current branch changes against a local base branch", SlashCommandAction.ReviewBranch),
         new("/security-review-branch", "Scan current branch changes against a local base branch", SlashCommandAction.SecurityReviewBranch),
+        new("/pr-description", "Draft a pull request title and description from current branch changes", SlashCommandAction.DraftPullRequestDescription),
         new("/skills", "Open user and trusted-project skill folders", SlashCommandAction.OpenSkillsFolder),
         new("/status", "Show local provider, model, mode, context, and queue status", SlashCommandAction.ShowStatus)
     ];

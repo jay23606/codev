@@ -140,3 +140,4 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Stage a small change in a trusted disposable project with local loopback Ollama selected; choose **Draft with local model** and verify the suggestion appears in the editable commit-message field without creating a commit.
 - Edit the suggestion and confirm the normal staged-diff review and explicit commit confirmation still run; reject or cancel and verify no commit is created.
 - Change the staged tree while drafting from another process and confirm Codev discards the stale suggestion with a clear message; switch to a hosted provider or an untrusted project and confirm the diff is never sent remotely.
+- Run `/pr-description` against a local base branch and verify the title and description appear as selectable text, the Testing section is honest, and no PR is created. Switch to hosted provider or untrusted project and confirm the branch diff is never sent remotely.
