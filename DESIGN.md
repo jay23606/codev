@@ -26,7 +26,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Per-conversation context size | Choices from Model default through model's configured max, sent as Ollama `num_ctx` |
 | Context use visibility | Last request's prompt/history token count from Ollama and selected context limit; bounded source-context estimate shown before sending |
 | Streaming chat and independent persistent conversations | Done |
-| Pinning and title search | Done |
+| Pinning and conversation search | Title and message text search, matching excerpts, project/archive scope, and debounced input are implemented |
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
 | Choose a project folder and include bounded source/config excerpts | Select project-relative chat context files or use safe bounded excerpts; Code task mode can list/read/search supported text files |
 | File explorer and preview | Project context menu opens a safe text-file browser with filtering, read-only preview, and Add to chat context |

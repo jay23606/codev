@@ -84,7 +84,7 @@
                         <TextBlock Text="PINNED" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,1,0,8"/>
                         <ItemsControl x:Name="PinnedList"/>
                         <TextBlock Text="RECENTS" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,18,0,8"/>
-                        <TextBox x:Name="SearchBox" Margin="8,0,8,7" Padding="8,7" FontSize="12" Foreground="{DynamicResource SidebarTextBrush}" Background="{DynamicResource SidebarInputBrush}" TextChanged="SearchBox_TextChanged" Visibility="Collapsed"/>
+                        <TextBox x:Name="SearchBox" Margin="8,0,8,7" Padding="8,7" FontSize="12" Foreground="{DynamicResource SidebarTextBrush}" Background="{DynamicResource SidebarInputBrush}" TextChanged="SearchBox_TextChanged" Visibility="Collapsed" ToolTip="Search conversation titles and messages in the current project or chat list"/>
                         <ItemsControl x:Name="RecentList"/>
                     </StackPanel>
                 </ScrollViewer>

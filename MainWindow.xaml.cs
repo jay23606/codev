@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private readonly List<ModelOption> _models = [];
     private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
     private readonly Dictionary<Window, DispatcherTimer> _completionToasts = [];
+    private readonly DispatcherTimer _conversationSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private Conversation? _active;
     private WorkspaceProject? _activeProject;
     private readonly SerialAsyncQueue<QueuedTurn> _requestQueue = new();
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
         };
         contextMenu.Items.Add(clearContext);
         AddContextButton.ContextMenu = contextMenu;
+        _conversationSearchDebounce.Tick += (_, _) => { _conversationSearchDebounce.Stop(); RefreshConversationLists(); };
         LoadThemePreference();
         ApplyTheme();
         ApplyChatTextSize();
@@ -394,12 +396,10 @@ public partial class MainWindow : Window
     private void RefreshConversationLists()
     {
         FillProjectsList();
-        var inWorkspace = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path) && c.IsArchived == _showArchived);
-        FillConversationList(PinnedList, inWorkspace.Where(c => c.IsPinned).OrderByDescending(c => c.UpdatedAt));
         var search = SearchBox.Text?.Trim();
-        var recent = inWorkspace.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt);
-        if (!string.IsNullOrWhiteSpace(search)) recent = recent.Where(c => c.Title.Contains(search, StringComparison.OrdinalIgnoreCase)).OrderByDescending(c => c.UpdatedAt);
-        FillConversationList(RecentList, recent);
+        var inWorkspace = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path) && c.IsArchived == _showArchived && ConversationSearch.Matches(c, search));
+        FillConversationList(PinnedList, inWorkspace.Where(c => c.IsPinned).OrderByDescending(c => c.UpdatedAt));
+        FillConversationList(RecentList, inWorkspace.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt));
     }
 
     private static string FormatRelativeTime(DateTimeOffset updatedAt)
@@ -1067,6 +1067,8 @@ public partial class MainWindow : Window
             var caption = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             caption.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 12, Foreground = ThemeBrush("SidebarTextBrush") });
             caption.Children.Add(new TextBlock { Text = string.Join(" · ", details), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 9, Foreground = ThemeBrush("SidebarMutedBrush"), Margin = new Thickness(0, 2, 0, 0) });
+            if (SearchBox.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(SearchBox.Text) && ConversationSearch.FindMessageExcerpt(item, SearchBox.Text) is { } excerpt)
+                caption.Children.Add(new TextBlock { Text = "↳ " + excerpt, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 9, Foreground = ThemeBrush("WelcomeAccentBrush"), Margin = new Thickness(0, 2, 0, 0) });
             row.Children.Add(caption);
             var contextText = item.LastPromptTokens > 0 ? $"Last prompt: {FormatTokenCount(item.LastPromptTokens)} / {FormatContextLimit(item.LastPromptContext > 0 ? item.LastPromptContext : item.NumCtx > 0 ? item.NumCtx : MaxContextForModel(item.LastPromptModel.Length > 0 ? item.LastPromptModel : item.Model))}" : "No prompt usage reported yet";
             button.ToolTip = $"{title}\nModel: {modelLabel}\nWorkspace: {item.ProjectPath ?? "Quick chat"}\n{contextText}\nChanged files: {item.FileChanges.Count}\nLast activity: {item.UpdatedAt.LocalDateTime:g}\n{requestStatus}";
@@ -2115,10 +2117,15 @@ public partial class MainWindow : Window
     {
         SearchBox.Visibility = SearchBox.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         if (SearchBox.Visibility == Visibility.Visible) SearchBox.Focus();
-        else { SearchBox.Clear(); RefreshConversationLists(); }
+        else SearchBox.Clear();
     }
 
-    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => RefreshConversationLists();
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _conversationSearchDebounce.Stop();
+        if (SearchBox.Visibility != Visibility.Visible || string.IsNullOrWhiteSpace(SearchBox.Text)) RefreshConversationLists();
+        else _conversationSearchDebounce.Start();
+    }
 
     private void Suggestion_Click(object sender, RoutedEventArgs e)
     {
@@ -2281,6 +2288,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosing = true;
+        _conversationSearchDebounce.Stop();
         foreach (var toast in _completionToasts.Keys.ToArray()) CloseCompletionToast(toast);
         _requestCancellation?.Cancel();
         while (_requestQueue.TryDequeuePending(out var turn))
