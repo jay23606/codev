@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -184,6 +185,83 @@ public partial class MainWindow : Window
             viewModel.ReportContextActionStatus($"Could not export conversation: {ex.Message}");
         }
     }
+
+    private async void RenameConversation_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem || GetMenuConversation(menuItem) is not { } conversation || DataContext is not ViewModels.MainViewModel viewModel) return;
+        var input = new TextBox { Text = conversation.Title, MinWidth = 360, Margin = new Thickness(0, 10, 0, 18) };
+        var save = new Button { Content = "Save name", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, MinWidth = 100 };
+        var dialog = new Window
+        {
+            Title = "Rename conversation",
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Children = { new TextBlock { Text = "Conversation name" }, input, save }
+            }
+        };
+        save.Click += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(input.Text)) dialog.Close(true);
+        };
+        dialog.Opened += (_, _) => { input.Focus(); input.SelectAll(); };
+        if (await dialog.ShowDialog<bool>(this) == true)
+            await viewModel.RenameConversationAsync(conversation, input.Text ?? "");
+    }
+
+    private void ArchiveConversation_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && GetMenuConversation(menuItem) is { } conversation && DataContext is ViewModels.MainViewModel viewModel)
+            viewModel.ToggleConversationArchive(conversation);
+    }
+
+    private async void DeleteConversation_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem || GetMenuConversation(menuItem) is not { } conversation || DataContext is not ViewModels.MainViewModel viewModel) return;
+        var cancel = new Button { Content = "Cancel", MinWidth = 90 };
+        var delete = new Button { Content = "Delete conversation", MinWidth = 150 };
+        var buttons = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+            Children = { cancel, delete }
+        };
+        var dialog = new Window
+        {
+            Title = "Delete conversation?",
+            Width = 460,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"Permanently delete ‘{conversation.Title}’ and its saved messages? This cannot be undone.",
+                        TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+                    },
+                    buttons
+                }
+            }
+        };
+        cancel.Click += (_, _) => dialog.Close(false);
+        delete.Click += (_, _) => dialog.Close(true);
+        if (await dialog.ShowDialog<bool>(this) == true)
+            await viewModel.DeleteConversationAsync(conversation);
+    }
+
+    private static Codev.Conversation? GetMenuConversation(MenuItem item) =>
+        item.Tag as Codev.Conversation ??
+        (item.Parent as ContextMenu)?.PlacementTarget?.DataContext as Codev.Conversation;
 
     private async void ExportBackup_Click(object? sender, RoutedEventArgs e)
     {

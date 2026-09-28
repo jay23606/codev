@@ -69,14 +69,30 @@
                         <TextBlock Text="PINNED" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" Margin="9,4,0,5" />
                         <ItemsControl ItemsSource="{Binding PinnedConversations}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
-                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" />
+                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                    <Button.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
+                                            <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
+                                            <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <Button Classes="nav" Content="{Binding ArchiveViewLabel}" Command="{Binding ToggleArchiveViewCommand}" Margin="1,12,0,0" />
                         <TextBlock Text="RECENTS" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" Margin="9,8,0,5" />
                         <ItemsControl ItemsSource="{Binding RecentConversations}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
-                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" />
+                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                    <Button.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
+                                            <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
+                                            <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </StackPanel>

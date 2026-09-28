@@ -45,6 +45,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly Queue<QueuedChatTurn> _requestQueue = new();
     private bool _queuePaused;
     private bool _queueProcessorRunning;
+    private Codev.Conversation? _generationConversation;
     private string _connectionStatus = "Checking Ollama…";
     private bool _isDarkTheme = true;
     private CancellationTokenSource? _modelLoadCancellation;
@@ -236,6 +237,74 @@ public sealed class MainViewModel : ViewModelBase
         Persist();
         RebuildLists();
     }
+
+    public async Task<bool> RenameConversationAsync(Codev.Conversation conversation, string title)
+    {
+        if (!_conversations.Contains(conversation) || string.IsNullOrWhiteSpace(title)) return false;
+        conversation.Title = title.Trim();
+        conversation.UpdatedAt = DateTimeOffset.Now;
+        if (ReferenceEquals(ActiveConversation, conversation)) OnPropertyChanged(nameof(ConversationTitle));
+        RebuildLists();
+        Persist();
+        await _persistenceTask;
+        return true;
+    }
+
+    public bool ToggleConversationArchive(Codev.Conversation conversation)
+    {
+        if (!_conversations.Contains(conversation)) return false;
+        if (IsConversationBusy(conversation))
+        {
+            ReportContextActionStatus("Cancel queued requests and wait for this conversation to finish before archiving it.");
+            return false;
+        }
+
+        conversation.IsArchived = !conversation.IsArchived;
+        conversation.UpdatedAt = DateTimeOffset.Now;
+        if (ReferenceEquals(ActiveConversation, conversation))
+        {
+            _showArchived = false;
+            OnPropertyChanged(nameof(ShowArchived));
+            OnPropertyChanged(nameof(ArchiveViewLabel));
+            var next = _conversations.Where(item => !ReferenceEquals(item, conversation) && !item.IsArchived)
+                .OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+            if (next is not null) SelectConversation(next);
+            else NewConversation();
+        }
+        RebuildLists();
+        Persist();
+        return true;
+    }
+
+    public async Task<bool> DeleteConversationAsync(Codev.Conversation conversation)
+    {
+        if (!_conversations.Contains(conversation)) return false;
+        if (IsConversationBusy(conversation))
+        {
+            ReportContextActionStatus("Cancel queued requests and wait for this conversation to finish before deleting it.");
+            return false;
+        }
+
+        var wasActive = ReferenceEquals(ActiveConversation, conversation);
+        _conversations.Remove(conversation);
+        if (wasActive)
+        {
+            _showArchived = false;
+            OnPropertyChanged(nameof(ShowArchived));
+            OnPropertyChanged(nameof(ArchiveViewLabel));
+            var next = _conversations.Where(item => !item.IsArchived).OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+            if (next is not null) SelectConversation(next);
+            else NewConversation();
+        }
+        RebuildLists();
+        Persist();
+        await _persistenceTask;
+        ReportContextActionStatus($"Deleted conversation · {conversation.Title}");
+        return true;
+    }
+
+    private bool IsConversationBusy(Codev.Conversation conversation) =>
+        conversation.PendingRequestCount > 0 || ReferenceEquals(_generationConversation, conversation);
 
     private void SelectConversation(Codev.Conversation conversation)
     {
@@ -466,6 +535,7 @@ public sealed class MainViewModel : ViewModelBase
         var assistantIndex = savedTurn.AssistantIndex;
         var token = new CancellationTokenSource();
         _generationCancellation = token;
+        _generationConversation = conversation;
         conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
         conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == assistantIndex);
         conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "");
@@ -541,6 +611,7 @@ public sealed class MainViewModel : ViewModelBase
             });
             IsGenerating = false;
             _generationCancellation = null;
+            _generationConversation = null;
             token.Dispose();
             conversation.UpdatedAt = DateTimeOffset.Now;
             OnPropertyChanged(nameof(MessageCountLabel));

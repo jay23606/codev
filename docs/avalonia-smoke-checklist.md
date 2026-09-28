@@ -19,6 +19,9 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [ ] Verify Enter sends, Shift+Enter inserts a newline, Ctrl/Cmd+N creates a conversation, Ctrl/Cmd+F focuses search, and Ctrl/Cmd+L focuses the composer.
 - [ ] Scroll upward during streaming and verify auto-follow pauses; return to the bottom and verify it resumes.
 - [ ] Pin a conversation, find it through search, archive it, and restore it.
+- [ ] Open a conversation's context menu, rename it, and verify the new title survives restart.
+- [ ] Archive and restore a conversation from its context menu; verify the active conversation switches to an available chat.
+- [ ] Confirm permanent deletion, verify the selected conversation disappears from recents, pins, and search, and verify another chat becomes active.
 - [x] Export the active conversation as Markdown and verify its content and metadata.
 - [ ] Export all chats to a JSON backup and verify the selected file is written.
 - [x] Import a synthetic JSON backup and verify it adds a conversation with a new ID while keeping existing chats; confirm rollback checkpoint paths are not restored.
@@ -26,7 +29,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 
 ## Not yet supported in Avalonia
 
-Project file browsing and previews, Plan and Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Keep the Windows WPF release checklist separate until those workflows are ported.
+Project file browsing and previews, Plan and Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Keep the Windows WPF release checklist separate until those workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
 
 ## Run record
 
