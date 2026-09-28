@@ -527,31 +527,42 @@ public partial class MainWindow : Window
     private async void AdvancedModelSettings_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation) return;
+        var hints = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["temperature"] = "0–2 · lower is more focused",
+            ["top_p"] = "0–1 · nucleus sampling",
+            ["top_k"] = "1–1000 · candidate token limit",
+            ["presence_penalty"] = "0–2 · reduce repeated topics",
+            ["repeat_penalty"] = "0–2 · reduce repeated text",
+            ["num_predict"] = "1–131072 · maximum generated tokens"
+        };
         var fields = new Dictionary<string, TextBox>(StringComparer.Ordinal)
         {
-            ["temperature"] = SettingField("0–2 · lower is more focused", conversation.Temperature),
-            ["top_p"] = SettingField("0–1 · nucleus sampling", conversation.TopP),
-            ["top_k"] = SettingField("1–1000 · candidate token limit", conversation.TopK),
-            ["presence_penalty"] = SettingField("0–2 · reduce repeated topics", conversation.PresencePenalty),
-            ["repeat_penalty"] = SettingField("0–2 · reduce repeated text", conversation.RepeatPenalty),
-            ["num_predict"] = SettingField("1–131072 · maximum generated tokens", conversation.NumPredict)
+            ["temperature"] = SettingField(hints["temperature"], conversation.Temperature),
+            ["top_p"] = SettingField(hints["top_p"], conversation.TopP),
+            ["top_k"] = SettingField(hints["top_k"], conversation.TopK),
+            ["presence_penalty"] = SettingField(hints["presence_penalty"], conversation.PresencePenalty),
+            ["repeat_penalty"] = SettingField(hints["repeat_penalty"], conversation.RepeatPenalty),
+            ["num_predict"] = SettingField(hints["num_predict"], conversation.NumPredict)
         };
         var panel = new StackPanel { Spacing = 8, Margin = new Thickness(20) };
         panel.Children.Add(new TextBlock
         {
-            Text = "Blank means the model's default. Values are saved with this conversation and captured for queued turns. Maximum tokens limits the combined reasoning and answer output; a higher limit can take longer and use more memory.",
+            Text = "Blank means the model's default. Values are saved with this conversation and captured for queued turns. Maximum tokens limits the combined reasoning and answer output; a higher limit can take longer and use more memory. Loading defaults reads this model's metadata from the configured Ollama server; unlisted values may be runtime defaults.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             MaxWidth = 470,
             Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
         });
+        var loadDefaults = new Button { Content = "Load model defaults…", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left };
+        var status = new TextBlock { Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
+        panel.Children.Add(loadDefaults);
+        panel.Children.Add(status);
         foreach (var (name, field) in fields)
         {
             panel.Children.Add(new TextBlock { Text = name, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
             global::Avalonia.Automation.AutomationProperties.SetName(field, name);
             panel.Children.Add(field);
         }
-        var status = new TextBlock { Foreground = global::Avalonia.Media.Brushes.IndianRed, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
-        panel.Children.Add(status);
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
         var dialog = new Window
         {
@@ -563,6 +574,31 @@ public partial class MainWindow : Window
             Background = this.FindResource("MainSurfaceBrush") as global::Avalonia.Media.IBrush,
             Foreground = this.FindResource("MainTextBrush") as global::Avalonia.Media.IBrush,
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto }
+        };
+        loadDefaults.Click += async (_, _) =>
+        {
+            loadDefaults.IsEnabled = false;
+            status.Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush;
+            status.Text = "Loading declared settings from Ollama…";
+            try
+            {
+                var defaults = await viewModel.LoadDeclaredModelDefaultsAsync(conversation.Model);
+                foreach (var (name, field) in fields)
+                {
+                    var declared = defaults.TryGetValue(name, out var value)
+                        ? $"Declared by model: {value.Trim().Trim('"')}"
+                        : "Not declared by model · Ollama runtime default";
+                    field.Watermark = $"{declared} · {hints[name]}";
+                }
+                status.Text = defaults.Count == 0
+                    ? "Ollama returned no declared parameters. Blank fields still use Ollama's defaults."
+                    : "Showing settings declared by this model. Blank fields continue to use the effective Ollama defaults.";
+            }
+            catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or InvalidOperationException or OperationCanceledException)
+            {
+                status.Text = $"Could not load model metadata ({ex.GetType().Name}). Check that Ollama is running and the model is installed; blank fields still use the model defaults.";
+            }
+            finally { loadDefaults.IsEnabled = true; }
         };
         var reset = new Button { Content = "Reset all to model defaults" };
         reset.Click += (_, _) =>
@@ -582,6 +618,7 @@ public partial class MainWindow : Window
                 !TryReadDouble(fields["repeat_penalty"], 0, 2, out var repeatPenalty) ||
                 !TryReadInt(fields["num_predict"], 1, 131072, out var numPredict))
             {
+                status.Foreground = global::Avalonia.Media.Brushes.IndianRed;
                 status.Text = "Enter a number within the range shown for each setting, or leave it blank to use the model default.";
                 return;
             }

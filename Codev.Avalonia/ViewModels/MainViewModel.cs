@@ -410,6 +410,11 @@ public sealed class MainViewModel : ViewModelBase
         Persist();
     }
 
+    public Task<IReadOnlyDictionary<string, string>> LoadDeclaredModelDefaultsAsync(string model,
+        CancellationToken cancellationToken = default) =>
+        new Codev.OllamaModelParameterClient(_http, _ollamaEndpoint)
+            .GetDeclaredDefaultsAsync(model, cancellationToken);
+
     private void TogglePlanMode()
     {
         if (ActiveConversation is not { } conversation || IsGenerating) return;
