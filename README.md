@@ -1,11 +1,13 @@
 # Codev
 
+[![Windows CI](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml/badge.svg?branch=main)](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml)
+
 Codev is a standalone Windows desktop coding workspace for local language models. It connects directly to Ollama on `127.0.0.1` by default; a different server can be configured explicitly in Settings, with a warning before using a non-local endpoint. No VS Code dependency is required.
 
 ## First preview
 
 - A chat-first desktop layout, with dark mode as the default and light mode available
-- Independent persistent conversations, pinning, and debounced search across titles and message text with matching excerpts
+- Independent persistent conversations, pinning, and debounced title/message search; search can match all query words across a conversation and optionally include all projects
 - Optional completion toasts for responses that finish while you are away from their conversation
 - Conversation rename and archive/restore, with permanent deletion available from the archive view
 - Regenerate the latest answer, edit/resend the last prompt, and branch a new conversation from a message
