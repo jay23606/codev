@@ -17,6 +17,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [ ] Browse project files, filter and preview a source file read-only, add it to context, and verify unsupported, sensitive, excluded and outside-project files are not listed.
 - [x] In a new disposable conversation, send a short prompt; verify streaming, right-aligned user bubble, left-aligned assistant response without role labels or Copy buttons, and selectable Markdown.
 - [ ] Send `/status`; verify the report describes the current provider/model, context, mode, project and queue without invoking the model or disclosing an API key.
+- [ ] With valid OpenAI and Anthropic API credentials available, connect each provider, verify model discovery and a streamed reply, then verify disabling hosted requests blocks further hosted turns while local Ollama remains available; confirm keys never appear in settings, chat history, backups, or /status, and project files remain excluded until separately opted in.
 - [ ] Toggle Plan mode; verify it is visibly selected, persists after restart, produces a read-only ordered plan, and is captured per queued turn.
 - [ ] Type `@` in the composer with a project attached; verify safe project-relative suggestions appear, selecting one adds it to context and replaces the mention, and sensitive/excluded/outside-project files never appear.
 - [ ] Send a follow-up while a response is running; verify it queues, the first answer completes, and the follow-up then runs.
