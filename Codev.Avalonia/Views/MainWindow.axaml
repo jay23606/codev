@@ -234,7 +234,7 @@
                                             ToolTip.Tip="Restore conversation to before this prompt; project files stay unchanged" />
                                 </StackPanel>
                             </StackPanel>
-                            <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="1050" Margin="24,0,24,0" Spacing="8">
+                            <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="800" Margin="24,0,24,0" Spacing="8">
                                 <Expander Header="Model thinking" IsExpanded="False" IsVisible="{Binding HasThinking}" ToolTip.Tip="Thinking returned separately by the local Ollama model. It is saved with this reply but excluded from future prompts.">
                                     <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
                                         <md:MarkdownScrollViewer Markdown="{Binding Thinking}" SelectionEnabled="True" />
@@ -253,7 +253,7 @@
             </ScrollViewer>
             <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,8,22,8">
                 <Grid>
-                    <StackPanel MaxWidth="1050" HorizontalAlignment="Stretch" Spacing="4">
+                    <StackPanel MaxWidth="800" HorizontalAlignment="Stretch" Spacing="4">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />

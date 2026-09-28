@@ -2194,6 +2194,11 @@ public partial class MainWindow : Window
     private async void ExportConversationHtml_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation) return;
+        var diffResult = await CollectConversationExportDiffsAsync(conversation);
+        var candidates = Codev.ConversationSecretRedactor.FindCandidates(conversation,
+            diffResult.Diffs.Select(pair => (pair.Value, $"Reviewed diff · {pair.Key}")));
+        var redactions = await ReviewExportSecretsAsync(candidates);
+        if (redactions is null) return;
         if (!StorageProvider.CanSave)
         {
             viewModel.ReportContextActionStatus("This platform does not provide a local save dialog.");
@@ -2210,13 +2215,126 @@ public partial class MainWindow : Window
                 FileTypeChoices = [new FilePickerFileType("HTML document") { Patterns = ["*.html", "*.htm"] }]
             });
             if (file is null) return;
-            await WriteTextFileAsync(file, Codev.ConversationHtmlExporter.Export(conversation));
-            viewModel.ReportContextActionStatus($"Exported standalone HTML · {file.Name}");
+            await WriteTextFileAsync(file, Codev.ConversationHtmlExporter.Export(conversation, redactions, diffResult.Diffs));
+            viewModel.ReportContextActionStatus(diffResult.SkippedFiles == 0
+                ? $"Exported standalone HTML · {file.Name}"
+                : $"Exported standalone HTML · {file.Name} · {diffResult.SkippedFiles} file diff(s) unavailable or over the export size limit");
         }
         catch (Exception ex)
         {
             viewModel.ReportContextActionStatus($"Could not export conversation: {ex.Message}");
         }
+    }
+
+    private static async Task<(IReadOnlyDictionary<string, string> Diffs, int SkippedFiles)> CollectConversationExportDiffsAsync(Codev.Conversation conversation)
+    {
+        var diffs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (conversation.FileChanges.Count == 0) return (diffs, 0);
+        if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !Directory.Exists(conversation.ProjectPath))
+            return (diffs, conversation.FileChanges.Select(change => change.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        const int maxFiles = 50;
+        const int maxTotalDiffCharacters = 200_000;
+        var files = conversation.FileChanges
+            .GroupBy(change => change.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var skipped = Math.Max(0, files.Length - maxFiles);
+        var totalCharacters = 0;
+        var workspace = new Codev.WorkspaceFileService(conversation.ProjectPath);
+        foreach (var group in files.Take(maxFiles))
+        {
+            var first = group.OrderBy(change => change.ChangedAt).First();
+            try
+            {
+                var before = first.PreviousFileExisted
+                    ? string.IsNullOrWhiteSpace(first.CheckpointPath)
+                        ? throw new IOException("The earliest saved checkpoint is unavailable.")
+                        : await workspace.ReadCheckpointAsync(first.RelativePath, conversation.Id, first.CheckpointPath)
+                    : "";
+                var fullPath = workspace.ResolvePath(first.RelativePath);
+                var after = File.Exists(fullPath) ? await workspace.ReadFileAsync(first.RelativePath) : "";
+                if (string.Equals(before, after, StringComparison.Ordinal)) continue;
+                if (before.Length + after.Length > 100_000)
+                {
+                    skipped++;
+                    continue;
+                }
+                var diff = Codev.UnifiedDiff.Format(first.RelativePath, before, after);
+                if (totalCharacters + diff.Length > maxTotalDiffCharacters)
+                {
+                    skipped++;
+                    continue;
+                }
+                diffs[first.RelativePath] = diff;
+                totalCharacters += diff.Length;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            {
+                skipped++;
+            }
+        }
+        return (diffs, skipped);
+    }
+
+    private async Task<IReadOnlyList<string>?> ReviewExportSecretsAsync(IReadOnlyList<Codev.SecretRedactionCandidate> candidates)
+    {
+        var content = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
+        content.Children.Add(new TextBlock
+        {
+            Text = candidates.Count == 0
+                ? "Codev did not find common credential patterns in the transcript or included file diffs. This scan is only a heuristic and can miss secrets; review the export before sharing it."
+                : $"Codev found {candidates.Count} possible secret(s) in the transcript or included file diffs. Selected matches will be replaced with [REDACTED]. Detection is heuristic and can miss secrets, so review the export before sharing it.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MaxWidth = 620
+        });
+        var checks = new List<CheckBox>();
+        if (candidates.Count > 0)
+        {
+            var list = new StackPanel { Spacing = 5 };
+            foreach (var candidate in candidates)
+            {
+                var check = new CheckBox { Content = candidate.Display, IsChecked = true, Tag = candidate.Value };
+                checks.Add(check);
+                list.Children.Add(check);
+            }
+            content.Children.Add(new ScrollViewer
+            {
+                Content = list,
+                MaxHeight = 300,
+                VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+            });
+        }
+        var buttons = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8
+        };
+        var dialog = new Window
+        {
+            Title = "Review possible secrets",
+            Width = 680,
+            MinWidth = 520,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+            Content = content
+        };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" } };
+        var exportOriginal = new Button { Content = "Export without redaction", Classes = { "soft" } };
+        var exportRedacted = new Button { Content = "Redact selected & continue" };
+        cancel.Click += (_, _) => dialog.Close(null);
+        exportOriginal.Click += (_, _) => dialog.Close(Array.Empty<string>());
+        exportRedacted.Click += (_, _) => dialog.Close(checks
+            .Where(check => check.IsChecked == true && check.Tag is string)
+            .Select(check => (string)check.Tag!).ToArray());
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(exportOriginal);
+        buttons.Children.Add(exportRedacted);
+        content.Children.Add(buttons);
+        return await dialog.ShowDialog<IReadOnlyList<string>?>(this);
     }
 
     private async void RenameConversation_Click(object? sender, RoutedEventArgs e)

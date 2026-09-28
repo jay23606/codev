@@ -101,7 +101,7 @@ For compact project orientation, enable **Include repo map** beside the project 
 
 Each user prompt also has a **Rewind** action. It asks before removing that prompt and all later messages, restores the prompt to the composer, and leaves project files untouched; use Files history separately when you want to review a file restore.
 
-Use **More → Export conversation…** to save Markdown or a standalone HTML transcript. The HTML file includes its own styling, works offline, escapes conversation text, and omits full local paths and checkpoint locations.
+Use **More → Export conversation…** to save Markdown or a standalone HTML transcript. The HTML file includes rendered Markdown/code/tables, its own offline styling, reviewed-file summaries and bounded Codev-managed diffs; it omits full local paths and checkpoint locations. Before saving, Codev offers a review of masked matches for common secret patterns and can redact the selected matches. Secret detection is heuristic and can miss credentials.
 
 Build a self-contained Windows app:
 
