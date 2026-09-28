@@ -114,6 +114,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ToggleThemeCommand { get; }
     public ICommand TogglePlanModeCommand { get; }
     public ICommand ToggleCodeTaskCommand { get; }
+    public ICommand EnableHostedCodeTaskConsentCommand { get; }
     public ICommand SummarizeConversationUpToCommand { get; }
     public ICommand RemoveContextFileCommand { get; }
     public ICommand ClearContextFilesCommand { get; }
@@ -134,6 +135,7 @@ public sealed class MainViewModel : ViewModelBase
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
         TogglePlanModeCommand = new RelayCommand(_ => TogglePlanMode(), _ => ActiveConversation is not null && !IsGenerating);
         ToggleCodeTaskCommand = new RelayCommand(_ => ToggleCodeTaskMode(), _ => CanToggleCodeTaskMode);
+        EnableHostedCodeTaskConsentCommand = new RelayCommand(_ => EnableHostedCodeTaskConsent(), _ => CanEnableHostedCodeTaskConsent);
         SummarizeConversationUpToCommand = new RelayCommand(value =>
         {
             if (value is Codev.ChatMessage message) _ = SummarizeConversationUpToAsync(message);
@@ -330,6 +332,9 @@ public sealed class MainViewModel : ViewModelBase
             ? CanEnterCodeTaskMode ? "Ctrl+Shift+M switches Plan to Code task." : $"Ctrl+Shift+M switches Plan to Chat. {GetCodeTaskUnavailableReason()}"
             : $"Ctrl+Shift+M switches Chat to Plan. {GetCodeTaskUnavailableReason() ?? "Code task can also be selected."}";
     public bool CanEnterCodeTaskMode => GetCodeTaskUnavailableReason() is null;
+    public bool CanEnableHostedCodeTaskConsent => ActiveConversation is not null && !IsGenerating &&
+        IsOpenAIModel && _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) &&
+        !IncludeProjectContextForHosted && (!HasProject || IsProjectTrusted);
     public bool CanToggleCodeTaskMode => ActiveConversation is not null && !IsGenerating;
     public bool ShowCodeTaskUnavailableReason => !IsCodeTask && GetCodeTaskUnavailableReason() is { } reason &&
         reason is not "Start or select a conversation first." &&
@@ -352,6 +357,15 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CodeTaskUnavailableReason));
         OnPropertyChanged(nameof(CodeTaskTooltip));
         OnPropertyChanged(nameof(ConversationModeCycleTooltip));
+        OnPropertyChanged(nameof(CanEnableHostedCodeTaskConsent));
+        ((RelayCommand)EnableHostedCodeTaskConsentCommand).NotifyCanExecuteChanged();
+    }
+
+    private void EnableHostedCodeTaskConsent()
+    {
+        if (!CanEnableHostedCodeTaskConsent) return;
+        IncludeProjectContextForHosted = true;
+        ReportContextActionStatus("OpenAI coding tools are enabled for this conversation. Requested project files and tool results may be sent to OpenAI.");
     }
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
@@ -926,6 +940,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged();
             OnPropertyChanged(nameof(CanIncludeRepoMap));
             OnPropertyChanged(nameof(RepoMapEstimateLabel));
+            NotifyCodeTaskAvailabilityProperties();
             RefreshContextEstimate();
             Persist();
         }
