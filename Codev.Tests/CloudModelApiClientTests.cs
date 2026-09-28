@@ -174,6 +174,27 @@ public sealed class CloudModelApiClientTests
     }
 
     [Theory]
+    [InlineData(CloudModelProviders.OpenAI, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":25}}}\n\n", 25)]
+    [InlineData(CloudModelProviders.Anthropic, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":37}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", 37)]
+    public async Task Reports_provider_input_token_usage_from_stream_events(string provider, string stream, int expectedInputTokens)
+    {
+        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(stream, Encoding.UTF8, "text/event-stream")
+        }));
+        int? inputTokens = null;
+
+        await foreach (var _ in new CloudModelApiClient(http).StreamChatAsync(provider, "key", "model",
+                           [new("user", "hello")], onInputTokenCount: count =>
+                           {
+                               inputTokens = count;
+                               return Task.CompletedTask;
+                           })) { }
+
+        Assert.Equal(expectedInputTokens, inputTokens);
+    }
+
+    [Theory]
     [InlineData(CloudModelProviders.OpenAI, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")]
     [InlineData(CloudModelProviders.Anthropic, "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n")]
     public async Task Rejects_a_stream_that_ends_without_a_provider_completion_event(string provider, string sse)

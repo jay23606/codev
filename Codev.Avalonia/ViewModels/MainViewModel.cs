@@ -1644,7 +1644,10 @@ public sealed class MainViewModel : ViewModelBase
                 if (!_cloudRequestsEnabled || !_cloudApiKeys.TryGetValue(savedTurn.Provider, out var apiKey))
                     throw new InvalidOperationException("Reconnect this hosted provider and approve cloud requests before resuming the queued turn.");
                 var cloudMessages = normalizedHistory.Select(message => new Codev.CloudChatMessage(message.Role, message.Content)).ToArray();
-                await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(savedTurn.Provider, apiKey, savedTurn.Model, cloudMessages, token.Token))
+                await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
+                                   savedTurn.Provider, apiKey, savedTurn.Model, cloudMessages, token.Token,
+                                   onInputTokenCount: inputTokens => RecordPromptTokenUsageAsync(
+                                       conversation, savedTurn.Model, savedTurn.NumCtx, inputTokens)))
                 {
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
                 }

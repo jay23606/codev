@@ -35,7 +35,7 @@ public sealed class PromptContextBreakdownTests
         var display = snapshot.ToDisplayText();
         Assert.Contains("Estimated input: ≈2 tokens (rough text estimate)", display);
         Assert.Contains("Context limit: model default", display);
-        Assert.Contains("Provider-reported input: unavailable for this provider", display);
+        Assert.Contains("Provider-reported input: not reported", display);
     }
 }
 

@@ -93,7 +93,8 @@ public sealed class CloudModelApiClient(HttpClient http)
         string model,
         IReadOnlyList<CloudChatMessage> messages,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
-        int? maxOutputTokens = null)
+        int? maxOutputTokens = null,
+        Func<int, Task>? onInputTokenCount = null)
     {
         Validate(provider, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose a hosted model first.", nameof(model));
@@ -126,6 +127,8 @@ public sealed class CloudModelApiClient(HttpClient http)
                 var type = GetString(root, "type") ?? eventName;
                 if (type is "error" or "response.failed")
                     throw new InvalidOperationException(ReadApiError(root));
+                if (onInputTokenCount is not null && TryReadInputTokenCount(provider, type, root) is { } inputTokenCount)
+                    await onInputTokenCount(inputTokenCount).ConfigureAwait(false);
                 if (provider == CloudModelProviders.OpenAI)
                 {
                     if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta)
@@ -233,6 +236,19 @@ public sealed class CloudModelApiClient(HttpClient http)
         if (root.TryGetProperty("response", out var response) && response.TryGetProperty("incomplete_details", out var details) && GetString(details, "reason") is { Length: > 0 } reason)
             return $"The OpenAI response is incomplete ({reason}).";
         return "The OpenAI response is incomplete.";
+    }
+
+    private static int? TryReadInputTokenCount(string provider, string type, JsonElement root)
+    {
+        if (provider == CloudModelProviders.OpenAI && type == "response.completed" &&
+            root.TryGetProperty("response", out var response) && response.TryGetProperty("usage", out var openAiUsage) &&
+            openAiUsage.TryGetProperty("input_tokens", out var openAiInput) && openAiInput.TryGetInt32(out var openAiCount) && openAiCount >= 0)
+            return openAiCount;
+        if (provider == CloudModelProviders.Anthropic && type == "message_start" &&
+            root.TryGetProperty("message", out var message) && message.TryGetProperty("usage", out var anthropicUsage) &&
+            anthropicUsage.TryGetProperty("input_tokens", out var anthropicInput) && anthropicInput.TryGetInt32(out var anthropicCount) && anthropicCount >= 0)
+            return anthropicCount;
+        return null;
     }
 
     private static string ProviderDisplayName(string provider) => provider == CloudModelProviders.OpenAI ? "OpenAI" : "Anthropic";

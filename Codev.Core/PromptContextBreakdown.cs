@@ -22,7 +22,7 @@ public sealed record PromptContextSnapshot(
         output.AppendLine($"Estimated input: ≈{EstimatedPromptTokens:N0} tokens (rough text estimate)");
         output.AppendLine(ActualPromptTokens is { } actual
             ? $"Provider-reported input: {actual:N0} tokens"
-            : Provider == "ollama" ? "Provider-reported input: not available yet" : "Provider-reported input: unavailable for this provider");
+            : "Provider-reported input: not reported");
         output.AppendLine().AppendLine("Context components:");
         foreach (var section in Sections)
             output.AppendLine($"• {section.Name}: {section.Content.Length:N0} characters · ≈{EstimateTokens(section.Content.Length):N0} tokens");
