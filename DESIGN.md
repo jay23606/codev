@@ -261,6 +261,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | B10 | Untrusted content handling | S–M | B1 | Later |
 | B11 | Task checklist | S–M | none | Later |
 | B12 | Model manager: recommend, download, upgrade, remove | L | B8, V3 results | Later |
+| B13 | Advanced model settings (thinking, sampling, token budget) | M | B6 | Later |
 
 - **B1 Permission modes and allowlist.** Modes for the command tool: *ask every time* (today's behavior and the default), *auto-approve read-only commands*, and a per-project *allowlist* of exact commands. File writes are never auto-approved. Rules, from Claude Code's [permission system](https://code.claude.com/docs/en/permissions): evaluate deny first, then ask, then allow, so a deny always wins; judge compound commands (`a && b`, pipes) piece by piece; treat output redirects (`>`, `tee`) as file writes and check their targets; resolve symlinks before judging a path; treat `.git` and Codev's own data folder as protected. Because rules on command text can be bypassed (for example through `sh -c`), the UI must keep saying commands are not sandboxed until B7 exists. Refuse the combination "never ask" plus "full access" if B7 ever adds full access.
 - **B2 Structured tool calls.** Use Ollama's native tool calling and [JSON-schema structured outputs](https://docs.ollama.com/capabilities/structured-outputs) where the model supports them, so plans, tool arguments and summaries are validated before use. Keep the current text parsing as the fallback for models that lack support, and record which path was used in the tool status.
@@ -282,6 +283,14 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
   - *Removal.* Never delete automatically. Suggest models that are clearly superseded (same family, older generation, or unused for a long time), list how much space would actually be freed (accounting for shared files), and show which conversations and project defaults use each model so a removal does not break them; offer to move those to a chosen replacement first. Always confirm, and never remove a model that is currently loaded or queued.
   - *Reporting.* Show what is installed, what is loaded now (B8), sizes, last used, and the measured speed from E10, so decisions are based on the user's own machine.
   - *Depends on:* B8 (what is loaded), E10 (speed measurements) and the V3 test suite; also X-steps for cross-platform hardware detection. Start small: a read-only "installed models" view with sizes, aliases and last-used, then a safe remove, then catalog-based recommendations, then guided upgrades.
+- **B13 Advanced model settings.** Let the user adjust, per conversation, the settings that changed results in the benchmark (see the V3 findings): the thinking toggle from B6 and its token budget, and the sampling settings: temperature (already present), `top_p`, `top_k`, `presence_penalty` and `repeat_penalty`. Design:
+  - *The default is always "model default".* Send nothing unless the user overrides a value, as Codev already does for temperature, so each model's own Ollama defaults apply. Show what those defaults are (Ollama's show endpoint returns a model's `parameters`; confirm the format before relying on it), because the official Qwen3.6 build ships `presence_penalty 1.5` and a user cannot tune what they cannot see.
+  - *Where it lives.* An "Advanced" section in the conversation's model menu and in Settings, with a reset to default for each field and a visible marker whenever anything is overridden (also shown by `/status`, A6).
+  - *Plain-language help.* One sentence per setting, for example: presence penalty discourages reusing words already used, which prevents endless repetition but can hurt code that legitimately repeats names.
+  - *Validated ranges.* Reject values outside what the setting accepts, and show only the settings the chosen backend supports (hosted providers expose different parameters from Ollama).
+  - *Presets.* Named presets (for example a low-temperature "precise" coding preset) that the user can edit, save and share as files (like D1's command files).
+  - *Held fixed for comparisons.* B12's "test before upgrade" must hold these settings fixed between builds (see the V3 finding on sampling settings).
+  - *No recommended preset yet.* Which values help is being measured in `bench/` (presence penalty 0, 0.5, 1.0 and 1.5 on Qwen3.6-35B-A3B). Do not ship a default that differs from the model's own until repeated runs show a difference beyond the noise, since scores varied by up to 33 points between runs of one task.
 
 #### C. Review, Git and recovery
 
@@ -379,7 +388,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B10, B11, B12, C2, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B10, B11, B12, B13, C2, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.
