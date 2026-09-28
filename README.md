@@ -47,6 +47,14 @@ Requirements: Windows 10/11, .NET 9 Desktop Runtime, and Ollama running at `http
 dotnet run --project .\Codev.csproj
 ```
 
+The Avalonia renderer prototype is separate and is not yet a replacement for the full WPF app:
+
+```powershell
+dotnet run --project .\Codev.Avalonia\Codev.Avalonia.csproj
+```
+
+It currently demonstrates the dark shell and locally persisted conversation browsing. Ollama streaming, project tools, reviewed edits, Git, export, backups, and the remaining WPF workflows are still on the porting roadmap.
+
 Build a self-contained Windows app:
 
 ```powershell

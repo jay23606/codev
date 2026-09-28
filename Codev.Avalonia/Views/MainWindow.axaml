@@ -1,89 +1,138 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Codev.Avalonia.ViewModels"
+        xmlns:core="using:Codev"
         xmlns:md="https://github.com/whistyun/Markdown.Avalonia"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="1400" d:DesignHeight="900"
         x:Class="Codev.Avalonia.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="Codev · Avalonia UI spike"
+        Title="Codev"
         Width="1440" Height="960" MinWidth="1000" MinHeight="650"
-        Background="#17191D">
+        Background="#191919" Foreground="#ECECEC">
 
-    <Design.DataContext>
-        <!-- This only sets the DataContext for the previewer in an IDE,
-             to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
-        <vm:MainViewModel />
-    </Design.DataContext>
+    <Window.Styles>
+        <Style Selector="Button.nav">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#C7C7C7" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="CornerRadius" Value="7" />
+        </Style>
+        <Style Selector="Button.nav:pointerover">
+            <Setter Property="Background" Value="#282828" />
+        </Style>
+        <Style Selector="Button.soft">
+            <Setter Property="Background" Value="#252525" />
+            <Setter Property="Foreground" Value="#E7E7E7" />
+            <Setter Property="BorderBrush" Value="#383838" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,7" />
+        </Style>
+        <Style Selector="Button.soft:pointerover">
+            <Setter Property="Background" Value="#333333" />
+        </Style>
+        <Style Selector="TextBox.search">
+            <Setter Property="Background" Value="#252525" />
+            <Setter Property="Foreground" Value="#E7E7E7" />
+            <Setter Property="BorderBrush" Value="#353535" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Padding" Value="10,8" />
+        </Style>
+        <Style Selector="TextBox.composer">
+            <Setter Property="Background" Value="#242424" />
+            <Setter Property="Foreground" Value="#ECECEC" />
+            <Setter Property="BorderBrush" Value="#3B3B3B" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="15,13" />
+        </Style>
+    </Window.Styles>
 
-    <Grid ColumnDefinitions="260,*" RowDefinitions="*">
-        <Border Grid.Column="0" Background="#1D2025" BorderBrush="#2B2F36" BorderThickness="0,0,1,0" Padding="16">
+    <Grid ColumnDefinitions="258,*">
+        <Border Grid.Column="0" Background="#202020" BorderBrush="#303030" BorderThickness="0,0,1,0" Padding="14,17,12,12">
             <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-                <TextBlock Text="codev" FontSize="22" FontWeight="SemiBold" Margin="4,4,0,18" />
-                <Button Grid.Row="1" Content="＋  New conversation" HorizontalContentAlignment="Left" Padding="12,10" Margin="0,0,0,10" />
-                <TextBox Grid.Row="2" Watermark="Search conversations" Margin="0,0,0,18" />
-                <StackPanel Grid.Row="3" Spacing="5">
-                    <TextBlock Text="PINNED" Foreground="#8E949F" FontSize="11" Margin="8,4,0,6" />
-                    <Button Content="▧  API client rewrite" HorizontalContentAlignment="Left" Background="#292D35" />
-                    <Button Content="▧  Space Invaders" HorizontalContentAlignment="Left" />
-                    <TextBlock Text="RECENTS" Foreground="#8E949F" FontSize="11" Margin="8,18,0,6" />
-                    <Button Content="▧  Fix startup behavior" HorizontalContentAlignment="Left" />
-                    <Button Content="▧  Add settings panel" HorizontalContentAlignment="Left" />
-                    <Button Content="▧  Explain build output" HorizontalContentAlignment="Left" />
-                </StackPanel>
-                <Border Grid.Row="4" BorderBrush="#2B2F36" BorderThickness="0,1,0,0" Padding="4,14,4,4">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="PROJECT" Foreground="#8E949F" FontSize="11" />
-                        <TextBlock Text="Codev · C:\Users\nimol\Documents\Codev" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="Ollama connected · 3 local models" Foreground="#83C995" FontSize="12" Margin="0,8,0,0" />
+                <Grid ColumnDefinitions="30,*" Margin="5,0,3,20">
+                    <Border Width="25" Height="25" CornerRadius="8" Background="#D97757" VerticalAlignment="Center">
+                        <TextBlock Text="c" FontSize="17" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="1" Spacing="0" VerticalAlignment="Center">
+                        <TextBlock Text="codev" FontSize="20" FontWeight="SemiBold" Foreground="#F0F0F0" />
+                        <TextBlock Text="YOUR LOCAL CODING SPACE" FontSize="8" Foreground="#858585" />
+                    </StackPanel>
+                </Grid>
+                <Button Grid.Row="1" Classes="nav" Content="＋   New conversation" Command="{Binding NewConversationCommand}" Background="#D97757" Foreground="White" Margin="0,0,0,4" />
+                <TextBox Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" />
+                <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="PINNED" Foreground="#898989" FontSize="10" FontWeight="SemiBold" Margin="9,4,0,5" />
+                        <ItemsControl ItemsSource="{Binding PinnedConversations}">
+                            <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
+                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" />
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="nav" Content="{Binding ArchiveViewLabel}" Command="{Binding ToggleArchiveViewCommand}" Margin="1,12,0,0" />
+                        <TextBlock Text="RECENTS" Foreground="#898989" FontSize="10" FontWeight="SemiBold" Margin="9,8,0,5" />
+                        <ItemsControl ItemsSource="{Binding RecentConversations}">
+                            <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
+                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" />
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+                <Border Grid.Row="4" BorderBrush="#343434" BorderThickness="0,1,0,0" Padding="4,13,4,3">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="PROJECT" Foreground="#898989" FontSize="10" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="#D0D0D0" />
+                        <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="#8C8C8C" />
+                        <TextBlock Text="Avalonia renderer · local chat storage" Foreground="#89B895" FontSize="10" Margin="0,5,0,0" />
                     </StackPanel>
                 </Border>
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
-            <Border Padding="22,14" BorderBrush="#2B2F36" BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="*,Auto,Auto">
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="API client rewrite" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Codev project · 42 messages" Foreground="#969CA6" FontSize="12" />
+        <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
+            <Border Grid.Row="0" BorderBrush="#303030" BorderThickness="0,0,0,1" Padding="30,0">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="#EEEEEE" />
+                        <TextBlock Text="{Binding MessageCountLabel}" Foreground="#8F8F8F" FontSize="10" />
                     </StackPanel>
-                    <ComboBox Grid.Column="1" Width="250" SelectedIndex="0" VerticalAlignment="Center" Margin="0,0,10,0">
-                        <ComboBoxItem Content="Devstral Small 2 · Q4 · 64K" />
-                        <ComboBoxItem Content="Qwen3-Coder-Next · Q2 · 24K" />
-                        <ComboBoxItem Content="Qwen3-Coder 30B · Q4 · 64K" />
-                    </ComboBox>
-                    <Button Grid.Column="2" Content="☆  Pin" VerticalAlignment="Center" Padding="12,8" />
+                    <ComboBox Grid.Column="1" Width="250" ItemsSource="{Binding Models}" SelectedValue="{Binding Model, Mode=TwoWay}" SelectedValueBinding="{Binding Name}" VerticalAlignment="Center" Background="#252525" Foreground="#E7E7E7" BorderBrush="#3B3B3B" />
+                    <Button Grid.Column="2" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
+                    <Button Grid.Column="3" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
                 </Grid>
             </Border>
-
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{Binding Messages}" Margin="0,18">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid ColumnDefinitions="*,740,*" Margin="0,0,0,18">
-                                <Border Grid.Column="1" Background="#202329" CornerRadius="12" Padding="20,16" BorderBrush="#2C3037" BorderThickness="1">
-                                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,*">
-                                        <TextBlock Text="{Binding Role}" Foreground="#AAB0BA" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                        <Button Grid.Column="1" Content="Copy" Padding="9,4" FontSize="11" Click="CopyMessage_Click" />
-                                        <md:MarkdownScrollViewer Grid.Row="1" Grid.ColumnSpan="2" Markdown="{Binding Content}" Margin="0,10,0,0" />
-                                    </Grid>
-                                </Border>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
+                <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22">
+                    <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
+                        <Grid ColumnDefinitions="*,760,*" Margin="0,0,0,20">
+                            <StackPanel Grid.Column="1" Spacing="8">
+                                <TextBlock Text="{Binding Role}" Foreground="#A7A7A7" FontSize="12" FontWeight="SemiBold" Margin="2,0,0,0" />
+                                <md:MarkdownScrollViewer Markdown="{Binding Content}" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
-
-            <Border Grid.Row="2" Padding="22,14,22,20" BorderBrush="#2B2F36" BorderThickness="0,1,0,0">
-                <Grid ColumnDefinitions="*,Auto" RowDefinitions="*,Auto" Width="820" MaxWidth="820" HorizontalAlignment="Center">
-                    <TextBox Grid.Row="0" AcceptsReturn="True" MinHeight="76" MaxHeight="160" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Padding="14" />
-                    <Button Grid.Row="0" Grid.Column="1" Content="↑" FontSize="18" Width="48" Height="48" VerticalAlignment="Bottom" Margin="10,0,0,2" />
-                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="Code task · Approval required for edits and commands" Foreground="#8E949F" FontSize="11" Margin="4,8,0,0" />
+            <Border Grid.Row="2" BorderBrush="#303030" BorderThickness="0,1,0,0" Padding="22,14,22,18">
+                        <Grid ColumnDefinitions="*,790,*">
+                    <StackPanel Grid.Column="1" Spacing="7">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" />
+                            <Button Grid.Column="1" Content="↑" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="Local chat prototype" Foreground="#858585" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="·" Foreground="#666666" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="Agent modes and project tools are on the porting roadmap" Foreground="#858585" FontSize="10" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="Local storage" Foreground="#858585" FontSize="10" VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>
     </Grid>
-
 </Window>
