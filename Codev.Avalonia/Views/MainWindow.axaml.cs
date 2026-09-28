@@ -362,7 +362,7 @@ public partial class MainWindow : Window
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
         layout.Children.Add(new TextBlock
         {
-            Text = "Saved permissions apply only to this exact command in this project. Allowing it turns on this project's allowlist; other commands still ask. Denials always block that exact command. Commands are not sandboxed.",
+            Text = "Saved allow/deny rules apply only to this exact command in this project. Choosing Allow exact command switches to allowlist mode. In Read-only mode, a conservative classifier handles simple inspections directly with bounded file APIs, without launching a shell; verification and everything else still require approval. Commands are not sandboxed.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             FontSize = 11,
             Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
@@ -1964,13 +1964,18 @@ public partial class MainWindow : Window
         var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
         layout.Children.Add(new TextBlock
         {
-            Text = "Command rules are saved locally for this exact project folder, outside the project. Deny rules always block their exact command. Allowlist mode runs exact saved allows without asking, except Git or protected app-data commands, which always ask; every unlisted command also asks. Ask every time is the default.",
+            Text = "Command rules are saved locally for this exact project folder, outside the project. Deny rules always block their exact command. Allowlist mode runs exact saved allows without asking, except Git or protected app-data commands, which always ask. Read-only mode skips approval only for a small set of simple inspection commands using project-relative paths; compound commands, redirects, wrappers, absolute paths and symlinks still ask. Ask every time is the default.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
         var mode = new ComboBox
         {
-            ItemsSource = new[] { "Ask every time", "Allow exact saved commands" },
-            SelectedIndex = viewModel.ProjectCommandPermissionMode == Codev.ProjectCommandPermissionMode.Allowlist ? 1 : 0,
+            ItemsSource = new[] { "Ask every time", "Allow exact saved commands", "Read-only commands" },
+            SelectedIndex = viewModel.ProjectCommandPermissionMode switch
+            {
+                Codev.ProjectCommandPermissionMode.Allowlist => 1,
+                Codev.ProjectCommandPermissionMode.ReadOnly => 2,
+                _ => 0
+            },
             IsEnabled = viewModel.CanPersistProjectCommandPermissions
         };
         layout.Children.Add(new TextBlock { Text = "Approval mode", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
@@ -2030,16 +2035,29 @@ public partial class MainWindow : Window
         {
             try
             {
-                await viewModel.SetProjectCommandPermissionModeAsync(mode.SelectedIndex == 1
-                    ? Codev.ProjectCommandPermissionMode.Allowlist : Codev.ProjectCommandPermissionMode.AskEveryTime);
-                status.Text = mode.SelectedIndex == 1
-                    ? "Allowlist mode is on. Unlisted commands still require approval."
-                    : "Commands will ask every time. Saved denials remain active.";
+                var selectedMode = mode.SelectedIndex switch
+                {
+                    1 => Codev.ProjectCommandPermissionMode.Allowlist,
+                    2 => Codev.ProjectCommandPermissionMode.ReadOnly,
+                    _ => Codev.ProjectCommandPermissionMode.AskEveryTime
+                };
+                await viewModel.SetProjectCommandPermissionModeAsync(selectedMode);
+                status.Text = selectedMode switch
+                {
+                    Codev.ProjectCommandPermissionMode.Allowlist => "Allowlist mode is on. Unlisted commands still require approval.",
+                    Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only mode is on. Only recognized inspection commands skip approval.",
+                    _ => "Commands will ask every time. Saved denials remain active."
+                };
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
                 status.Text = $"Could not save the mode ({ex.GetType().Name}).";
-                mode.SelectedIndex = viewModel.ProjectCommandPermissionMode == Codev.ProjectCommandPermissionMode.Allowlist ? 1 : 0;
+                mode.SelectedIndex = viewModel.ProjectCommandPermissionMode switch
+                {
+                    Codev.ProjectCommandPermissionMode.Allowlist => 1,
+                    Codev.ProjectCommandPermissionMode.ReadOnly => 2,
+                    _ => 0
+                };
             }
         };
 

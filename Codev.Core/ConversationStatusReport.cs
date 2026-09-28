@@ -83,7 +83,12 @@ public static class ConversationStatusReport
             $"Queue: {queue}",
             $"Hosted requests: {(CloudModelProviders.IsCloud(conversation.Provider) ? hostedRequestsEnabled ? "enabled for this session" : "disabled" : "not in use")}",
             $"Tools and file changes: {(conversation.IsCodeTask ? "available with per-change review and project command permissions" : "unavailable outside Code task mode")}",
-            $"Project command permissions: {(commandPermissionMode == ProjectCommandPermissionMode.Allowlist ? $"exact allowlist · {allowedCommandRules} allow rule(s), {deniedCommandRules} deny rule(s); unlisted commands ask" : $"ask every time · {deniedCommandRules} saved deny rule(s)")}");
+            $"Project command permissions: {(commandPermissionMode switch
+            {
+                ProjectCommandPermissionMode.Allowlist => $"exact allowlist · {allowedCommandRules} allow rule(s), {deniedCommandRules} deny rule(s); unlisted commands ask",
+                ProjectCommandPermissionMode.ReadOnly => $"read-only classifier · {deniedCommandRules} saved deny rule(s); unrecognized commands ask",
+                _ => $"ask every time · {deniedCommandRules} saved deny rule(s)"
+            })}");
     }
 
     private static string FolderName(string path)

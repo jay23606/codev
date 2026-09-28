@@ -767,9 +767,12 @@ public sealed class MainViewModel : ViewModelBase
         if (ActiveConversation?.ProjectPath is not { Length: > 0 } path) return;
         await _projectCommandPermissions.SetModeAsync(path, mode);
         OnPropertyChanged(nameof(ProjectCommandPermissionMode));
-        ReportContextActionStatus(mode == Codev.ProjectCommandPermissionMode.Allowlist
-            ? "Project allowlist mode enabled. Exact saved allow rules skip approval; unlisted commands still ask, and saved denials always block."
-            : "Project commands will ask for approval every time; saved denials remain in force.");
+        ReportContextActionStatus(mode switch
+        {
+            Codev.ProjectCommandPermissionMode.Allowlist => "Project allowlist mode enabled. Exact saved allow rules skip approval; unlisted commands still ask, and saved denials always block.",
+            Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only command mode enabled. Only simple inspection commands with project-relative paths can skip approval; all other commands still ask.",
+            _ => "Project commands will ask for approval every time; saved denials remain in force."
+        });
     }
 
     public async Task RemoveProjectCommandPermissionRuleAsync(string command, Codev.ProjectCommandPermissionDecision decision)
@@ -782,7 +785,8 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task<Codev.CommandApprovalOutcome> ApproveCommandWithProjectPolicyAsync(Codev.CodeTaskCommandProposal proposal)
     {
-        var decision = _projectCommandPermissions.Evaluate(proposal.ProjectPath, proposal.Command);
+        var decision = _projectCommandPermissions.Evaluate(proposal.ProjectPath, proposal.Command, proposal.ShellName,
+            allowReadOnly: !proposal.IsVerification);
         if (decision == Codev.ProjectCommandPermissionDecision.Deny)
         {
             _ = SetConnectionStatusAsync("Project command permission denied this exact command; it was not run.");
@@ -790,6 +794,11 @@ public sealed class MainViewModel : ViewModelBase
         }
         if (decision == Codev.ProjectCommandPermissionDecision.Allow)
         {
+            if (!proposal.IsVerification && _projectCommandPermissions.GetMode(proposal.ProjectPath) == Codev.ProjectCommandPermissionMode.ReadOnly)
+            {
+                _ = SetConnectionStatusAsync("Recognized read-only command; running through Codev's bounded file inspection, without launching a shell.");
+                return Codev.CommandApprovalOutcome.ApprovedReadOnly;
+            }
             _ = SetConnectionStatusAsync("Exact project allowlist match; running the previously approved command.");
             return Codev.CommandApprovalOutcome.Approved;
         }

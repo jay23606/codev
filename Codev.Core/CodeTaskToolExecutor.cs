@@ -157,10 +157,22 @@ public sealed class CodeTaskToolExecutor(
         var commandProposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
             ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command));
         var approval = await RequestCommandApprovalAsync(commandProposal);
-        if (approval != CommandApprovalOutcome.Approved)
+        if (approval is not (CommandApprovalOutcome.Approved or CommandApprovalOutcome.ApprovedReadOnly))
             return approval == CommandApprovalOutcome.Denied
                 ? "Denied by a saved project command permission rule; the command was not run."
                 : "Rejected by user; the command was not run.";
+        if (approval == CommandApprovalOutcome.ApprovedReadOnly)
+        {
+            status?.Invoke("Code task · inspecting project files…");
+            try
+            {
+                var output = await ReadOnlyCommandClassifier.ExecuteAsync(command, files.Root, shell.DisplayName, cancellationToken);
+                AddContextSource("Output from read-only project inspection: " + command);
+                TrackUntrustedContent("Output from read-only project inspection: " + command, output);
+                return UntrustedToolOutput.Format("read-only project inspection output", Truncate(output, 8000));
+            }
+            finally { status?.Invoke("Code task · Thinking…"); }
+        }
         status?.Invoke($"Code task · starting approved {shell.DisplayName} command…");
         var progress = new Progress<TimeSpan>(elapsed =>
             status?.Invoke($"Code task · command running · {elapsed:mm\\:ss}"));

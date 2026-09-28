@@ -7,7 +7,8 @@ namespace Codev;
 public enum ProjectCommandPermissionMode
 {
     AskEveryTime,
-    Allowlist
+    Allowlist,
+    ReadOnly
 }
 
 public enum ProjectCommandPermissionDecision
@@ -28,6 +29,7 @@ public enum ProjectCommandApprovalChoice
 public enum CommandApprovalOutcome
 {
     Approved,
+    ApprovedReadOnly,
     Rejected,
     Denied
 }
@@ -92,7 +94,7 @@ public sealed class ProjectCommandPermissionRegistry
 
     public IReadOnlyList<ProjectCommandPermissionRule> GetRules(string projectPath) => GetProject(projectPath)?.Rules.ToArray() ?? [];
 
-    public ProjectCommandPermissionDecision Evaluate(string projectPath, string command)
+    public ProjectCommandPermissionDecision Evaluate(string projectPath, string command, string shellName = "", bool allowReadOnly = true)
     {
         var project = GetProject(projectPath);
         if (project is null) return ProjectCommandPermissionDecision.Ask;
@@ -103,6 +105,8 @@ public sealed class ProjectCommandPermissionRegistry
         if (project.Mode == ProjectCommandPermissionMode.Allowlist && CanCreateAllowRule(normalizedCommand) &&
             project.Rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Allow &&
                                       string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal)))
+            return ProjectCommandPermissionDecision.Allow;
+        if (allowReadOnly && project.Mode == ProjectCommandPermissionMode.ReadOnly && ReadOnlyCommandClassifier.IsReadOnly(normalizedCommand, project.ProjectPath, shellName))
             return ProjectCommandPermissionDecision.Allow;
         return ProjectCommandPermissionDecision.Ask;
     }
