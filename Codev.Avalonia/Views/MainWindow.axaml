@@ -244,9 +244,9 @@
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
-            <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,14,22,18">
+            <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,8,22,8">
                 <Grid>
-                    <StackPanel MaxWidth="1050" HorizontalAlignment="Stretch" Spacing="7">
+                    <StackPanel MaxWidth="1050" HorizontalAlignment="Stretch" Spacing="4">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
@@ -294,7 +294,7 @@
                                 </Border>
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="2">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button Classes="soft" Content="＋ Context" Padding="8,4" FontSize="10" ToolTip.Tip="Attach a project or choose files to include with this conversation">
                                     <Button.Flyout>
@@ -335,10 +335,8 @@
                                 </StackPanel>
                             </StackPanel>
                         </Grid>
-                        <Grid ColumnDefinitions="*,Auto">
+                        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasQueuedTurns}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="{Binding ProviderStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
-                                <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding QueueStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
