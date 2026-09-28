@@ -200,6 +200,7 @@ Both desktop apps implement model discovery and streamed text chat for both prov
 3. Anything downloaded (models, voices) is opt-in and shows its size first.
 4. New behavior ships with tests in `Codev.Tests` where it is pure logic, and with an updated row in the feature status table.
 5. Small local models have small context windows: prefer loading things on demand over always-on context, and show what each feature costs.
+6. Meet the definition of done in section 10 (Q1) before marking an item Done; mark rows that do not apply as not applicable instead of skipping them.
 
 **Recommended build order**
 
@@ -212,6 +213,7 @@ Both desktop apps implement model discovery and streamed text chat for both prov
 | 4. Extend | D3, D4, D6, B12, A9, E4, E6, E7 | Extension points, once the basics are solid |
 | 5. Parallel and unattended | D5, D8, B7, E8, D10 | Depends on worktrees, the shared core, and sandbox research |
 | Anytime | A4, A7, A10, A11, A12, B10, B11, C6, C7, D7, D9, E1, E3, E4, E5, E9, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
+| 6. Harden and release | Q3 (section 10) | After phases 1 to 5, and again before every release; each item has already met Q1 |
 
 X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia port; E7 needs `Codev.Core` (X2), and E8 is a decision after X2.
 
@@ -231,6 +233,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | A10 | Small helper model for chores | S | none | Later |
 | A11 | Conversation recall | S | none | Speculative |
 | A12 | Multi-folder projects | M | none | Later |
+| A13 | Prompt-prefix stability | S | none | Later |
 
 - **A1 Context breakdown (partially implemented in Avalonia).** The composer estimates bounded project-file and repo-map context separately from conversation history. **View last request context** shows separate character counts for system instructions, conversation history, trusted project guidance, selected source excerpts, repo map, tool schemas, and tool results, plus a clearly labeled rough token estimate, provider/model/context limit, and normalized messages. It captures the exact outgoing JSON request body (without HTTP headers) for Chat, Plan, and every Code task round; input-token counts are shown when Ollama or a hosted provider reports them. Snapshots are memory-only and capped to eight conversations. Saved prompt parts from user settings, provider-specific tokenization accuracy for estimates, and cross-platform personal/project knowledge settings remain future work.
 - **A2 Compaction and summarize (partially implemented in Avalonia).** `/compact` and the conversation-bar **Compact** action summarize older complete exchanges with the current provider/model. The editable proposal is shown before applying; the original visible transcript and exported/backup messages are preserved, and future prompts use the accepted summary plus the four newest complete exchanges. User and assistant messages also offer **Summarize up to here**, preserving that boundary and later messages verbatim. When Ollama reports actual prompt usage at or above 80% of an explicitly selected context limit, Codev offers compaction after the turn finishes; it never summarizes automatically. The **Full history** action removes the summary. Compaction state survives persistence and backups; clearing history resets it, and rewinding into compacted messages clears the summary. Summarization excludes project files and tools. Still to do: support an explicit summarize-from boundary, warn when the runtime context is left at an unknown model default, and port the flow to WPF. Never compact silently. Modeled on Claude Code's [checkpointing and `/compact`](https://code.claude.com/docs/en/checkpointing).
@@ -244,6 +247,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **A10 Helper model.** Let the user pick a small Ollama model for conversation titles and compaction summaries so the main coding model is not reloaded or interrupted for chores (OpenCode does this with hidden system agents). Default is "use the same model", the safe choice on limited RAM.
 - **A11 Conversation recall.** Let the model search the user's past conversations, using the existing conversation search, scoped to the current project by default. The search appears as a visible tool call. Off by default, because it moves old text into the context. Modeled on Goose's Chat Recall extension.
 - **A12 Multi-folder projects.** A project can list extra folders (for example a web app and its API) as additional roots. Extra roots are read-only until the user grants write access to each one, and the same bounds, exclusions and secret-file rules apply to every root. Gemini CLI's `includeDirectories` setting and Cline's multi-root workspaces do the same.
+- **A13 Prompt-prefix stability.** Order every request so its start stays identical from turn to turn (system instructions, project instructions and knowledge, `AGENTS.md`, tool definitions) and only the end changes (history, the new message, tool results). Ollama can reuse its already-processed copy of a matching start (confirm this on the installed version), which should make later turns and agent steps faster, especially on a CPU where reading a prompt is slow (about 20 to 130 tokens per second in the benchmark). Measure before and after on the same conversation with E10's prompt-reading speed and time to first token. Watch for things that silently change the start: a timestamp, a rotating tip, a reordered file list, a changed set of selected files. Do not reorder anything that could change the model's behavior without re-running the benchmark.
 
 #### B. Agent quality and safety
 
@@ -303,6 +307,8 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | C5 | Queue a follow-up while running | S | none | Core |
 | C6 | Edit any earlier message | S–M | C3 | Later |
 | C7 | Whole-tree snapshot before commands | M–L (prototype first) | C3 | Speculative |
+| C8 | Security review pass | S–M | C2 | Later |
+| C9 | Draft commit messages and PR descriptions | S | none | Later |
 
 - **C1 Richer review pane (partially implemented).** Per [Codex's review pane](https://learn.chatgpt.com/docs/code-review?surface=app): stage, unstage and revert at three levels (whole diff, per file, **per hunk**; Codev is per file today); choose the scope to review (uncommitted changes, **the assistant's last turn**, a branch against a base, one commit); and attach a comment to selected diff excerpts. Avalonia comments stay in the conversation and composer until sent, then travel with the user message as guidance; they are included in conversation persistence and backups. Hunk-level stage/revert and broader review scopes remain future work.
 - **C2 `/review`.** A separate, read-only model pass over uncommitted changes, a commit or a branch, returning findings by priority before the user commits. Uses a review-specific prompt and never edits files. Label it a second opinion; quality depends on the model.
@@ -311,6 +317,8 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **C5 Queue a follow-up.** Let the user type and queue a message while a response is running. The WPF queue and Avalonia port support this; an enqueued message is its own saved user/assistant pair, and queued turns use the model/context captured at enqueue time. A message that joins a running turn is not its own rewind point.
 - **C6 Edit any earlier message.** Click any sent message to revise it and resend, which restores the conversation (and optionally the files) to that point through C3 and puts the original text back in the composer. Codev only edits and resends the last prompt today; [Zed](https://zed.dev/docs/ai/agent-panel) lets you edit any past message.
 - **C7 Whole-tree snapshot before commands.** C3's main gap is that shell-made changes are not tracked. Gemini CLI stores its [checkpoints](https://geminicli.com/docs/cli/checkpointing/) as commits in a separate "shadow" Git repository outside the project (together with the conversation and the tool call that triggered it), so they never touch the project's own history. Codev could use the same approach for file edits and also snapshot the whole project tree (respecting ignore rules) before an approved command, so undo covers shell changes too. That extension is an inference, not something either tool documents. Prototype it on a large repository and measure time, disk use, and behavior with ignored, binary, huge and symlinked files before committing to it.
+- **C8 Security review pass.** A read-only model pass over uncommitted changes, a commit or a branch that looks specifically for security problems (unvalidated input, committed secrets, unsafe file or command handling, missing authorization checks) and returns findings by priority with the file and line. Same rules as C2: it never edits, and it is labeled a second opinion. Claude Code has an on-demand [`/security-review`](https://code.claude.com/docs/en/security) for the same purpose. Ship it as a review mode of C2 with its own prompt, plus a check that needs no model (a simple secret-pattern scan of the diff) so it is useful even when the model is weak.
+- **C9 Draft commit messages and PR descriptions.** After staging, offer to draft a commit message from the staged diff (a subject line and a short body, matching the style of the project's recent commit messages), shown in the commit dialog for the user to edit. The same for a pull request title and description from a branch's diff, as text the user copies; creating the pull request itself is D13. The model sees only the diff the user already reviewed, and nothing is committed without the existing review-and-confirm step. Claude Code and Codex both write commit messages and open pull requests ([Claude Code overview](https://code.claude.com/docs/en/overview)).
 
 #### D. Extensibility and automation
 
@@ -326,6 +334,9 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | D8 | Automations and review inbox | L | section 3 worktrees, C1 | Speculative |
 | D9 | Opt-in web search and fetch | M | B1 | Speculative |
 | D10 | Code intelligence (language servers) | L | none | Speculative |
+| D11 | Background commands | M | B1 | Later |
+| D12 | Testing a running app | L | B1, D11, a vision model | Speculative |
+| D13 | CI and GitHub integration | M | E7 | Speculative |
 
 - **D1 Slash commands and file-based commands (partially implemented in Avalonia).** Typing `/` opens keyboard-navigable suggestions for shipped actions: `/plan`, `/code`, `/clear`, `/model`, `/export`, `/status`, and `/commands`. `/review` and `/init` insert editable prompt starters and never run until the user sends them. `/clear` asks for confirmation and keeps the project selection and reviewed file-change history. User and trusted-project Markdown prompt files, named argument placeholders, bounds, validation, and folder guidance are implemented; project commands can be shared through Git. Avalonia imports existing WPF settings-backed prompt templates once, manages them locally, and exposes them as `/template-…` suggestions. Remaining work is agent/tool constraints. A command file may later name an agent (D3) and limit its tools, allowing saved tasks to be run from the menu, headlessly (E7), or on a schedule (D8); Goose calls these recipes (its recipe format was not reviewed).
 - **D2 Skills (partially implemented in Avalonia).** User and trusted-project folders of Markdown skills are discoverable through slash suggestions and `/skills`. Only metadata is retained in suggestions; selecting `/skill-name` reloads the prompt, expands named arguments, and inserts it into the composer for review. Project definitions override user skills; built-in and user slash commands take precedence over colliding skill names. This first stage is explicitly user-invoked and treats Markdown as data. Remaining work: optional scripts through the approval-gated command tool, skill metadata for agent invocation, and richer migration from existing custom commands. Design, from Claude Code's [extension guide](https://code.claude.com/docs/en/features-overview): keep only each skill's name and short description in model context until used, and allow skills to opt into user-invocation-only behavior.
@@ -337,6 +348,9 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **D8 Automations and review inbox.** Scheduled or manual runs that deliver results to an inbox. Per [Codex's scheduled tasks page](https://learn.chatgpt.com/docs/automations?surface=app), each run in a Git repository can use *worktree mode* (changes stay isolated from the user's checkout) or *local mode* (edits the main checkout directly); Codev should default to a worktree per run and require an explicit choice for local mode. Schedules are time-based, and Codex also offers event triggers (Gmail, Slack, GitHub) on some plans; it does not mention webhooks. Skip event triggers and webhooks at first, since they need connectors or a listening server, which is a security surface (localhost only with a token, if ever). Codex's Scheduled view is an inbox of active, paused and completed tasks with an unread indicator for runs that need attention; copy that. Unattended runs use the default sandbox settings, so any tool call that needs more than the sandbox allows simply fails; until B7 exists, Codev has no sandbox, so unattended runs should be read-only by default and every write should wait in the inbox for approval. Codex's desktop app must stay running for tasks that touch local files; say the same. Local models are slow, so show queue position and expected wait. (An earlier third-party description said runs with nothing to report archive themselves; the official page does not say that, so treat it as unconfirmed.)
 - **D9 Opt-in web search and fetch.** Off by default, clearly labeled as leaving the machine, per-domain permission, and never sends project content to a search query without showing it. Consistent with local-first.
 - **D10 Code intelligence.** Opt-in per-language language-server support: go to definition, find references, and live type errors after an edit, so a small model can check its own work. Larger than A8; do A8 first.
+- **D11 Background commands.** Let the agent start a long-running command (a dev server, a file watcher, a slow test run) without waiting for it to finish, keep working, read its output so far, and stop it. Claude Code's shell tool has a background mode for this; Codev's command tool today has a three-minute timeout and nothing else. Rules: each start is approved like any command (B1) and shows the exact command; a visible list of running background commands, each with how long it has run and a Stop button; output is bounded and read on request; every background process ends when the conversation closes or Codev exits; a hard limit on how many can run at once; and the approval prompt flags commands that open a port or run indefinitely.
+- **D12 Testing a running app.** An opt-in tool that lets the agent open a page from the user's own running app in a controlled browser, take a screenshot, read console and network errors, and click through a flow, so it can check its own UI work. Claude Code does this through [a Chrome integration](https://code.claude.com/docs/en/overview). It needs strict limits: local addresses only (localhost and the project's own dev server) unless the user allows a host; a separate browser profile with no saved sign-ins; screenshots go only to a vision-capable model the user has chosen, shown to the user first; off by default. It depends on D11 (a dev server to open), B1 and a vision model, so treat it as research first.
+- **D13 CI and GitHub integration.** A recipe and, if it proves useful, a GitHub Action that runs Codev's headless mode (E7) in continuous integration, for example to review a pull request's diff or draft release notes, plus opening a pull request from the current branch through the user's own `gh` login. Claude Code and Codex both offer GitHub Actions or pull-request review ([Claude Code overview](https://code.claude.com/docs/en/overview)). Off by default, it needs the user's explicit token or login, and a local model must be reachable from the CI runner, so it is mostly useful with self-hosted runners.
 
 #### E. Everyday use and input/output
 
@@ -353,6 +367,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | E9 | Compare models side by side | M | B8 helpful | Speculative |
 | E10 | Generation stats | S | none | Done |
 | E11 | Follow the agent | S–M | none | Later |
+| E12 | Terminal pane | M | D11 helpful | Later |
 
 - **E1 Output styles (implemented in Avalonia).** A per-conversation selector offers balanced, concise, explanatory, and code-only styles. The selection is stored with conversations and captured in each queued turn; it changes response presentation only, never tools or permissions. Even code-only responses must disclose failures, caveats, and unverified work.
 - **E2 Plan/Code toggle (implemented in Avalonia).** `Ctrl+Shift+M` cycles Chat → Plan → Code task → Chat. The current mode remains visible on the mode controls and in the provider/mode status. Code task is included in the cycle only when the conversation has a trusted project and a loopback Ollama model; otherwise cycling from Plan returns to Chat with an explanation. The shortcut never bypasses per-file review or command approval, and mode changes are blocked while a response is running. Broader rebindable shortcuts remain under E3.
@@ -365,6 +380,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **E9 Compare models side by side.** Send one prompt to two or more installed models and show the answers next to each other, run one after another on local hardware, and let the user keep one as the conversation's answer. Helps choose between local models. Read-only chat only, never Code mode. Msty's split chat does this.
 - **E10 Generation stats (implemented in Avalonia for local Ollama replies).** The assistant message footer displays time to first non-empty response token (measured by Codev), generated tokens per second, output token count, and model load time from the final streaming response. Throughput and load duration use Ollama's documented `eval_count`, `eval_duration`, and `load_duration` fields; stats persist with the conversation. Hosted replies do not show locally inferred performance numbers.
 - **E11 Follow the agent.** While the agent reads or edits a file, highlight that file in the project browser and preview pane, with a toggle. [Zed's agent panel](https://zed.dev/docs/ai/agent-panel) has a "follow the agent" mode. Fits the "visible work" principle.
+- **E12 Terminal pane.** An interactive terminal in the app, rooted in the project, that the user types into like any terminal. A button sends the last command and its output (or a selection) to the conversation as context, and the agent's approved commands can be shown in the same pane so the user sees them run. Claude's desktop app has a terminal panel for the same reason. Rules: it runs as the user, so nothing typed there needs agent approval, and nothing the agent runs bypasses approval; output shared with the model is bounded and shown to the user first (B10 applies); one shell per project, ended when the project closes.
 
 **Not planned:** cloud-hosted agents (Codex cloud tasks), phone or browser remote control, hosted share links, and organization-wide managed-policy servers, all of which need a service Codev does not run.
 
@@ -388,8 +404,8 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B10, B11, B12, B13, C2, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
-| Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B10, B11, B12, B13, C2, C6, D2, D3, D4, D6, A13, C8, C9, D11, E12, E3, E4, E6, E7, E11, and X6 and X7 |
+| Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, D12, D13, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.
 
@@ -477,6 +493,50 @@ Findings that change the backlog:
 - **V4c. Real-use log.** Use Codev on a real project for a stretch of time and write down every point of friction, wrong answer and confusing moment. These notes feed V1 and are usually more valuable than another comparison with a competitor.
 
 **Done when:** V4a stays green, the checklist is committed and has been run at least once, and the first real-use log has been read and its items triaged.
+
+
+### 10. Quality gates and release readiness
+
+Section 8 says what to build and section 9 checks the plan. This section says what "finished" means. It works in two layers: every feature meets a definition of done as it is built, and a hardening pass runs once the features exist and before every release. Doing only the second layer lets problems pile up, and polish is harder to do well long after the code was written.
+
+#### Q1. Definition of done for every feature
+
+An item is not marked Done until each row below is true, or is marked not applicable with a reason.
+
+| # | Check | What it means |
+|---|---|---|
+| 1 | Behavior is proven | A test that would fail without the feature (pure logic goes in `Codev.Tests`); anything only a person can check goes on the manual checklist (Q2) |
+| 2 | Failure states are handled | A clear message and a way forward when Ollama is unreachable, the model is missing or unloaded, a request times out or is cancelled, the disk is full or a file is locked, the project is empty, huge or not a Git repository, a path is outside the project, or a data file is unreadable |
+| 3 | Every state exists | First run, empty, loading and error states all look intentional, and nothing blocks the window while it waits |
+| 4 | Usable without a mouse | Everything reachable by keyboard in a sensible order, and controls have accessible names for screen readers |
+| 5 | Looks right everywhere | Light and dark themes, larger text sizes, a narrow window, and no clipped or overlapping text |
+| 6 | Works on every platform | Passes the smoke checklist on Windows, macOS and Linux once the Avalonia port has reached the feature |
+| 7 | Safe by default | No new silent write, command or network call; approval prompts show exactly what will happen; secrets and file contents are not written to logs |
+| 8 | Data survives | New stored data is versioned and survives an upgrade and a crash mid-write (atomic writes, unreadable files preserved), following the existing pattern |
+| 9 | Cost is stated | What the feature costs in context tokens, memory and time, visible where the user can see it (A1) |
+| 10 | Documented | The README and in-app help match what the feature does, the feature status row is updated, and any setting's default is written down |
+
+#### Q2. A short smoke card per feature
+
+Each shipped feature adds a short manual checklist to `docs/`, extending `docs/avalonia-smoke-checklist.md` or a file beside it: the steps, the expected result, and a dated log line for each run (build tested, operating system, pass or fail). Keep each card under ten lines. Dated log lines are a record of real runs and are never rewritten later.
+
+#### Q3. The hardening pass
+
+Run after phases 1 to 5 and again before every release, as its own change set.
+
+- **Whole-app smoke run** on Windows, macOS and Linux from a clean install, using the Q2 cards. Test on a machine or virtual machine without development tools installed.
+- **Performance budgets.** Set numbers from measurement, then keep to them: startup time, time to first token, and memory with a long conversation open and a large project loaded.
+- **Security review** of the parts that can do harm: folder trust (B9), untrusted content handling (B10), the command runner and any background commands (D11), hosted-provider keys (section 8a), MCP servers, and anything a project can bring with it. Include the security review pass (C8) run on Codev's own changes.
+- **Data safety.** Open data files written by the previous release; kill the app during a write and reopen it; export and re-import a backup; check that uninstalling leaves the user's data alone.
+- **Benchmark re-run.** Run `bench/` on the shipped default settings and models and compare with the previous results, so a regression in agent behavior shows up before users see it.
+- **Accessibility and text.** A keyboard-only pass through the main flows, a screen-reader spot check, and large-text and high-contrast checks.
+- **Documentation.** The README, in-app help and DESIGN status rows match what the app actually does.
+
+#### Q4. Exit rule and ownership
+
+- **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
+- **Release blockers:** data loss, an action taken without the user's approval, a crash on startup, or a wrong claim of success.
+- **Ownership.** Whoever builds a feature does Q1 and Q2 for it in the same change. The Q3 pass is a separate change set, recorded in `docs/` with the date, the build and the results.
 
 
 ## Product principles
