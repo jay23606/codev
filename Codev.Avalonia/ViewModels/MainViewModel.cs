@@ -304,6 +304,11 @@ public sealed class MainViewModel : ViewModelBase
     public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
     public bool IsCodeTask => ActiveConversation?.IsCodeTask ?? false;
     public string CodeTaskLabel => IsCodeTask ? "Code task on" : "Code task";
+    public string ConversationModeCycleTooltip => IsCodeTask
+        ? "Ctrl+Shift+M switches Code task back to Chat."
+        : IsPlanMode
+            ? CanEnterCodeTaskMode ? "Ctrl+Shift+M switches Plan to Code task." : $"Ctrl+Shift+M switches Plan to Chat. {GetCodeTaskUnavailableReason()}"
+            : $"Ctrl+Shift+M switches Chat to Plan. {GetCodeTaskUnavailableReason() ?? "Code task can also be selected."}";
     public bool CanEnterCodeTaskMode => GetCodeTaskUnavailableReason() is null;
     public bool CanToggleCodeTaskMode => ActiveConversation is not null && !IsGenerating;
     public string CodeTaskTooltip => IsCodeTask
@@ -593,6 +598,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(IsCodeTask));
         OnPropertyChanged(nameof(CodeTaskLabel));
+        OnPropertyChanged(nameof(ConversationModeCycleTooltip));
         OnPropertyChanged(nameof(ShouldShowTaskChecklist));
         OnPropertyChanged(nameof(CanEditTaskChecklist));
         OnPropertyChanged(nameof(CanAddTaskChecklistItem));

@@ -155,7 +155,7 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="Ctrl+Shift+M cycles Chat, Plan, and Code task. Plan mode cannot edit files or run commands." />
+                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" />
                     <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" />
                     <ComboBox Grid.Column="5" Width="105" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions.">
                         <ComboBox.ItemTemplate>
