@@ -218,7 +218,7 @@
                 </Expander>
             </Border>
             <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
-                <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22">
+                <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22" MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Center">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
                             <StackPanel IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="{Binding ReadingWidth}" Margin="48,0,24,0" Spacing="4">

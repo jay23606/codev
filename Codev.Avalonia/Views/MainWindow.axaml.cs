@@ -783,6 +783,11 @@ public partial class MainWindow : Window
             panel.Children.Add(field);
         }
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var resolvedBackground = (this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.ISolidColorBrush)?.Color
+            ?? global::Avalonia.Media.Color.Parse("#191919");
+        var opaqueBackground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.FromRgb(
+            resolvedBackground.R, resolvedBackground.G, resolvedBackground.B));
+        panel.Background = opaqueBackground;
         var dialog = new Window
         {
             Title = "Advanced model settings",
@@ -790,14 +795,14 @@ public partial class MainWindow : Window
             Height = 700,
             MinHeight = 560,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+            Background = opaqueBackground,
             Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
             Content = new Border
             {
-                Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+                Background = opaqueBackground,
                 Child = new ScrollViewer
                 {
-                    Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+                    Background = opaqueBackground,
                     Content = panel,
                     VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
                 }
