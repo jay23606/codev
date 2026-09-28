@@ -169,7 +169,10 @@
                             <MenuFlyout>
                                 <MenuItem Header="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
                                 <MenuItem Header="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
-                                <MenuItem Header="Export conversation as Markdown…" Click="ExportConversation_Click" />
+                                <MenuItem Header="Export conversation…">
+                                    <MenuItem Header="Markdown…" Click="ExportConversation_Click" />
+                                    <MenuItem Header="Standalone HTML…" Click="ExportConversationHtml_Click" />
+                                </MenuItem>
                                 <Separator />
                                 <MenuItem Header="Advanced model settings…" Click="AdvancedModelSettings_Click" IsEnabled="{Binding IsLocalModel}" />
                                 <MenuItem Header="Thinking mode" ToggleType="CheckBox" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsEnabled="{Binding IsLocalModel}" />

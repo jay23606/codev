@@ -654,8 +654,8 @@ public partial class MainWindow : Window
             Height = 700,
             MinHeight = 560,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = this.FindResource("MainSurfaceBrush") as global::Avalonia.Media.IBrush,
-            Foreground = this.FindResource("MainTextBrush") as global::Avalonia.Media.IBrush,
+            Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto }
         };
         loadDefaults.Click += async (_, _) =>
@@ -2184,6 +2184,34 @@ public partial class MainWindow : Window
             var markdown = await viewModel.ExportActiveConversationMarkdownAsync();
             await WriteTextFileAsync(file, markdown);
             viewModel.ReportContextActionStatus($"Exported conversation · {file.Name}");
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportContextActionStatus($"Could not export conversation: {ex.Message}");
+        }
+    }
+
+    private async void ExportConversationHtml_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation) return;
+        if (!StorageProvider.CanSave)
+        {
+            viewModel.ReportContextActionStatus("This platform does not provide a local save dialog.");
+            return;
+        }
+        try
+        {
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Export conversation as standalone HTML",
+                SuggestedFileName = $"{SafeExportName(conversation.Title)}.html",
+                DefaultExtension = "html",
+                ShowOverwritePrompt = true,
+                FileTypeChoices = [new FilePickerFileType("HTML document") { Patterns = ["*.html", "*.htm"] }]
+            });
+            if (file is null) return;
+            await WriteTextFileAsync(file, Codev.ConversationHtmlExporter.Export(conversation));
+            viewModel.ReportContextActionStatus($"Exported standalone HTML · {file.Name}");
         }
         catch (Exception ex)
         {

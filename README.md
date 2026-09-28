@@ -101,6 +101,8 @@ For compact project orientation, enable **Include repo map** beside the project 
 
 Each user prompt also has a **Rewind** action. It asks before removing that prompt and all later messages, restores the prompt to the composer, and leaves project files untouched; use Files history separately when you want to review a file restore.
 
+Use **More → Export conversation…** to save Markdown or a standalone HTML transcript. The HTML file includes its own styling, works offline, escapes conversation text, and omits full local paths and checkpoint locations.
+
 Build a self-contained Windows app:
 
 ```powershell
