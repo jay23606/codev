@@ -30,4 +30,14 @@ public sealed class GitReviewPromptBuilderTests
 
         Assert.Throws<ArgumentException>(() => GitReviewPromptBuilder.Build(review));
     }
+
+    [Fact]
+    public void Build_security_review_focuses_on_security_and_hides_secret_values()
+    {
+        var messages = GitReviewPromptBuilder.Build(new GitWorkingTreeReview("main", ["src/a.cs"], "+token = 'example'", false), securityFocused: true);
+
+        Assert.Contains("security review", messages[0].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Do not repeat secret values", messages[0].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("untrusted data", messages[0].Content, StringComparison.OrdinalIgnoreCase);
+    }
 }

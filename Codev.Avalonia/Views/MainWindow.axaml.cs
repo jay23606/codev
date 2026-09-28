@@ -1254,9 +1254,10 @@ public partial class MainWindow : Window
                 ComposerTextBox.Focus();
                 break;
             case Codev.SlashCommandAction.ReviewWorkingTree:
+            case Codev.SlashCommandAction.SecurityReviewWorkingTree:
                 viewModel.Draft = "";
                 ComposerTextBox.Text = "";
-                if (await viewModel.ReviewUncommittedChangesAsync() is { } review)
+                if (await viewModel.ReviewUncommittedChangesAsync(securityFocused: command.Action == Codev.SlashCommandAction.SecurityReviewWorkingTree) is { } review)
                     await ShowReadOnlyReviewAsync(review, this);
                 break;
             case Codev.SlashCommandAction.UserPrompt:

@@ -48,6 +48,8 @@ public sealed class SlashCommandCatalogTests
             command => Assert.False(string.IsNullOrWhiteSpace(command.Prompt)));
         var review = Assert.Single(SlashCommandCatalog.All, command => command.Name == "/review");
         Assert.Equal(SlashCommandAction.ReviewWorkingTree, review.Action);
+        var securityReview = Assert.Single(SlashCommandCatalog.All, command => command.Name == "/security-review");
+        Assert.Equal(SlashCommandAction.SecurityReviewWorkingTree, securityReview.Action);
         Assert.Contains("local model", review.Description, StringComparison.OrdinalIgnoreCase);
     }
 }

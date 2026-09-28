@@ -11,6 +11,7 @@ public enum SlashCommandAction
     TogglePlan,
     ReviewProject,
     ReviewWorkingTree,
+    SecurityReviewWorkingTree,
     ShowStatus,
     OpenCommandsFolder,
     OpenSkillsFolder,
@@ -39,6 +40,7 @@ public static class SlashCommandCatalog
         new("/model", "Choose a different model", SlashCommandAction.SelectModel),
         new("/plan", "Toggle read-only Plan mode", SlashCommandAction.TogglePlan),
         new("/review", "Review uncommitted Git changes with the selected local model", SlashCommandAction.ReviewWorkingTree),
+        new("/security-review", "Scan uncommitted changes for likely security issues and exposed secrets", SlashCommandAction.SecurityReviewWorkingTree),
         new("/skills", "Open user and trusted-project skill folders", SlashCommandAction.OpenSkillsFolder),
         new("/status", "Show local provider, model, mode, context, and queue status", SlashCommandAction.ShowStatus)
     ];

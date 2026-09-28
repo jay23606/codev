@@ -431,11 +431,11 @@ public sealed class MainViewModel : ViewModelBase
         new Codev.OllamaModelParameterClient(_http, _ollamaEndpoint)
             .GetDeclaredDefaultsAsync(model, cancellationToken);
 
-    public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default)
+    public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default, bool securityFocused = false)
     {
         if (ActiveConversation is not { } conversation || conversation.ProjectPath is not { Length: > 0 } projectPath || !IsProjectTrusted)
         {
-            ReportContextActionStatus("/review needs an attached, trusted Git project.");
+            ReportContextActionStatus($"{(securityFocused ? "/security-review" : "/review")} needs an attached, trusted Git project.");
             return null;
         }
         var reviewModel = conversation.Model;
@@ -449,11 +449,23 @@ public sealed class MainViewModel : ViewModelBase
         var reviewOutputTokens = Math.Min(conversation.NumPredict ?? 3000, 3000);
         if (conversation.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(reviewEndpoint))
         {
-            ReportContextActionStatus("/review uses only the selected local Ollama model and a loopback Ollama endpoint. Switch back to local Ollama to continue.");
-            return null;
+            if (!securityFocused)
+            {
+                ReportContextActionStatus("/review uses only the selected local Ollama model and a loopback Ollama endpoint. Switch back to local Ollama to continue.");
+                return null;
+            }
         }
-        if (string.IsNullOrWhiteSpace(reviewModel) || !Models.Any(choice => choice.Provider == "ollama" &&
-            RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(reviewModel), StringComparison.OrdinalIgnoreCase)))
+        if (conversation.Provider == "ollama" && !Codev.OllamaEndpoint.IsLoopback(reviewEndpoint))
+        {
+            reviewModel = "";
+        }
+        if (!string.IsNullOrWhiteSpace(reviewModel) && (conversation.Provider != "ollama" || !Models.Any(choice => choice.Provider == "ollama" &&
+            RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(reviewModel), StringComparison.OrdinalIgnoreCase))))
+        {
+            reviewModel = "";
+        }
+        if (!string.IsNullOrWhiteSpace(reviewModel) && !Codev.OllamaEndpoint.IsLoopback(reviewEndpoint)) reviewModel = "";
+        if (string.IsNullOrWhiteSpace(reviewModel) && !securityFocused)
         {
             ReportContextActionStatus("Choose an installed Ollama model before starting /review.");
             return null;
@@ -472,63 +484,74 @@ public sealed class MainViewModel : ViewModelBase
         IsGenerating = true;
         try
         {
-            await SetConnectionStatusAsync("/review · reading local Git changes…");
+            await SetConnectionStatusAsync($"{(securityFocused ? "/security-review" : "/review")} · reading local Git changes…");
             var snapshot = await new Codev.GitRepositoryService(projectPath)
                 .GetWorkingTreeReviewAsync(timeout.Token);
             if (!_projectFolderTrust.IsTrusted(projectPath))
             {
-                ReportContextActionStatus("Project trust was revoked while preparing /review. No diff was sent to the model.");
+                ReportContextActionStatus("Project trust was revoked while preparing the review. No diff was sent to the model.");
                 return null;
             }
             if (snapshot.Files.Count == 0)
             {
-                ReportContextActionStatus("/review found no uncommitted Git changes.");
+                ReportContextActionStatus($"{(securityFocused ? "/security-review" : "/review")} found no uncommitted Git changes.");
                 return null;
             }
 
-            var messages = Codev.GitReviewPromptBuilder.Build(snapshot);
-            if (!_projectFolderTrust.IsTrusted(projectPath))
+            var localFindings = securityFocused ? Codev.GitSecretPatternScanner.Scan(snapshot) : [];
+            string? modelFindings = null;
+            if (!string.IsNullOrWhiteSpace(reviewModel))
             {
-                ReportContextActionStatus("Project trust was revoked before /review could send its diff. No changes were sent to the model.");
-                return null;
+                if (!_projectFolderTrust.IsTrusted(projectPath))
+                {
+                    ReportContextActionStatus("Project trust was revoked before the review could send its diff. No changes were sent to the model.");
+                    return null;
+                }
+                var messages = Codev.GitReviewPromptBuilder.Build(snapshot, securityFocused);
+                var options = Codev.OllamaRequestOptions.Build(reviewContext, reviewTemperature, reviewTopP, reviewTopK,
+                    reviewPresencePenalty, reviewRepeatPenalty, reviewOutputTokens) ?? new Dictionary<string, object>();
+                if (reviewContext > 0) options["num_ctx"] = reviewContext;
+                options["num_predict"] = reviewOutputTokens;
+                var payload = new Dictionary<string, object>
+                {
+                    ["model"] = reviewModel, ["messages"] = messages, ["stream"] = false, ["think"] = false, ["options"] = options
+                };
+                await SetConnectionStatusAsync($"{(securityFocused ? "/security-review" : "/review")} · {snapshot.Files.Count} changed files · local second opinion…");
+                using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(reviewEndpoint, "api/chat"), payload, timeout.Token);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
+                using var result = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
+                if (!result.RootElement.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var content) || string.IsNullOrWhiteSpace(content.GetString()))
+                    throw new InvalidOperationException("The selected model returned no review findings.");
+                modelFindings = content.GetString()?.Trim();
             }
-            var options = Codev.OllamaRequestOptions.Build(reviewContext, reviewTemperature, reviewTopP, reviewTopK,
-                reviewPresencePenalty, reviewRepeatPenalty, reviewOutputTokens) ?? new Dictionary<string, object>();
-            if (reviewContext > 0) options["num_ctx"] = reviewContext;
-            options["num_predict"] = reviewOutputTokens;
-            var payload = new Dictionary<string, object>
-            {
-                ["model"] = reviewModel,
-                ["messages"] = messages,
-                ["stream"] = false,
-                ["think"] = false,
-                ["options"] = options
-            };
-            await SetConnectionStatusAsync($"/review · {snapshot.Files.Count} changed files · local second opinion…");
-            using var response = await _http.PostAsJsonAsync(
-                Codev.OllamaEndpoint.ApiUri(reviewEndpoint, "api/chat"), payload, timeout.Token);
-            if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
-            using var result = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
-            if (!result.RootElement.TryGetProperty("message", out var message) ||
-                !message.TryGetProperty("content", out var content) ||
-                string.IsNullOrWhiteSpace(content.GetString()))
-                throw new InvalidOperationException("The selected model returned no review findings.");
+            if (securityFocused && string.IsNullOrWhiteSpace(modelFindings))
+                ReportContextActionStatus("/security-review complete · deterministic local secret scan only · no diff was sent to a model");
+            else
+                ReportContextActionStatus($"{(securityFocused ? "/security-review" : "/review")} complete · {snapshot.Files.Count} files · read-only local second opinion");
             var truncationNote = snapshot.Truncated ? "\n\n_Codev capped the review input; some changed content may not have been included._" : "";
-            ReportContextActionStatus($"/review complete · {snapshot.Files.Count} files · read-only local second opinion");
-            return $"Read-only second opinion · {snapshot.Branch} · {snapshot.Files.Count} files" +
-                (snapshot.Truncated ? " · input capped" : "") + "\n\n" + content.GetString()?.Trim() + truncationNote;
+            if (securityFocused && snapshot.Truncated) localFindings = [];
+            var secretReport = securityFocused
+                ? localFindings.Count == 0 ? "No common secret patterns were found on added lines." : string.Join("\n", localFindings.Select(f => $"- Possible {f.Kind} in `{f.FilePath}:{f.Line}` (value hidden)"))
+                : null;
+            var body = securityFocused
+                ? "Local secret-pattern scan\n" + secretReport + (modelFindings is null ? "" : "\n\nLocal model security review\n" + modelFindings)
+                : modelFindings ?? "No model review was available.";
+            return $"Read-only {(securityFocused ? "security review" : "second opinion")} · {snapshot.Branch} · {snapshot.Files.Count} files" +
+                (snapshot.Truncated ? " · input capped" : "") + "\n\n" + body + truncationNote;
         }
         catch (OperationCanceledException)
         {
             ReportContextActionStatus(reviewTimer.Elapsed >= TimeSpan.FromMinutes(3)
-                ? "/review timed out after three minutes. No project files were changed."
-                : "/review canceled. No project files were changed.");
+                ? "Review timed out after three minutes. No project files were changed."
+                : "Review canceled. No project files were changed.");
             return null;
         }
         catch (Exception ex)
         {
-            ReportContextActionStatus($"Could not review local Git changes: {ex.Message}");
+            ReportContextActionStatus(securityFocused && string.IsNullOrWhiteSpace(reviewModel)
+                ? $"Could not scan local Git changes: {ex.Message}"
+                : $"Could not review local Git changes: {ex.Message}");
             return null;
         }
         finally
