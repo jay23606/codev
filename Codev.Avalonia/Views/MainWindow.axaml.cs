@@ -2312,12 +2312,35 @@ public partial class MainWindow : Window
         layout.Children.Add(message);
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
         var cancel = new Button { Content = "Cancel", Classes = { "soft" } };
+        var draftMessage = new Button { Content = "Draft with local model", Classes = { "soft" } };
         var commit = new Button { Content = "Create local commit", Classes = { "soft" } };
         buttons.Children.Add(cancel);
+        buttons.Children.Add(draftMessage);
         buttons.Children.Add(commit);
         layout.Children.Add(buttons);
         var dialog = new Window { Title = "Review staged changes", Width = 900, Height = 620, MinWidth = 640, MinHeight = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        using var draftCancellation = new CancellationTokenSource();
+        dialog.Closed += (_, _) => draftCancellation.Cancel();
         cancel.Click += (_, _) => dialog.Close();
+        draftMessage.Click += async (_, _) =>
+        {
+            if (DataContext is not ViewModels.MainViewModel viewModel) return;
+            draftMessage.IsEnabled = false;
+            draftMessage.Content = "Drafting…";
+            try
+            {
+                message.Text = await viewModel.DraftCommitMessageAsync(stagedReview, draftCancellation.Token);
+                message.CaretIndex = message.Text?.Length ?? 0;
+                message.Focus();
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { await ShowGitInfoAsync("Could not draft commit message", ex.Message, dialog); }
+            finally
+            {
+                draftMessage.Content = "Draft with local model";
+                draftMessage.IsEnabled = true;
+            }
+        };
         commit.Click += async (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(message.Text)) { await ShowGitInfoAsync("Commit message required", "Enter a commit message first.", dialog); return; }

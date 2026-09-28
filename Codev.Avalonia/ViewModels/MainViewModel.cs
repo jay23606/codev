@@ -436,6 +436,63 @@ public sealed class MainViewModel : ViewModelBase
         new Codev.OllamaModelParameterClient(_http, _ollamaEndpoint)
             .GetDeclaredDefaultsAsync(model, cancellationToken);
 
+    public async Task<string> DraftCommitMessageAsync(Codev.GitStagedReview stagedReview, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stagedReview);
+        if (ActiveConversation is not { ProjectPath: { Length: > 0 } projectPath } conversation || !IsProjectTrusted)
+            throw new InvalidOperationException("Attach and trust a project folder before asking a model to draft a commit message.");
+        if (conversation.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ||
+            !Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(conversation.Model), StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Commit-message drafts use only an installed local Ollama model on a loopback endpoint.");
+        if (IsGenerating || HasQueuedTurns || _queueProcessorRunning)
+            throw new InvalidOperationException("Wait for active and queued requests to finish before drafting a commit message.");
+
+        var model = conversation.Model;
+        var endpoint = _ollamaEndpoint;
+        var boundedDiff = stagedReview.Diff.Length > Codev.GitCommitMessagePromptBuilder.MaxDiffCharacters
+            ? stagedReview.Diff[..Codev.GitCommitMessagePromptBuilder.MaxDiffCharacters]
+            : stagedReview.Diff;
+        var wasTruncated = boundedDiff.Length < stagedReview.Diff.Length;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        _generationCancellation = timeout;
+        IsGenerating = true;
+        try
+        {
+            await SetConnectionStatusAsync("Drafting commit message with local Ollama…");
+            if (!_projectFolderTrust.IsTrusted(projectPath)) throw new InvalidOperationException("Project trust was revoked. No staged diff was sent to the model.");
+            var repository = new Codev.GitRepositoryService(projectPath);
+            var recentSubjects = await repository.GetRecentCommitSubjectsAsync(cancellationToken: timeout.Token);
+            var messages = Codev.GitCommitMessagePromptBuilder.Build(boundedDiff, recentSubjects);
+            var options = Codev.OllamaRequestOptions.Build(conversation.NumCtx, conversation.Temperature, conversation.TopP,
+                conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, 180) ?? new Dictionary<string, object>();
+            if (conversation.NumCtx > 0) options["num_ctx"] = conversation.NumCtx;
+            options["num_predict"] = 180;
+            var payload = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages, ["stream"] = false, ["think"] = false, ["options"] = options };
+            using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(endpoint, "api/chat"), payload, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
+            using var result = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
+            if (!result.RootElement.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var content) || string.IsNullOrWhiteSpace(content.GetString()))
+                throw new InvalidOperationException("The selected model returned no commit-message draft.");
+            if (!_projectFolderTrust.IsTrusted(projectPath)) throw new InvalidOperationException("Project trust was revoked while drafting. No commit was created.");
+            var currentReview = await repository.GetStagedReviewAsync(timeout.Token);
+            if (!string.Equals(currentReview.TreeId, stagedReview.TreeId, StringComparison.Ordinal) || !string.Equals(currentReview.Diff, stagedReview.Diff, StringComparison.Ordinal))
+                throw new InvalidOperationException("The staged changes changed while drafting. Review the updated staged diff before committing.");
+            var draft = content.GetString()!.Trim().Trim('`');
+            ReportContextActionStatus(wasTruncated
+                ? "Commit-message draft is ready; it used only the first 40,000 characters of the staged diff."
+                : "Commit-message draft is ready to edit.");
+            return draft;
+        }
+        finally
+        {
+            _generationCancellation = null;
+            IsGenerating = false;
+            await SetConnectionStatusAsync("Ollama ready");
+        }
+    }
+
     public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default, bool securityFocused = false, string? commit = null, string? baseBranch = null)
     {
         if (ActiveConversation is not { } conversation || conversation.ProjectPath is not { Length: > 0 } projectPath || !IsProjectTrusted)

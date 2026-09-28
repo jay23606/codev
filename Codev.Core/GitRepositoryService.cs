@@ -253,6 +253,15 @@ public sealed class GitRepositoryService
         throw new InvalidOperationException("The Git index is changing too quickly to produce a stable review. Refresh and try again.");
     }
 
+    public async Task<IReadOnlyList<string>> GetRecentCommitSubjectsAsync(int count = 5, CancellationToken cancellationToken = default)
+    {
+        if (count is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(count));
+        var result = await RunGitAsync(["log", $"-{count}", "--format=%s"], cancellationToken, 4096);
+        if (result.ExitCode != 0) return [];
+        return result.Output.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(subject => subject.Trim()).Where(subject => subject.Length > 0).Take(count).ToArray();
+    }
+
     public async Task StageFileAsync(string path, CancellationToken cancellationToken = default)
     {
         await EnsureChangedPathAsync(path, cancellationToken);

@@ -134,3 +134,9 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Run `/review-branch` and `/security-review-branch` against a local base branch; verify the comparison is base...HEAD, rejects a name that is not an existing local branch, and leaves the repository unchanged.
 - Add a disposable token-shaped string on a new diff line and verify the deterministic scan reports file and line while hiding the value; check removed lines do not trigger it and a truncated diff is labeled incomplete.
 - Switch to a hosted provider and run a security review; verify the deterministic local scan still runs but no request containing the diff is sent to a hosted endpoint. If local loopback Ollama is unavailable, confirm scan-only output says no model review ran.
+
+## Local commit-message draft
+
+- Stage a small change in a trusted disposable project with local loopback Ollama selected; choose **Draft with local model** and verify the suggestion appears in the editable commit-message field without creating a commit.
+- Edit the suggestion and confirm the normal staged-diff review and explicit commit confirmation still run; reject or cancel and verify no commit is created.
+- Change the staged tree while drafting from another process and confirm Codev discards the stale suggestion with a clear message; switch to a hosted provider or an untrusted project and confirm the diff is never sent remotely.
