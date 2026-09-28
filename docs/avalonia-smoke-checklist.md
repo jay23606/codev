@@ -74,3 +74,10 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Repeat, approve a command that exits successfully, and confirm the transcript reports Verification PASSED (exit code 0).
 - Cause a verification command to fail; confirm its exit code and bounded output appear and the model can propose a reviewed repair.
 - Exhaust the two repair cycles with failing verification; confirm subsequent file-edit, patch, create, and command tools are blocked for the task, while the model can still explain the unresolved failure.
+
+## Per-conversation output styles
+
+- Change the style selector among Balanced, Concise, Explanatory, and Code only; confirm the selected value follows the active conversation.
+- Switch conversations and restart the app; verify each style persists.
+- Queue a prompt while a response runs, change the selected style, and confirm the queued prompt uses the style captured when it was queued.
+- Verify the style changes answer formatting without enabling tools or weakening approval, caveat, and test-result reporting.

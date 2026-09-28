@@ -19,6 +19,7 @@ public sealed class ConversationBackupServiceTests
             Provider = "ollama",
             IsPlanMode = false,
             IsCodeTask = true,
+            OutputStyle = ConversationOutputStyles.Concise,
             IncludeRepoMap = true,
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
@@ -37,6 +38,7 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal("ollama", imported.Provider);
         Assert.False(imported.IsPlanMode);
         Assert.True(imported.IsCodeTask);
+        Assert.Equal(ConversationOutputStyles.Concise, imported.OutputStyle);
         Assert.True(imported.IncludeRepoMap);
         Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);

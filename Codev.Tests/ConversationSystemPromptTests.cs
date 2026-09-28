@@ -10,7 +10,7 @@ public sealed class ConversationSystemPromptTests
         var prompt = ConversationSystemPrompt.Build(isPlanMode: true, isLocal);
 
         Assert.Contains("read-only Plan mode", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("concise ordered implementation plan", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ordered implementation plan", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not edit files, run commands", prompt, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -32,5 +32,37 @@ public sealed class ConversationSystemPromptTests
         Assert.Contains("explicit user approval", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("full account permissions", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("without a sandbox", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(ConversationOutputStyles.Balanced, "balanced level of detail")]
+    [InlineData(ConversationOutputStyles.Concise, "Answer concisely")]
+    [InlineData(ConversationOutputStyles.Explanatory, "clear explanation")]
+    [InlineData(ConversationOutputStyles.CodeOnly, "Prefer the requested code")]
+    public void Output_style_is_added_without_changing_the_conversation_mode(string style, string instruction)
+    {
+        var prompt = ConversationSystemPrompt.Build(isCodeTask: false, isPlanMode: false, isLocal: true, outputStyle: style);
+
+        Assert.Contains("read-only", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(instruction, prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Code_only_style_preserves_failure_and_verification_disclosures()
+    {
+        var prompt = ConversationSystemPrompt.Build(isCodeTask: true, isPlanMode: false, isLocal: true, outputStyle: ConversationOutputStyles.CodeOnly);
+
+        Assert.Contains("explicit user approval", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Never say checks passed unless verify_command returns exit code 0", prompt, StringComparison.Ordinal);
+        Assert.Contains("always disclose unverified work, failures, and important caveats", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Unknown_output_style_normalizes_to_balanced()
+    {
+        var conversation = new Conversation { OutputStyle = "unknown-style" };
+
+        Assert.Equal(ConversationOutputStyles.Balanced, conversation.OutputStyle);
+        Assert.Equal(ConversationOutputStyles.Balanced, ConversationOutputStyles.Normalize(null));
     }
 }

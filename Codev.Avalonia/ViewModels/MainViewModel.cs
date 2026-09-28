@@ -34,6 +34,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _draft = "";
     private string _model = "qwen3-coder:30b";
     private string _provider = "ollama";
+    private string _outputStyle = Codev.ConversationOutputStyles.Balanced;
     private bool _cloudRequestsEnabled;
     private int _contextSize;
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
@@ -68,6 +69,13 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<string> SelectedContextFiles { get; } = [];
     public ObservableCollection<Codev.GitDiffComment> PendingDiffComments { get; } = [];
     public ObservableCollection<ContextSizeChoice> ContextSizes { get; } = [];
+    public ObservableCollection<OutputStyleChoice> OutputStyles { get; } =
+    [
+        new(Codev.ConversationOutputStyles.Balanced, "Balanced"),
+        new(Codev.ConversationOutputStyles.Concise, "Concise"),
+        new(Codev.ConversationOutputStyles.Explanatory, "Explanatory"),
+        new(Codev.ConversationOutputStyles.CodeOnly, "Code only")
+    ];
     public ICommand NewConversationCommand { get; }
     public ICommand SelectConversationCommand { get; }
     public ICommand TogglePinCommand { get; }
@@ -154,6 +162,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
                 OnPropertyChanged(nameof(IncludeProjectContextForHosted));
                 OnPropertyChanged(nameof(IncludeRepoMap));
+                OnPropertyChanged(nameof(OutputStyle));
                 OnPropertyChanged(nameof(CanIncludeRepoMap));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
@@ -273,6 +282,20 @@ public sealed class MainViewModel : ViewModelBase
     public string Provider => ActiveConversation?.Provider ?? _provider;
     public bool IsLocalModel => Provider == "ollama";
     public bool IsHostedModel => Codev.CloudModelProviders.IsCloud(Provider);
+
+    public string OutputStyle
+    {
+        get => Codev.ConversationOutputStyles.Normalize(ActiveConversation?.OutputStyle ?? _outputStyle);
+        set
+        {
+            var normalized = Codev.ConversationOutputStyles.Normalize(value);
+            if (string.Equals(OutputStyle, normalized, StringComparison.Ordinal)) return;
+            if (ActiveConversation is null) _outputStyle = normalized;
+            else ActiveConversation.OutputStyle = normalized;
+            OnPropertyChanged();
+            Persist();
+        }
+    }
 
     private void TogglePlanMode()
     {
@@ -425,6 +448,7 @@ public sealed class MainViewModel : ViewModelBase
             Model = Model,
             Provider = Provider,
             IsPlanMode = IsPlanMode,
+            OutputStyle = OutputStyle,
             IncludeRepoMap = IncludeRepoMap,
             NumCtx = ContextSize,
             UpdatedAt = DateTimeOffset.Now
@@ -525,6 +549,7 @@ public sealed class MainViewModel : ViewModelBase
             : $"{conversation.Model} selected · connect its API key to send";
         Draft = conversation.Draft;
         OnPropertyChanged(nameof(IncludeRepoMap));
+        OnPropertyChanged(nameof(OutputStyle));
         OnPropertyChanged(nameof(CanIncludeRepoMap));
         OnPropertyChanged(nameof(RepoMapEstimateLabel));
         Reset(PendingDiffComments, conversation.PendingDiffComments ?? []);
@@ -904,7 +929,7 @@ public sealed class MainViewModel : ViewModelBase
             conversation.ProjectPath, hasExplicitProjectFiles, projectTrusted);
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
             conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
-            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap);
+            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -1124,7 +1149,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (savedTurn.IsCodeTask && (savedTurn.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint)))
                 throw new InvalidOperationException("Code task turns can only run through a loopback Ollama endpoint. Switch to local Ollama before resuming this task.");
-            var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama");
+            var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama", savedTurn.OutputStyle);
             var priorMessages = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
                 .Prepend(new Codev.ChatMessage("system", systemPrompt))
@@ -1773,6 +1798,7 @@ public sealed class MainViewModel : ViewModelBase
 
 public sealed record ModelChoice(string Name, string DisplayName, string Provider = "ollama");
 public sealed record ContextSizeChoice(int Value, string DisplayName);
+public sealed record OutputStyleChoice(string Value, string DisplayName);
 
 public sealed class RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null) : ICommand
 {

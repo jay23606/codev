@@ -52,6 +52,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Markdown/code rendering, attachments, and session export | Markdown tables, lightweight syntax coloring, clickable web links, copyable code blocks, Markdown export, and JSON conversation backup/import; file/image/PDF attachments remain pending |
 | Skills, MCP tools, recurring tasks, and notifications | Not implemented |
 | Patch-based agent file edits | Avalonia Code task can apply strict unified-diff hunks, review the patch and resulting file, and use the same approval, checkpoint, and concurrency protection as full replacements |
+| Per-conversation output styles | Avalonia offers balanced, concise, explanatory, and code-only response styles; the choice persists with the conversation and queued turns and does not alter permissions |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
 
@@ -302,7 +303,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 | ID | Feature | Size | Depends on | Tier |
 |---|---|---|---|---|
-| E1 | Output styles | S | none | Later |
+| E1 | Output styles | S | none | Done |
 | E2 | One-key Plan/Code toggle | S | none | Core |
 | E3 | Themes and key bindings | S–M | none | Later |
 | E4 | Self-contained HTML export | S | none | Later |
@@ -314,7 +315,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | E10 | Generation stats | S | none | Later |
 | E11 | Follow the agent | S–M | none | Later |
 
-- **E1 Output styles.** Saved system-prompt presets (concise, explanatory, code-only) chosen per conversation. A style controls *how* the model answers; project instructions control *what it should know*.
+- **E1 Output styles (implemented in Avalonia).** A per-conversation selector offers balanced, concise, explanatory, and code-only styles. The selection is stored with conversations and captured in each queued turn; it changes response presentation only, never tools or permissions. Even code-only responses must disclose failures, caveats, and unverified work.
 - **E2 Plan/Code toggle.** A single shortcut and a clear on-screen indicator for the current mode, since accidental edits are the risk.
 - **E3 Themes and key bindings.** Custom themes and rebindable shortcuts; section 5 already lists broader shortcut customization as remaining.
 - **E4 HTML export.** Export a conversation as one self-contained HTML file (rendered Markdown, code, diffs) to email or commit, alongside the Markdown and JSON exports. Replaces the hosted share links other tools offer, which Codev will not do. Strip local file paths and offer to redact secrets first.
@@ -348,7 +349,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B6, B8, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E1, E3, E4, E6, E7, E10, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B6, B8, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E3, E4, E6, E7, E10, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.

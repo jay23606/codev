@@ -15,6 +15,7 @@ public static class ConversationPersistence
             Provider = conversation.Provider,
             IsPlanMode = conversation.IsPlanMode,
             IsCodeTask = conversation.IsCodeTask,
+            OutputStyle = conversation.OutputStyle,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,
             NumCtx = conversation.NumCtx,
@@ -33,7 +34,8 @@ public static class ConversationPersistence
             PendingTurns = conversation.PendingTurns?.Select(turn => turn with
             {
                 ContextFiles = turn.ContextFiles is null ? [] : [.. turn.ContextFiles],
-                ContextExclusions = turn.ContextExclusions is null ? [] : [.. turn.ContextExclusions]
+                ContextExclusions = turn.ContextExclusions is null ? [] : [.. turn.ContextExclusions],
+                OutputStyle = ConversationOutputStyles.Normalize(turn.OutputStyle)
             }).ToList() ?? []
         }).ToList();
     }

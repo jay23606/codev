@@ -120,7 +120,7 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
@@ -145,6 +145,13 @@
                     <Button Grid.Column="5" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
                     <Button Grid.Column="6" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
                     <Button Grid.Column="7" Classes="soft" Content="⇩ Export" Click="ExportConversation_Click" ToolTip.Tip="Save this conversation as a Markdown file" />
+                    <ComboBox Grid.Column="8" Width="120" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions.">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:OutputStyleChoice">
+                                <TextBlock Text="{Binding DisplayName}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                 </Grid>
             </Border>
             <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
