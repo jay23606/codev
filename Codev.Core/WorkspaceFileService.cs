@@ -48,7 +48,10 @@ public sealed class WorkspaceFileService
             throw new ArgumentException("A project-relative file path is required.", nameof(relativePath));
         }
 
-        var full = Path.GetFullPath(Path.IsPathRooted(relativePath) ? relativePath : Path.Combine(_root, relativePath));
+        if (Path.IsPathRooted(relativePath) || IsWindowsRootedPath(relativePath))
+            throw new UnauthorizedAccessException("This tool only allows paths inside the selected project folder.");
+        var platformRelativePath = relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+        var full = Path.GetFullPath(Path.Combine(_root, platformRelativePath));
         if (string.Equals(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), _root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
         {
             if (allowWorkspaceRoot) return _root;
@@ -72,6 +75,9 @@ public sealed class WorkspaceFileService
             throw new UnauthorizedAccessException("This file looks like a secret or private key and is excluded from agent access.");
         return full;
     }
+
+    private static bool IsWindowsRootedPath(string path) =>
+        path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && (path[2] is '\\' or '/');
 
     public IReadOnlyList<string> ListFiles(string relativeDirectory = "", int maxEntries = 200)
         => ListFilesCore(relativeDirectory, maxEntries, applyContextExclusions: false);
@@ -243,18 +249,10 @@ public sealed class WorkspaceFileService
         if (command.Length > 4000) throw new InvalidOperationException("Commands longer than 4,000 characters are not allowed.");
         if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromMinutes(3)) throw new ArgumentOutOfRangeException(nameof(timeout), "Command timeout must be at most three minutes.");
 
-        var start = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "powershell.exe",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = _root,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            ArgumentList = { "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command }
-        };
+        var shell = ShellCommandResolver.ResolveCurrent();
+        var start = shell.CreateStartInfo(command, _root);
         using var process = new System.Diagnostics.Process { StartInfo = start, EnableRaisingEvents = true };
-        if (!process.Start()) throw new InvalidOperationException("Could not start PowerShell.");
+        if (!process.Start()) throw new InvalidOperationException($"Could not start {shell.DisplayName}.");
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         using var progressCts = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
@@ -439,9 +437,10 @@ public sealed class WorkspaceFileService
     {
         var normalizedRoot = Path.GetFullPath(root);
         var normalizedPath = Path.GetFullPath(path);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar) ? normalizedRoot : normalizedRoot + Path.DirectorySeparatorChar;
-        return string.Equals(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), normalizedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) ||
-               normalizedPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), normalizedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), comparison) ||
+               normalizedPath.StartsWith(rootPrefix, comparison);
     }
 
     private bool IsSensitivePath(string path)

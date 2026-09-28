@@ -22,7 +22,7 @@ public sealed class ConversationMarkdownExporterTests
         Assert.Contains("# Fix startup", markdown);
         Assert.Contains("**Model:** devstral-small-2-64k:latest", markdown);
         Assert.Contains("**Project:** sample-project", markdown);
-        Assert.Contains("`src\\App.cs`", markdown);
+        Assert.Contains("`src/App.cs`", markdown);
         Assert.Contains("## You", markdown);
         Assert.Contains("Find the startup issue.", markdown);
         Assert.Contains("## Codev", markdown);

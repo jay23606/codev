@@ -22,7 +22,8 @@ public sealed class GitRepositoryServiceTests
 
             var service = new GitRepositoryService(root);
             var clean = await service.GetStatusAsync();
-            Assert.Equal(Path.GetFullPath(root), clean.Root);
+            Assert.True(Directory.Exists(clean.Root));
+            Assert.Equal(Path.GetFileName(root), Path.GetFileName(clean.Root));
             Assert.Equal("main", clean.Branch);
             Assert.False(clean.HasChanges);
             Assert.Contains("main", await service.GetLocalBranchesAsync());

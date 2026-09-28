@@ -17,7 +17,7 @@ public static class ConversationMarkdownExporter
         if (conversation.ContextFiles.Count > 0)
         {
             output.AppendLine("- **Context files:**");
-            foreach (var file in conversation.ContextFiles) output.Append("  - `").Append(file.Replace("`", "\\`", StringComparison.Ordinal)).AppendLine("`");
+            foreach (var file in conversation.ContextFiles) output.Append("  - `").Append(file.Replace('\\', '/').Replace("`", "\\`", StringComparison.Ordinal)).AppendLine("`");
         }
 
         output.AppendLine().AppendLine("---").AppendLine();
@@ -31,7 +31,7 @@ public static class ConversationMarkdownExporter
         {
             output.AppendLine("---").AppendLine().AppendLine("## Reviewed file changes").AppendLine();
             foreach (var change in conversation.FileChanges.OrderBy(c => c.ChangedAt))
-                output.Append("- **").Append(change.Kind).Append("** `").Append(change.RelativePath.Replace("`", "\\`", StringComparison.Ordinal)).Append("` · ").AppendLine(change.ChangedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm"));
+                output.Append("- **").Append(change.Kind).Append("** `").Append(change.RelativePath.Replace('\\', '/').Replace("`", "\\`", StringComparison.Ordinal)).Append("` · ").AppendLine(change.ChangedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm"));
         }
 
         return output.ToString();

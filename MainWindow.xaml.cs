@@ -1850,6 +1850,7 @@ public partial class MainWindow : Window
 
     private async Task RunAgentTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, WorkspaceFileService service, string model, int numCtx, double? temperature, CancellationToken cancellationToken)
     {
+        var shellName = ShellCommandResolver.ResolveCurrent().DisplayName;
         var tools = new object[]
         {
             Tool("list_files", "List project files; pass a project-relative directory or an empty string for the root.", new { relative_directory = new { type = "string" } }, ["relative_directory"]),
@@ -1857,7 +1858,7 @@ public partial class MainWindow : Window
             Tool("search_files", "Search supported source files for a literal string.", new { query = new { type = "string" } }, ["query"]),
             Tool("create_file", "Propose a new source, text, or configuration file in an existing project folder. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("write_file", "Propose the complete replacement contents of one existing project file. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
-            Tool("run_command", "Request approval to run one PowerShell command in the project folder. Every invocation requires approval.", new { command = new { type = "string" } }, ["command"])
+            Tool("run_command", $"Request approval to run one {shellName} command in the project folder. Use {shellName} command syntax. Every invocation requires approval.", new { command = new { type = "string" } }, ["command"])
         };
         for (var round = 0; round < 8; round++)
         {
@@ -1972,15 +1973,16 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(command)) return "Error: command is empty.";
         if (command.Length > 4000) return "Rejected: command exceeds 4,000 characters.";
-        if (!ShowCommandApproval(command, service.Root)) return "Rejected by user; command was not run.";
-        SetAgentStatus(conversation, "Code task · Starting approved PowerShell command…");
+        var shell = ShellCommandResolver.ResolveCurrent();
+        if (!ShowCommandApproval(command, service.Root, shell.DisplayName)) return "Rejected by user; command was not run.";
+        SetAgentStatus(conversation, $"Code task · Starting approved {shell.DisplayName} command…");
         var progress = new Progress<TimeSpan>(elapsed =>
-            SetAgentStatus(conversation, $"Code task · PowerShell running · {elapsed:mm\\:ss}"));
+            SetAgentStatus(conversation, $"Code task · {shell.DisplayName} running · {elapsed:mm\\:ss}"));
         try { return await service.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, progress); }
         finally { SetAgentStatus(conversation, "Code task · Thinking…"); }
     }
 
-    private bool ShowCommandApproval(string command, string projectPath)
+    private bool ShowCommandApproval(string command, string projectPath, string shellName)
     {
         var dialog = new Window { Title = "Approve project command", Width = 760, Height = 430, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize, SizeToContent = SizeToContent.Manual };
         var layout = new Grid { Margin = new Thickness(18) };
@@ -1990,7 +1992,7 @@ public partial class MainWindow : Window
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var warning = new TextBlock
         {
-            Text = "This command runs through PowerShell as your Windows account. It can access files and services available to that account; Codev cannot sandbox shell commands to the project folder. Review the command before approving.",
+            Text = $"This command runs through {shellName} with your account permissions. It can access files and services available to that account; Codev cannot sandbox shell commands to the project folder. Review the command before approving.",
             TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
         };
         layout.Children.Add(warning);

@@ -18,6 +18,8 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData("../outside.txt")]
+    [InlineData("sub/../../outside.txt")]
     [InlineData("..\\outside.txt")]
     [InlineData("sub\\..\\..\\outside.txt")]
     public void Rejects_paths_that_escape_the_workspace(string relativePath)
@@ -33,10 +35,18 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Rejects_windows_drive_paths_even_on_unix()
+    {
+        Assert.Throws<UnauthorizedAccessException>(() => Service.ResolvePath("C:\\outside\\secret.txt"));
+    }
+
+    [Fact]
     public void Root_boundary_comparison_does_not_accept_sibling_prefixes()
     {
         Assert.True(WorkspaceFileService.IsPathWithinRoot(_root, Path.Combine(_root, "src", "a.cs")));
         Assert.False(WorkspaceFileService.IsPathWithinRoot(_root, _root + "-sibling\\secret.txt"));
+        if (!OperatingSystem.IsWindows())
+            Assert.False(WorkspaceFileService.IsPathWithinRoot(_root, _root.ToUpperInvariant() + "/secret.txt"));
     }
 
     [Fact]

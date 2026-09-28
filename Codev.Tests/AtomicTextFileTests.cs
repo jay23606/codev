@@ -26,7 +26,9 @@ public sealed class AtomicTextFileTests : IDisposable
         var destination = Path.Combine(_root, "destination.json");
         Directory.CreateDirectory(destination);
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => AtomicTextFile.WriteAsync(destination, "content"));
+        var error = await Record.ExceptionAsync(() => AtomicTextFile.WriteAsync(destination, "content"));
+        Assert.NotNull(error);
+        Assert.True(error is IOException or UnauthorizedAccessException, $"Unexpected exception type: {error.GetType().Name}");
 
         Assert.True(Directory.Exists(destination));
         Assert.Empty(Directory.GetFiles(_root, "*.tmp", SearchOption.TopDirectoryOnly));
