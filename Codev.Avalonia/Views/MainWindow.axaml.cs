@@ -586,9 +586,15 @@ public partial class MainWindow : Window
             Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
             Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
         };
+        var askAboutDiff = new Button { Content = "Ask Codev about selection", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), IsEnabled = false };
+        ToolTip.SetTip(askAboutDiff, "Add selected diff lines to the composer without sending them");
+        var diffPanel = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
         var diffScroll = new ScrollViewer { Content = diffBox, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
-        Grid.SetColumn(diffScroll, 1);
-        body.Children.Add(diffScroll);
+        diffPanel.Children.Add(diffScroll);
+        Grid.SetRow(askAboutDiff, 1);
+        diffPanel.Children.Add(askAboutDiff);
+        Grid.SetColumn(diffPanel, 1);
+        body.Children.Add(diffPanel);
         Grid.SetRow(body, 1);
         layout.Children.Add(body);
 
@@ -655,8 +661,10 @@ public partial class MainWindow : Window
             if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file })
             {
                 stage.IsEnabled = false;
+                askAboutDiff.IsEnabled = false;
                 return;
             }
+            askAboutDiff.IsEnabled = false;
             stage.Content = file.Staged != " " && file.WorkingTree == " " ? "Unstage selected" : "Stage selected";
             stage.IsEnabled = true;
             diffBox.Text = "Loading diff…";
@@ -667,6 +675,22 @@ public partial class MainWindow : Window
                     diffBox.Text = string.IsNullOrWhiteSpace(diff) ? "Git reported no textual diff for this file (it may be binary or unchanged since status was refreshed)." : diff;
             }
             catch (Exception ex) { if (revision == diffRevision) diffBox.Text = "Could not load diff: " + ex.Message; }
+        };
+        diffBox.PropertyChanged += (_, args) =>
+        {
+            if (args.Property.Name is "SelectionStart" or "SelectionEnd")
+                askAboutDiff.IsEnabled = files.SelectedItem is ListBoxItem { Tag: Codev.GitFileStatus } && !string.IsNullOrWhiteSpace(diffBox.SelectedText);
+        };
+        askAboutDiff.Click += (_, _) =>
+        {
+            if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file } || string.IsNullOrWhiteSpace(diffBox.SelectedText)) return;
+            viewModel.Draft = Codev.GitDiffPromptBuilder.AppendSelection(viewModel.Draft, file.DisplayPath, diffBox.SelectedText);
+            dialog.Close();
+            Dispatcher.UIThread.Post(() =>
+            {
+                ComposerTextBox.Focus();
+                ComposerTextBox.CaretIndex = (ComposerTextBox.Text ?? "").Length;
+            }, DispatcherPriority.Background);
         };
         branchPicker.SelectionChanged += (_, _) => UpdateBranchButtons(status);
         refresh.Click += async (_, _) => await RefreshAsync();
