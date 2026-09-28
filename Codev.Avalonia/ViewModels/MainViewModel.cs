@@ -783,10 +783,11 @@ public sealed class MainViewModel : ViewModelBase
         ReportContextActionStatus("Saved command permission rule removed.");
     }
 
-    private async Task<Codev.CommandApprovalOutcome> ApproveCommandWithProjectPolicyAsync(Codev.CodeTaskCommandProposal proposal)
+    private async Task<Codev.CommandApprovalOutcome> ApproveCommandWithProjectPolicyAsync(Codev.CodeTaskCommandProposal proposal,
+        IReadOnlyList<string> contextExclusions)
     {
         var decision = _projectCommandPermissions.Evaluate(proposal.ProjectPath, proposal.Command, proposal.ShellName,
-            allowReadOnly: !proposal.IsVerification);
+            allowReadOnly: !proposal.IsVerification, contextExclusions: contextExclusions);
         if (decision == Codev.ProjectCommandPermissionDecision.Deny)
         {
             _ = SetConnectionStatusAsync("Project command permission denied this exact command; it was not run.");
@@ -2057,7 +2058,7 @@ public sealed class MainViewModel : ViewModelBase
                 (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After, proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false))),
             _ => Task.FromResult(false),
             status: message => _ = SetConnectionStatusAsync(message), initialContextSources: initialContextSources,
-            permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal)));
+            permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)));
         var transcript = new System.Text.StringBuilder();
         for (var round = 0; round < 8; round++)
         {

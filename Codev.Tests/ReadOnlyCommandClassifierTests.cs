@@ -51,16 +51,40 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     }
 
     [Fact]
+    public void Read_only_commands_respect_secret_names_ignored_folders_and_project_exclusions()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "node_modules"));
+        File.WriteAllText(Path.Combine(_root, "my-secret-config.json"), "secret");
+
+        Assert.False(ReadOnlyCommandClassifier.IsReadOnly("cat my-secret-config.json", _root, "bash"));
+        Assert.False(ReadOnlyCommandClassifier.IsReadOnly("cat package.json", _root, "bash", ["README.md", "package.json"]));
+        Assert.False(ReadOnlyCommandClassifier.IsReadOnly("cat node_modules", _root, "bash"));
+        Assert.False(ReadOnlyCommandClassifier.IsReadOnly("ls node_modules", _root, "bash"));
+    }
+
+    [Fact]
     public async Task Read_only_command_runs_as_bounded_file_inspection_without_a_shell()
     {
         File.WriteAllText(Path.Combine(_root, ".env"), "secret");
         File.WriteAllText(Path.Combine(_root, "visible.txt"), "visible");
+        File.WriteAllText(Path.Combine(_root, "package.json"), "excluded");
         var content = await ReadOnlyCommandClassifier.ExecuteAsync("cat README.md", _root, "bash");
-        var listing = await ReadOnlyCommandClassifier.ExecuteAsync("ls", _root, "bash");
+        var listing = await ReadOnlyCommandClassifier.ExecuteAsync("ls", _root, "bash", contextExclusions: ["package.json"]);
 
         Assert.Contains("project readme", content, StringComparison.Ordinal);
         Assert.Contains("visible.txt", listing, StringComparison.Ordinal);
         Assert.DoesNotContain(".env", listing, StringComparison.Ordinal);
+        Assert.DoesNotContain("package.json", listing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Read_only_file_output_is_capped()
+    {
+        File.WriteAllText(Path.Combine(_root, "large.md"), new string('x', 20_000));
+        var output = await ReadOnlyCommandClassifier.ExecuteAsync("cat large.md", _root, "bash");
+
+        Assert.True(output.Length < 8100);
+        Assert.Contains("read-only inspection output truncated", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -69,6 +93,7 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
         var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "permissions.json"));
         await registry.SetModeAsync(_root, ProjectCommandPermissionMode.ReadOnly);
         Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_root, "cat README.md", "bash"));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_root, "cat README.md", "bash", contextExclusions: ["README.md"]));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_root, "cat README.md", "bash", allowReadOnly: false));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_root, "cat README.md; rm README.md", "bash"));
         await registry.SetRuleAsync(_root, "cat README.md", ProjectCommandPermissionDecision.Deny);

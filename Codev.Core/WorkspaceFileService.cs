@@ -28,6 +28,8 @@ public sealed class WorkspaceFileService
                fileName.EndsWith(".key", StringComparison.Ordinal) || fileName is "id_rsa" or "id_ed25519";
     }
 
+    public static bool IsIgnoredDirectory(string name) => IgnoredDirectories.Contains(name);
+
     public WorkspaceFileService(string root, IReadOnlyList<string>? contextExclusions = null)
     {
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException($"Project folder not found: {root}");
@@ -39,6 +41,7 @@ public sealed class WorkspaceFileService
     }
 
     public string Root => _root;
+    public IReadOnlyList<string> ContextExclusions => _contextExclusions;
 
     public bool IsSupportedContextFile(string relativePath) =>
         !string.IsNullOrWhiteSpace(relativePath) && SourceExtensions.Contains(Path.GetExtension(relativePath));
@@ -85,6 +88,29 @@ public sealed class WorkspaceFileService
     public IReadOnlyList<string> ListFiles(string relativeDirectory = "", int maxEntries = 200)
         => ListFilesCore(relativeDirectory, maxEntries, applyContextExclusions: false);
 
+    /// <summary>Lists immediate, visible project entries without following links or exposing excluded/secret paths.</summary>
+    public IReadOnlyList<string> ListDirectoryEntries(string relativeDirectory = "", int maxEntries = 200)
+    {
+        var directory = ResolvePath(relativeDirectory, allowWorkspaceRoot: true);
+        if (!Directory.Exists(directory)) throw new DirectoryNotFoundException($"Folder not found: {relativeDirectory}");
+        var results = new List<string>();
+        var maximum = Math.Clamp(maxEntries, 1, 200);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory).Take(10_000))
+        {
+            if (results.Count >= maximum) break;
+            var attributes = File.GetAttributes(entry);
+            if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System)) != 0) continue;
+            var name = Path.GetFileName(entry);
+            if (string.IsNullOrWhiteSpace(name) || name[0] == '.' || IsSensitiveFileName(name)) continue;
+            var isDirectory = (attributes & FileAttributes.Directory) != 0;
+            if (isDirectory && IsIgnoredDirectory(name)) continue;
+            var relative = Path.GetRelativePath(_root, entry);
+            if (IsContextExcluded(relative)) continue;
+            results.Add(isDirectory ? name + Path.DirectorySeparatorChar : name);
+        }
+        return results.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     public IReadOnlyList<string> ListContextFiles(int maxEntries = 300)
         => ListFilesCore("", maxEntries, applyContextExclusions: true);
 
@@ -110,7 +136,7 @@ public sealed class WorkspaceFileService
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
                     var relative = Path.GetRelativePath(_root, entry);
-                    if (!IgnoredDirectories.Contains(name) && (!applyContextExclusions || !IsContextExcluded(relative))) pending.Push(entry);
+                    if (!IsIgnoredDirectory(name) && (!applyContextExclusions || !IsContextExcluded(relative))) pending.Push(entry);
                     continue;
                 }
                 if (IsSensitivePath(entry)) continue;

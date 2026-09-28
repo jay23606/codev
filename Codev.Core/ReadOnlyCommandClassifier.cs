@@ -10,8 +10,9 @@ public static class ReadOnlyCommandClassifier
     private static readonly char[] ShellSyntax = ['\'', '"', '`', '$', '|', '&', ';', '<', '>', '(', ')', '{', '}', '*', '?', '[', ']', '\\', '#', '!'];
     private const int MaxReadBytes = 256 * 1024;
     private const int MaxListedEntries = 200;
+    private const int MaxOutputCharacters = 8000;
 
-    public static bool IsReadOnly(string command, string projectPath, string shellName)
+    public static bool IsReadOnly(string command, string projectPath, string shellName, IReadOnlyList<string>? contextExclusions = null)
     {
         if (string.IsNullOrWhiteSpace(command) || string.IsNullOrWhiteSpace(projectPath) ||
             command.Length > 4000 || command.Any(character => char.IsControl(character) || character is '\u0085' or '\u2028' or '\u2029') ||
@@ -39,13 +40,21 @@ public static class ReadOnlyCommandClassifier
         var root = Path.GetFullPath(projectPath);
         if (IsProtectedProjectPath(root)) return false;
         if (HasReparsePoint(root)) return false;
+        WorkspaceFileService workspace;
+        try { workspace = new WorkspaceFileService(root, contextExclusions); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
         if (parts.Length == 1) return listCommand;
 
         foreach (var argument in parts.Skip(1))
         {
             if (!IsPlainRelativePath(argument)) return false;
-            var target = Path.GetFullPath(Path.Combine(root, argument));
+            if (argument.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries).Any(WorkspaceFileService.IsIgnoredDirectory)) return false;
+            if (workspace.IsContextExcluded(argument)) return false;
+            string target;
+            try { target = workspace.ResolvePath(argument, allowWorkspaceRoot: listCommand); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
             if (!IsWithinRoot(root, target) || HasReparsePointInPath(root, target)) return false;
+            if (readCommand && !workspace.IsSupportedContextFile(argument)) return false;
             if (readCommand && !File.Exists(target)) return false;
             if (listCommand && !Directory.Exists(target) && !File.Exists(target)) return false;
         }
@@ -53,9 +62,10 @@ public static class ReadOnlyCommandClassifier
     }
 
     /// <summary>Executes an already-classified inspection using bounded .NET file APIs, never a shell process.</summary>
-    public static async Task<string> ExecuteAsync(string command, string projectPath, string shellName, CancellationToken cancellationToken = default)
+    public static async Task<string> ExecuteAsync(string command, string projectPath, string shellName, CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? contextExclusions = null)
     {
-        if (!IsReadOnly(command, projectPath, shellName)) throw new InvalidOperationException("The command is not in the read-only command set.");
+        if (!IsReadOnly(command, projectPath, shellName, contextExclusions)) throw new InvalidOperationException("The command is not in the read-only command set.");
         var parts = command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         var verb = parts[0];
         var isPowerShell = shellName.Contains("PowerShell", StringComparison.OrdinalIgnoreCase) || shellName.Contains("pwsh", StringComparison.OrdinalIgnoreCase);
@@ -65,6 +75,7 @@ public static class ReadOnlyCommandClassifier
 
         var isList = isPowerShell ? IsOneOf(verb, "Get-ChildItem", "ls", "dir") : isUnix && IsOneOf(verb, "ls", "dir");
         var root = Path.GetFullPath(projectPath);
+        var workspace = new WorkspaceFileService(root, contextExclusions);
         var output = new List<string>();
         var targets = parts.Length == 1 ? [root] : parts.Skip(1).Select(part => Path.GetFullPath(Path.Combine(root, part))).ToArray();
         foreach (var target in targets)
@@ -76,24 +87,22 @@ public static class ReadOnlyCommandClassifier
                 if (Directory.Exists(target))
                 {
                     output.Add($"Directory: {Path.GetRelativePath(root, target)}");
-                    output.AddRange(Directory.EnumerateFileSystemEntries(target)
-                        .Where(IsVisibleEntry)
-                        .Select(path => Path.GetFileName(path) ?? "")
-                        .Where(name => !string.IsNullOrEmpty(name))
-                        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                        .Take(MaxListedEntries));
+                    var relative = Path.GetRelativePath(root, target);
+                    output.AddRange(workspace.ListDirectoryEntries(relative == "." ? "" : relative, MaxListedEntries));
                 }
                 else output.Add(Path.GetFileName(target));
                 continue;
             }
 
+            var relativeFile = Path.GetRelativePath(root, target);
             var info = new FileInfo(target);
-            if (!info.Exists || info.Length > MaxReadBytes || HasReparsePoint(target))
+            if (!info.Exists || info.Length > MaxReadBytes || HasReparsePoint(target) || workspace.IsContextExcluded(relativeFile))
                 throw new IOException("The file is missing, too large, or changed to a symlink; inspection stopped.");
             output.Add($"==> {Path.GetRelativePath(root, target)} <==");
-            output.Add(await File.ReadAllTextAsync(target, cancellationToken).ConfigureAwait(false));
+            output.Add(await workspace.ReadFileAsync(relativeFile, cancellationToken).ConfigureAwait(false));
         }
-        return string.Join(Environment.NewLine, output);
+        var result = string.Join(Environment.NewLine, output);
+        return result.Length <= MaxOutputCharacters ? result : result[..MaxOutputCharacters] + "\n… [read-only inspection output truncated]";
     }
 
     private static bool IsPlainRelativePath(string value)
@@ -139,14 +148,6 @@ public static class ReadOnlyCommandClassifier
     {
         try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return true; }
-    }
-
-    private static bool IsVisibleEntry(string path)
-    {
-        var name = Path.GetFileName(path) ?? "";
-        if (name.Length == 0 || name[0] == '.') return false;
-        try { return (File.GetAttributes(path) & (FileAttributes.Hidden | FileAttributes.System)) == 0; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
     }
 
     private static bool IsOneOf(string value, params string[] options) =>

@@ -166,7 +166,7 @@ public sealed class CodeTaskToolExecutor(
             status?.Invoke("Code task · inspecting project files…");
             try
             {
-                var output = await ReadOnlyCommandClassifier.ExecuteAsync(command, files.Root, shell.DisplayName, cancellationToken);
+                var output = await ReadOnlyCommandClassifier.ExecuteAsync(command, files.Root, shell.DisplayName, cancellationToken, files.ContextExclusions);
                 AddContextSource("Output from read-only project inspection: " + command);
                 TrackUntrustedContent("Output from read-only project inspection: " + command, output);
                 return UntrustedToolOutput.Format("read-only project inspection output", Truncate(output, 8000));

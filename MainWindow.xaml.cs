@@ -2047,7 +2047,7 @@ public partial class MainWindow : Window
             }
             else if (turn.IsCodeTask)
             {
-                var service = new WorkspaceFileService(turn.ProjectPath!);
+                var service = new WorkspaceFileService(turn.ProjectPath!, turn.ContextExclusions);
                 await RunAgentTurnAsync(conversation, assistantIndex, ollamaHistory, service, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
             }
             else
@@ -2356,12 +2356,13 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(command)) return "Error: command is empty.";
         if (command.Length > 4000) return "Rejected: command exceeds 4,000 characters.";
         var shell = ShellCommandResolver.ResolveCurrent();
-        var decision = _projectCommandPermissions.Evaluate(service.Root, command, shell.DisplayName);
+        var contextExclusions = EnsureProject(service.Root).ContextExclusions;
+        var decision = _projectCommandPermissions.Evaluate(service.Root, command, shell.DisplayName, contextExclusions: contextExclusions);
         if (decision == ProjectCommandPermissionDecision.Deny) return "Denied by a saved project command permission rule; the command was not run.";
         if (decision == ProjectCommandPermissionDecision.Allow && _projectCommandPermissions.GetMode(service.Root) == ProjectCommandPermissionMode.ReadOnly)
         {
             SetAgentStatus(conversation, "Code task · inspecting project files…");
-            try { return UntrustedToolOutput.Format("read-only project inspection output", await ReadOnlyCommandClassifier.ExecuteAsync(command, service.Root, shell.DisplayName, cancellationToken)); }
+            try { return UntrustedToolOutput.Format("read-only project inspection output", await ReadOnlyCommandClassifier.ExecuteAsync(command, service.Root, shell.DisplayName, cancellationToken, contextExclusions)); }
             finally { SetAgentStatus(conversation, "Code task · Thinking…"); }
         }
         if (decision != ProjectCommandPermissionDecision.Allow)
