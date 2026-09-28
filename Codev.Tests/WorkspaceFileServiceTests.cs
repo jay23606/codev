@@ -250,6 +250,33 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Markdown_tables_render_as_scrollable_grids()
+    {
+        var columnCount = 0;
+        var rowCount = 0;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var rendered = MarkdownRenderer.Render("| Model | Context |\n| :--- | ---: |\n| Devstral | 64K |", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral);
+                var frame = rendered.Children.OfType<Border>().Single();
+                var scroll = (ScrollViewer)frame.Child!;
+                var grid = (Grid)scroll.Content;
+                columnCount = grid.ColumnDefinitions.Count;
+                rowCount = grid.RowDefinitions.Count;
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start(); thread.Join();
+        if (failure is not null) throw failure;
+
+        Assert.Equal(2, columnCount);
+        Assert.Equal(2, rowCount);
+    }
+
+    [Fact]
     public void Markdown_text_size_scales_body_and_headings_and_is_bounded()
     {
         double headingSize = 0;

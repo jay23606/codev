@@ -19,8 +19,9 @@ public static class MarkdownRenderer
         var code = new StringBuilder();
         string? language = null;
         var inCode = false;
-        foreach (var raw in lines)
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
+            var raw = lines[lineIndex];
             var line = raw.TrimEnd();
             if (line.TrimStart().StartsWith("```") || line.TrimStart().StartsWith("~~~"))
             {
@@ -41,6 +42,12 @@ public static class MarkdownRenderer
             if (inCode)
             {
                 code.AppendLine(raw);
+                continue;
+            }
+            if (MarkdownTableParser.TryParse(lines, lineIndex, out var table, out var lastTableLine))
+            {
+                panel.Children.Add(RenderTable(table, foreground, muted, codeBackground, accent, baseFontSize));
+                lineIndex = lastTableLine;
                 continue;
             }
             if (string.IsNullOrWhiteSpace(line))
@@ -84,6 +91,53 @@ public static class MarkdownRenderer
         }
         if (inCode) panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent, baseFontSize, foreground, keyword, type, stringLiteral, number, comment));
         return panel;
+    }
+
+    private static Border RenderTable(MarkdownTable table, Brush foreground, Brush muted, Brush headerBackground, Brush accent, double baseFontSize)
+    {
+        var columnCount = table.Alignments.Count;
+        var grid = new Grid { SnapsToDevicePixels = true };
+        for (var column = 0; column < columnCount; column++)
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 84 });
+        for (var row = 0; row < table.Rows.Count; row++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        for (var row = 0; row < table.Rows.Count; row++)
+        for (var column = 0; column < columnCount; column++)
+        {
+            var cells = table.Rows[row];
+            var text = column < cells.Length ? cells[column] : "";
+            var block = new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap, MaxWidth = 300, MinWidth = 68, FontSize = baseFontSize,
+                FontWeight = row == 0 ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground = foreground, TextAlignment = table.Alignments[column] switch
+                {
+                    MarkdownTableAlignment.Center => TextAlignment.Center,
+                    MarkdownTableAlignment.Right => TextAlignment.Right,
+                    _ => TextAlignment.Left
+                }
+            };
+            AddInlineMarkdown(block, text, foreground, accent, headerBackground);
+            var cell = new Border
+            {
+                BorderBrush = muted, BorderThickness = new Thickness(0.5), Padding = new Thickness(8, 6, 8, 6),
+                Background = row == 0 ? headerBackground : Brushes.Transparent, Child = block
+            };
+            Grid.SetRow(cell, row);
+            Grid.SetColumn(cell, column);
+            grid.Children.Add(cell);
+        }
+
+        var frame = new Border
+        {
+            BorderBrush = muted, BorderThickness = new Thickness(0.5), CornerRadius = new CornerRadius(6),
+            Margin = new Thickness(0, 5, 0, 10), Child = new ScrollViewer
+            {
+                Content = grid, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false
+            }
+        };
+        return frame;
     }
 
     private static Border RenderCode(string code, string? language, Brush background, Brush muted, Brush accent, double baseFontSize,

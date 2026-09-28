@@ -93,7 +93,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 5. Everyday assistant usability
 
-- [x] Markdown headings, emphasis, lists, quotes, inline code, safe clickable HTTP(S) links, and fenced code blocks with Copy and lightweight syntax coloring for common languages; Markdown tables remain.
+- [x] Markdown headings, emphasis, lists, quotes, inline code, safe clickable HTTP(S) links, fenced code blocks with Copy and lightweight syntax coloring for common languages, and scrollable tables.
 - [x] Read-only Plan mode, stop generation while keeping partial response, visible agent-tool status, retry/edit-resend, and branch from an earlier message. Resume and richer plans remain.
 - [x] Core shortcuts: Ctrl+N new conversation, Ctrl+F search, F2 rename, Esc stop. Adjustable chat/composer text size is available in Settings. Accessible focus order and broader shortcut customization remain.
 - [x] Conversation rename, archive, restore, explicit permanent delete, Markdown export, and additive JSON conversation backup/import. JSON backups omit rollback checkpoint file paths and do not contain project files.
