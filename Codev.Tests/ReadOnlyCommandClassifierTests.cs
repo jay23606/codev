@@ -16,13 +16,27 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     [InlineData("PowerShell", "Get-Location")]
     [InlineData("PowerShell", "pwd")]
     [InlineData("PowerShell", "Get-ChildItem src")]
-    [InlineData("PowerShell", "Get-Content README.md")]
-    [InlineData("PowerShell", "type README.md")]
     [InlineData("bash", "pwd")]
     [InlineData("bash", "ls src")]
-    [InlineData("bash", "cat README.md")]
     public void Allows_simple_inspection_commands(string shell, string command) =>
         Assert.True(ReadOnlyCommandClassifier.IsReadOnly(command, _root, shell));
+
+    [Fact]
+    public async Task File_reads_require_windows_hard_link_verification()
+    {
+        var shell = OperatingSystem.IsWindows() ? "PowerShell" : "bash";
+        var command = OperatingSystem.IsWindows() ? "Get-Content README.md" : "cat README.md";
+        Assert.Equal(OperatingSystem.IsWindows(), ReadOnlyCommandClassifier.IsReadOnly(command, _root, shell));
+        if (OperatingSystem.IsWindows())
+        {
+            var output = await ReadOnlyCommandClassifier.ExecuteAsync(command, _root, shell);
+            Assert.Contains("project readme", output, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Throws<InvalidOperationException>(() => StartReadOnlyCommand(command, shell));
+        }
+    }
 
     [Theory]
     [InlineData("PowerShell", "Get-Content README.md; Remove-Item README.md")]
@@ -65,6 +79,7 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     [Fact]
     public async Task Read_only_command_runs_as_bounded_file_inspection_without_a_shell()
     {
+        if (!OperatingSystem.IsWindows()) return;
         File.WriteAllText(Path.Combine(_root, ".env"), "secret");
         File.WriteAllText(Path.Combine(_root, "visible.txt"), "visible");
         File.WriteAllText(Path.Combine(_root, "package.json"), "excluded");
@@ -80,6 +95,7 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     [Fact]
     public async Task Read_only_file_output_is_capped()
     {
+        if (!OperatingSystem.IsWindows()) return;
         File.WriteAllText(Path.Combine(_root, "large.md"), new string('x', 20_000));
         var output = await ReadOnlyCommandClassifier.ExecuteAsync("cat large.md", _root, "bash");
 
@@ -88,12 +104,31 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     }
 
     [Fact]
+    public void Read_only_mode_refuses_hard_linked_files()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var outside = Path.Combine(Path.GetTempPath(), "Codev-linked-secret-" + Guid.NewGuid().ToString("N") + ".md");
+        var link = Path.Combine(_root, "linked.md");
+        File.WriteAllText(outside, "external file contents");
+        try
+        {
+            Assert.True(CreateHardLink(link, outside, IntPtr.Zero));
+            Assert.False(ReadOnlyCommandClassifier.IsReadOnly("Get-Content linked.md", _root, "PowerShell"));
+            Assert.Throws<InvalidOperationException>(() => StartReadOnlyCommand("Get-Content linked.md", "PowerShell"));
+        }
+        finally { File.Delete(outside); }
+    }
+
+    [Fact]
     public async Task Read_only_mode_auto_approves_only_classified_commands_and_keeps_deny_rules_first()
     {
         var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "permissions.json"));
         await registry.SetModeAsync(_root, ProjectCommandPermissionMode.ReadOnly);
-        Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_root, "cat README.md", "bash"));
-        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_root, "cat README.md", "bash", contextExclusions: ["README.md"]));
+        var readShell = OperatingSystem.IsWindows() ? "PowerShell" : "bash";
+        var readCommand = OperatingSystem.IsWindows() ? "Get-Content README.md" : "cat README.md";
+        Assert.Equal(OperatingSystem.IsWindows() ? ProjectCommandPermissionDecision.Allow : ProjectCommandPermissionDecision.Ask,
+            registry.Evaluate(_root, readCommand, readShell));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_root, readCommand, readShell, contextExclusions: ["README.md"]));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_root, "cat README.md", "bash", allowReadOnly: false));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_root, "cat README.md; rm README.md", "bash"));
         await registry.SetRuleAsync(_root, "cat README.md", ProjectCommandPermissionDecision.Deny);
@@ -122,4 +157,11 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     {
         try { Directory.Delete(_root, recursive: true); } catch { }
     }
+
+    private void StartReadOnlyCommand(string command, string shell) =>
+        _ = ReadOnlyCommandClassifier.ExecuteAsync(command, _root, shell);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string fileName, string existingFileName, IntPtr securityAttributes);
 }

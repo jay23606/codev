@@ -36,6 +36,7 @@ public static class ReadOnlyCommandClassifier
             ? IsOneOf(verb, "Get-Content", "cat", "type")
             : isUnix && IsOneOf(verb, "cat");
         if (!listCommand && !readCommand) return false;
+        if (readCommand && !OperatingSystem.IsWindows()) return false;
 
         var root = Path.GetFullPath(projectPath);
         if (IsProtectedProjectPath(root)) return false;
@@ -56,13 +57,14 @@ public static class ReadOnlyCommandClassifier
             if (!IsWithinRoot(root, target) || HasReparsePointInPath(root, target)) return false;
             if (readCommand && !workspace.IsSupportedContextFile(argument)) return false;
             if (readCommand && !File.Exists(target)) return false;
+            if (readCommand && !ReadOnlyFileHandleReader.CanRead(target, root, contextExclusions, MaxReadBytes)) return false;
             if (listCommand && !Directory.Exists(target) && !File.Exists(target)) return false;
         }
         return true;
     }
 
     /// <summary>Executes an already-classified inspection using bounded .NET file APIs, never a shell process.</summary>
-    public static async Task<string> ExecuteAsync(string command, string projectPath, string shellName, CancellationToken cancellationToken = default,
+    public static Task<string> ExecuteAsync(string command, string projectPath, string shellName, CancellationToken cancellationToken = default,
         IReadOnlyList<string>? contextExclusions = null)
     {
         if (!IsReadOnly(command, projectPath, shellName, contextExclusions)) throw new InvalidOperationException("The command is not in the read-only command set.");
@@ -71,7 +73,7 @@ public static class ReadOnlyCommandClassifier
         var isPowerShell = shellName.Contains("PowerShell", StringComparison.OrdinalIgnoreCase) || shellName.Contains("pwsh", StringComparison.OrdinalIgnoreCase);
         var isUnix = IsOneOf(shellName, "bash", "zsh", "sh", "fish");
         var isLocation = isPowerShell ? IsOneOf(verb, "Get-Location", "pwd") : isUnix && IsOneOf(verb, "pwd");
-        if (isLocation) return Path.GetFullPath(projectPath);
+        if (isLocation) return Task.FromResult(Path.GetFullPath(projectPath));
 
         var isList = isPowerShell ? IsOneOf(verb, "Get-ChildItem", "ls", "dir") : isUnix && IsOneOf(verb, "ls", "dir");
         var root = Path.GetFullPath(projectPath);
@@ -95,14 +97,14 @@ public static class ReadOnlyCommandClassifier
             }
 
             var relativeFile = Path.GetRelativePath(root, target);
-            var info = new FileInfo(target);
-            if (!info.Exists || info.Length > MaxReadBytes || HasReparsePoint(target) || workspace.IsContextExcluded(relativeFile))
+            if (!File.Exists(target) || HasReparsePoint(target) || workspace.IsContextExcluded(relativeFile))
                 throw new IOException("The file is missing, too large, or changed to a symlink; inspection stopped.");
             output.Add($"==> {Path.GetRelativePath(root, target)} <==");
-            output.Add(await workspace.ReadFileAsync(relativeFile, cancellationToken).ConfigureAwait(false));
+            output.Add(ReadOnlyFileHandleReader.ReadText(target, root, contextExclusions, MaxReadBytes));
         }
         var result = string.Join(Environment.NewLine, output);
-        return result.Length <= MaxOutputCharacters ? result : result[..MaxOutputCharacters] + "\n… [read-only inspection output truncated]";
+        result = result.Length <= MaxOutputCharacters ? result : result[..MaxOutputCharacters] + "\n… [read-only inspection output truncated]";
+        return Task.FromResult(result);
     }
 
     private static bool IsPlainRelativePath(string value)
