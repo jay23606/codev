@@ -217,6 +217,10 @@
                                     <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
                                 </Border>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+                                    <Button Content="Edit prompt" Classes="soft" Padding="7,3" FontSize="10"
+                                            Command="{Binding $parent[Window].DataContext.EditPromptCommand}"
+                                            CommandParameter="{Binding MessageIndex}"
+                                            ToolTip.Tip="Revise this prompt; later conversation messages will be removed and the edited prompt will return to the composer" />
                                     <Button Content="Summarize up to here" Classes="soft" Padding="7,3" FontSize="10"
                                             Command="{Binding $parent[Window].DataContext.SummarizeConversationUpToCommand}"
                                             CommandParameter="{Binding}"

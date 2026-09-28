@@ -106,6 +106,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ClearContextFilesCommand { get; }
     public ICommand RemoveDiffCommentCommand { get; }
     public ICommand RewindConversationCommand { get; }
+    public ICommand EditPromptCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
     [
     ];
@@ -128,6 +129,8 @@ public sealed class MainViewModel : ViewModelBase
         ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
         RemoveDiffCommentCommand = new RelayCommand(value => { if (value is Codev.GitDiffComment comment) RemovePendingDiffComment(comment); });
         RewindConversationCommand = new RelayCommand(value => { if (value is int index) _ = RewindConversationAsync(index); },
+            value => value is int index && CanRewindConversationMessage(index));
+        EditPromptCommand = new RelayCommand(value => { if (value is int index) _ = EditPromptAsync(index); },
             value => value is int index && CanRewindConversationMessage(index));
         SendCommand = new RelayCommand(_ =>
         {
@@ -296,6 +299,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (CanEnterCodeTaskMode && !IsPlanMode));
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
+    public Func<int, string, Task<string?>>? EditConversationPromptAsync { get; set; }
     public Func<Codev.ConversationCompactionProposal, Task>? ShowCompactionProposalAsync { get; set; }
     public Func<string, string, string, bool, IReadOnlyList<string>?, string?, Task<bool>>? ApproveProjectCommandAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
@@ -1240,6 +1244,33 @@ public sealed class MainViewModel : ViewModelBase
         }
         catch (InvalidOperationException ex) { ReportContextActionStatus(ex.Message); }
         finally { ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged(); }
+    }
+
+    private async Task EditPromptAsync(int messageIndex)
+    {
+        if (ActiveConversation is not { } conversation || !CanRewindConversationMessage(messageIndex)) return;
+        var original = conversation.Messages[messageIndex].Content;
+        var revised = await (EditConversationPromptAsync?.Invoke(messageIndex, original) ?? Task.FromResult<string?>(null));
+        if (revised is null || !CanRewindConversationMessage(messageIndex)) return;
+        try
+        {
+            _ = Codev.ConversationRewindService.RestoreConversationOnly(conversation, messageIndex);
+            Draft = revised;
+            Messages.Clear();
+            foreach (var message in conversation.Messages) Messages.Add(message);
+            OnPropertyChanged(nameof(MessageCountLabel));
+            ContextActionStatus = "Prompt revised. Send it when ready; later conversation messages were removed, and project files were left unchanged.";
+            OnPropertyChanged(nameof(ContextActionStatus));
+            OnPropertyChanged(nameof(HasContextActionStatus));
+            Persist();
+            RebuildLists();
+        }
+        catch (InvalidOperationException ex) { ReportContextActionStatus(ex.Message); }
+        finally
+        {
+            ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)EditPromptCommand).NotifyCanExecuteChanged();
+        }
     }
 
     private void TogglePin()

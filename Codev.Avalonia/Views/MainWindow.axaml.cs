@@ -188,6 +188,7 @@ public partial class MainWindow : Window
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         viewModel.ReviewFileChangeAsync = ReviewAgentFileChangeAsync;
         viewModel.ConfirmConversationRewindAsync = ConfirmConversationRewindAsync;
+        viewModel.EditConversationPromptAsync = EditConversationPromptAsync;
         viewModel.ShowCompactionProposalAsync = ShowCompactionProposalAsync;
         viewModel.ApproveProjectCommandAsync = ApproveAgentCommandAsync;
         viewModel.ConfirmRepeatedToolCallAsync = ConfirmRepeatedToolCallAsync;
@@ -522,6 +523,73 @@ public partial class MainWindow : Window
         };
         cancel.Click += (_, _) => dialog.Close();
         await dialog.ShowDialog(this);
+    }
+
+    private async Task<string?> EditConversationPromptAsync(int messageIndex, string original)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation ||
+            messageIndex < 0 || messageIndex >= conversation.Messages.Count || !conversation.Messages[messageIndex].IsUser) return null;
+        var input = new TextBox
+        {
+            Text = original,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MinHeight = 180,
+            MaxHeight = 420,
+            VerticalContentAlignment = global::Avalonia.Layout.VerticalAlignment.Top,
+            Padding = new Thickness(10),
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Stretch
+        };
+        var dialog = new Window
+        {
+            Title = "Edit prompt",
+            Width = 720,
+            Height = 430,
+            MinWidth = 520,
+            MinHeight = 320,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+            Content = new Grid
+            {
+                Margin = new Thickness(18),
+                RowDefinitions = new RowDefinitions("Auto,*,Auto"),
+                RowSpacing = 12,
+                Children =
+                {
+                    new TextBlock { Text = "Revise the prompt. Confirming removes this prompt and all later conversation messages; project files are unchanged.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                    input,
+                    new StackPanel
+                    {
+                        Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+                        HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            new Button { Content = "Cancel", Classes = { "soft" }, MinWidth = 90 },
+                            new Button { Content = "Apply edit", MinWidth = 100, Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#D97757")), Foreground = global::Avalonia.Media.Brushes.White, BorderThickness = new Thickness(0) }
+                        }
+                    }
+                }
+            }
+        };
+        var layout = (Grid)dialog.Content!;
+        Grid.SetRow(input, 1);
+        var buttons = (StackPanel)layout.Children[2];
+        Grid.SetRow(buttons, 2);
+        var cancel = (Button)buttons.Children[0];
+        var apply = (Button)buttons.Children[1];
+        string? result = null;
+        void UpdateApplyState() => apply.IsEnabled = !string.IsNullOrWhiteSpace(input.Text);
+        input.TextChanged += (_, _) => UpdateApplyState();
+        UpdateApplyState();
+        cancel.Click += (_, _) => dialog.Close();
+        apply.Click += (_, _) =>
+        {
+            result = input.Text?.Trim();
+            dialog.Close();
+        };
+        await dialog.ShowDialog(this);
+        return result;
     }
 
     private async void AdvancedModelSettings_Click(object? sender, RoutedEventArgs e)
