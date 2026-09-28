@@ -14,7 +14,7 @@ public static class ConversationStatusReport
         {
             CloudModelProviders.OpenAI => "OpenAI API",
             CloudModelProviders.Anthropic => "Anthropic API",
-            _ => ollamaEndpointIsLocal ? "Ollama (local)" : $"Ollama (remote · {ollamaEndpoint})"
+            _ => ollamaEndpointIsLocal ? "Ollama (local)" : $"Ollama (remote · {RemoteEndpointHost(ollamaEndpoint)})"
         };
         var context = CloudModelProviders.IsCloud(conversation.Provider)
             ? "managed by provider"
@@ -86,5 +86,18 @@ public static class ConversationStatusReport
         var name = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\')
             .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
         return string.IsNullOrWhiteSpace(name) || name.EndsWith(':') ? "filesystem root" : name;
+    }
+
+    private static string RemoteEndpointHost(string? endpoint)
+    {
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+        {
+            var host = uri.Host.Trim('[', ']');
+            if (uri.HostNameType == UriHostNameType.IPv6) host = $"[{host}]";
+            var defaultPort = uri.IsDefaultPort;
+            var port = defaultPort ? "" : $":{uri.Port}";
+            return $"{uri.Scheme}://{host}{port}";
+        }
+        return "configured remote host";
     }
 }

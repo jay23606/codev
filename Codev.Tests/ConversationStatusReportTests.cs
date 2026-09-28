@@ -79,7 +79,21 @@ public sealed class ConversationStatusReportTests
         var report = ConversationStatusReport.Build(new Conversation { Model = "qwen3-coder:30b" }, false, 0, false, false,
             ollamaEndpoint: "https://ollama.example/api", ollamaEndpointIsLocal: false);
 
-        Assert.Contains("Model: Ollama (remote · https://ollama.example/api) · qwen3-coder:30b", report);
+        Assert.Contains("Model: Ollama (remote · https://ollama.example) · qwen3-coder:30b", report);
+    }
+
+    [Theory]
+    [InlineData("https://name:password@ollama.example:9443/api?token=secret#fragment", "https://ollama.example:9443")]
+    [InlineData("https://[2001:db8::1]:9443/api?token=secret", "https://[2001:db8::1]:9443")]
+    public void Remote_ollama_status_redacts_endpoint_paths_credentials_and_query(string endpoint, string safeHost)
+    {
+        var report = ConversationStatusReport.Build(new Conversation(), false, 0, false, false,
+            ollamaEndpoint: endpoint, ollamaEndpointIsLocal: false);
+
+        Assert.Contains($"Model: Ollama (remote · {safeHost})", report);
+        Assert.DoesNotContain("password", report, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", report, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/api", report, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
