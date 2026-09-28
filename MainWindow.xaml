@@ -100,10 +100,11 @@
             <Grid.RowDefinitions><RowDefinition Height="62"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Border Grid.Row="0" BorderBrush="{DynamicResource MainBorderBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource MainSurfaceAltBrush}">
                 <Grid Margin="34,0,34,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center"><TextBlock x:Name="ConversationTitle" Text="New conversation" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource MainTextBrush}"/><TextBlock Text="Private · running on your machine" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" Margin="0,2,0,0"/></StackPanel>
+                    <StackPanel VerticalAlignment="Center"><TextBlock x:Name="ConversationTitle" Text="New conversation" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource MainTextBrush}"/><TextBlock x:Name="ConversationPrivacyLabel" Text="Private · running on your machine" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" Margin="0,2,0,0"/></StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="MODEL" FontSize="9" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
                         <ComboBox x:Name="ModelPicker" Width="245" SelectionChanged="ModelPicker_SelectionChanged" DropDownOpened="ModelPicker_DropDownOpened" DisplayMemberPath="DisplayName" SelectedValuePath="Name"/>
+                        <Button Content="☁ Connect" Style="{StaticResource SoftButton}" Margin="6,0,0,0" Click="HostedModels_Click" ToolTip="Connect OpenAI or Anthropic API models for this session"/>
                         <TextBlock Text="CTX" FontSize="9" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="12,0,7,0"/>
                         <ComboBox x:Name="ContextPicker" Width="118" SelectionChanged="ContextPicker_SelectionChanged" DisplayMemberPath="DisplayName" SelectedValuePath="Value" ToolTip="Per-conversation context size sent to Ollama; choices are capped to the selected model's configured limit"/>
                         <TextBlock x:Name="ContextUsageLabel" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="7,0,0,0"/>

@@ -17,6 +17,7 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 - Save reusable local prompt templates and insert them into the composer for editing before sending
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with friendly quick choices for the original three and automatic discovery of other installed models
+- Optional OpenAI API and Anthropic API (Claude) chat models, with model discovery and streaming; connect from the model bar
 - Per-conversation Ollama context selection, limited to each model's configured maximum
 - Per-conversation temperature control (0–2), with Ollama's model default preserved unless you set a value
 - Last request token count compared with the selected context size, reported by Ollama
@@ -40,6 +41,10 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 
 Code task mode can create or edit supported source, text, and configuration files after showing a review and receiving approval. The Files button shows changes and lets you review or restore checkpoints, including undo/redo of file creation. Code task mode can also request an approved shell command: PowerShell on Windows, or `$SHELL` (falling back to Bash) on macOS and Linux. Set `CODEV_SHELL` to override the executable. Every command requires approval, shows elapsed progress, runs with your account permissions in the project folder, has a three-minute timeout, and is not sandboxed. Use the active-turn Stop control to terminate it. Ordinary chat remains read-only.
 
+## Hosted models
+
+In the WPF app, choose **Connect** beside the model picker, select OpenAI or Anthropic (Claude), and enter an API key. You can instead set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Codev discovers the text models available to that API account and streams hosted chat replies. Connecting asks you to acknowledge that chat is sent to the provider and API usage may be billed. API access and billing are separate from ChatGPT and Claude subscriptions. Keys stay in memory for the current app session and are not saved in settings, conversations, or backups; reconnect after restarting Codev. Hosted requests do not automatically include project files or local project instructions. Hosted models support chat and read-only planning; Code task tools continue to use local Ollama only.
+
 ## Run
 
 Codev has two front ends over one shared, cross-platform core:
@@ -49,7 +54,7 @@ Codev has two front ends over one shared, cross-platform core:
 | WPF app (`Codev.csproj`) | Windows 10/11 | The full feature set described above |
 | Avalonia prototype (`Codev.Avalonia`) | Windows, macOS and Linux (CI builds it on all three) | Prototype; not yet a replacement for the WPF app |
 
-Both need the .NET 9 SDK to build from source, and Ollama running at `http://127.0.0.1:11434` (the default endpoint). A framework-dependent published WPF build needs the .NET 9 Desktop Runtime; the self-contained publish below needs neither.
+Both need the .NET 9 SDK to build from source. Ollama at `http://127.0.0.1:11434` is needed for local models; it is optional when using only hosted models. A framework-dependent published WPF build needs the .NET 9 Desktop Runtime; the self-contained publish below needs neither.
 
 WPF app, Windows only:
 

@@ -23,6 +23,9 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<Conversation> _conversations = [];
     private readonly ObservableCollection<WorkspaceProject> _projects = [];
     private readonly List<ModelOption> _models = [];
+    private readonly Dictionary<string, string> _hostedApiKeys = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<ModelOption>> _hostedModels = new(StringComparer.Ordinal);
+    private static readonly CloudModelApiClient CloudClient = new(Http);
     private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
     private readonly Dictionary<Window, DispatcherTimer> _completionToasts = [];
     private readonly DispatcherTimer _conversationSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -261,7 +264,7 @@ public partial class MainWindow : Window
             conversation.PendingRequestCount++;
             _requestQueue.Enqueue(new QueuedTurn(conversation, saved.AssistantIndex, saved.Model, saved.NumCtx,
                 saved.IsCodeTask, saved.IsPlanMode, saved.ProjectPath, [.. saved.ContextFiles ?? []], [.. saved.ContextExclusions ?? []],
-                ConversationSamplingSettings.Normalize(saved.Temperature)));
+                ConversationSamplingSettings.Normalize(saved.Temperature), saved.Provider));
         }
         if (_requestQueue.Count > 0)
         {
@@ -363,33 +366,105 @@ public partial class MainWindow : Window
             }.Select(RemoveLatestTag).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var model in installed.Where(model => !knownNames.Contains(RemoveLatestTag(model.Name))).OrderBy(model => model.Name, StringComparer.OrdinalIgnoreCase))
                 _models.Add(new ModelOption(model.Name, OllamaModelDisplayName.Format(model.Name)));
+            foreach (var hosted in _hostedModels.Values.SelectMany(models => models)) _models.Add(hosted);
+            AddReconnectPlaceholder();
 
             _loadingModel = true;
             ModelPicker.ItemsSource = _models;
             if (_models.Count > 0)
             {
                 var wanted = _active?.Model ?? "qwen3-coder:30b";
-                ModelPicker.SelectedValue = FindModelOption(wanted)?.Name ?? _models[0].Name;
+                ModelPicker.SelectedValue = FindModelOption(wanted, _active?.Provider)?.Name ?? _models[0].Name;
             }
             _loadingModel = false;
             RefreshContextPicker(_active);
-            ConnectionLabel.Text = _models.Count == 0 ? "No local models found" : $"Ollama · {_models.Count} local models · {_ollamaEndpoint.Host}";
+            ConnectionLabel.Text = _hostedModels.Count > 0
+                ? $"Ollama · {_models.Count - _hostedModels.Values.Sum(models => models.Count)} local · hosted models connected"
+                : _models.Count == 0 ? "No local models found" : $"Ollama · {_models.Count} local models · {_ollamaEndpoint.Host}";
             RefreshConversationLists();
         }
         catch
         {
             _loadingModel = true;
             _models.Clear();
+            foreach (var hosted in _hostedModels.Values.SelectMany(models => models)) _models.Add(hosted);
+            AddReconnectPlaceholder();
             ModelPicker.ItemsSource = _models;
+            if (_models.Count > 0 && _active is not null)
+                ModelPicker.SelectedValue = FindModelOption(_active.Model, _active.Provider)?.Name;
             _loadingModel = false;
             RefreshContextPicker(_active);
-            ConnectionLabel.Text = "Ollama is not reachable";
+            ConnectionLabel.Text = _hostedModels.Count > 0 ? "Ollama offline · hosted models connected" : "Ollama is not reachable";
             RefreshConversationLists();
         }
         finally { _loadingModels = false; }
     }
 
     private async void ModelPicker_DropDownOpened(object sender, EventArgs e) => await LoadModelsAsync();
+
+    private void AddReconnectPlaceholder()
+    {
+        if (_active is not { } conversation || !CloudModelProviders.IsCloud(conversation.Provider) ||
+            _models.Any(model => model.Provider == conversation.Provider && model.Name.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase))) return;
+        var providerName = conversation.Provider == CloudModelProviders.OpenAI ? "OpenAI" : "Claude";
+        _models.Add(new ModelOption(conversation.Model, $"{providerName} · {conversation.Model} (reconnect API key)", conversation.Provider));
+    }
+
+    private async void HostedModels_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Window
+        {
+            Title = "Connect hosted models", Width = 500, Height = 430,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.NoResize
+        };
+        var layout = new StackPanel { Margin = new Thickness(22) };
+        layout.Children.Add(new TextBlock { Text = "Use an OpenAI API key or an Anthropic API key to discover models available to your account.", TextWrapping = TextWrapping.Wrap, FontSize = 13, Margin = new Thickness(0, 0, 0, 12) });
+        layout.Children.Add(new TextBlock { Text = "API access and charges are separate from ChatGPT and Claude subscriptions. Hosted replies send the current conversation history and new prompts to the provider and may incur API charges. Codev does not attach project files or local project instructions. Keys are kept in memory for this session only.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), FontSize = 11, Margin = new Thickness(0, 0, 0, 12) });
+        var provider = new ComboBox { ItemsSource = new[] { new ProviderOption(CloudModelProviders.OpenAI, "OpenAI API"), new ProviderOption(CloudModelProviders.Anthropic, "Anthropic API (Claude)") }, DisplayMemberPath = "Name", SelectedValuePath = "Id", SelectedIndex = 0, Margin = new Thickness(0, 0, 0, 10), Padding = new Thickness(8, 7, 8, 7) };
+        layout.Children.Add(provider);
+        layout.Children.Add(new TextBlock { Text = "API key (or set OPENAI_API_KEY / ANTHROPIC_API_KEY)", FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 5) });
+        var key = new PasswordBox { Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 10) };
+        layout.Children.Add(key);
+        var consent = new CheckBox { Content = "I understand this conversation is sent to the provider and API usage may be billed.", IsChecked = false, Margin = new Thickness(0, 2, 0, 16) };
+        layout.Children.Add(consent);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true });
+        var connect = new Button { Content = "Connect and load models", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        connect.Click += (_, args) =>
+        {
+            if (consent.IsChecked != true) { MessageBox.Show(dialog, "Confirm the hosted request and billing details to connect.", "Confirmation required", MessageBoxButton.OK, MessageBoxImage.Information); args.Handled = true; return; }
+            dialog.DialogResult = true;
+        };
+        buttons.Children.Add(connect); layout.Children.Add(buttons); dialog.Content = layout;
+        if (dialog.ShowDialog() != true || provider.SelectedValue is not string providerId) return;
+        var envName = providerId == CloudModelProviders.OpenAI ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+        var apiKey = string.IsNullOrWhiteSpace(key.Password) ? Environment.GetEnvironmentVariable(envName) : key.Password;
+        if (string.IsNullOrWhiteSpace(apiKey)) { MessageBox.Show(this, $"Enter a key or set {envName}.", "API key required", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        AgentStatusLabel.Text = $"Connecting to {(providerId == CloudModelProviders.OpenAI ? "OpenAI" : "Anthropic")}…";
+        try
+        {
+            var discovered = await CloudClient.ListModelsAsync(providerId, apiKey);
+            if (discovered.Count == 0) { MessageBox.Show(this, "The key was accepted, but no chat-capable models were available to this account.", "No models found", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+            _hostedApiKeys[providerId] = apiKey;
+            _hostedModels[providerId] = discovered.Select(model => new ModelOption(model.Id, $"{(providerId == CloudModelProviders.OpenAI ? "OpenAI" : "Claude")} · {model.DisplayName}", providerId)).ToList();
+            await LoadModelsAsync();
+            var first = _hostedModels[providerId][0];
+            _loadingModel = true;
+            ModelPicker.SelectedItem = first;
+            if (_active is not null) { _active.Provider = providerId; _active.Model = first.Name; _active.IsCodeTask = false; UpdateProviderUi(_active); }
+            ModelOptionsButton.IsEnabled = false;
+            _loadingModel = false;
+            if (_active is not null) { RefreshContextPicker(_active); UpdateContextLabel(_active); await SaveAsync(); }
+            AgentStatusLabel.Text = $"Connected · {discovered.Count} hosted models available for this session";
+        }
+        catch (Exception ex)
+        {
+            AgentStatusLabel.Text = "Hosted model connection failed";
+            MessageBox.Show(this, $"Could not connect or list models. The previous session key remains active.\n\n{ex.Message}", "Connection failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void AddKnownModel(List<TagModel> installed, string preferredName, string displayName, params string[] aliases)
     {
@@ -398,10 +473,12 @@ public partial class MainWindow : Window
         if (actual is not null) _models.Add(new ModelOption(actual.Name, displayName));
     }
 
-    private ModelOption? FindModelOption(string modelName)
+    private ModelOption? FindModelOption(string modelName, string? provider = null)
     {
         var normalized = RemoveLatestTag(modelName);
-        return _models.FirstOrDefault(m => m.Name.Equals(modelName, StringComparison.OrdinalIgnoreCase) || RemoveLatestTag(m.Name).Equals(normalized, StringComparison.OrdinalIgnoreCase)) ??
+        var exact = _models.FirstOrDefault(m => (provider is null || m.Provider == provider) && (m.Name.Equals(modelName, StringComparison.OrdinalIgnoreCase) || RemoveLatestTag(m.Name).Equals(normalized, StringComparison.OrdinalIgnoreCase)));
+        if (exact is not null || provider is not null and not "ollama") return exact;
+        return
             (IsSameModel(normalized, "qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l", "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L") ? _models.FirstOrDefault(m => m.DisplayName.StartsWith("Qwen3-Coder-Next", StringComparison.Ordinal)) : null) ??
             (normalized.Equals("qwen3-coder:30b", StringComparison.OrdinalIgnoreCase) ? _models.FirstOrDefault(m => m.DisplayName.StartsWith("Qwen3-Coder 30B", StringComparison.Ordinal)) : null);
     }
@@ -414,7 +491,7 @@ public partial class MainWindow : Window
     {
         var model = ModelPicker.SelectedValue as string ?? "qwen3-coder:30b";
         var projectPath = _activeProject?.Path ?? _active?.ProjectPath;
-        var conversation = new Conversation { Model = model, ProjectPath = projectPath, UpdatedAt = DateTimeOffset.Now };
+        var conversation = new Conversation { Model = model, Provider = (ModelPicker.SelectedItem as ModelOption)?.Provider ?? "ollama", ProjectPath = projectPath, UpdatedAt = DateTimeOffset.Now };
         _conversations.Insert(0, conversation);
         SelectConversation(conversation);
         RefreshConversationLists();
@@ -441,11 +518,21 @@ public partial class MainWindow : Window
         UpdateQueueControl();
         if (_activeProject is not null) _activeProject.LastOpenedAt = DateTimeOffset.Now;
         ConversationTitle.Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
+        UpdateProviderUi(conversation);
         PinButton.Content = conversation.IsPinned ? "★  Pinned" : "☆  Pin";
         ModelOptionsButton.Content = conversation.Temperature is double temperature ? $"T{temperature:0.#}" : "⚙";
+        ModelOptionsButton.IsEnabled = !CloudModelProviders.IsCloud(conversation.Provider);
         _loadingModel = true;
-        ModelPicker.SelectedValue = FindModelOption(conversation.Model)?.Name;
-        if (ModelPicker.SelectedValue is null && _models.Count > 0) ModelPicker.SelectedIndex = 0;
+        var matchingModel = FindModelOption(conversation.Model, conversation.Provider);
+        if (matchingModel is null && CloudModelProviders.IsCloud(conversation.Provider))
+        {
+            matchingModel = new ModelOption(conversation.Model, $"{(conversation.Provider == CloudModelProviders.OpenAI ? "OpenAI" : "Claude")} · {conversation.Model} (reconnect API key)", conversation.Provider);
+            _models.Add(matchingModel);
+            ModelPicker.ItemsSource = null;
+            ModelPicker.ItemsSource = _models;
+        }
+        ModelPicker.SelectedItem = matchingModel;
+        if (ModelPicker.SelectedItem is null && _models.Count > 0 && !CloudModelProviders.IsCloud(conversation.Provider)) ModelPicker.SelectedIndex = 0;
         _loadingModel = false;
         RefreshContextPicker(conversation);
         WelcomePanel.Visibility = conversation.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -551,6 +638,7 @@ public partial class MainWindow : Window
         {
             Title = title,
             Model = source.Model,
+            Provider = source.Provider,
             NumCtx = source.NumCtx,
             ProjectPath = source.ProjectPath,
             ContextFiles = [.. source.ContextFiles],
@@ -943,6 +1031,7 @@ public partial class MainWindow : Window
             var conversation = new Conversation
             {
                 Model = ModelPicker.SelectedValue as string ?? "qwen3-coder:30b",
+                Provider = (ModelPicker.SelectedItem as ModelOption)?.Provider ?? "ollama",
                 ProjectPath = project?.Path,
                 UpdatedAt = DateTimeOffset.Now
             };
@@ -1474,7 +1563,11 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(text) || _active is null) return;
         var isCodeTask = _codeTaskMode && _codeTaskConversationId == _active.Id;
         var isPlanMode = _planMode;
-        if (ModelPicker.SelectedValue is string model) _active.Model = model;
+        if (ModelPicker.SelectedItem is ModelOption selectedModel)
+        {
+            _active.Model = selectedModel.Name;
+            _active.Provider = selectedModel.Provider;
+        }
         var conversation = _active;
         var userMessage = text;
         if (conversation.Messages.Count == 0)
@@ -1490,10 +1583,10 @@ public partial class MainWindow : Window
         List<string> exclusions = conversation.ProjectPath is null ? [] : [.. EnsureProject(conversation.ProjectPath).ContextExclusions];
         var turn = new QueuedTurn(conversation, assistantIndex, conversation.Model, conversation.NumCtx,
             isCodeTask, isPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles], exclusions,
-            ConversationSamplingSettings.Normalize(conversation.Temperature));
+            ConversationSamplingSettings.Normalize(conversation.Temperature), conversation.Provider);
         conversation.PendingTurns ??= [];
         var persistedTurn = new PersistedQueuedTurn(turn.AssistantIndex, turn.Model, turn.NumCtx, turn.IsCodeTask, turn.IsPlanMode,
-            turn.ProjectPath, [.. turn.ContextFiles], [.. turn.ContextExclusions], DateTimeOffset.Now, turn.Temperature);
+            turn.ProjectPath, [.. turn.ContextFiles], [.. turn.ContextExclusions], DateTimeOffset.Now, turn.Temperature, turn.Provider);
         conversation.PendingTurns.Add(persistedTurn);
         conversation.Messages[assistantIndex] = new ChatMessage("assistant", "Queued locally · waiting for the model");
         PromptBox.Clear();
@@ -1705,14 +1798,19 @@ public partial class MainWindow : Window
         try
         {
             var history = conversation.Messages.Take(assistantIndex).Select(m => new ChatMessage(m.Role, m.Content)).ToList();
-            var system = turn.IsCodeTask
+            var hosted = CloudModelProviders.IsCloud(turn.Provider);
+            if (hosted && !_hostedApiKeys.ContainsKey(turn.Provider))
+                throw new InvalidOperationException("Connect the selected hosted provider again before sending. API keys are held only for the current session.");
+            var system = hosted
+                ? "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. You are responding through an optional hosted provider. Do not claim to have changed files or run commands."
+                : turn.IsCodeTask
                 ? "You are Codev, a concise local coding agent. Work only within the selected project. Inspect before editing. Use the provided tools instead of claiming actions. Every file replacement and shell command requires user approval. Never represent tool output as successful unless its result confirms success."
                 : turn.IsPlanMode
                     ? "You are Codev in read-only Plan mode. Give a concise, ordered implementation plan with key files, risks, and checks. Do not edit files, run commands, or claim that any work has been done. Ask a short clarifying question only if a missing detail blocks a useful plan."
                     : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
-            var personalInstructions = PersonalAgentInstructions.Build(_personalInstructions);
+            var personalInstructions = hosted ? "" : PersonalAgentInstructions.Build(_personalInstructions);
             if (!string.IsNullOrWhiteSpace(personalInstructions)) system += "\n\n" + personalInstructions;
-            var project = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
+            var project = hosted || conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
             if (project is not null && !string.IsNullOrWhiteSpace(project.Instructions))
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + project.Instructions;
             if (project is not null)
@@ -1722,7 +1820,7 @@ public partial class MainWindow : Window
                 var agentGuidance = await ProjectAgentInstructions.LoadAsync(new WorkspaceFileService(project.Path, project.ContextExclusions), cancellation.Token);
                 if (!string.IsNullOrWhiteSpace(agentGuidance)) system += "\n\n" + agentGuidance;
             }
-            if (!string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
+            if (!hosted && !string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
             {
                 system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
                 system += "\n\n" + await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles, turn.ContextExclusions);
@@ -1730,7 +1828,11 @@ public partial class MainWindow : Window
             history.Insert(0, new ChatMessage("system", system));
             var ollamaHistory = OllamaConversationHistory.Normalize(history)
                 .Select(message => new OllamaMessage(message.Role, message.Content)).ToList();
-            if (turn.IsCodeTask)
+            if (hosted)
+            {
+                await RunHostedChatTurnAsync(conversation, assistantIndex, history, turn.Provider, turn.Model, _hostedApiKeys[turn.Provider], cancellation.Token);
+            }
+            else if (turn.IsCodeTask)
             {
                 var service = new WorkspaceFileService(turn.ProjectPath!);
                 await RunAgentTurnAsync(conversation, assistantIndex, ollamaHistory, service, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
@@ -1836,6 +1938,22 @@ public partial class MainWindow : Window
         if (_completionToasts.TryGetValue(toast, out var timer)) timer.Stop();
         if (toast.IsVisible) toast.Close();
         else _completionToasts.Remove(toast);
+    }
+
+    private async Task RunHostedChatTurnAsync(Conversation conversation, int assistantIndex, IReadOnlyList<ChatMessage> history, string provider, string model, string apiKey, CancellationToken cancellationToken)
+    {
+        var messages = history.Select(message => new CloudChatMessage(message.Role, message.Content)).ToArray();
+        var output = new StringBuilder();
+        await foreach (var chunk in CloudClient.StreamChatAsync(provider, apiKey, model, messages, cancellationToken))
+        {
+            output.Append(chunk);
+            var current = output.ToString();
+            await Dispatcher.InvokeAsync(() =>
+            {
+                conversation.Messages[assistantIndex] = new ChatMessage("assistant", current);
+                if (ReferenceEquals(_active, conversation)) RenderMessages();
+            });
+        }
     }
 
     private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, double? temperature, CancellationToken cancellationToken)
@@ -2400,12 +2518,22 @@ public partial class MainWindow : Window
 
     private void ModelPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadingModel || _active is null || ModelPicker.SelectedValue is not string model) return;
-        _active.Model = model;
-        var maxContext = MaxContextForModel(model);
+        if (_loadingModel || _active is null || ModelPicker.SelectedItem is not ModelOption option) return;
+        _active.Model = option.Name;
+        _active.Provider = option.Provider;
+        if (CloudModelProviders.IsCloud(option.Provider))
+        {
+            _active.IsCodeTask = false;
+            _codeTaskMode = false;
+            _codeTaskConversationId = null;
+            UpdateModeButtons();
+        }
+        UpdateProviderUi(_active);
+        ModelOptionsButton.IsEnabled = !CloudModelProviders.IsCloud(option.Provider);
+        var maxContext = MaxContextForModel(option.Name);
         if (_active.NumCtx > maxContext) _active.NumCtx = 0;
         RefreshContextPicker(_active);
-        UpdateContextBudgetLabel(_active);
+        UpdateContextLabel(_active);
         RefreshConversationLists();
         _ = SaveAsync();
     }
@@ -2417,6 +2545,16 @@ public partial class MainWindow : Window
         UpdateContextBudgetLabel(_active);
         RefreshConversationLists();
         _ = SaveAsync();
+    }
+
+    private void UpdateProviderUi(Conversation conversation)
+    {
+        ConversationPrivacyLabel.Text = conversation.Provider switch
+        {
+            CloudModelProviders.OpenAI => "Hosted · chat sent to OpenAI API",
+            CloudModelProviders.Anthropic => "Hosted · chat sent to Anthropic API (Claude)",
+            _ => "Private · running on your machine"
+        };
     }
 
     private void RefreshContextPicker(Conversation? conversation)
@@ -2432,6 +2570,8 @@ public partial class MainWindow : Window
         ContextPicker.ItemsSource = _contextSizes.Where(option => option.Value == 0 || option.Value <= max).ToList();
         ContextPicker.SelectedValue = conversation?.NumCtx ?? 0;
         if (ContextPicker.SelectedValue is null) ContextPicker.SelectedValue = 0;
+        ContextPicker.IsEnabled = conversation is null || !CloudModelProviders.IsCloud(conversation.Provider);
+        if (conversation is not null && CloudModelProviders.IsCloud(conversation.Provider)) ContextUsageLabel.Text = "";
         _updatingContext = false;
         if (conversation is not null) UpdateContextUsage(conversation);
     }
@@ -2634,6 +2774,16 @@ public partial class MainWindow : Window
     private void UpdateContextLabel(Conversation conversation)
     {
         _projectPath = conversation.ProjectPath;
+        var hosted = CloudModelProviders.IsCloud(conversation.Provider);
+        AddContextButton.IsEnabled = !hosted;
+        if (hosted)
+        {
+            ContextLabel.Text = conversation.ProjectPath is null ? "No project attached" : "Project context stays local";
+            ContextLabel.ToolTip = "Hosted requests do not include attached project files or local project instructions.";
+            ContextEstimateLabel.Text = "";
+            ContextEstimateLabel.ToolTip = null;
+            return;
+        }
         var selectedCount = conversation.ContextFiles.Count;
         var excludedCount = 0;
         if (conversation.ProjectPath is not null && Directory.Exists(conversation.ProjectPath) && selectedCount > 0)
@@ -3034,10 +3184,11 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("tool_calls")] List<JsonElement>? ToolCalls = null,
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
-        bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions, double? Temperature);
+        bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions, double? Temperature, string Provider = "ollama");
     private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null, string? PersonalInstructions = null, bool? SearchAllProjects = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
-    private sealed record ModelOption(string Name, string DisplayName);
+    private sealed record ModelOption(string Name, string DisplayName, string Provider = "ollama");
+    private sealed record ProviderOption(string Id, string Name);
     private sealed record ContextOption(int Value, string DisplayName);
 }
