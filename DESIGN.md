@@ -115,17 +115,17 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 7. Cross-platform (macOS and Linux) — planned
 
-The current build targets `net9.0-windows` with WPF, which only runs on Windows. Most non-UI code is plain .NET and should already be portable (persistence, backup, search, Markdown export, the Ollama client and request options, Git integration, unified diffs, project context selection, and the `Codev.Tests` project), but this has not been built or run off Windows yet.
+The desktop UI currently targets `net9.0-windows` with WPF, which only runs on Windows. Most non-UI code now lives in `Codev.Core`, a plain `net9.0` library referenced by the Windows app. `Codev.Tests` also targets plain `net9.0`; WPF rendering and PowerShell command tests stay in `Codev.Windows.Tests`. A GitHub Actions matrix now builds the core and runs its tests on Windows, Linux, and macOS; hosted results will establish the portability baseline before any UI work.
 
 Chosen approach: port the UI to [Avalonia UI](https://avaloniaui.net/), which is XAML-based (closest to WPF), MIT-licensed and free for commercial use, and has first-class Linux support including Wayland. Alternatives considered: Uno Platform (free, also covers web/mobile, but WinUI-style XAML is further from WPF), .NET MAUI (no official Linux support), Eto.Forms (native controls; harder to match Codev's custom Markdown/code rendering), and a web/Electron front end (a full UI rewrite). Avalonia's paid products (Accelerate tooling, XPF, premium support) are optional and not required; XPF is irrelevant because the UI is being rewritten rather than run as-is.
 
-- [ ] Verify portability first: build and run `Codev.Tests` on Linux and macOS in CI before any UI work, and record which tests fail.
-- [ ] Split non-UI code into a shared `Codev.Core` library targeting plain `net9.0`; the WPF app and the Avalonia app both reference it.
+- [ ] Verify portability first: confirm the new `Codev.Tests` CI matrix passes on Linux and macOS before any UI work, and record any platform-specific failures.
+- [x] Split non-UI code into a shared `Codev.Core` library targeting plain `net9.0`; the WPF app and future Avalonia app both reference it.
 - [ ] Replace the hard-coded `powershell.exe` command tool with a shell abstraction: PowerShell on Windows, the user's `$SHELL` (or `bash`/`sh`) on macOS and Linux, and a configurable override. The approval, timeout, bounded-output and process-tree-kill behavior stays identical on every OS, and the prompt must name the shell actually used.
 - [ ] Use `Environment.SpecialFolder.LocalApplicationData` for the data folder instead of `%LOCALAPPDATA%\Codev`, and migrate nothing silently: an existing Windows folder is left where it is.
 - [ ] Make the "open folder" action per-OS (`explorer`/`open`/`xdg-open`) and reword the Git-not-found message so it is not Windows-specific.
 - [ ] Port the UI to Avalonia. The riskiest parts are the rich Markdown renderer with copy buttons, syntax coloring, scrollable tables, drag-and-drop of files onto the composer, and theming (dark default, light option).
-- [ ] Add macOS and Linux to CI alongside Windows, and publish per-OS builds (`win-x64`, `osx-arm64`/`osx-x64`, `linux-x64`).
+- [x] Add macOS and Linux core-test jobs to CI alongside Windows. Per-OS desktop publishing (`win-x64`, `osx-arm64`/`osx-x64`, `linux-x64`) remains pending the Avalonia port.
 - [ ] Decide whether to keep the WPF app alongside Avalonia during the transition or retire it once Avalonia reaches parity.
 
 ### 8. Claude-inspired features worth adding

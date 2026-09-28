@@ -1,8 +1,4 @@
 using System.IO;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Documents;
-using System.Windows.Media;
 
 namespace Codev.Tests;
 
@@ -110,7 +106,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         Assert.Equal("app.cs", match.RelativePath);
         Assert.Equal(2, match.LineNumber);
         Assert.Equal("// startup marker", match.LineText);
-        Assert.Contains(agentMatches, result => result.StartsWith("generated\\client.cs:1:", StringComparison.Ordinal));
+        Assert.Contains(agentMatches, result => result.StartsWith($"generated{Path.DirectorySeparatorChar}client.cs:1:", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -194,163 +190,6 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         var outside = Path.Combine(_root, "outside.bak");
         await File.WriteAllTextAsync(outside, "not a checkpoint");
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service.ReadCheckpointAsync("Program.cs", Guid.NewGuid(), outside));
-    }
-
-    [Fact]
-    public void Renders_markdown_fences_and_copy_control_as_separate_blocks()
-    {
-        var hasHeading = false;
-        var hasCopy = false;
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var rendered = MarkdownRenderer.Render("# Heading\n\n`inline`\n\n```js\nconst x = 1;\n```", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral);
-                hasHeading = rendered.Children.OfType<TextBlock>().Any(block => block.Inlines.OfType<Run>().Any(run => run.Text.Contains("Heading", StringComparison.Ordinal)));
-                hasCopy = rendered.Children.OfType<Border>().Any(border => FindChild<Button>(border)?.Content?.ToString() == "Copy");
-            }
-            catch (Exception ex) { failure = ex; }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start(); thread.Join();
-        if (failure is not null) throw failure;
-        Assert.True(hasHeading);
-        Assert.True(hasCopy);
-    }
-
-    [Fact]
-    public void Fenced_javascript_runs_receive_syntax_colors()
-    {
-        var keywordBrush = Brushes.MediumPurple;
-        var stringBrush = Brushes.LightGreen;
-        var hasColoredKeyword = false;
-        var hasColoredString = false;
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var rendered = MarkdownRenderer.Render("```javascript\nconst message = \"hello\";\n```", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral,
-                    keyword: keywordBrush, stringLiteral: stringBrush);
-                var frame = rendered.Children.OfType<Border>().Single();
-                var scroll = ((StackPanel)frame.Child!).Children.OfType<ScrollViewer>().Single();
-                var runs = ((TextBlock)scroll.Content).Inlines.OfType<Run>().ToArray();
-                hasColoredKeyword = runs.Any(run => run.Text == "const" && ReferenceEquals(run.Foreground, keywordBrush));
-                hasColoredString = runs.Any(run => run.Text == "\"hello\"" && ReferenceEquals(run.Foreground, stringBrush));
-            }
-            catch (Exception ex) { failure = ex; }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start(); thread.Join();
-        if (failure is not null) throw failure;
-
-        Assert.True(hasColoredKeyword);
-        Assert.True(hasColoredString);
-    }
-
-    [Fact]
-    public void Markdown_tables_render_as_scrollable_grids()
-    {
-        var columnCount = 0;
-        var rowCount = 0;
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var rendered = MarkdownRenderer.Render("| Model | Context |\n| :--- | ---: |\n| Devstral | 64K |", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral);
-                var frame = rendered.Children.OfType<Border>().Single();
-                var scroll = (ScrollViewer)frame.Child!;
-                var grid = (Grid)scroll.Content;
-                columnCount = grid.ColumnDefinitions.Count;
-                rowCount = grid.RowDefinitions.Count;
-            }
-            catch (Exception ex) { failure = ex; }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start(); thread.Join();
-        if (failure is not null) throw failure;
-
-        Assert.Equal(2, columnCount);
-        Assert.Equal(2, rowCount);
-    }
-
-    [Fact]
-    public void Markdown_text_size_scales_body_and_headings_and_is_bounded()
-    {
-        double headingSize = 0;
-        double bodySize = 0;
-        double clampedSize = 0;
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var rendered = MarkdownRenderer.Render("# Heading\n\nBody", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral, baseFontSize: 18);
-                headingSize = rendered.Children.OfType<TextBlock>().First(block => block.Inlines.OfType<Run>().Any(run => run.Text.Contains("Heading", StringComparison.Ordinal))).FontSize;
-                bodySize = rendered.Children.OfType<TextBlock>().First(block => block.Inlines.OfType<Run>().Any(run => run.Text.Contains("Body", StringComparison.Ordinal))).FontSize;
-                var clamped = MarkdownRenderer.Render("Body", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral, baseFontSize: 100);
-                clampedSize = clamped.Children.OfType<TextBlock>().Single().FontSize;
-            }
-            catch (Exception ex) { failure = ex; }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start(); thread.Join();
-        if (failure is not null) throw failure;
-
-        Assert.Equal(18, bodySize);
-        Assert.Equal(18 * 1.57, headingSize, 4);
-        Assert.Equal(22, clampedSize);
-    }
-
-    private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
-    {
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, index);
-            if (child is T match) return match;
-            var nested = FindChild<T>(child);
-            if (nested is not null) return nested;
-        }
-        return null;
-    }
-
-    [Fact]
-    public async Task Runs_an_explicitly_approved_command_from_workspace_and_captures_output()
-    {
-        var result = await Service.RunApprovedCommandAsync("Write-Output 'Codev smoke test'; exit 7", TimeSpan.FromSeconds(20));
-        Assert.Contains("Codev smoke test", result);
-        Assert.Contains("Exit code: 7", result);
-    }
-
-    [Fact]
-    public async Task Terminates_a_command_when_its_timeout_expires()
-    {
-        var result = await Service.RunApprovedCommandAsync("Start-Sleep -Seconds 10", TimeSpan.FromMilliseconds(150));
-        Assert.Contains("timed out", result);
-    }
-
-    [Fact]
-    public async Task Reports_elapsed_time_while_an_approved_command_is_running()
-    {
-        var reports = new System.Collections.Concurrent.ConcurrentQueue<TimeSpan>();
-        var progress = new Progress<TimeSpan>(reports.Enqueue);
-
-        var result = await Service.RunApprovedCommandAsync("Start-Sleep -Seconds 2; Write-Output 'done'", TimeSpan.FromSeconds(30), progress: progress);
-
-        Assert.Contains("done", result);
-        Assert.NotEmpty(reports);
-        Assert.True(reports.TryPeek(out var elapsed));
-        Assert.True(elapsed > TimeSpan.Zero);
-    }
-
-    [Fact]
-    public async Task Bounds_captured_command_output()
-    {
-        var result = await Service.RunApprovedCommandAsync("1..5000 | ForEach-Object { '0123456789' }", TimeSpan.FromSeconds(20));
-        Assert.True(result.Length < 22_000);
-        Assert.Contains("Exit code: 0", result);
     }
 
     [Fact]

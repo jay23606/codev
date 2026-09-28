@@ -11,6 +11,31 @@ permissions:
   contents: read
 
 jobs:
+  portable-core:
+    name: Portable core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore portable tests
+        run: dotnet restore Codev.Tests/Codev.Tests.csproj
+
+      - name: Build portable core
+        run: dotnet build Codev.Core/Codev.Core.csproj --configuration Release --no-restore
+
+      - name: Run portable tests
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
+
   build-and-test:
     runs-on: windows-latest
     steps:
@@ -23,6 +48,9 @@ jobs:
           dotnet-version: 9.0.x
 
       - name: Restore test project and application
+        run: dotnet restore Codev.Windows.Tests\Codev.Windows.Tests.csproj
+
+      - name: Restore portable test project
         run: dotnet restore Codev.Tests\Codev.Tests.csproj
 
       - name: Build application
@@ -31,13 +59,18 @@ jobs:
       - name: Publish self-contained Windows app
         run: dotnet publish Codev.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\ci-publish
 
-      - name: Run tests
-        run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-tests.trx"
+      - name: Run portable tests
+        run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-portable-tests.trx"
+
+      - name: Run Windows UI tests
+        run: dotnet test Codev.Windows.Tests\Codev.Windows.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-windows-tests.trx"
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: codev-test-results
-          path: Codev.Tests/TestResults/*.trx
+          path: |
+            Codev.Tests/TestResults/*.trx
+            Codev.Windows.Tests/TestResults/*.trx
           if-no-files-found: ignore

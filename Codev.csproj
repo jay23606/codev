@@ -10,8 +10,16 @@
 
   <ItemGroup>
     <Compile Remove="Codev.Tests\**\*.cs" />
+    <Compile Remove="Codev.Windows.Tests\**\*.cs" />
+    <Compile Remove="Codev.Core\**\*.cs" />
     <Page Remove="Codev.Tests\**\*.xaml" />
     <ApplicationDefinition Remove="Codev.Tests\**\*.xaml" />
+    <Page Remove="Codev.Windows.Tests\**\*.xaml" />
+    <ApplicationDefinition Remove="Codev.Windows.Tests\**\*.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="Codev.Core\Codev.Core.csproj" />
   </ItemGroup>
 
 </Project>
