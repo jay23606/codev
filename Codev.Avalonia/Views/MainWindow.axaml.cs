@@ -180,7 +180,7 @@ public partial class MainWindow : Window
         return await dialog.ShowDialog<bool>(this);
     }
 
-    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName)
+    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName, bool isVerification)
     {
         var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
         layout.Children.Add(new TextBlock
@@ -196,9 +196,9 @@ public partial class MainWindow : Window
             Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
         });
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
-        var dialog = new Window { Title = "Approve project command", Width = 720, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        var dialog = new Window { Title = isVerification ? "Approve verification command" : "Approve project command", Width = 720, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
         var reject = new Button { Content = "Cancel" };
-        var approve = new Button { Content = "Approve & run" };
+        var approve = new Button { Content = isVerification ? "Approve & verify" : "Approve & run" };
         reject.Click += (_, _) => dialog.Close(false);
         approve.Click += (_, _) => dialog.Close(true);
         buttons.Children.Add(reject);

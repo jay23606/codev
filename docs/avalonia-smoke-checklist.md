@@ -66,3 +66,11 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Confirm the review dialog shows the patch, current file, and complete resulting file; reject it and verify no workspace change or history entry.
 - Repeat and approve; verify a checkpointed edit appears in Files history and can be restored.
 - Change the hunk context so it no longer matches, or provide malformed hunk counts; verify Codev reports a patch error before opening review and leaves the file unchanged.
+
+## Code task verification and bounded repairs
+
+- In a trusted project, ask Code task mode to make a small source change and propose the appropriate test or lint command with `verify_command`.
+- Cancel verification and confirm it is not run and Codev makes no pass/fail claim.
+- Repeat, approve a command that exits successfully, and confirm the transcript reports Verification PASSED (exit code 0).
+- Cause a verification command to fail; confirm its exit code and bounded output appear and the model can propose a reviewed repair.
+- Exhaust the two repair cycles with failing verification; confirm subsequent file-edit, patch, create, and command tools are blocked for the task, while the model can still explain the unresolved failure.

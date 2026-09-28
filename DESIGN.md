@@ -180,7 +180,7 @@ This section is the single backlog for features drawn from studying Claude Code 
 | 3. Smarter context | A3, A5, A8, B2, B6, B9, D2 | Cuts wasted tokens; skills and structured calls make agents more reliable, and folder trust (B9) must be in place before any project-provided skill, hook, agent or command file is read |
 | 4. Extend | D3, D4, D6, B12, A9, E4, E6, E7 | Extension points, once the basics are solid |
 | 5. Parallel and unattended | D5, D8, B7, E8, D10 | Depends on worktrees, the shared core, and sandbox research |
-| Anytime | A4, A7, A10, A11, A12, B5, B8, B10, B11, C4, C6, C7, D7, D9, E1, E3, E4, E5, E9, E10, E11 | Independent; pick up between phases (B5 needs B1 and D7 needs D2 to D6) |
+| Anytime | A4, A7, A10, A11, A12, B8, B10, B11, C4, C6, C7, D7, D9, E1, E3, E4, E5, E9, E10, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
 
 X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia port; E7 needs `Codev.Core` (X2), and E8 is a decision after X2.
 
@@ -222,7 +222,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | B2 | Structured tool calls | M | none | Later |
 | B3 | Diff edits alongside whole-file edits | M | none | Done |
 | B4 | Step limit and loop detection | S | none | Core |
-| B5 | Test and lint loop | M | B1 | Later |
+| B5 | Test and lint loop | M | B1 | Done |
 | B6 | Show model reasoning | S | none | Later |
 | B7 | Sandbox research | L | X3, per OS | Speculative |
 | B8 | Loaded-model awareness | S | none | Later |
@@ -235,7 +235,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **B2 Structured tool calls.** Use Ollama's native tool calling and [JSON-schema structured outputs](https://docs.ollama.com/capabilities/structured-outputs) where the model supports them, so plans, tool arguments and summaries are validated before use. Keep the current text parsing as the fallback for models that lack support, and record which path was used in the tool status.
 - **B3 Diff edits (implemented for Avalonia Code task).** The agent can propose a strict, single-file unified-hunk patch or a whole-file replacement. Patches are applied in memory with exact line/context checks and no fuzzy matching; malformed, mismatched, or file-header patches fail before review and leave the workspace unchanged. Valid patches show the original, proposed patch, and complete resulting file in one review, then use the same approval, checkpoint, and hash concurrency check as replacement edits. [Aider supports several edit formats](https://aider.chat/docs/) for the same token-efficiency motivation.
 - **B4 Step limit and loop detection (implemented for both the WPF and Avalonia Code task runners).** Codev caps a task at eight tool rounds and now pauses for a user decision when the same tool name and canonicalized arguments repeat three consecutive times. Choosing Yes permits that call once and restarts the detector; No stops the task with an explanation. Tests cover reordered JSON properties, changed calls, and the continue-once reset. OpenCode's `doom_loop` permission fires when the same tool call repeats 3 times with identical input and defaults to *ask* ([permissions docs](https://opencode.ai/docs/permissions/)).
-- **B5 Test and lint loop.** After an approved edit, optionally run a configured test or lint command and give failures back to the model for another attempt, capped at a small number of rounds. Each command still needs approval or an allowlist entry, each round is shown, and success is claimed only on a passing run.
+- **B5 Test and lint loop (implemented in Avalonia Code task).** The model can propose a test or lint command through a distinct `verify_command` tool. Codev shows a verification-specific approval dialog for every run, reports the exit code and bounded output in the transcript, and only identifies exit code 0 as a pass. Failure output returns to the model; up to two reviewed repair cycles are allowed, after which file edits and commands are blocked for that task. Verification is optional, not silently selected or run.
 - **B6 Show model reasoning.** For Ollama models with a thinking mode, show the reasoning as a collapsible block and let the user turn thinking off per conversation.
 - **B7 Sandbox research.** Codex separates *what a process may physically do* (read-only, workspace-write, full access) from *when it must ask*; Codev has only the second. Real sandboxing needs a different mechanism on each OS, and [Codex's own Windows sandbox write-up](https://openai.com/index/building-codex-windows-sandbox/) shows it is hard to get right. This item is research first: write down what each OS offers, prototype, and only then add a mode. No mode is described as safe until tested. The simplest cross-platform candidate to prototype first is running commands in a Docker or Podman container with the project mounted, which is what Gemini CLI offers as its sandbox option. It needs a container runtime installed, so make it optional and detect it.
 - **B8 Loaded-model awareness.** Show which models Ollama currently holds in memory and their memory use, and offer to unload one. Backs the hardware-aware principle with real numbers.
@@ -348,7 +348,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B5, B6, B8, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E1, E3, E4, E6, E7, E10, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B6, B8, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E1, E3, E4, E6, E7, E10, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.

@@ -175,6 +175,64 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Verification_command_requires_approval_and_reports_success()
+    {
+        CodeTaskCommandProposal? reviewed = null;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false),
+            proposal => { reviewed = proposal; return Task.FromResult(true); });
+
+        var result = await ExecuteAsync(executor, "verify_command", """{"command":"exit 0"}""");
+
+        Assert.Contains("Verification PASSED (exit code 0)", result);
+        Assert.NotNull(reviewed);
+        Assert.True(reviewed!.IsVerification);
+        Assert.Equal("exit 0", reviewed.Command);
+        Assert.Equal(Path.GetFullPath(_root), reviewed.ProjectPath);
+    }
+
+    [Fact]
+    public async Task Failed_verification_returns_failure_and_blocks_edits_after_repair_cap()
+    {
+        var filePath = Path.Combine(_root, "Program.cs");
+        File.WriteAllText(filePath, "class Old {}\n");
+        var approvals = 0;
+        var reviews = 0;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => { reviews++; return Task.FromResult(true); },
+            _ => { approvals++; return Task.FromResult(true); },
+            maxRepairAttempts: 1);
+
+        var first = await ExecuteAsync(executor, "verify_command", """{"command":"exit 7"}""");
+        var second = await ExecuteAsync(executor, "verify_command", """{"command":"exit 7"}""");
+        var edit = await ExecuteAsync(executor, "write_file", """{"relative_path":"Program.cs","content":"class New {}"}""");
+        var command = await ExecuteAsync(executor, "run_command", """{"command":"exit 0"}""");
+
+        Assert.Contains("Verification FAILED (exit code 7)", first);
+        Assert.Contains("repair attempts allowed: 1", first);
+        Assert.Contains("Repair limit reached", second);
+        Assert.Contains("repair limit has been reached", edit);
+        Assert.Contains("repair limit has been reached", command);
+        Assert.Equal(2, approvals);
+        Assert.Equal(0, reviews);
+        Assert.Equal("class Old {}\n", File.ReadAllText(filePath));
+        Assert.Empty(_conversation.FileChanges);
+    }
+
+    [Fact]
+    public async Task Rejected_verification_does_not_execute_or_claim_a_result()
+    {
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false));
+
+        var result = await ExecuteAsync(executor, "verify_command", """{"command":"exit 0"}""");
+
+        Assert.Contains("rejected by user", result);
+        Assert.DoesNotContain("PASSED", result);
+        Assert.DoesNotContain("FAILED", result);
+    }
+
+    [Fact]
     public async Task File_tools_reject_path_traversal_and_secret_files()
     {
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,

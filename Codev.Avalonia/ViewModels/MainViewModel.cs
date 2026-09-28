@@ -212,7 +212,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (IsLocalModel && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted && !IsPlanMode));
     public Func<string, string, string, bool, string?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
-    public Func<string, string, string, Task<bool>>? ApproveProjectCommandAsync { get; set; }
+    public Func<string, string, string, bool, Task<bool>>? ApproveProjectCommandAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
         ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase)
@@ -995,6 +995,7 @@ public sealed class MainViewModel : ViewModelBase
             Tool("create_file", "Propose a new supported source, text, or configuration file. Codev shows the full contents for approval before creating it.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("write_file", "Propose a complete replacement for one existing project file. Codev shows the change and requires approval before applying it.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("apply_patch", "Propose a strict unified-diff patch for one existing project file. Pass only @@ hunk headers and lines prefixed by space, +, or -. Do not include ---/+++ file headers. Every context/removal line must match exactly; Codev rejects mismatches before review. The complete resulting file is reviewed and checkpointed before applying.", new { relative_path = new { type = "string" }, patch = new { type = "string" } }, ["relative_path", "patch"]),
+            Tool("verify_command", "Request approval to run a test or lint command in the project folder. Codev reports the exact exit status and bounded output to you. A failing run allows at most two reviewed repair attempts, and every subsequent verification run needs approval. After the cap, Codev blocks further edits and commands. Do not claim success unless this tool reports exit code 0.", new { command = new { type = "string" } }, ["command"]),
             Tool("run_command", $"Request approval to run one {shell.DisplayName} command in the project folder. Every invocation requires individual approval.", new { command = new { type = "string" } }, ["command"])
         ];
         var repeatedCalls = new Codev.RepeatedToolCallGuard();
@@ -1002,7 +1003,7 @@ public sealed class MainViewModel : ViewModelBase
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
                 (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After, proposal.IsNewFile, proposal.ProposedPatch) ?? Task.FromResult(false))),
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
-                (ApproveProjectCommandAsync?.Invoke(proposal.Command, proposal.ProjectPath, proposal.ShellName) ?? Task.FromResult(false))),
+                (ApproveProjectCommandAsync?.Invoke(proposal.Command, proposal.ProjectPath, proposal.ShellName, proposal.IsVerification) ?? Task.FromResult(false))),
             status: message => _ = SetConnectionStatusAsync(message));
         var transcript = new System.Text.StringBuilder();
         for (var round = 0; round < 8; round++)
