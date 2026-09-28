@@ -45,6 +45,8 @@ ul { padding-left:1.2em; }
 <li><b>Results vary from run to run.</b> Qwen3.6 scored between 51% and 84% on the filter task across three runs, and <code>qwen3-coder:30b</code> scored 50% and 100% on the same refactor task at different settings. Treat gaps of a few points, and anything based on a single run, as uncertain.</li>
 </ul>
 <p class="muted">Confidence: the ranking of the two Qwen3-Coder models below Qwen3.6 is fairly solid (three runs each). The comparison between Qwen3.6 and Qwen3.8 is not: Qwen3.8 has one run per task, so its hard score of 79% versus Qwen3.6's 85% is within the noise.</p>
+<h3>Follow-up: does a bigger thinking budget help Qwen3.6?</h3>
+<p>Afterwards I re-ran Qwen3.6-35B-A3B with thinking on and the token limit per reply raised from 8,000 to 16,000 (with a larger 32,000-token context window). On the hard agent task it scored 28, 24 and 25 of 29 across three runs (about 89% on average, against 83% with thinking off and 24 of 29 at the old limit), taking 6 to 10 minutes per run instead of about 3. It never reached the 29 of 29 that Qwen3.8 got with thinking on. On the filter task it used all 16,000 tokens (17.5 minutes) without writing an answer and scored 1 of 51. So more room helps a little on the agent task and does not fix the filter task. These runs are in a separate file and are not included in the tables above.</p>
 </div>
 
 <h2>Overall</h2>

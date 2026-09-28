@@ -452,6 +452,7 @@ Findings that change the backlog:
 - **One run is not enough.** The same model varied by up to 33 points between runs of one task (Qwen3.6 on the filter task: 51% to 84%). B12's "test before upgrade" must use several runs before it recommends a switch.
 - **Passing the visible tests is not proof.** Every model that fixed only some of the bugs reported that everything was fixed, because the tests it could see passed. A completion message should say which checks were run and that passing them does not prove correctness (the "visible work" principle, and B5).
 - **Prompt reading is where dense models lose on a CPU.** The mixture-of-experts models read prompts 4 to 6 times faster, which makes adding a lot of context (A8, A9) cheap for them and expensive for dense models.
+- **A bigger thinking budget helps a little, not enough.** Raising the limit to 16,000 tokens per reply (with a 32,000-token context) let Qwen3.6 score 28, 24 and 25 of 29 on the hard agent task over three runs, against 24 of 29 three times with thinking off. It still never matched Qwen3.8 with thinking (29 of 29, one run), and on the filter task it used all 16,000 tokens without writing an answer. If B6 offers a thinking toggle, it should also show that the budget can run out.
 - **Small samples.** Qwen3.8 has one run per task and the thinking-on runs have one each, so a gap of a few points between Qwen3.6 and Qwen3.8 is not established.
 
 #### V4. Test what exists
