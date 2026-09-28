@@ -365,9 +365,17 @@ public partial class MainWindow : Window
             content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
             var border = new Border { Child = content, Padding = new Thickness(isUser ? 15 : 0, isUser ? 12 : 8, isUser ? 15 : 0, isUser ? 12 : 8), Background = isUser ? ThemeBrush("MessageBubbleBrush") : Brushes.Transparent, CornerRadius = new CornerRadius(12), HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Stretch, MaxWidth = 720, Margin = new Thickness(0, 0, 0, 17) };
+            var menu = new ContextMenu();
+            var copy = new MenuItem { Header = "Copy message" };
+            copy.Click += (_, _) =>
+            {
+                try { Clipboard.SetText(message.Content); }
+                catch (Exception ex) { ConnectionLabel.Text = $"Could not copy message: {ex.Message}"; }
+            };
+            menu.Items.Add(copy);
             if (_requestCancellation is null && conversation.PendingRequestCount == 0)
             {
-                var menu = new ContextMenu();
+                menu.Items.Add(new Separator());
                 var branchIndex = messageIndex;
                 var branch = new MenuItem { Header = "Branch conversation from here" };
                 branch.Click += async (_, _) => await BranchConversationAsync(conversation, branchIndex);
@@ -391,8 +399,8 @@ public partial class MainWindow : Window
                     continueResponse.Click += async (_, _) => await ContinueInterruptedResponseAsync(conversation, messageIndex);
                     menu.Items.Add(continueResponse);
                 }
-                if (menu.Items.Count > 0) border.ContextMenu = menu;
             }
+            border.ContextMenu = menu;
             MessagesList.Items.Add(border);
         }
         ChatScroll.ScrollToEnd();
