@@ -69,6 +69,15 @@ public sealed class ConversationCompactionServiceTests
         Assert.Equal(11, ConversationCompactionService.BuildPromptHistory(compacted, conversation.Messages).Count);
     }
 
+    [Theory]
+    [InlineData(79, 100, false)]
+    [InlineData(80, 100, true)]
+    [InlineData(90, 100, true)]
+    [InlineData(80, 0, false)]
+    [InlineData(0, 100, false)]
+    public void Context_limit_offer_requires_known_limit_and_at_least_eighty_percent(int promptTokens, int contextLimit, bool expected) =>
+        Assert.Equal(expected, ConversationCompactionService.ShouldOfferCompaction(promptTokens, contextLimit));
+
     [Fact]
     public void Apply_rejects_pending_requests_invalid_cutoffs_and_oversized_summaries()
     {

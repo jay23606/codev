@@ -272,7 +272,13 @@
                                 <TextBlock Text="{Binding RepoMapEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
                                 <Button Content="{Binding LastPromptContextLabel}" Classes="soft" Padding="6,2" FontSize="9" HorizontalAlignment="Left" IsEnabled="{Binding HasLastPromptContext}" Click="PromptContext_Click" ToolTip.Tip="Inspect normalized messages, the exact request JSON body, and approximate token breakdown from the latest Chat, Plan, or Code task request" />
                             </StackPanel>
-                            <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
+                            <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Spacing="3">
+                                <TextBlock Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
+                                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShouldOfferCompaction}">
+                                    <TextBlock Text="{Binding CompactionOfferLabel}" Foreground="#D6A66D" FontSize="9" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                    <Button Content="Compact now" Classes="soft" Padding="6,2" FontSize="9" Click="CompactConversation_Click" ToolTip.Tip="Review a summary of older turns before using it in future prompts" />
+                                </StackPanel>
+                            </StackPanel>
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Orientation="Horizontal" Spacing="6">

@@ -58,6 +58,7 @@ public sealed class MainViewModel : ViewModelBase
     private Uri _ollamaEndpoint = Codev.OllamaEndpoint.Default;
     private readonly Dictionary<string, string> _cloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, Codev.PromptContextSnapshot> _lastPromptContexts = [];
+    private readonly Dictionary<Guid, int> _lastPromptMessageCounts = [];
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
     private bool _isUnloadingModel;
@@ -135,7 +136,11 @@ public sealed class MainViewModel : ViewModelBase
         ResumeQueueCommand = new RelayCommand(_ => ResumeQueue(), _ => HasQueuedTurns && _queuePaused);
         CancelQueuedCommand = new RelayCommand(_ => CancelQueuedTurns(), _ => ActiveConversation?.PendingRequestCount > 0);
         _draftSaveTimer.Tick += (_, _) => { _draftSaveTimer.Stop(); Persist(); };
-        Messages.CollectionChanged += (_, _) => ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        Messages.CollectionChanged += (_, _) =>
+        {
+            ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(ShouldOfferCompaction));
+        };
         LoadConversations();
         if (_conversations.Count == 0)
         {
@@ -164,6 +169,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(MessageCountLabel));
                 OnPropertyChanged(nameof(HasCompactionSummary));
                 OnPropertyChanged(nameof(CompactionStatusLabel));
+                OnPropertyChanged(nameof(ShouldOfferCompaction));
                 OnPropertyChanged(nameof(ProjectLabel));
                 OnPropertyChanged(nameof(ContextLabel));
                 OnPropertyChanged(nameof(HasLastPromptContext));
@@ -207,6 +213,16 @@ public sealed class MainViewModel : ViewModelBase
     public string CompactionStatusLabel => HasCompactionSummary && ActiveConversation is { } conversation
         ? $"Earlier {conversation.CompactionThroughMessageCount} messages summarized for future prompts · original transcript preserved"
         : "";
+    public bool ShouldOfferCompaction => ActiveConversation is { } conversation && !IsGenerating &&
+        conversation.PendingRequestCount == 0 && !_queueProcessorRunning && _requestQueue.Count == 0 &&
+        _lastPromptMessageCounts.TryGetValue(conversation.Id, out var messageCount) && messageCount == conversation.Messages.Count &&
+        conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
+        conversation.LastPromptContext > 0 && conversation.LastPromptContext == conversation.NumCtx &&
+        Codev.ConversationCompactionService.FindBoundary(conversation.Messages, conversation.CompactionThroughMessageCount) > 0 &&
+        Codev.ConversationCompactionService.ShouldOfferCompaction(conversation.LastPromptTokens, conversation.LastPromptContext);
+    public string CompactionOfferLabel => ActiveConversation is { LastPromptContext: > 0 } conversation
+        ? $"This request used {Math.Round(100d * conversation.LastPromptTokens / conversation.LastPromptContext)}% of its selected context. Compact older turns before continuing?"
+        : "This request used most of the selected context. Compact older turns before continuing?";
     public string ProjectLabel => ActiveConversation?.ProjectPath is { Length: > 0 } path ? Path.GetFileName(path) + " · " + path : "No project folder attached";
     public int FileChangesCount => ActiveConversation?.FileChanges?.Count ?? 0;
     public string FileChangesLabel => FileChangesCount == 0 ? "Files" : $"Files · {FileChangesCount}";
@@ -286,6 +302,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(SendButtonLabel));
                 OnPropertyChanged(nameof(QueueStatusLabel));
+                OnPropertyChanged(nameof(ShouldOfferCompaction));
                 OnPropertyChanged(nameof(CanReviewFileChanges));
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
@@ -455,12 +472,14 @@ public sealed class MainViewModel : ViewModelBase
         {
             ReportContextActionStatus("Wait for the current Ollama unload operation before changing models.");
             OnPropertyChanged(nameof(SelectedModel));
+            OnPropertyChanged(nameof(ShouldOfferCompaction));
             return;
         }
         if (IsCodeTask && choice.Provider != "ollama")
         {
             ReportContextActionStatus("Code task mode requires a local Ollama model. Turn Code task mode off before selecting a hosted model.");
             OnPropertyChanged(nameof(SelectedModel));
+            OnPropertyChanged(nameof(ShouldOfferCompaction));
             return;
         }
         if (string.Equals(Provider, choice.Provider, StringComparison.OrdinalIgnoreCase) &&
@@ -475,6 +494,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
+            OnPropertyChanged(nameof(ShouldOfferCompaction));
             OnPropertyChanged(nameof(CanToggleCodeTaskMode));
             ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         }
@@ -488,6 +508,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
+            OnPropertyChanged(nameof(ShouldOfferCompaction));
             OnPropertyChanged(nameof(CanToggleCodeTaskMode));
             ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
             Persist();
@@ -515,6 +536,7 @@ public sealed class MainViewModel : ViewModelBase
                 if (ActiveConversation.NumCtx == value) return;
                 ActiveConversation.NumCtx = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(ShouldOfferCompaction));
                 Persist();
             }
         }
@@ -1329,8 +1351,10 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("The conversation changed or a request was queued. The proposed summary was not applied.");
             return false;
         }
+        _lastPromptMessageCounts.Remove(conversation.Id);
         OnPropertyChanged(nameof(HasCompactionSummary));
         OnPropertyChanged(nameof(CompactionStatusLabel));
+        OnPropertyChanged(nameof(ShouldOfferCompaction));
         Persist();
         ReportContextActionStatus("Summary applied to future prompts. The full transcript remains saved and visible.");
         return true;
@@ -1345,8 +1369,10 @@ public sealed class MainViewModel : ViewModelBase
             return false;
         }
         Codev.ConversationCompactionService.Clear(conversation);
+        _lastPromptMessageCounts.Remove(conversation.Id);
         OnPropertyChanged(nameof(HasCompactionSummary));
         OnPropertyChanged(nameof(CompactionStatusLabel));
+        OnPropertyChanged(nameof(ShouldOfferCompaction));
         Persist();
         ReportContextActionStatus("Future prompts will use the full conversation history again.");
         return true;
@@ -1567,9 +1593,14 @@ public sealed class MainViewModel : ViewModelBase
             conversation.LastPromptTokens = promptTokens;
             conversation.LastPromptContext = contextLimit;
             conversation.LastPromptModel = model;
+            _lastPromptMessageCounts[conversation.Id] = conversation.Messages.Count;
             if (_lastPromptContexts.TryGetValue(conversation.Id, out var snapshot))
                 _lastPromptContexts[conversation.Id] = snapshot with { ActualPromptTokens = promptTokens };
-            if (ReferenceEquals(ActiveConversation, conversation)) OnPropertyChanged(nameof(LastPromptContextLabel));
+            if (ReferenceEquals(ActiveConversation, conversation))
+            {
+                OnPropertyChanged(nameof(LastPromptContextLabel));
+                OnPropertyChanged(nameof(ShouldOfferCompaction));
+            }
         });
     }
 
@@ -1815,7 +1846,7 @@ public sealed class MainViewModel : ViewModelBase
                 await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
                                    savedTurn.Provider, apiKey, savedTurn.Model, cloudMessages, token.Token,
                                    onInputTokenCount: inputTokens => RecordPromptTokenUsageAsync(
-                                       conversation, savedTurn.Model, savedTurn.NumCtx, inputTokens),
+                                       conversation, savedTurn.Model, 0, inputTokens),
                                    onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body)))
                 {
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
