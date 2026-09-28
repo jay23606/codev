@@ -2243,7 +2243,6 @@ public sealed class MainViewModel : ViewModelBase
                 cancellationToken, body => SetLastPromptRequestBodyAsync(conversation, body));
             if (response.InputTokens is { } inputTokens)
                 await RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, 0, inputTokens);
-            input.AddRange(response.OutputItems.Cast<object>());
             if (response.FunctionCalls.Count == 0)
             {
                 if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
@@ -2253,6 +2252,7 @@ public sealed class MainViewModel : ViewModelBase
                 return;
             }
             if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.AppendLine(response.OutputText);
+            var toolOutputs = new List<Codev.OpenAiFunctionOutput>(response.FunctionCalls.Count);
             foreach (var call in response.FunctionCalls)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -2280,7 +2280,7 @@ public sealed class MainViewModel : ViewModelBase
                 var result = name == "update_task_checklist"
                     ? await UpdateTaskChecklistFromModelAsync(conversation, arguments)
                     : await executor.ExecuteAsync(name, arguments, cancellationToken);
-                input.Add(new { type = "function_call_output", call_id = callId, output = result });
+                toolOutputs.Add(new Codev.OpenAiFunctionOutput(callId, result));
                 Persist();
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
@@ -2291,6 +2291,7 @@ public sealed class MainViewModel : ViewModelBase
                 transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**").AppendLine(TruncateToolOutput(result));
                 await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
             }
+            Codev.OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, toolOutputs);
         }
         throw new InvalidOperationException("OpenAI Code task reached the eight-step tool limit. Send a follow-up to continue.");
     }

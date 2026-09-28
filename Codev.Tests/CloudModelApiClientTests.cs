@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 
 namespace Codev.Tests;
 
@@ -166,6 +167,47 @@ public sealed class CloudModelApiClientTests
             new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("key", "gpt-example", Array.Empty<object>(), Array.Empty<object>()));
 
         Assert.Contains(expected, exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Openai_tool_response_preserves_refusal_text_without_invoking_a_tool()
+    {
+        using var http = new HttpClient(new StubHandler(_ => Json("""
+            {"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"I can't help with that request."}]}]}
+            """)));
+
+        var result = await new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("key", "gpt-example",
+            Array.Empty<object>(), Array.Empty<object>());
+
+        Assert.Empty(result.FunctionCalls);
+        Assert.Equal("I can't help with that request.", result.OutputText);
+    }
+
+    [Fact]
+    public async Task Openai_followup_request_contains_the_function_call_and_its_local_result()
+    {
+        using var toolCall = JsonDocument.Parse("""{"type":"function_call","call_id":"call-1","name":"list_files","arguments":"{}"}""");
+        var response = new OpenAiToolResponse([toolCall.RootElement.Clone()], [toolCall.RootElement.Clone()], "", null);
+        var input = new List<object> { new { role = "user", content = "list files" } };
+        OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, [new("call-1", "[]")]);
+        string? requestBody = null;
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return Json("""
+                {"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"No files found."}]}]}
+                """);
+        }));
+
+        var final = await new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("key", "gpt-example", input, []);
+
+        using var sent = JsonDocument.Parse(requestBody!);
+        var sentInput = sent.RootElement.GetProperty("input").EnumerateArray().ToArray();
+        Assert.Equal("function_call", sentInput[1].GetProperty("type").GetString());
+        Assert.Equal("function_call_output", sentInput[2].GetProperty("type").GetString());
+        Assert.Equal("call-1", sentInput[2].GetProperty("call_id").GetString());
+        Assert.Equal("[]", sentInput[2].GetProperty("output").GetString());
+        Assert.Equal("No files found.", final.OutputText);
     }
 
     [Fact]
