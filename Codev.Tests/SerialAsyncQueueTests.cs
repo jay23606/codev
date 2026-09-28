@@ -67,6 +67,21 @@ public sealed class SerialAsyncQueueTests
     }
 
     [Fact]
+    public async Task Removing_queued_items_keeps_the_remaining_fifo_order()
+    {
+        var queue = new SerialAsyncQueue<int>();
+        queue.Enqueue(1);
+        queue.Enqueue(2);
+        queue.Enqueue(3);
+
+        Assert.Equal([2], queue.RemoveWhere(item => item == 2));
+        var order = new List<int>();
+        await queue.ProcessPendingAsync(item => { order.Add(item); return Task.CompletedTask; }, (_, _) => Task.CompletedTask);
+
+        Assert.Equal([1, 3], order);
+    }
+
+    [Fact]
     public void Runtime_queue_state_is_not_written_to_the_conversation_store()
     {
         var conversation = new Conversation { PendingRequestCount = 4, LastPromptContext = 32_768 };

@@ -27,6 +27,23 @@ public sealed class SerialAsyncQueue<T>
         }
     }
 
+    public IReadOnlyList<T> RemoveWhere(Predicate<T> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        lock (_gate)
+        {
+            var retained = new Queue<T>(_items.Count);
+            var removed = new List<T>();
+            while (_items.TryDequeue(out var item))
+            {
+                if (predicate(item)) removed.Add(item);
+                else retained.Enqueue(item);
+            }
+            while (retained.TryDequeue(out var item)) _items.Enqueue(item);
+            return removed;
+        }
+    }
+
     public async Task ProcessPendingAsync(Func<T, Task> processAsync, Func<T, Exception, Task> onErrorAsync)
     {
         var processor = new object();

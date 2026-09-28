@@ -696,6 +696,12 @@ public partial class MainWindow : Window
             menu.Items.Add(export);
             menu.Items.Add(new Separator());
             menu.Items.Add(archive);
+            if (item.PendingRequestCount > 0)
+            {
+                var cancelQueued = new MenuItem { Header = $"Cancel {item.PendingRequestCount} queued request(s)" };
+                cancelQueued.Click += async (_, _) => await CancelQueuedRequestsAsync(item);
+                menu.Items.Add(cancelQueued);
+            }
             if (item.IsArchived)
             {
                 var delete = new MenuItem { Header = "Delete permanently…" };
@@ -1424,6 +1430,23 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, $"Could not export the conversation.\n\n{ex.Message}", "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private async Task CancelQueuedRequestsAsync(Conversation conversation)
+    {
+        var removed = _requestQueue.RemoveWhere(turn => ReferenceEquals(turn.Conversation, conversation));
+        if (removed.Count == 0) return;
+        foreach (var turn in removed)
+        {
+            conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
+            if (turn.AssistantIndex < conversation.Messages.Count)
+                conversation.Messages[turn.AssistantIndex] = new ChatMessage("assistant", "Queued request canceled before it was sent.");
+        }
+        conversation.UpdatedAt = DateTimeOffset.Now;
+        if (ReferenceEquals(_active, conversation)) RenderMessages();
+        RefreshConversationLists();
+        UpdateActiveRequestStatus();
+        await SaveAsync();
     }
 
     private static string MakeExportFileName(string title)
