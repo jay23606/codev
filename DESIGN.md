@@ -55,7 +55,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 - [x] Project/workspace switcher with recent and pinned projects; each workspace maps to a chosen local folder.
 - [x] Multiple conversations belonging to each project, plus ungrouped quick chats.
-- [x] Project instructions, reusable knowledge notes, and context exclusions persist locally; instructions and knowledge are applied to project chat context, and knowledge is capped at 20,000 characters. User-selected source lists remain.
+- [x] Project instructions, reusable knowledge notes, and context exclusions persist locally; instructions and knowledge are applied to project chat context, and knowledge is capped at 20,000 characters. Root `AGENTS.md` is also included through safe project-bounded access with a 20,000-character cap. User-selected source lists remain.
 - [x] Deliberately select project-relative files for chat context; if none are selected, use the existing bounded safe excerpt.
 - [x] Project file browser with filtering, safe read-only previews, and direct add-to-context; richer tree navigation and file diffs remain.
 - [x] Approximate source-context token count versus the selected model context limit, with tooltip distinguishing it from Ollama's actual prompt count.
@@ -102,7 +102,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 6. Extensibility and automation
 
-- Local skills/instructions for repeatable workflows, with project-level and user-level scope.
+- Root project `AGENTS.md` instructions and saved project guidance are supported; user-level local skills/instructions remain pending.
 - MCP-compatible tools with per-server enablement, visible permissions, and logs; keep local-only use straightforward.
 - [x] Reusable local prompt templates with bounded name/prompt lengths; choosing a template inserts it into the composer for review before sending.
 - Optional recurring local jobs with an approval/review queue.

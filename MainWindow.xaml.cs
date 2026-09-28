@@ -1589,6 +1589,11 @@ public partial class MainWindow : Window
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + project.Instructions;
             if (project is not null)
                 system += "\n\n" + ProjectKnowledgeContext.Build(project.Knowledge);
+            if (project is not null)
+            {
+                var agentGuidance = await ProjectAgentInstructions.LoadAsync(new WorkspaceFileService(project.Path, project.ContextExclusions), cancellation.Token);
+                if (!string.IsNullOrWhiteSpace(agentGuidance)) system += "\n\n" + agentGuidance;
+            }
             if (!string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
             {
                 system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
