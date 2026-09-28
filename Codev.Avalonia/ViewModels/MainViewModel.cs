@@ -26,6 +26,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _searchText = "";
     private string _draft = "";
     private string _model = "devstral-small-2-64k";
+    private int _contextSize;
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private Task _persistenceTask = Task.CompletedTask;
@@ -43,6 +44,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
     public ObservableCollection<Codev.ChatMessage> Messages { get; } = [];
+    public ObservableCollection<ContextSizeChoice> ContextSizes { get; } = [];
     public ICommand NewConversationCommand { get; }
     public ICommand SelectConversationCommand { get; }
     public ICommand TogglePinCommand { get; }
@@ -89,6 +91,8 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ContextLabel));
                 OnPropertyChanged(nameof(ArchiveLabel));
                 OnPropertyChanged(nameof(Model));
+                OnPropertyChanged(nameof(ContextSize));
+                RefreshContextSizes(Model);
                 ((RelayCommand)TogglePinCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ArchiveConversationCommand).NotifyCanExecuteChanged();
             }
@@ -136,7 +140,28 @@ public sealed class MainViewModel : ViewModelBase
             if (string.IsNullOrWhiteSpace(value) || string.Equals(Model, value, StringComparison.OrdinalIgnoreCase)) return;
             if (ActiveConversation is null) SetProperty(ref _model, value);
             else { ActiveConversation.Model = value; OnPropertyChanged(); Persist(); }
+            RefreshContextSizes(value);
             _ = WarmModelAsync(value);
+        }
+    }
+
+    public int ContextSize
+    {
+        get => ActiveConversation?.NumCtx ?? _contextSize;
+        set
+        {
+            if (!ContextSizes.Any(choice => choice.Value == value)) return;
+            if (ActiveConversation is null)
+            {
+                if (SetProperty(ref _contextSize, value)) return;
+            }
+            else
+            {
+                if (ActiveConversation.NumCtx == value) return;
+                ActiveConversation.NumCtx = value;
+                OnPropertyChanged();
+                Persist();
+            }
         }
     }
 
@@ -155,6 +180,12 @@ public sealed class MainViewModel : ViewModelBase
         var previousModel = Model;
         ActiveConversation = conversation;
         _model = conversation.Model;
+        if (conversation.NumCtx > Codev.OllamaContextSizes.MaximumFor(conversation.Model))
+        {
+            conversation.NumCtx = 0;
+            Persist();
+        }
+        RefreshContextSizes(conversation.Model);
         if (!string.Equals(previousModel, conversation.Model, StringComparison.OrdinalIgnoreCase)) _ = WarmModelAsync(conversation.Model);
         Draft = conversation.Draft;
         Messages.Clear();
@@ -330,6 +361,7 @@ public sealed class MainViewModel : ViewModelBase
                 Models.Clear();
                 foreach (var model in allChoices) Models.Add(model);
                 if (Models.Count > 0 && Models.All(m => !m.Name.Equals(Model, StringComparison.OrdinalIgnoreCase))) Model = Models[0].Name;
+                RefreshContextSizes(Model);
                 if (Models.Count == 0) ConnectionStatus = "Ollama connected · no local models installed";
                 else
                 {
@@ -423,6 +455,23 @@ public sealed class MainViewModel : ViewModelBase
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
+    private void RefreshContextSizes(string model)
+    {
+        var selected = ActiveConversation?.NumCtx ?? _contextSize;
+        var choices = Codev.OllamaContextSizes.ForModel(model);
+        if (selected > 0 && !choices.Contains(selected))
+        {
+            selected = 0;
+            if (ActiveConversation is { } conversation) conversation.NumCtx = 0;
+            else _contextSize = 0;
+            Persist();
+        }
+        ContextSizes.Clear();
+        foreach (var value in choices)
+            ContextSizes.Add(new ContextSizeChoice(value, value == 0 ? "Model default" : $"{value / 1024}K"));
+        OnPropertyChanged(nameof(ContextSize));
+    }
+
     private async Task WarmModelAsync(string model)
     {
         if (!Models.Any(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase))) return;
@@ -469,6 +518,7 @@ public sealed class MainViewModel : ViewModelBase
 }
 
 public sealed record ModelChoice(string Name, string DisplayName);
+public sealed record ContextSizeChoice(int Value, string DisplayName);
 
 public sealed class RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null) : ICommand
 {

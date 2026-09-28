@@ -30,7 +30,11 @@ public sealed class Conversation
 
 public sealed record FileChangeRecord(string RelativePath, string? CheckpointPath, DateTimeOffset ChangedAt, string Kind, bool PreviousFileExisted = true);
 
-public sealed record ChatMessage(string Role, string Content);
+public sealed record ChatMessage(string Role, string Content)
+{
+    [JsonIgnore] public bool IsUser => string.Equals(Role, "user", StringComparison.OrdinalIgnoreCase);
+    [JsonIgnore] public bool IsAssistant => string.Equals(Role, "assistant", StringComparison.OrdinalIgnoreCase);
+}
 
 public sealed class WorkspaceProject
 {
