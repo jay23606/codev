@@ -134,6 +134,24 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Read_only_permission_executes_inspection_without_launching_the_shell()
+    {
+        File.WriteAllText(Path.Combine(_root, "README.md"), "safe inspection output");
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false),
+            permissionApproval: proposal => Task.FromResult(proposal.IsVerification
+                ? CommandApprovalOutcome.Rejected
+                : CommandApprovalOutcome.ApprovedReadOnly));
+        var command = OperatingSystem.IsWindows() ? "Get-Content README.md" : "cat README.md";
+
+        var result = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command }));
+
+        using var output = JsonDocument.Parse(result);
+        Assert.Equal("untrusted_tool_output", output.RootElement.GetProperty("type").GetString());
+        Assert.Contains("safe inspection output", output.RootElement.GetProperty("content").GetString());
+    }
+
+    [Fact]
     public async Task Saved_permission_denial_blocks_verification_without_returning_a_test_result()
     {
         var approvalDialogShown = false;
