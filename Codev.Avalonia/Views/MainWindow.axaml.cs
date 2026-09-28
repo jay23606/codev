@@ -24,6 +24,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
+        DragDrop.SetAllowDrop(ComposerTextBox, true);
+        DragDrop.AddDragOverHandler(ComposerTextBox, Composer_DragOver);
+        DragDrop.AddDropHandler(ComposerTextBox, Composer_Drop);
         Closed += (_, _) => { _fileMentionSearch?.Cancel(); _slashCommandSearch?.Cancel(); };
         DataContextChanged += (_, _) => ObserveMessages();
         DataContextChanged += (_, _) => ConfigureAgentInteractions();
@@ -54,6 +57,26 @@ public partial class MainWindow : Window
             e.NewItems?.Cast<Codev.ChatMessage>().Any(message => message.Role == "user") == true)
             _followOutput = true;
         if (_followOutput) ScheduleScrollToLatest();
+    }
+
+    private void Composer_DragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) && (DataContext as ViewModels.MainViewModel)?.HasProject == true
+            ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    private void Composer_Drop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        var paths = e.DataTransfer.TryGetFiles()?.Select(file => file.TryGetLocalPath())
+            .Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToArray() ?? [];
+        if (paths.Length == 0) return;
+        if (!viewModel.HasProject)
+        {
+            viewModel.ReportContextActionStatus("Attach a project folder before dropping files. Dropped files are accepted only from that project and stay local until you send a prompt.");
+            return;
+        }
+        viewModel.AddContextFiles(paths);
     }
 
     private void ScheduleScrollToLatest()

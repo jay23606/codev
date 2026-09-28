@@ -37,8 +37,10 @@ public static class ProjectContextSelection
                 var fullPath = Path.GetFullPath(path);
                 if (!WorkspaceFileService.IsPathWithinRoot(service.Root, fullPath)) { ignored++; continue; }
                 var relative = Path.GetRelativePath(service.Root, fullPath);
-                service.ResolvePath(relative);
-                if (!availableFiles.Contains(relative) || selectedFiles.Contains(relative, StringComparer.OrdinalIgnoreCase) || selectedFiles.Count >= WorkspaceFileService.MaxContextFiles) { ignored++; continue; }
+                var validatedPath = service.ResolvePath(relative);
+                relative = Path.GetRelativePath(service.Root, validatedPath);
+                if (!availableFiles.Contains(relative) || service.IsContextExcluded(relative) ||
+                    selectedFiles.Contains(relative, StringComparer.OrdinalIgnoreCase) || selectedFiles.Count >= WorkspaceFileService.MaxContextFiles) { ignored++; continue; }
                 selectedFiles.Add(relative);
                 added++;
             }
