@@ -35,6 +35,9 @@ public sealed class MainViewModel : ViewModelBase
     private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
+    private readonly Queue<QueuedChatTurn> _requestQueue = new();
+    private bool _queuePaused;
+    private bool _queueProcessorRunning;
     private string _connectionStatus = "Checking Ollama…";
     private bool _isDarkTheme = true;
     private CancellationTokenSource? _modelLoadCancellation;
@@ -50,6 +53,9 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand TogglePinCommand { get; }
     public ICommand ArchiveConversationCommand { get; }
     public ICommand SendCommand { get; }
+    public ICommand StopGenerationCommand { get; }
+    public ICommand ResumeQueueCommand { get; }
+    public ICommand CancelQueuedCommand { get; }
     public ICommand ToggleThemeCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
     [
@@ -63,7 +69,14 @@ public sealed class MainViewModel : ViewModelBase
         ArchiveConversationCommand = new RelayCommand(_ => ArchiveConversation(), _ => ActiveConversation is not null);
         ToggleArchiveViewCommand = new RelayCommand(_ => { ShowArchived = !ShowArchived; RebuildLists(); });
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
-        SendCommand = new RelayCommand(_ => { if (IsGenerating) StopGeneration(); else _ = SendDraftAsync(); }, _ => IsGenerating || !string.IsNullOrWhiteSpace(Draft));
+        SendCommand = new RelayCommand(_ =>
+        {
+            if (string.IsNullOrWhiteSpace(Draft)) StopGeneration();
+            else _ = SendDraftAsync();
+        }, _ => IsGenerating || !string.IsNullOrWhiteSpace(Draft));
+        StopGenerationCommand = new RelayCommand(_ => StopGeneration(), _ => IsGenerating);
+        ResumeQueueCommand = new RelayCommand(_ => ResumeQueue(), _ => HasQueuedTurns && _queuePaused);
+        CancelQueuedCommand = new RelayCommand(_ => CancelQueuedTurns(), _ => ActiveConversation?.PendingRequestCount > 0);
         _draftSaveTimer.Tick += (_, _) => { _draftSaveTimer.Stop(); Persist(); };
         LoadConversations();
         if (_conversations.Count == 0)
@@ -72,6 +85,7 @@ public sealed class MainViewModel : ViewModelBase
             Persist();
         }
         RebuildLists();
+        RestoreQueuedTurns();
         SelectConversation(_conversations.FirstOrDefault(c => !c.IsArchived) ?? _conversations[0]);
         LoadTheme();
         _ = LoadModelsAsync();
@@ -106,7 +120,12 @@ public sealed class MainViewModel : ViewModelBase
     public string ContextLabel => ActiveConversation?.ContextFiles.Count > 0 ? $"{ActiveConversation.ContextFiles.Count} context files" : "No project context";
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
     public string ThemeLabel => _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
-    public string SendButtonLabel => IsGenerating ? "■" : "↑";
+    public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) ? "■" : "↑";
+    public bool HasQueuedTurns => _requestQueue.Count > 0;
+    public bool IsQueuePaused => _queuePaused;
+    public string QueueStatusLabel => HasQueuedTurns
+        ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · resume when ready" : $"{_requestQueue.Count} request(s) queued"
+        : "";
     public bool IsGenerating
     {
         get => _isGenerating;
@@ -115,7 +134,9 @@ public sealed class MainViewModel : ViewModelBase
             if (SetProperty(ref _isGenerating, value))
             {
                 OnPropertyChanged(nameof(SendButtonLabel));
+                OnPropertyChanged(nameof(QueueStatusLabel));
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)StopGenerationCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -128,6 +149,7 @@ public sealed class MainViewModel : ViewModelBase
             if (!SetProperty(ref _draft, value)) return;
             if (ActiveConversation is { } conversation) conversation.Draft = value;
             ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(SendButtonLabel));
             _draftSaveTimer.Stop();
             _draftSaveTimer.Start();
         }
@@ -225,7 +247,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task SendDraftAsync()
     {
-        if (ActiveConversation is not { } conversation || string.IsNullOrWhiteSpace(Draft) || IsGenerating) return;
+        if (ActiveConversation is not { } conversation || string.IsNullOrWhiteSpace(Draft)) return;
         var text = Draft.Trim();
         if (conversation.Title == "New conversation") conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
         else if (conversation.Messages.Count == 0) conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
@@ -238,21 +260,72 @@ public sealed class MainViewModel : ViewModelBase
         Messages.Add(userMessage);
         Messages.Add(conversation.Messages[^1]);
         var assistantIndex = conversation.Messages.Count - 1;
-        var token = new CancellationTokenSource();
-        _generationCancellation = token;
-        IsGenerating = true;
+        var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
+            false, false, conversation.ProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature);
+        conversation.PendingTurns ??= [];
+        conversation.PendingTurns.Add(queuedTurn);
+        conversation.PendingRequestCount++;
+        var turn = new QueuedChatTurn(conversation, queuedTurn);
+        _requestQueue.Enqueue(turn);
+        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued locally · waiting for the current response");
+        if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        OnPropertyChanged(nameof(HasQueuedTurns));
+        ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)CancelQueuedCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ConversationTitle));
         OnPropertyChanged(nameof(MessageCountLabel));
         Persist();
         RebuildLists();
+        if (!_queuePaused) _ = ProcessQueuedTurnsAsync();
+        await Task.CompletedTask;
+    }
+
+    private async Task ProcessQueuedTurnsAsync()
+    {
+        if (_queueProcessorRunning || _queuePaused || _requestQueue.Count == 0) return;
+        _queueProcessorRunning = true;
+        try
+        {
+            while (!_queuePaused && _requestQueue.TryDequeue(out var turn))
+            {
+                await ExecuteQueuedTurnAsync(turn);
+            }
+        }
+        finally
+        {
+            _queueProcessorRunning = false;
+            OnPropertyChanged(nameof(QueueStatusLabel));
+            OnPropertyChanged(nameof(HasQueuedTurns));
+            ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
+        }
+    }
+
+    private async Task ExecuteQueuedTurnAsync(QueuedChatTurn turn)
+    {
+        var conversation = turn.Conversation;
+        var savedTurn = turn.Turn;
+        var assistantIndex = savedTurn.AssistantIndex;
+        var token = new CancellationTokenSource();
+        _generationCancellation = token;
+        conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
+        conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == assistantIndex);
+        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "");
+        if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+        IsGenerating = true;
+        Persist();
+        await _persistenceTask;
         try
         {
             var history = Codev.OllamaConversationHistory.Normalize(
                 conversation.Messages.Take(assistantIndex).Select(message => new Codev.ChatMessage(message.Role, message.Content))
                     .Prepend(new Codev.ChatMessage("system", "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only.")))
                 .Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
-            var payload = new Dictionary<string, object> { ["model"] = conversation.Model, ["messages"] = history, ["stream"] = true };
-            if (conversation.NumCtx > 0) payload["options"] = new Dictionary<string, object> { ["num_ctx"] = conversation.NumCtx };
+            var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["stream"] = true };
+            var options = new Dictionary<string, object>();
+            if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
+            if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
+            if (options.Count > 0) payload["options"] = options;
             using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/chat")) { Content = JsonContent.Create(payload) };
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token.Token);
             if (!response.IsSuccessStatusCode)
@@ -273,7 +346,10 @@ public sealed class MainViewModel : ViewModelBase
                     output.Append(chunk.GetString());
                     var responseText = output.ToString();
                     conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", responseText);
-                    if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+                    });
                 }
             }
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
@@ -293,7 +369,10 @@ public sealed class MainViewModel : ViewModelBase
         }
         finally
         {
-            if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+            });
             IsGenerating = false;
             _generationCancellation = null;
             token.Dispose();
@@ -301,7 +380,70 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(MessageCountLabel));
             Persist();
             RebuildLists();
+            OnPropertyChanged(nameof(QueueStatusLabel));
+            ((RelayCommand)CancelQueuedCommand).NotifyCanExecuteChanged();
         }
+    }
+
+    private void RestoreQueuedTurns()
+    {
+        var restored = Codev.ConversationQueueRecovery.Restore(_conversations);
+        foreach (var item in restored)
+        {
+            item.Conversation.PendingRequestCount++;
+            _requestQueue.Enqueue(new QueuedChatTurn(item.Conversation, item.Turn));
+        }
+        foreach (var conversation in _conversations)
+        {
+            for (var i = 1; i < conversation.Messages.Count; i++)
+            {
+                if (conversation.Messages[i].Role == "assistant" && string.IsNullOrWhiteSpace(conversation.Messages[i].Content) &&
+                    conversation.PendingTurns.All(turn => turn.AssistantIndex != i))
+                    conversation.Messages[i] = new Codev.ChatMessage("assistant", "[Generation interrupted when Codev closed.]");
+            }
+        }
+        _queuePaused = _requestQueue.Count > 0;
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        OnPropertyChanged(nameof(HasQueuedTurns));
+        ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
+        Persist();
+    }
+
+    private void ResumeQueue()
+    {
+        if (_requestQueue.Count == 0) return;
+        _queuePaused = false;
+        OnPropertyChanged(nameof(IsQueuePaused));
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
+        _ = ProcessQueuedTurnsAsync();
+    }
+
+    private void CancelQueuedTurns()
+    {
+        if (ActiveConversation is not { } conversation || _requestQueue.Count == 0) return;
+        var retained = new Queue<QueuedChatTurn>();
+        while (_requestQueue.TryDequeue(out var turn))
+        {
+            if (!ReferenceEquals(turn.Conversation, conversation)) { retained.Enqueue(turn); continue; }
+            conversation.Messages[turn.Turn.AssistantIndex] = new Codev.ChatMessage("assistant", "Queued request canceled before it was sent.");
+            conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == turn.Turn.AssistantIndex);
+            conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
+        }
+        while (retained.TryDequeue(out var item)) _requestQueue.Enqueue(item);
+        if (ReferenceEquals(ActiveConversation, conversation))
+        {
+            Messages.Clear();
+            foreach (var message in conversation.Messages) Messages.Add(message);
+        }
+        if (_requestQueue.Count == 0) _queuePaused = false;
+        OnPropertyChanged(nameof(HasQueuedTurns));
+        OnPropertyChanged(nameof(IsQueuePaused));
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)CancelQueuedCommand).NotifyCanExecuteChanged();
+        Persist();
+        RebuildLists();
     }
 
     private void StopGeneration() => _generationCancellation?.Cancel();
@@ -514,6 +656,7 @@ public sealed class MainViewModel : ViewModelBase
     private sealed record OllamaChatMessage(
         [property: JsonPropertyName("role")] string Role,
         [property: JsonPropertyName("content")] string Content);
+    private sealed record QueuedChatTurn(Codev.Conversation Conversation, Codev.PersistedQueuedTurn Turn);
     private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;
 }
 

@@ -66,18 +66,13 @@ public partial class MainWindow : Window
             _followOutput = true;
     }
 
-    private async void CopyMessage_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Button { DataContext: Codev.ChatMessage message } && TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
-            await clipboard.SetTextAsync(message.Content);
-    }
-
     private void Composer_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
         e.Handled = true;
-        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.IsGenerating) return;
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
         viewModel.Draft = ComposerTextBox.Text ?? "";
+        if (string.IsNullOrWhiteSpace(viewModel.Draft)) return;
         if (viewModel.SendCommand.CanExecute(null)) viewModel.SendCommand.Execute(null);
     }
 
@@ -97,7 +92,7 @@ public partial class MainWindow : Window
         else if (primaryModifier && e.Key == Key.L)
             ComposerTextBox.Focus();
         else if (e.Key == Key.Escape && viewModel.IsGenerating)
-            viewModel.SendCommand.Execute(null);
+            viewModel.StopGenerationCommand.Execute(null);
         else
             return;
         e.Handled = true;

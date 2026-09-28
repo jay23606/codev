@@ -128,9 +128,6 @@
                                 <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
                             </Border>
                             <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="1050" Margin="24,0,24,0" Spacing="8">
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <Button Grid.Column="1" Classes="soft" Content="Copy" Padding="8,4" FontSize="10" Click="CopyMessage_Click" />
-                                </Grid>
                                 <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
                             </StackPanel>
                         </Grid>
@@ -142,15 +139,19 @@
                     <StackPanel Grid.Column="1" Spacing="7">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" />
-                            <Button Grid.Column="1" Content="{Binding SendButtonLabel}" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
+                            <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="Chat · local Ollama streaming" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
-                                <TextBlock Text="Project tools and agent modes are on the porting roadmap" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding QueueStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
-                            <TextBlock Grid.Column="1" Text="Enter to send · Shift+Enter for new line" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                <Button IsVisible="{Binding IsQueuePaused}" Content="Resume saved queue" Command="{Binding ResumeQueueCommand}" Classes="soft" Padding="7,3" FontSize="10" />
+                                <Button IsVisible="{Binding HasQueuedTurns}" Content="Cancel queued" Command="{Binding CancelQueuedCommand}" Classes="soft" Padding="7,3" FontSize="10" />
+                                <TextBlock Text="Enter to send · Shift+Enter for new line" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                            </StackPanel>
                         </Grid>
                     </StackPanel>
                 </Grid>
