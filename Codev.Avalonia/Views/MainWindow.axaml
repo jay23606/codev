@@ -132,7 +132,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" RowDefinitions="62,Auto,*,Auto">
+        <Grid Grid.Column="1" RowDefinitions="62,Auto,Auto,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
                 <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
@@ -193,7 +193,10 @@
                     </Button>
                 </Grid>
             </Border>
-            <Border Grid.Row="1" IsVisible="{Binding ShouldShowTaskChecklist}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="28,8">
+            <Border Grid.Row="1" IsVisible="{Binding ShowCodeTaskUnavailableReason}" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,7">
+                <TextBlock Text="{Binding CodeTaskUnavailableReason}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+            </Border>
+            <Border Grid.Row="2" IsVisible="{Binding ShouldShowTaskChecklist}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="28,8">
                 <Expander Header="{Binding TaskChecklistLabel}" IsExpanded="True">
                     <StackPanel Spacing="6" MaxWidth="920" HorizontalAlignment="Stretch">
                         <TextBlock Text="For multi-step Code tasks, the model can maintain these steps. Edit or reorder them when needed; checklist text never grants permissions." IsVisible="{Binding HasTaskChecklist}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" />
@@ -217,7 +220,7 @@
                     </StackPanel>
                 </Expander>
             </Border>
-            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
+            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
                 <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22" MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Center">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
@@ -257,7 +260,7 @@
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
-            <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,8,22,8">
+            <Border Grid.Row="4" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,8,22,8">
                 <Grid>
                     <StackPanel MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Stretch" Spacing="4">
                         <Grid ColumnDefinitions="*,Auto">

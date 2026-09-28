@@ -94,6 +94,7 @@ public sealed class CodeTaskToolExecutor(
             if (content.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Any(line => NormalizeCommand(line).Contains(normalizedCommand, StringComparison.OrdinalIgnoreCase)))
                 return source;
+            if (UntrustedCommandMatcher.IsLikelyRewrite(command, content)) return source;
         }
         return null;
     }

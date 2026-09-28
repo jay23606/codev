@@ -219,6 +219,7 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+                NotifyCodeTaskAvailabilityProperties();
                 OnPropertyChanged(nameof(CanEditTaskChecklist));
                 OnPropertyChanged(nameof(CanAddTaskChecklistItem));
             }
@@ -311,9 +312,22 @@ public sealed class MainViewModel : ViewModelBase
             : $"Ctrl+Shift+M switches Chat to Plan. {GetCodeTaskUnavailableReason() ?? "Code task can also be selected."}";
     public bool CanEnterCodeTaskMode => GetCodeTaskUnavailableReason() is null;
     public bool CanToggleCodeTaskMode => ActiveConversation is not null && !IsGenerating;
+    public bool ShowCodeTaskUnavailableReason => !IsCodeTask && GetCodeTaskUnavailableReason() is { } reason &&
+        reason is not "Start or select a conversation first." &&
+        reason is not "Wait for the current response to finish before changing conversation mode.";
+    public string CodeTaskUnavailableReason => GetCodeTaskUnavailableReason() ?? "";
     public string CodeTaskTooltip => IsCodeTask
         ? "Code task is on. Click to return to Chat mode. File changes and every shell command still need approval."
         : GetCodeTaskUnavailableReason() ?? "Enable Code task. File changes and every shell command still need approval.";
+
+    private void NotifyCodeTaskAvailabilityProperties()
+    {
+        OnPropertyChanged(nameof(CanEnterCodeTaskMode));
+        OnPropertyChanged(nameof(ShowCodeTaskUnavailableReason));
+        OnPropertyChanged(nameof(CodeTaskUnavailableReason));
+        OnPropertyChanged(nameof(CodeTaskTooltip));
+        OnPropertyChanged(nameof(ConversationModeCycleTooltip));
+    }
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
     public Func<int, string, Task<string?>>? EditConversationPromptAsync { get; set; }
@@ -348,6 +362,7 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+                NotifyCodeTaskAvailabilityProperties();
                 OnPropertyChanged(nameof(CanEditTaskChecklist));
             }
         }
@@ -726,6 +741,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasLastPromptContext));
         OnPropertyChanged(nameof(LastPromptContextLabel));
         OnPropertyChanged(nameof(CanEnterCodeTaskMode));
+        NotifyCodeTaskAvailabilityProperties();
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         OnPropertyChanged(nameof(ProviderStatusLabel));
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -829,6 +845,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(SelectedModel));
             OnPropertyChanged(nameof(ShouldOfferCompaction));
             OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+            NotifyCodeTaskAvailabilityProperties();
             ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         }
         else
@@ -843,6 +860,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(SelectedModel));
             OnPropertyChanged(nameof(ShouldOfferCompaction));
             OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+            NotifyCodeTaskAvailabilityProperties();
             ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
             Persist();
         }
@@ -1049,6 +1067,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+        NotifyCodeTaskAvailabilityProperties();
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ProjectTrustRoot));
         OnPropertyChanged(nameof(IsProjectTrustInherited));
@@ -1081,6 +1100,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+        NotifyCodeTaskAvailabilityProperties();
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ProjectTrustRoot));
         OnPropertyChanged(nameof(IsProjectTrustInherited));
@@ -2627,6 +2647,7 @@ public sealed class MainViewModel : ViewModelBase
                 if (Provider != "ollama" && !Models.Any(choice => choice.Provider == Provider && choice.Name.Equals(Model, StringComparison.OrdinalIgnoreCase)))
                     Models.Add(new ModelChoice(Model, $"{Provider} · {Model} (connect key)", Provider));
                 OnPropertyChanged(nameof(HasModels));
+                NotifyCodeTaskAvailabilityProperties();
                 OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -2758,6 +2779,7 @@ public sealed class MainViewModel : ViewModelBase
                 if (Provider.Equals(provider, StringComparison.OrdinalIgnoreCase) && !Models.Any(choice => choice.Provider == provider && choice.Name.Equals(Model, StringComparison.OrdinalIgnoreCase)))
                     Models.Add(new ModelChoice(Model, $"{provider} · {Model}", provider));
                 OnPropertyChanged(nameof(HasModels));
+                NotifyCodeTaskAvailabilityProperties();
                 OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
                 OnPropertyChanged(nameof(SelectedModel));
                 ConnectionStatus = $"Connected to {provider} · {choices.Count} model(s) available{keySaveWarning}";
@@ -2809,6 +2831,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(HasModels));
                 OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
                 OnPropertyChanged(nameof(SelectedModel));
+                NotifyCodeTaskAvailabilityProperties();
                 ConnectionStatus = removed
                     ? $"Removed the saved {provider} key and disconnected it for this session. An environment variable may still provide a key."
                     : $"No saved {provider} key was found. An environment variable may still provide a key.";
@@ -2833,6 +2856,7 @@ public sealed class MainViewModel : ViewModelBase
                 Models.Add(new ModelChoice(conversation.Model, $"{Provider} · {conversation.Model} (connect key)", Provider));
             OnPropertyChanged(nameof(CloudRequestsEnabled));
             OnPropertyChanged(nameof(HasModels));
+            NotifyCodeTaskAvailabilityProperties();
             OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
             OnPropertyChanged(nameof(SelectedModel));
             ConnectionStatus = "Hosted requests disabled · local chats remain available";
