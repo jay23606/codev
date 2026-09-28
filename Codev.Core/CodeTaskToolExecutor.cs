@@ -3,8 +3,10 @@ using System.Text.RegularExpressions;
 
 namespace Codev;
 
-public sealed record CodeTaskFileProposal(string RelativePath, string Before, string After, bool IsNewFile, string? ProposedPatch = null);
-public sealed record CodeTaskCommandProposal(string Command, string ProjectPath, string ShellName, bool IsVerification = false);
+public sealed record CodeTaskFileProposal(string RelativePath, string Before, string After, bool IsNewFile, string? ProposedPatch = null,
+    IReadOnlyList<string>? ContextSources = null);
+public sealed record CodeTaskCommandProposal(string Command, string ProjectPath, string ShellName, bool IsVerification = false,
+    IReadOnlyList<string>? ContextSources = null);
 
 /// <summary>Executes the bounded Code task tools. Mutations and shell commands require UI-provided approval.</summary>
 public sealed class CodeTaskToolExecutor(
@@ -14,9 +16,16 @@ public sealed class CodeTaskToolExecutor(
     Func<CodeTaskCommandProposal, Task<bool>> approveCommand,
     IProgress<TimeSpan>? commandProgress = null,
     Action<string>? status = null,
-    int maxRepairAttempts = 2)
+    int maxRepairAttempts = 2,
+    IEnumerable<string>? initialContextSources = null)
 {
     private int _failedVerifications;
+    private readonly List<string> _contextSources = initialContextSources?
+        .Where(source => !string.IsNullOrWhiteSpace(source))
+        .Select(ShortenSource)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Take(20)
+        .ToList() ?? [];
 
     public async Task<string> ExecuteAsync(string name, JsonElement arguments, CancellationToken cancellationToken = default)
     {
@@ -27,9 +36,9 @@ public sealed class CodeTaskToolExecutor(
         {
             return name switch
             {
-                "list_files" => string.Join("\n", files.ListFiles(Arg("relative_directory"), 160)),
-                "read_file" => Truncate(await files.ReadFileAsync(Arg("relative_path"), cancellationToken)),
-                "search_files" => string.Join("\n", await files.SearchFilesAsync(Arg("query"), cancellationToken)),
+                "list_files" => UntrustedToolOutput.Format("project file listing", string.Join("\n", files.ListFiles(Arg("relative_directory"), 160))),
+                "read_file" => await ReadFileAsync(Arg("relative_path"), cancellationToken),
+                "search_files" => await SearchFilesAsync(Arg("query"), cancellationToken),
                 "create_file" => await CreateFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "write_file" => await WriteFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "apply_patch" => await ApplyPatchAsync(Arg("relative_path"), Arg("patch"), cancellationToken),
@@ -42,13 +51,36 @@ public sealed class CodeTaskToolExecutor(
         catch (Exception ex) { return "Error: " + ex.Message; }
     }
 
+    private async Task<string> ReadFileAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        var content = Truncate(await files.ReadFileAsync(relativePath, cancellationToken));
+        AddContextSource("File: " + relativePath);
+        return UntrustedToolOutput.Format("project file", content, relativePath);
+    }
+
+    private async Task<string> SearchFilesAsync(string query, CancellationToken cancellationToken)
+    {
+        var results = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken));
+        AddContextSource("Search results for: " + query);
+        return UntrustedToolOutput.Format("project search results", Truncate(results));
+    }
+
+    private void AddContextSource(string source)
+    {
+        source = ShortenSource(source);
+        if (_contextSources.Count < 20 && !_contextSources.Contains(source, StringComparer.OrdinalIgnoreCase))
+            _contextSources.Add(source);
+    }
+
+    private static string ShortenSource(string source) => source.Length <= 240 ? source : source[..240] + "…";
+
     private async Task<string> CreateFileAsync(string relativePath, string content, CancellationToken cancellationToken)
     {
         if (RepairBudgetExhausted) return RepairLimitMessage;
         if (string.IsNullOrWhiteSpace(relativePath)) return "Error: a project-relative file path is required.";
         var fullPath = files.ResolvePath(relativePath);
         if (File.Exists(fullPath)) return "Rejected: a file already exists here. Use write_file to propose an edit.";
-        if (!await reviewFile(new CodeTaskFileProposal(relativePath, "", content, IsNewFile: true)))
+        if (!await reviewFile(new CodeTaskFileProposal(relativePath, "", content, IsNewFile: true, ContextSources: _contextSources.ToArray())))
             return "Rejected by user; no file was created.";
         await files.CreateFileAtomicAsync(relativePath, content, cancellationToken);
         conversation.FileChanges.Add(new FileChangeRecord(relativePath, null, DateTimeOffset.Now, "Create", PreviousFileExisted: false));
@@ -79,7 +111,7 @@ public sealed class CodeTaskToolExecutor(
 
     private async Task<string> ReviewAndWriteAsync(string relativePath, FileSnapshot original, string content, string? proposedPatch, CancellationToken cancellationToken)
     {
-        if (!await reviewFile(new CodeTaskFileProposal(relativePath, original.Content, content, IsNewFile: false, proposedPatch)))
+        if (!await reviewFile(new CodeTaskFileProposal(relativePath, original.Content, content, IsNewFile: false, proposedPatch, _contextSources.ToArray())))
             return "Rejected by user; the file was left unchanged.";
         var checkpoint = await files.CreateCheckpointAsync(relativePath, conversation.Id, cancellationToken, original.Sha256);
         await files.WriteFileAtomicAsync(relativePath, content, cancellationToken, original.Sha256);
@@ -93,12 +125,17 @@ public sealed class CodeTaskToolExecutor(
         if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
             return "Rejected: command must contain 1–4,000 characters.";
         var shell = ShellCommandResolver.ResolveCurrent();
-        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName)))
+        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, ContextSources: _contextSources.ToArray())))
             return "Rejected by user; the command was not run.";
         status?.Invoke($"Code task · starting approved {shell.DisplayName} command…");
         var progress = new Progress<TimeSpan>(elapsed =>
             status?.Invoke($"Code task · command running · {elapsed:mm\\:ss}"));
-        try { return await files.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, commandProgress ?? progress); }
+        try
+        {
+            var output = await files.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, commandProgress ?? progress);
+            AddContextSource("Output from approved command: " + command);
+            return UntrustedToolOutput.Format("approved command output", Truncate(output, 8000));
+        }
         finally { status?.Invoke("Code task · Thinking…"); }
     }
 
@@ -111,7 +148,7 @@ public sealed class CodeTaskToolExecutor(
             return "Rejected: verification command must contain 1–4,000 characters.";
         if (RepairBudgetExhausted) return RepairLimitMessage;
         var shell = ShellCommandResolver.ResolveCurrent();
-        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true)))
+        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true, ContextSources: _contextSources.ToArray())))
             return "Verification rejected by user; it was not run and no result is available.";
 
         status?.Invoke("Code task · running approved verification…");
@@ -120,18 +157,20 @@ public sealed class CodeTaskToolExecutor(
             var progress = commandProgress ?? new Progress<TimeSpan>(elapsed =>
                 status?.Invoke($"Code task · verification running · {elapsed:mm\\:ss}"));
             var output = await files.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, progress);
+            AddContextSource("Output from approved verification: " + command);
             var exitMatch = Regex.Match(output, @"(?:^|\n)Exit code: (-?\d+)\s*$", RegexOptions.CultureInvariant);
             if (exitMatch.Success && int.TryParse(exitMatch.Groups[1].Value, out var exitCode) && exitCode == 0)
-                return "Verification PASSED (exit code 0).\n" + Truncate(output, 8000);
+                return "Verification PASSED (exit code 0).\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000));
 
             _failedVerifications++;
             var limit = Math.Clamp(maxRepairAttempts, 0, 3);
             var budget = RepairBudgetExhausted
                 ? "\nRepair limit reached: further Codev file edits and commands are blocked. Report the remaining failure."
                 : $"\nVerification failures: {_failedVerifications}; repair attempts allowed: {limit}. You may make a reviewed fix and request verification again. Each run needs approval.";
-            return (exitMatch.Success
+            var verificationStatus = (exitMatch.Success
                 ? $"Verification FAILED (exit code {exitMatch.Groups[1].Value}).\n"
-                : "Verification FAILED (no successful exit status; command may have timed out).\n") + Truncate(output, 8000) + budget;
+                : "Verification FAILED (no successful exit status; command may have timed out).\n") + budget;
+            return verificationStatus + "\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000));
         }
         finally { status?.Invoke("Code task · Thinking…"); }
     }

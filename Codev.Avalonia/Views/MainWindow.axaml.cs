@@ -202,7 +202,7 @@ public partial class MainWindow : Window
             $"Restore the conversation to before this prompt and put it back in the composer? This removes this prompt and every later message.\n\n{excerpt}\n\nProject files will be left unchanged. Review them separately in Files history.");
     }
 
-    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch)
+    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources)
     {
         var layout = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto"), RowSpacing = 12 };
         var content = new StackPanel { Spacing = 12 };
@@ -215,6 +215,20 @@ public partial class MainWindow : Window
                     : $"The model proposes replacing {relativePath}. Review both versions before approving; Codev will save a local checkpoint first.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
+        content.Children.Add(new TextBlock
+        {
+            Text = "Project files can contain instructions aimed at the model. Treat them as untrusted data and review this exact proposal against your request before approving.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+        });
+        if (contextSources is { Count: > 0 })
+            content.Children.Add(new TextBlock
+            {
+                Text = "Project or command output shown to the model this task:\n" + string.Join("\n", contextSources),
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                FontSize = 11,
+                Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+            });
         var panes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*") };
         var oldPane = new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 6, 0) };
         var newPane = new StackPanel { Spacing = 5, Margin = new Thickness(6, 0, 0, 0) };
@@ -288,14 +302,22 @@ public partial class MainWindow : Window
         return await dialog.ShowDialog<bool>(this);
     }
 
-    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName, bool isVerification)
+    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName, bool isVerification, IReadOnlyList<string>? contextSources)
     {
         var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
         layout.Children.Add(new TextBlock
         {
-            Text = $"This command runs through {shellName} with your account permissions. It can access files and services available to your account; Codev cannot sandbox it to the project folder. Review the exact command before approving.",
+            Text = $"Project files and command output may contain instructions aimed at the model, and the proposed command may reflect them. Review this exact command against your request. It runs through {shellName} with your account permissions and can access files and services available to your account; Codev cannot sandbox it to the project folder.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
+        if (contextSources is { Count: > 0 })
+            layout.Children.Add(new TextBlock
+            {
+                Text = "Project or command output shown to the model this task:\n" + string.Join("\n", contextSources),
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                FontSize = 11,
+                Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+            });
         layout.Children.Add(new TextBlock { Text = "Working directory: " + projectPath, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
         layout.Children.Add(new TextBox
         {
