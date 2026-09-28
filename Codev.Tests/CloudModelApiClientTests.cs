@@ -178,20 +178,32 @@ public sealed class CloudModelApiClientTests
     [InlineData(CloudModelProviders.Anthropic, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":37}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", 37)]
     public async Task Reports_provider_input_token_usage_from_stream_events(string provider, string stream, int expectedInputTokens)
     {
-        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        string? sentBody = null;
+        using var http = new HttpClient(new StubHandler(request =>
         {
-            Content = new StringContent(stream, Encoding.UTF8, "text/event-stream")
+            sentBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(stream, Encoding.UTF8, "text/event-stream")
+            };
         }));
         int? inputTokens = null;
+        string? capturedRequestBody = null;
 
         await foreach (var _ in new CloudModelApiClient(http).StreamChatAsync(provider, "key", "model",
                            [new("user", "hello")], onInputTokenCount: count =>
                            {
                                inputTokens = count;
                                return Task.CompletedTask;
+                           }, onRequestPayload: body =>
+                           {
+                               capturedRequestBody = body;
+                               return Task.CompletedTask;
                            })) { }
 
         Assert.Equal(expectedInputTokens, inputTokens);
+        Assert.Equal(sentBody, capturedRequestBody);
+        Assert.Contains("\"model\":\"model\"", sentBody);
     }
 
     [Theory]

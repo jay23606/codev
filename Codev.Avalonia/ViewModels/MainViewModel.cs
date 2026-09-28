@@ -215,14 +215,14 @@ public sealed class MainViewModel : ViewModelBase
         ? IsProjectTrusted ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included" : $"{SelectedContextFiles.Count} file(s) explicitly selected · folder untrusted"
         : IsProjectTrusted ? "Trusted project · bounded source files included automatically" : "Untrusted project · automatic context is off";
     public string ContextEstimateLabel => _contextEstimateLabel;
-    public bool HasLastPromptContext => !IsCodeTask && ActiveConversation is { } conversation && _lastPromptContexts.ContainsKey(conversation.Id);
+    public bool HasLastPromptContext => ActiveConversation is { } conversation && _lastPromptContexts.ContainsKey(conversation.Id);
     public string LastPromptContextLabel => ActiveConversation is { } conversation && _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot)
         ? snapshot.ActualPromptTokens is { } actual ? $"Last request · {actual:N0} input tokens" : $"Last request · ≈{snapshot.EstimatedPromptTokens:N0} estimated tokens"
         : "View request context";
     public bool CanIncludeRepoMap => HasProject && (SelectedContextFiles.Count > 0 || IsProjectTrusted) && (!IsHostedModel || IncludeProjectContextForHosted);
     public string RepoMapEstimateLabel => IncludeRepoMap && CanIncludeRepoMap ? "Repo map: up to ≈2,000 tokens." : "";
 
-    public string? GetLastPromptContextDetails() => ActiveConversation is { } conversation && !IsCodeTask &&
+    public string? GetLastPromptContextDetails() => ActiveConversation is { } conversation &&
         _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot) ? snapshot.ToDisplayText() : null;
     public string ContextActionStatus { get; private set; } = "";
     public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
@@ -1295,7 +1295,19 @@ public sealed class MainViewModel : ViewModelBase
             if (turn.Temperature is { } temperature) options["temperature"] = temperature;
             if (options.Count > 0) payload["options"] = options;
             using var request = new HttpRequestMessage(HttpMethod.Post,
-                Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(payload) };
+                Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"));
+            var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
+            request.Content = new StringContent(payloadJson, System.Text.Encoding.UTF8, "application/json");
+            var roundMessages = history.Select(message => new Codev.ChatMessage(message.Role, message.Content)).ToArray();
+            var roundSections = new[]
+            {
+                new Codev.PromptContextSection("Current model messages and tool results",
+                    string.Join("\n\n", history.Select(message => $"[{message.Role}]\n{message.Content}"))),
+                new Codev.PromptContextSection("Available tool schemas", JsonSerializer.Serialize(tools, JsonSerializerOptions.Web)),
+                new Codev.PromptContextSection("Generation controls", $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}")
+            };
+            await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create("ollama", turn.Model,
+                turn.NumCtx, roundSections, roundMessages, payloadJson));
             using var response = await _http.SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
@@ -1393,6 +1405,16 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(HasLastPromptContext));
                 OnPropertyChanged(nameof(LastPromptContextLabel));
             }
+        });
+    }
+
+    private async Task SetLastPromptRequestBodyAsync(Codev.Conversation conversation, string requestBody)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (_lastPromptContexts.TryGetValue(conversation.Id, out var snapshot))
+                _lastPromptContexts[conversation.Id] = snapshot with { SerializedRequestBody = requestBody };
+            if (ReferenceEquals(ActiveConversation, conversation)) OnPropertyChanged(nameof(LastPromptContextLabel));
         });
     }
 
@@ -1606,7 +1628,10 @@ public sealed class MainViewModel : ViewModelBase
                 if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
                 if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
                 if (options.Count > 0) payload["options"] = options;
-                using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(payload) };
+                var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
+                await SetLastPromptRequestBodyAsync(conversation, payloadJson);
+                using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"))
+                { Content = new StringContent(payloadJson, System.Text.Encoding.UTF8, "application/json") };
                 var requestTimer = Stopwatch.StartNew();
                 TimeSpan? firstTokenTime = null;
                 using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token.Token);
@@ -1647,7 +1672,8 @@ public sealed class MainViewModel : ViewModelBase
                 await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
                                    savedTurn.Provider, apiKey, savedTurn.Model, cloudMessages, token.Token,
                                    onInputTokenCount: inputTokens => RecordPromptTokenUsageAsync(
-                                       conversation, savedTurn.Model, savedTurn.NumCtx, inputTokens)))
+                                       conversation, savedTurn.Model, savedTurn.NumCtx, inputTokens),
+                                   onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body)))
                 {
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
                 }

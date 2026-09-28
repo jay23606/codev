@@ -12,9 +12,10 @@ public sealed class PromptContextBreakdownTests
             new("system", "Be concise."),
             new("user", "Fix the failing test.")
         };
+        const string requestBody = "{\"model\":\"coder:latest\",\"messages\":[]}";
         var snapshot = PromptContextBreakdown.Create("ollama", "coder:latest", 65_536,
-            [new("System instruction", "Be concise."), new("Project context", "source excerpt")], messages) with
-        { ActualPromptTokens = 42 };
+            [new("System instruction", "Be concise."), new("Project context", "source excerpt")], messages,
+            requestBody) with { ActualPromptTokens = 42 };
         messages[1] = new ChatMessage("user", "mutated after snapshot");
 
         var display = snapshot.ToDisplayText();
@@ -23,6 +24,9 @@ public sealed class PromptContextBreakdownTests
         Assert.Contains("System instruction: 11 characters", display);
         Assert.Contains("Provider-reported input: 42 tokens", display);
         Assert.Contains("[user]" + Environment.NewLine + "Fix the failing test.", display);
+        Assert.Contains("Exact request JSON body (before HTTP headers):", display);
+        Assert.Contains(requestBody, display);
+        Assert.Equal((requestBody.Length + 3) / 4, snapshot.EstimatedPromptTokens);
         Assert.DoesNotContain("mutated after snapshot", display);
     }
 

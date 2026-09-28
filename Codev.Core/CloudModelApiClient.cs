@@ -94,7 +94,8 @@ public sealed class CloudModelApiClient(HttpClient http)
         IReadOnlyList<CloudChatMessage> messages,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         int? maxOutputTokens = null,
-        Func<int, Task>? onInputTokenCount = null)
+        Func<int, Task>? onInputTokenCount = null,
+        Func<string, Task>? onRequestPayload = null)
     {
         Validate(provider, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose a hosted model first.", nameof(model));
@@ -104,9 +105,11 @@ public sealed class CloudModelApiClient(HttpClient http)
         var payload = provider == CloudModelProviders.OpenAI
             ? BuildOpenAiPayload(model, messages, maxOutputTokens)
             : BuildAnthropicPayload(model, messages, maxOutputTokens);
+        var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
         using var request = CreateRequest(HttpMethod.Post, endpoint, provider, apiKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        request.Content = JsonContent.Create(payload);
+        request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
+        if (onRequestPayload is not null) await onRequestPayload(payloadJson).ConfigureAwait(false);
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
