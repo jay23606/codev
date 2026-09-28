@@ -89,3 +89,10 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Confirm unload while idle; check the model disappears but remains installed and can be loaded again by selecting it.
 - Attempt unload while a response is generating or a request is queued; confirm Codev refuses and does not interrupt the request.
 - Start a send during the unload operation; confirm it is held until unload finishes instead of racing the model state.
+
+## Ollama generation stats
+
+- Send a normal local Ollama prompt and verify the completed assistant reply shows first-token latency, tokens per second, output token count, and server-reported model load time.
+- Verify a warm-model response can report a near-zero load time, and missing optional response fields do not display invented values or break the reply.
+- Switch to a hosted model and confirm Codev does not show locally estimated throughput or load numbers.
+- Restart and reopen the conversation; confirm the stats persist with that reply.

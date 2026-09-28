@@ -1184,6 +1184,7 @@ public sealed class MainViewModel : ViewModelBase
             }
             var normalizedHistory = Codev.OllamaConversationHistory.Normalize(priorMessages);
             var output = new System.Text.StringBuilder();
+            Codev.OllamaGenerationStats? generationStats = null;
             if (savedTurn.Provider == "ollama")
             {
                 var history = normalizedHistory.Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
@@ -1202,6 +1203,8 @@ public sealed class MainViewModel : ViewModelBase
                 if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
                 if (options.Count > 0) payload["options"] = options;
                 using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(payload) };
+                var requestTimer = Stopwatch.StartNew();
+                TimeSpan? firstTokenTime = null;
                 using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token.Token);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -1216,7 +1219,12 @@ public sealed class MainViewModel : ViewModelBase
                     using var json = System.Text.Json.JsonDocument.Parse(line);
                     if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
                     if (json.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var chunk))
-                        await AppendAssistantDeltaAsync(conversation, assistantIndex, output, chunk.GetString() ?? "");
+                    {
+                        var delta = chunk.GetString() ?? "";
+                        if (delta.Length > 0 && firstTokenTime is null) firstTokenTime = requestTimer.Elapsed;
+                        await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
+                    }
+                    generationStats = Codev.OllamaGenerationStats.FromFinalChunk(json.RootElement, firstTokenTime) ?? generationStats;
                 }
                 }
             }
@@ -1230,6 +1238,8 @@ public sealed class MainViewModel : ViewModelBase
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
                 }
             }
+            if (generationStats is not null)
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { GenerationStats = generationStats };
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
                 conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "The selected provider returned an empty response.");
         }

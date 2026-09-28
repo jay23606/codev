@@ -54,6 +54,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Patch-based agent file edits | Avalonia Code task can apply strict unified-diff hunks, review the patch and resulting file, and use the same approval, checkpoint, and concurrency protection as full replacements |
 | Per-conversation output styles | Avalonia offers balanced, concise, explanatory, and code-only response styles; the choice persists with the conversation and queued turns and does not alter permissions |
 | Ollama loaded-model memory view | Avalonia reads the server's running-model list, shows reported model size and VRAM allocation, and offers a confirmed unload while no response or queued request is active |
+| Ollama generation stats | Avalonia displays first-token latency, generated tokens per second, output token count, and server-reported model load time beneath completed local replies |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
 
@@ -182,7 +183,7 @@ This section is the single backlog for features drawn from studying Claude Code 
 | 3. Smarter context | A3, A5, A8, B2, B6, B9, D2 | Cuts wasted tokens; skills and structured calls make agents more reliable, and folder trust (B9) must be in place before any project-provided skill, hook, agent or command file is read |
 | 4. Extend | D3, D4, D6, B12, A9, E4, E6, E7 | Extension points, once the basics are solid |
 | 5. Parallel and unattended | D5, D8, B7, E8, D10 | Depends on worktrees, the shared core, and sandbox research |
-| Anytime | A4, A7, A10, A11, A12, B10, B11, C4, C6, C7, D7, D9, E1, E3, E4, E5, E9, E10, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
+| Anytime | A4, A7, A10, A11, A12, B10, B11, C4, C6, C7, D7, D9, E1, E3, E4, E5, E9, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
 
 X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia port; E7 needs `Codev.Core` (X2), and E8 is a decision after X2.
 
@@ -313,7 +314,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | E7 | Headless mode | M | X2 | Later |
 | E8 | Local server for multiple front ends | L | X2, decision | Speculative |
 | E9 | Compare models side by side | M | B8 helpful | Speculative |
-| E10 | Generation stats | S | none | Later |
+| E10 | Generation stats | S | none | Done |
 | E11 | Follow the agent | S–M | none | Later |
 
 - **E1 Output styles (implemented in Avalonia).** A per-conversation selector offers balanced, concise, explanatory, and code-only styles. The selection is stored with conversations and captured in each queued turn; it changes response presentation only, never tools or permissions. Even code-only responses must disclose failures, caveats, and unverified work.
@@ -325,7 +326,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **E7 Headless mode.** `codev -p "prompt"` with piped input for scripting and CI, read-only unless explicitly allowed, reusing `Codev.Core`. Modeled on `codex exec` and `claude -p`.
 - **E8 Local server.** OpenCode runs its agent as a local server that the terminal UI, desktop app and editor extensions all talk to over HTTP. It could let Codev's Avalonia app, a command-line mode and an editor extension share one core, but it adds a network surface (localhost only, token required) and a lot of design work. Decide after X2 shows what actually needs sharing; do not build speculatively. Zed's open Agent Client Protocol (ACP) lets an editor host any compatible agent; Codev could one day speak ACP, either to host external agents or to be hosted by an editor. That is speculative and only worth studying if E8 goes ahead. Basics from its [introduction page](https://agentclientprotocol.com/overview/introduction): it standardizes communication between code editors and coding agents, uses JSON-RPC over stdio for local agents, and lists HTTP or WebSocket for remote agents as work in progress. That page did not state who created it, its version or its capabilities, so those remain to be read.
 - **E9 Compare models side by side.** Send one prompt to two or more installed models and show the answers next to each other, run one after another on local hardware, and let the user keep one as the conversation's answer. Helps choose between local models. Read-only chat only, never Code mode. Msty's split chat does this.
-- **E10 Generation stats.** Show time to first token, tokens per second and model load time for each reply, since speed is the main practical difference between local models. Ollama responses report durations and token counts; confirm the field names against its API docs.
+- **E10 Generation stats (implemented in Avalonia for local Ollama replies).** The assistant message footer displays time to first non-empty response token (measured by Codev), generated tokens per second, output token count, and model load time from the final streaming response. Throughput and load duration use Ollama's documented `eval_count`, `eval_duration`, and `load_duration` fields; stats persist with the conversation. Hosted replies do not show locally inferred performance numbers.
 - **E11 Follow the agent.** While the agent reads or edits a file, highlight that file in the project browser and preview pane, with a toggle. [Zed's agent panel](https://zed.dev/docs/ai/agent-panel) has a "follow the agent" mode. Fits the "visible work" principle.
 
 **Not planned:** cloud-hosted agents (Codex cloud tasks), phone or browser remote control, hosted share links, and organization-wide managed-policy servers, all of which need a service Codev does not run.
@@ -350,7 +351,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B6, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E3, E4, E6, E7, E10, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B6, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.

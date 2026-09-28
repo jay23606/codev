@@ -170,6 +170,7 @@
                             </StackPanel>
                             <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="1050" Margin="24,0,24,0" Spacing="8">
                                 <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
+                                <TextBlock Text="{Binding GenerationStatsLabel}" IsVisible="{Binding HasGenerationStats}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" Margin="2,0,0,0" ToolTip.Tip="Generation stats reported by Ollama; first-token time is measured by Codev." />
                             </StackPanel>
                         </Grid>
                     </DataTemplate></ItemsControl.ItemTemplate>
