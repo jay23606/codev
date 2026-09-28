@@ -11,6 +11,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace Codev;
 
@@ -22,6 +23,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<WorkspaceProject> _projects = [];
     private readonly List<ModelOption> _models = [];
     private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
+    private readonly Dictionary<Window, DispatcherTimer> _completionToasts = [];
     private Conversation? _active;
     private WorkspaceProject? _activeProject;
     private readonly SerialAsyncQueue<QueuedTurn> _requestQueue = new();
@@ -39,6 +41,7 @@ public partial class MainWindow : Window
     private bool _showArchived;
     private Guid? _codeTaskConversationId;
     private bool _isDarkTheme = true;
+    private bool _completionNotificationsEnabled = true;
     private double _chatFontSize = 14;
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
@@ -80,6 +83,7 @@ public partial class MainWindow : Window
                 var settings = JsonSerializer.Deserialize<UiSettings>(File.ReadAllText(ThemePath), JsonOptions);
                 _isDarkTheme = !string.Equals(settings?.Theme, "light", StringComparison.OrdinalIgnoreCase);
                 _chatFontSize = settings?.ChatFontSize is double storedSize && double.IsFinite(storedSize) ? Math.Clamp(storedSize, 12, 22) : 14;
+                _completionNotificationsEnabled = settings?.CompletionNotifications ?? true;
             }
         }
         catch { _isDarkTheme = true; }
@@ -90,7 +94,7 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
-            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize), JsonOptions));
+            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled), JsonOptions));
         }
         catch { }
     }
@@ -1432,6 +1436,8 @@ public partial class MainWindow : Window
         RefreshConversationLists();
         UpdateSendControl();
         UpdateActiveRequestStatus();
+        var shouldNotifyCompletion = false;
+        var completionFailed = false;
         try
         {
             var history = conversation.Messages.Take(assistantIndex).Select(m => new OllamaMessage(m.Role, m.Content)).ToList();
@@ -1458,13 +1464,19 @@ public partial class MainWindow : Window
                 await RunChatTurnAsync(conversation, assistantIndex, history, turn.Model, turn.NumCtx, cancellation.Token);
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
                 conversation.Messages[assistantIndex] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
+            shouldNotifyCompletion = true;
         }
         catch (OperationCanceledException)
         {
             var partial = conversation.Messages[assistantIndex].Content;
             conversation.Messages[assistantIndex] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]");
         }
-        catch (Exception ex) { conversation.Messages[assistantIndex] = new ChatMessage("assistant", $"Could not complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed."); }
+        catch (Exception ex)
+        {
+            completionFailed = true;
+            shouldNotifyCompletion = true;
+            conversation.Messages[assistantIndex] = new ChatMessage("assistant", $"Could not complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed.");
+        }
         finally
         {
             conversation.UpdatedAt = DateTimeOffset.Now;
@@ -1478,7 +1490,75 @@ public partial class MainWindow : Window
             RefreshConversationLists();
             UpdateSendControl();
             UpdateActiveRequestStatus();
+            if (shouldNotifyCompletion && !_isClosing && _completionNotificationsEnabled && (!IsActive || !ReferenceEquals(_active, conversation)))
+                ShowCompletionToast(conversation, completionFailed);
         }
+    }
+
+    private void ShowCompletionToast(Conversation conversation, bool failed)
+    {
+        const double width = 340;
+        const double height = 86;
+        const double gap = 10;
+        if (_completionToasts.Count >= 3)
+        {
+            var oldest = _completionToasts.First().Key;
+            CloseCompletionToast(oldest);
+        }
+
+        var toast = new Window
+        {
+            Width = width, Height = height, WindowStyle = WindowStyle.None, AllowsTransparency = true,
+            Background = Brushes.Transparent, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
+            Topmost = true, ShowActivated = false, WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = SystemParameters.WorkArea.Right - width - 18,
+            Top = SystemParameters.WorkArea.Bottom - height - 18 - _completionToasts.Count * (height + gap),
+            Cursor = System.Windows.Input.Cursors.Hand
+        };
+        var card = new Border
+        {
+            Background = ThemeBrush("SidebarCardBrush"), BorderBrush = ThemeBrush("MainBorderBrush"),
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(14),
+            Child = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new TextBlock { Text = failed ? "Local request needs attention" : "Local response is ready", FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush("MainTextBrush"), FontSize = 12 },
+                    new TextBlock { Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title, Foreground = ThemeBrush("MutedTextBrush"), FontSize = 11, Margin = new Thickness(0, 5, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis }
+                }
+            }
+        };
+        toast.Content = card;
+        toast.MouseLeftButtonUp += (_, _) =>
+        {
+            if (_conversations.Contains(conversation))
+            {
+                _showArchived = conversation.IsArchived;
+                ArchiveViewButton.Content = _showArchived ? "←  Show active chats" : "◷  Show archived";
+                SelectConversation(conversation);
+            }
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            Show();
+            Activate();
+            CloseCompletionToast(toast);
+        };
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+        timer.Tick += (_, _) => CloseCompletionToast(toast);
+        _completionToasts[toast] = timer;
+        toast.Closed += (_, _) =>
+        {
+            if (_completionToasts.Remove(toast, out var activeTimer)) activeTimer.Stop();
+        };
+        toast.Show();
+        timer.Start();
+    }
+
+    private void CloseCompletionToast(Window toast)
+    {
+        if (_completionToasts.TryGetValue(toast, out var timer)) timer.Stop();
+        if (toast.IsVisible) toast.Close();
+        else _completionToasts.Remove(toast);
     }
 
     private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, CancellationToken cancellationToken)
@@ -2138,12 +2218,13 @@ public partial class MainWindow : Window
     {
         var editor = new Window
         {
-            Title = "Codev settings", Width = 540, Height = 300,
+            Title = "Codev settings", Width = 540, Height = 360,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
             Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
             ResizeMode = ResizeMode.NoResize
         };
         var layout = new Grid { Margin = new Thickness(20) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -2164,15 +2245,22 @@ public partial class MainWindow : Window
         var slider = new Slider { Minimum = 12, Maximum = 22, Value = _chatFontSize, TickFrequency = 1, IsSnapToTickEnabled = true, Margin = new Thickness(0, 8, 0, 0), Foreground = ThemeBrush("WelcomeAccentBrush"), Focusable = true };
         Grid.SetRow(slider, 1); Grid.SetColumnSpan(slider, 2); sizeRow.Children.Add(slider);
         Grid.SetRow(sizeRow, 1); layout.Children.Add(sizeRow);
+        var completionNotifications = new CheckBox
+        {
+            Content = "Show a toast when a response finishes away from this conversation",
+            IsChecked = _completionNotificationsEnabled, Foreground = ThemeBrush("MainTextBrush"),
+            Margin = new Thickness(0, 0, 0, 8), VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetRow(completionNotifications, 2); layout.Children.Add(completionNotifications);
         var preview = new TextBlock { Text = "The quick brown fox jumps over the lazy dog.", FontSize = _chatFontSize, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrush("MainTextBrush"), Margin = new Thickness(0, 4, 0, 14) };
         slider.ValueChanged += (_, _) => { sizeLabel.Text = $"{slider.Value:0} pt"; preview.FontSize = slider.Value; };
-        Grid.SetRow(preview, 2); layout.Children.Add(preview);
+        Grid.SetRow(preview, 3); layout.Children.Add(preview);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
         var apply = new Button { Content = "Apply", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
-        apply.Click += (_, _) => { _chatFontSize = slider.Value; ApplyChatTextSize(); SaveThemePreference(); RenderMessages(); editor.DialogResult = true; editor.Close(); };
+        apply.Click += (_, _) => { _chatFontSize = slider.Value; _completionNotificationsEnabled = completionNotifications.IsChecked == true; ApplyChatTextSize(); SaveThemePreference(); RenderMessages(); editor.DialogResult = true; editor.Close(); };
         buttons.Children.Add(cancel); buttons.Children.Add(apply);
-        Grid.SetRow(buttons, 3); layout.Children.Add(buttons);
+        Grid.SetRow(buttons, 4); layout.Children.Add(buttons);
         editor.Content = layout;
         editor.ShowDialog();
     }
@@ -2193,6 +2281,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosing = true;
+        foreach (var toast in _completionToasts.Keys.ToArray()) CloseCompletionToast(toast);
         _requestCancellation?.Cancel();
         while (_requestQueue.TryDequeuePending(out var turn))
         {
@@ -2216,7 +2305,7 @@ public partial class MainWindow : Window
     private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
         bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions);
-    private sealed record UiSettings(string Theme, double? ChatFontSize = null);
+    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);

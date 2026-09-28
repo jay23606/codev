@@ -32,12 +32,12 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | File explorer and preview | Project context menu opens a safe text-file browser with filtering, read-only preview, and Add to chat context |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and safe project context implemented; reusable knowledge files pending |
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
-| Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, and restore with rollback implemented; unified diff pending |
+| Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, rollback, and unified text diffs implemented |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
-| Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, tool status, retry/edit-resend, and branch-from-message implemented; resume and richer plans remain |
-| Conversation request scheduling | Serial Ollama queue with per-conversation running/queued indicators; true parallel agents and isolated worktrees remain pending |
-| Git status, branch, staging, and review workflow | Not implemented |
-| Markdown/code rendering, attachments, and session export | Basic Markdown and fenced code rendering with clickable web links and one-click code copying; conversation export to Markdown; file/image/PDF attachments and import pending |
+| Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, tool status, retry/edit-resend, branch-from-message, and between-turn queue pause/resume implemented; request resume and richer plans remain |
+| Conversation request scheduling | Serial Ollama queue with per-conversation running/queued indicators and pause/resume; true parallel agents and isolated worktrees remain pending |
+| Git status, branch, staging, and review workflow | Local status, branch creation/switching, per-file staged/unstaged diff review, staging, unstaging, selected-diff questions, and reviewed local commits implemented; worktree merge/recovery remains |
+| Markdown/code rendering, attachments, and session export | Markdown tables, lightweight syntax coloring, clickable web links, copyable code blocks, Markdown export, and JSON conversation backup/import; file/image/PDF attachments remain pending |
 | Skills, MCP tools, recurring tasks, and notifications | Not implemented |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
@@ -81,7 +81,8 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - More than one independent agent task at once, subject to available RAM and model-load limits; communicate when local hardware serializes inference.
 - Optional Git worktree per task so parallel edits cannot collide in the same checkout.
 - Per-session model, context use, project, progress, changed files, and last activity visible from the workspace/session list.
-- Completion notifications and reliable queued-task resume after app restart remain pending; requests still waiting when Codev closes are marked as not sent.
+- [x] Optional completion toasts for responses that finish while the user is away from that conversation; toast clicks return to the conversation.
+- Reliable queued-task resume after app restart remains pending; requests still waiting when Codev closes are marked as not sent.
 
 ### 4. Git and change management
 
@@ -104,7 +105,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - Local skills/instructions for repeatable workflows, with project-level and user-level scope.
 - MCP-compatible tools with per-server enablement, visible permissions, and logs; keep local-only use straightforward.
 - Reusable task templates and optional recurring local jobs with an approval/review queue.
-- Notification controls and a run history for background tasks.
+- Notification controls are available for conversation completions; a run history for background tasks remains.
 - Optional cloud connectors only as opt-in integrations, clearly separated from the local-only default.
 
 ## Product principles
