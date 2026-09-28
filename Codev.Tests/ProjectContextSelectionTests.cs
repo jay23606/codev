@@ -24,7 +24,7 @@ public sealed class ProjectContextSelectionTests : IDisposable
 
         try
         {
-            var result = ProjectContextSelection.AddDroppedFiles(new WorkspaceFileService(_root), selected,
+            var result = ProjectContextSelection.AddFiles(new WorkspaceFileService(_root), selected,
                 [source, source, secret, binary, outside]);
 
             Assert.Equal(1, result.AddedCount);
@@ -42,11 +42,26 @@ public sealed class ProjectContextSelectionTests : IDisposable
         File.WriteAllText(excluded, "do not attach");
         var selected = new List<string>();
 
-        var result = ProjectContextSelection.AddDroppedFiles(new WorkspaceFileService(_root, ["private"]), selected, [excluded]);
+        var result = ProjectContextSelection.AddFiles(new WorkspaceFileService(_root, ["private"]), selected, [excluded]);
 
         Assert.Equal(0, result.AddedCount);
         Assert.Equal(1, result.IgnoredCount);
         Assert.Empty(selected);
+    }
+
+    [Fact]
+    public void File_selection_stops_at_the_same_limit_used_for_prompt_context()
+    {
+        var paths = Enumerable.Range(0, WorkspaceFileService.MaxContextFiles + 1)
+            .Select(index => Path.Combine(_root, $"file-{index:D2}.cs")).ToArray();
+        foreach (var path in paths) File.WriteAllText(path, "class Sample {}");
+        var selected = new List<string>();
+
+        var result = ProjectContextSelection.AddFiles(new WorkspaceFileService(_root), selected, paths);
+
+        Assert.Equal(WorkspaceFileService.MaxContextFiles, result.AddedCount);
+        Assert.Equal(1, result.IgnoredCount);
+        Assert.Equal(WorkspaceFileService.MaxContextFiles, selected.Count);
     }
 
     public void Dispose()

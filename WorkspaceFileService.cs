@@ -8,6 +8,7 @@ namespace Codev;
 /// <summary>Provides project-scoped file operations and refuses path escapes and link traversal.</summary>
 public sealed class WorkspaceFileService
 {
+    public const int MaxContextFiles = 24;
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "dist", "build", "coverage" };
     private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -114,7 +115,6 @@ public sealed class WorkspaceFileService
     /// <summary>Estimates source-file tokens using bounded sizes; it does not include chat history or prompt instructions.</summary>
     public int EstimateContextTokens(IReadOnlyList<string>? selectedFiles = null)
     {
-        const int maxFiles = 24;
         const int maxChars = 32_000;
         const int maxFileChars = 2_400;
         var files = selectedFiles is { Count: > 0 } ? selectedFiles : ListContextFiles(maxEntries: 300);
@@ -122,7 +122,7 @@ public sealed class WorkspaceFileService
         var fileCount = 0;
         foreach (var relative in files)
         {
-            if (fileCount >= maxFiles || estimatedChars >= maxChars) break;
+            if (fileCount >= MaxContextFiles || estimatedChars >= maxChars) break;
             if (!SourceExtensions.Contains(Path.GetExtension(relative)) || IsContextExcluded(relative)) continue;
             try
             {

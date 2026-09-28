@@ -30,7 +30,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Find in the active conversation | Search message text, inspect matching excerpts, and jump directly to a result with Ctrl+Shift+F |
 | Pinning and conversation search | Title and message text search, matching excerpts, project/archive scope, and debounced input are implemented |
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
-| Choose a project folder and include bounded source/config excerpts | Select project-relative chat context files or use safe bounded excerpts; Code task mode can list/read/search supported text files |
+| Choose a project folder and include bounded source/config excerpts | Select up to 24 project-relative chat context files or use safe bounded excerpts; token estimates and sent context use the same file limit |
 | Attach local source files | Project files can be dragged onto the composer and added as context; attachment bytes are not sent until the user sends the prompt |
 | File explorer and preview | Project context menu opens a safe text-file browser with filtering, read-only preview, and Add to chat context |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and bounded reusable project knowledge included in local model context |

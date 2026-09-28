@@ -6,16 +6,16 @@ public sealed record ContextFileSelectionResult(int AddedCount, int IgnoredCount
 
 public static class ProjectContextSelection
 {
-    public static ContextFileSelectionResult AddDroppedFiles(WorkspaceFileService service, IList<string> selectedFiles, IEnumerable<string> droppedPaths)
+    public static ContextFileSelectionResult AddFiles(WorkspaceFileService service, IList<string> selectedFiles, IEnumerable<string> paths)
     {
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(selectedFiles);
-        ArgumentNullException.ThrowIfNull(droppedPaths);
+        ArgumentNullException.ThrowIfNull(paths);
 
         var availableFiles = service.ListContextFiles(maxEntries: 500).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var added = 0;
         var ignored = 0;
-        foreach (var path in droppedPaths)
+        foreach (var path in paths)
         {
             try
             {
@@ -24,7 +24,7 @@ public static class ProjectContextSelection
                 if (!WorkspaceFileService.IsPathWithinRoot(service.Root, fullPath)) { ignored++; continue; }
                 var relative = Path.GetRelativePath(service.Root, fullPath);
                 service.ResolvePath(relative);
-                if (!availableFiles.Contains(relative) || selectedFiles.Contains(relative, StringComparer.OrdinalIgnoreCase)) { ignored++; continue; }
+                if (!availableFiles.Contains(relative) || selectedFiles.Contains(relative, StringComparer.OrdinalIgnoreCase) || selectedFiles.Count >= WorkspaceFileService.MaxContextFiles) { ignored++; continue; }
                 selectedFiles.Add(relative);
                 added++;
             }

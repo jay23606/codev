@@ -174,7 +174,7 @@ public partial class MainWindow : Window
                 item.Messages ??= [];
                 item.PendingTurns ??= [];
                 item.FileChanges ??= [];
-                item.ContextFiles ??= [];
+                item.ContextFiles = item.ContextFiles?.Take(WorkspaceFileService.MaxContextFiles).ToList() ?? [];
                 item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
                 item.Messages = item.Messages.Where(message => message is not null).ToList();
                 for (var index = 0; index < item.Messages.Count; index++)
@@ -2125,7 +2125,6 @@ public partial class MainWindow : Window
             var fileService = new WorkspaceFileService(root, contextExclusions);
         var output = new StringBuilder("Selected project files (limited read-only excerpts):\n");
         var count = 0;
-        const int maxFiles = 24;
         const int maxChars = 32000;
         const int maxFileChars = 2400;
         try
@@ -2142,7 +2141,7 @@ public partial class MainWindow : Window
                     if (content.Length > maxFileChars) content = content[..maxFileChars] + "\n… [excerpt truncated]";
                     output.Append("\n--- ").Append(relative).AppendLine(" ---\n").AppendLine(content);
                     count++;
-                    if (count >= maxFiles || output.Length >= maxChars) break;
+                    if (count >= WorkspaceFileService.MaxContextFiles || output.Length >= maxChars) break;
                 }
                 catch (OperationCanceledException) { throw; }
                 catch { }
@@ -2469,7 +2468,7 @@ public partial class MainWindow : Window
 
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
         var project = EnsureProject(_active.ProjectPath);
-        var result = ProjectContextSelection.AddDroppedFiles(new WorkspaceFileService(_active.ProjectPath, project.ContextExclusions), _active.ContextFiles, paths);
+        var result = ProjectContextSelection.AddFiles(new WorkspaceFileService(_active.ProjectPath, project.ContextExclusions), _active.ContextFiles, paths);
         if (result.AddedCount > 0)
         {
             UpdateContextLabel(_active);
@@ -2478,8 +2477,8 @@ public partial class MainWindow : Window
         }
         if (_requestCancellation is null)
             AgentStatusLabel.Text = result.AddedCount > 0
-                ? $"Added {result.AddedCount} file(s) to local context" + (result.IgnoredCount > 0 ? $" · ignored {result.IgnoredCount} unsupported, excluded, duplicate, or outside-project file(s)" : "")
-                : $"No files added · ignored {result.IgnoredCount} unsupported, excluded, duplicate, or outside-project file(s)";
+                ? $"Added {result.AddedCount} file(s) to local context" + (result.IgnoredCount > 0 ? $" · ignored {result.IgnoredCount} unsupported, excluded, duplicate, outside-project, or over-limit file(s)" : "")
+                : $"No files added · ignored {result.IgnoredCount} unsupported, excluded, duplicate, outside-project, or over-limit file(s)";
     }
 
     private void Suggestion_Click(object sender, RoutedEventArgs e)
@@ -2513,23 +2512,12 @@ public partial class MainWindow : Window
         if (picker.ShowDialog(this) != true) return;
         var projectSettings = EnsureProject(_active.ProjectPath!);
         var service = new WorkspaceFileService(_active.ProjectPath!, projectSettings.ContextExclusions);
-        var availableFiles = service.ListContextFiles(maxEntries: 500).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in picker.FileNames)
-        {
-            var full = Path.GetFullPath(path);
-            if (!WorkspaceFileService.IsPathWithinRoot(service.Root, full)) continue;
-            var relative = Path.GetRelativePath(service.Root, full);
-            try
-            {
-                service.ResolvePath(relative);
-                if (!availableFiles.Contains(relative)) continue;
-                if (!_active.ContextFiles.Contains(relative, StringComparer.OrdinalIgnoreCase)) _active.ContextFiles.Add(relative);
-            }
-            catch (UnauthorizedAccessException) { }
-        }
+        var result = ProjectContextSelection.AddFiles(service, _active.ContextFiles, picker.FileNames);
         UpdateContextLabel(_active);
         RefreshConversationLists();
         _ = SaveAsync();
+        if (_requestCancellation is null && result.IgnoredCount > 0)
+            AgentStatusLabel.Text = $"Added {result.AddedCount} file(s) · ignored {result.IgnoredCount} unsupported, excluded, duplicate, outside-project, or over-limit file(s)";
     }
 
     private void UpdateContextLabel(Conversation conversation)

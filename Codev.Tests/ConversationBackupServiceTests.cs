@@ -91,6 +91,16 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Backup_import_caps_context_files_to_the_prompt_limit()
+    {
+        var source = new Conversation { ContextFiles = Enumerable.Range(0, WorkspaceFileService.MaxContextFiles + 5).Select(index => $"file-{index}.cs").ToList() };
+
+        var imported = Assert.Single(ConversationBackupService.Import(JsonSerializer.Serialize(new[] { source }, Options), Options));
+
+        Assert.Equal(WorkspaceFileService.MaxContextFiles, imported.ContextFiles.Count);
+    }
+
+    [Fact]
     public void Import_marks_interrupted_assistant_turns_as_interrupted()
     {
         var json = """[{"Messages":[{"Role":"user","Content":"hello"},{"Role":"assistant","Content":""}]}]""";

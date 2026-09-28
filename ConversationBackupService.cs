@@ -61,7 +61,7 @@ public static class ConversationBackupService
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;
             item.PendingTurns = [];
-            item.ContextFiles ??= [];
+            item.ContextFiles = item.ContextFiles?.Take(WorkspaceFileService.MaxContextFiles).ToList() ?? [];
             item.FileChanges = item.FileChanges?.Where(change => change is not null)
                 .Select(change => change with { CheckpointPath = null }).ToList() ?? [];
             item.Messages = item.Messages.Select(message =>
