@@ -55,7 +55,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Per-conversation output styles | Avalonia offers balanced, concise, explanatory, and code-only response styles; the choice persists with the conversation and queued turns and does not alter permissions |
 | Ollama loaded-model memory view | Avalonia reads the server's running-model list, shows reported model size and VRAM allocation, and offers a confirmed unload while no response or queued request is active |
 | Ollama generation stats | Avalonia displays first-token latency, generated tokens per second, output token count, and server-reported model load time beneath completed local replies |
-| Avalonia conversation fork | Fork a saved chat from its sidebar menu; history, model/context choices, project association, and separate copies of Codev-managed rollback checkpoints are retained |
+| Avalonia project resume and conversation fork | Attaching a folder with prior chats offers resume recent, attach to current, or start fresh; the sidebar can fork a saved chat with separate copies of Codev-managed rollback checkpoints |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
 
@@ -184,7 +184,7 @@ This section is the single backlog for features drawn from studying Claude Code 
 | 3. Smarter context | A3, A5, A8, B2, B6, B9, D2 | Cuts wasted tokens; skills and structured calls make agents more reliable, and folder trust (B9) must be in place before any project-provided skill, hook, agent or command file is read |
 | 4. Extend | D3, D4, D6, B12, A9, E4, E6, E7 | Extension points, once the basics are solid |
 | 5. Parallel and unattended | D5, D8, B7, E8, D10 | Depends on worktrees, the shared core, and sandbox research |
-| Anytime | A4, A7, A10, A11, A12, B10, B11, C4, C6, C7, D7, D9, E1, E3, E4, E5, E9, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
+| Anytime | A4, A7, A10, A11, A12, B10, B11, C6, C7, D7, D9, E1, E3, E4, E5, E9, E11 | Independent; pick up between phases (D7 needs D2 to D6) |
 
 X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia port; E7 needs `Codev.Core` (X2), and E8 is a decision after X2.
 
@@ -263,7 +263,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | C1 | Richer review pane | M | none | Core |
 | C2 | `/review` pass | M | D1 | Later |
 | C3 | Rewind | M | none | Core |
-| C4 | Resume by project, fork a conversation | S | none | Later |
+| C4 | Resume by project, fork a conversation | S | none | Done |
 | C5 | Queue a follow-up while running | S | none | Core |
 | C6 | Edit any earlier message | S–M | C3 | Later |
 | C7 | Whole-tree snapshot before commands | M–L (prototype first) | C3 | Speculative |
@@ -271,7 +271,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **C1 Richer review pane (partially implemented).** Per [Codex's review pane](https://learn.chatgpt.com/docs/code-review?surface=app): stage, unstage and revert at three levels (whole diff, per file, **per hunk**; Codev is per file today); choose the scope to review (uncommitted changes, **the assistant's last turn**, a branch against a base, one commit); and attach a comment to selected diff excerpts. Avalonia comments stay in the conversation and composer until sent, then travel with the user message as guidance; they are included in conversation persistence and backups. Hunk-level stage/revert and broader review scopes remain future work.
 - **C2 `/review`.** A separate, read-only model pass over uncommitted changes, a commit or a branch, returning findings by priority before the user commits. Uses a review-specific prompt and never edits files. Label it a second opinion; quality depends on the model.
 - **C3 Rewind (partially implemented).** Avalonia can restore the conversation to before a selected user prompt, after confirmation, and place that prompt back in the composer. This mode deliberately leaves project files unchanged. The remaining implementation must connect each Codev-managed file checkpoint to its turn and offer reviewed *restore code and conversation*, *conversation only*, and *code only* choices; commands and edits made outside Codev remain outside the checkpoint history. Keep a bounded number of checkpoints, report missing snapshots, skip symlinks/hard links with a visible warning, and state that checkpoints are not a replacement for Git. After a restore, re-present the original pending action (an edit or a command) so the user can re-run, change or reject it, as Gemini CLI's `/restore` does. See C7 for covering changes made by shell commands.
-- **C4 Resume and fork (fork implemented in Avalonia; project-based resume remains).** A sidebar action forks an idle conversation with its messages, model/context/mode/output settings, project association, diff comments, and independent copies of Codev-managed file checkpoints. Active or queued conversations cannot be forked; missing, oversized, linked, or out-of-scope checkpoint files fail the operation and clean up any partial copy. Opening a project should still offer to continue its most recent conversation here (as `codex resume` does).
+- **C4 Resume and fork (implemented in Avalonia).** When a user attaches a folder with prior chats, Codev offers to resume the most recent non-archived chat for that normalized path, attach the folder to the current chat, or start fresh. A sidebar action forks an idle conversation with its messages, model/context/mode/output settings, project association, diff comments, and independent copies of Codev-managed file checkpoints. Active or queued conversations cannot be forked; missing, oversized, linked, or out-of-scope checkpoint files fail the operation and clean up any partial copy.
 - **C5 Queue a follow-up.** Let the user type and queue a message while a response is running. The WPF queue and Avalonia port support this; an enqueued message is its own saved user/assistant pair, and queued turns use the model/context captured at enqueue time. A message that joins a running turn is not its own rewind point.
 - **C6 Edit any earlier message.** Click any sent message to revise it and resend, which restores the conversation (and optionally the files) to that point through C3 and puts the original text back in the composer. Codev only edits and resends the last prompt today; [Zed](https://zed.dev/docs/ai/agent-panel) lets you edit any past message.
 - **C7 Whole-tree snapshot before commands.** C3's main gap is that shell-made changes are not tracked. Gemini CLI stores its [checkpoints](https://geminicli.com/docs/cli/checkpointing/) as commits in a separate "shadow" Git repository outside the project (together with the conversation and the tool call that triggered it), so they never touch the project's own history. Codev could use the same approach for file edits and also snapshot the whole project tree (respecting ignore rules) before an approved command, so undo covers shell changes too. That extension is an inference, not something either tool documents. Prototype it on a large repository and measure time, disk use, and behavior with ignored, binary, huge and symlinked files before committing to it.
@@ -352,7 +352,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B6, B10, B11, B12, C2, C4, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B6, B10, B11, B12, C2, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.

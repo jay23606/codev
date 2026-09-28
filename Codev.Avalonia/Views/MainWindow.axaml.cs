@@ -601,6 +601,17 @@ public partial class MainWindow : Window
                 viewModel.ReportContextActionStatus("No project folder was selected.");
                 return;
             }
+            if (viewModel.FindMostRecentConversationForProject(path) is { } recent)
+            {
+                var choice = await ShowProjectConversationChoice(path, recent);
+                if (choice == "resume")
+                {
+                    viewModel.ResumeProjectConversation(recent);
+                    return;
+                }
+                if (choice == "new") viewModel.NewConversation();
+                else if (choice != "attach") return;
+            }
             viewModel.SetProjectFolder(path);
             if (!viewModel.IsProjectPathKnown(path) && !viewModel.IsProjectPathTrusted(path) && viewModel.CanManageProjectTrust)
             {
@@ -614,6 +625,46 @@ public partial class MainWindow : Window
         {
             viewModel.ReportContextActionStatus($"Could not attach project folder: {ex.Message}");
         }
+    }
+
+    private async Task<string?> ShowProjectConversationChoice(string projectPath, Codev.Conversation recent)
+    {
+        var dialog = new Window
+        {
+            Title = "Continue work in this project?",
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        var choices = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8
+        };
+        foreach (var (label, value) in new[]
+                 {
+                     ("Cancel", "cancel"), ("Attach here", "attach"), ("New conversation", "new"), ("Resume recent", "resume")
+                 })
+        {
+            var button = new Button { Content = label, Classes = { "soft" }, Tag = value };
+            button.Click += (_, _) => dialog.Close(button.Tag?.ToString());
+            choices.Children.Add(button);
+        }
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock { Text = $"Codev found a recent conversation for:\n{projectPath}", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold },
+                new TextBlock { Text = $"{recent.Title}\nUpdated {recent.UpdatedAt.ToLocalTime():g} · {recent.Messages.Count} message(s)", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush },
+                new TextBlock { Text = "Resume it, attach this folder to the current conversation, or start a fresh conversation for this project.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                choices
+            }
+        };
+        return await dialog.ShowDialog<string?>(this);
     }
 
     private async Task<string?> ShowProjectTrustDialog(string projectPath)

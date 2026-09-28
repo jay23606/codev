@@ -103,3 +103,4 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Verify diff comments and file-change history are copied, and every local rollback checkpoint in the fork resides under the new conversation ID and remains independent of the source checkpoint.
 - Attempt to fork a conversation with active generation or queued turns; verify it is refused without altering the source or creating a new chat.
 - Simulate a missing or invalid checkpoint; verify fork reports the error and removes any partial checkpoint copies.
+- Attach a folder with multiple prior conversations; confirm the prompt chooses the most recently updated non-archived chat and offers Resume recent, Attach here, New conversation, and Cancel. Verify each choice does the corresponding action without copying or overwriting messages.

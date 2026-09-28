@@ -803,6 +803,25 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsProjectPathTrusted(string path) => _projectFolderTrust.IsTrusted(path);
     public bool IsProjectPathKnown(string path) => _projectFolderTrust.IsKnown(path);
 
+    public Codev.Conversation? FindMostRecentConversationForProject(string path)
+    {
+        if (ActiveConversation?.ProjectPath is { Length: > 0 } activePath && Codev.ProjectConversationResume.PathsEqual(activePath, path,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) return null;
+        return Codev.ProjectConversationResume.FindMostRecent(_conversations, path, ActiveConversation?.Id);
+    }
+
+    public bool ResumeProjectConversation(Codev.Conversation conversation)
+    {
+        if (!_conversations.Contains(conversation) || conversation.IsArchived) return false;
+        _showArchived = false;
+        OnPropertyChanged(nameof(ShowArchived));
+        OnPropertyChanged(nameof(ArchiveViewLabel));
+        SelectConversation(conversation);
+        RebuildLists();
+        ReportContextActionStatus($"Resumed conversation · {conversation.Title}");
+        return true;
+    }
+
     public async Task MarkProjectFolderKnownAsync(string path)
     {
         await _projectFolderTrust.MarkKnownAsync(path);
