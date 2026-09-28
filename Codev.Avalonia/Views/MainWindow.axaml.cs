@@ -1250,6 +1250,12 @@ public partial class MainWindow : Window
             await viewModel.RenameConversationAsync(conversation, input.Text ?? "");
     }
 
+    private async void ForkConversation_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && GetMenuConversation(menuItem) is { } conversation && DataContext is ViewModels.MainViewModel viewModel)
+            await viewModel.ForkConversationAsync(conversation);
+    }
+
     private void ArchiveConversation_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is MenuItem menuItem && GetMenuConversation(menuItem) is { } conversation && DataContext is ViewModels.MainViewModel viewModel)

@@ -96,3 +96,10 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Verify a warm-model response can report a near-zero load time, and missing optional response fields do not display invented values or break the reply.
 - Switch to a hosted model and confirm Codev does not show locally estimated throughput or load numbers.
 - Restart and reopen the conversation; confirm the stats persist with that reply.
+
+## Conversation fork
+
+- Fork an idle conversation from both the pinned and recent sidebar lists; verify the fork becomes active and retains the title suffix, messages, draft, model/context/style/mode settings, project link, and selected context.
+- Verify diff comments and file-change history are copied, and every local rollback checkpoint in the fork resides under the new conversation ID and remains independent of the source checkpoint.
+- Attempt to fork a conversation with active generation or queued turns; verify it is refused without altering the source or creating a new chat.
+- Simulate a missing or invalid checkpoint; verify fork reports the error and removes any partial checkpoint copies.

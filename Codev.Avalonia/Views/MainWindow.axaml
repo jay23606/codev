@@ -72,6 +72,7 @@
                                 <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
                                     <Button.ContextMenu>
                                         <ContextMenu>
+                                            <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />
                                             <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
                                             <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
                                             <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
@@ -87,6 +88,7 @@
                                 <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
                                     <Button.ContextMenu>
                                         <ContextMenu>
+                                            <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />
                                             <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
                                             <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
                                             <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />

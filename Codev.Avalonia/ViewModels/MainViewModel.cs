@@ -478,6 +478,33 @@ public sealed class MainViewModel : ViewModelBase
         return true;
     }
 
+    public async Task<bool> ForkConversationAsync(Codev.Conversation conversation)
+    {
+        if (!_conversations.Contains(conversation)) return false;
+        if (IsConversationBusy(conversation))
+        {
+            ReportContextActionStatus("Wait for this conversation to finish and cancel its queued requests before forking it.");
+            return false;
+        }
+
+        try
+        {
+            var fork = await Codev.ConversationForkService.CreateForkAsync(conversation);
+            _conversations.Insert(0, fork);
+            SelectConversation(fork);
+            RebuildLists();
+            Persist();
+            await _persistenceTask;
+            ReportContextActionStatus($"Forked conversation · {fork.Title}");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            ReportContextActionStatus($"Could not fork conversation: {ex.Message}");
+            return false;
+        }
+    }
+
     public bool ToggleConversationArchive(Codev.Conversation conversation)
     {
         if (!_conversations.Contains(conversation)) return false;
