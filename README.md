@@ -10,6 +10,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Conversation rename and archive/restore, with permanent deletion available from the archive view
 - Regenerate the latest answer, edit/resend the last prompt, and branch a new conversation from a message
 - Continue an explicitly stopped answer from its partial text
+- Keyboard shortcuts include quick new chat, search, composer focus, Settings, rename, and stop; press F1 for the in-app reference
 - Save reusable local prompt templates and insert them into the composer for editing before sending
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with quick choices for the three models in the original setup

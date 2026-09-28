@@ -2161,12 +2161,32 @@ public partial class MainWindow : Window
             SearchFocus_Click(this, new RoutedEventArgs());
             e.Handled = true;
         }
+        else if (control && e.Key == Key.L)
+        {
+            PromptBox.Focus();
+            PromptBox.CaretIndex = PromptBox.Text.Length;
+            e.Handled = true;
+        }
+        else if (control && e.Key == Key.OemComma)
+        {
+            Settings_Click(this, new RoutedEventArgs());
+            e.Handled = true;
+        }
         else if (e.Key == Key.F2 && _active is not null)
         {
             _ = RenameConversationAsync(_active);
             e.Handled = true;
         }
+        else if (e.Key == Key.F1)
+        {
+            ShowKeyboardShortcuts();
+            e.Handled = true;
+        }
     }
+
+    private void ShowKeyboardShortcuts() => MessageBox.Show(this,
+        "Ctrl+N  New conversation\nCtrl+F  Search conversations\nCtrl+L  Focus composer\nCtrl+,  Settings\nF2  Rename current conversation\nEsc  Stop the active request\nEnter  Send from the composer\nCtrl+Enter  Insert a line break\nF1  Show keyboard shortcuts\n\nRight-click a message for Copy, branch, edit/resend, regenerate, or continue actions.",
+        "Keyboard shortcuts", MessageBoxButton.OK, MessageBoxImage.Information);
 
     private void Pin_Click(object sender, RoutedEventArgs e)
     {
