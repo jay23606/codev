@@ -2374,12 +2374,12 @@ public partial class MainWindow : Window
         var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, IsCancel = true };
         var layout = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
         {
-            new TextBlock { Text = "Read-only model review · second opinion", FontSize = 15, FontWeight = global::Avalonia.Media.FontWeight.SemiBold },
-            new TextBlock { Text = "The model reviewed a bounded local Git diff. No project files or Git state were changed.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+            new TextBlock { Text = "Read-only Git review · second opinion", FontSize = 15, FontWeight = global::Avalonia.Media.FontWeight.SemiBold },
+            new TextBlock { Text = "The review used a bounded local Git diff. No project files or Git state were changed.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
             text,
             close
         }};
-        var dialog = new Window { Title = "Uncommitted changes review", Width = 760, Height = 620, MinWidth = 560, MinHeight = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        var dialog = new Window { Title = "Git review", Width = 760, Height = 620, MinWidth = 560, MinHeight = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
         close.Click += (_, _) => dialog.Close();
         await dialog.ShowDialog(owner);
     }
