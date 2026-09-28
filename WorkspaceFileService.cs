@@ -237,7 +237,7 @@ public sealed class WorkspaceFileService
         return matches;
     }
 
-    public async Task<string> RunApprovedCommandAsync(string command, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public async Task<string> RunApprovedCommandAsync(string command, TimeSpan timeout, CancellationToken cancellationToken = default, IProgress<TimeSpan>? progress = null)
     {
         if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException("A command is required.", nameof(command));
         if (command.Length > 4000) throw new InvalidOperationException("Commands longer than 4,000 characters are not allowed.");
@@ -257,8 +257,10 @@ public sealed class WorkspaceFileService
         if (!process.Start()) throw new InvalidOperationException("Could not start PowerShell.");
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var progressCts = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
         var stdout = ReadLimitedAsync(process.StandardOutput, 10_000, linked.Token);
         var stderr = ReadLimitedAsync(process.StandardError, 10_000, linked.Token);
+        var progressTask = progress is null ? Task.CompletedTask : ReportCommandProgressAsync(progress, progressCts.Token);
         try { await process.WaitForExitAsync(linked.Token); }
         catch (OperationCanceledException)
         {
@@ -268,6 +270,11 @@ public sealed class WorkspaceFileService
             if (cancellationToken.IsCancellationRequested) throw;
             return $"Command timed out after {timeout.TotalSeconds:0} seconds and was terminated.";
         }
+        finally
+        {
+            progressCts.Cancel();
+            try { await progressTask; } catch (OperationCanceledException) { }
+        }
         await Task.WhenAll(stdout, stderr);
         var output = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(stdout.Result)) output.AppendLine(stdout.Result);
@@ -275,6 +282,16 @@ public sealed class WorkspaceFileService
         if (output.Length > 24_000) output.Length = 24_000;
         output.AppendLine().Append("Exit code: ").Append(process.ExitCode);
         return output.ToString();
+    }
+
+    private static async Task ReportCommandProgressAsync(IProgress<TimeSpan> progress, CancellationToken cancellationToken)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            progress.Report(stopwatch.Elapsed);
+        }
     }
 
     private static async Task<string> ReadLimitedAsync(StreamReader reader, int maxCharacters, CancellationToken cancellationToken)

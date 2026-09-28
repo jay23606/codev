@@ -30,7 +30,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json`
 - Create a local JSON backup of all conversations and import one additively; imports receive new conversation IDs and do not replace current history
 
-Code task mode can create or edit supported source, text, and configuration files after showing a review and receiving approval. The Files button shows changes and lets you review or restore checkpoints, including undo/redo of file creation. Code task mode can also request a PowerShell command; every command requires approval, runs with your Windows account permissions in the project folder, has a three-minute timeout, and is not sandboxed. Ordinary chat remains read-only.
+Code task mode can create or edit supported source, text, and configuration files after showing a review and receiving approval. The Files button shows changes and lets you review or restore checkpoints, including undo/redo of file creation. Code task mode can also request a PowerShell command; every command requires approval, shows elapsed progress, runs with your Windows account permissions in the project folder, has a three-minute timeout, and is not sandboxed. Use the active-turn Stop control to terminate it. Ordinary chat remains read-only.
 
 ## Run
 

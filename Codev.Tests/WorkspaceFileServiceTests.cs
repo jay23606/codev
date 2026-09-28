@@ -332,6 +332,20 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Reports_elapsed_time_while_an_approved_command_is_running()
+    {
+        var reports = new System.Collections.Concurrent.ConcurrentQueue<TimeSpan>();
+        var progress = new Progress<TimeSpan>(reports.Enqueue);
+
+        var result = await Service.RunApprovedCommandAsync("Start-Sleep -Seconds 2; Write-Output 'done'", TimeSpan.FromSeconds(10), progress: progress);
+
+        Assert.Contains("done", result);
+        Assert.NotEmpty(reports);
+        Assert.True(reports.TryPeek(out var elapsed));
+        Assert.True(elapsed >= TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
     public async Task Bounds_captured_command_output()
     {
         var result = await Service.RunApprovedCommandAsync("1..5000 | ForEach-Object { '0123456789' }", TimeSpan.FromSeconds(20));

@@ -1830,7 +1830,7 @@ public partial class MainWindow : Window
                 "search_files" => string.Join("\n", await service.SearchFilesAsync(Arg("query"), cancellationToken)),
                 "create_file" => await ReviewAndCreateFileAsync(Arg("relative_path"), Arg("content"), service, conversation, cancellationToken),
                 "write_file" => await ReviewAndWriteFileAsync(Arg("relative_path"), Arg("content"), service, conversation, cancellationToken),
-                "run_command" => await ApproveAndRunCommandAsync(Arg("command"), service, cancellationToken),
+                "run_command" => await ApproveAndRunCommandAsync(Arg("command"), service, conversation, cancellationToken),
                 _ => "Error: tool is not available."
             };
         }
@@ -1865,12 +1865,16 @@ public partial class MainWindow : Window
         return $"Approved and applied. Original backed up at {checkpoint ?? "(new file)"}.";
     }
 
-    private async Task<string> ApproveAndRunCommandAsync(string command, WorkspaceFileService service, CancellationToken cancellationToken)
+    private async Task<string> ApproveAndRunCommandAsync(string command, WorkspaceFileService service, Conversation conversation, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(command)) return "Error: command is empty.";
         if (command.Length > 4000) return "Rejected: command exceeds 4,000 characters.";
         if (!ShowCommandApproval(command, service.Root)) return "Rejected by user; command was not run.";
-        return await service.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken);
+        SetAgentStatus(conversation, "Code task · Starting approved PowerShell command…");
+        var progress = new Progress<TimeSpan>(elapsed =>
+            SetAgentStatus(conversation, $"Code task · PowerShell running · {elapsed:mm\\:ss}"));
+        try { return await service.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, progress); }
+        finally { SetAgentStatus(conversation, "Code task · Thinking…"); }
     }
 
     private bool ShowCommandApproval(string command, string projectPath)

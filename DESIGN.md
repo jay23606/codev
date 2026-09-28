@@ -69,7 +69,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - [x] Explicit Code task mode with bounded agent tools for listing, reading, searching, and proposing new or updated supported text files.
 - [x] Review proposed whole-file replacements side by side; approve or reject before applying.
 - [x] Local checkpoints before edits and deletes; per-conversation changed-file list and restore, including undo/redo of file creation or deletion. Whole-file unified diff and side-by-side review are available; richer history browsing remains.
-- [x] Agent can request a PowerShell command in the selected project; show the exact command and current-user access warning, require per-call approval, enforce a 3-minute timeout, and capture bounded output. Progress UI, direct stop/retry, and final verification summary remain.
+- [x] Agent can request a PowerShell command in the selected project; show the exact command and current-user access warning, require per-call approval, enforce a 3-minute timeout, capture bounded output, show elapsed progress, and stop through the active-turn control. Final verification summary remains.
 - Commands are not sandboxed and may access anything available to the Windows account. Every call prompts; do not silently claim an edit, test, or command succeeded.
 
 ### 3. Sessions and parallel work
