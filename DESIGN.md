@@ -103,7 +103,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 6. Extensibility and automation
 
-- Root project `AGENTS.md` instructions and saved project guidance are supported; user-level local skills/instructions remain pending.
+- [x] User-level personal instructions plus root project `AGENTS.md`, project instructions, and knowledge notes provide user and project scope; executable skill workflows remain pending.
 - MCP-compatible tools with per-server enablement, visible permissions, and logs; keep local-only use straightforward.
 - [x] Reusable local prompt templates with bounded name/prompt lengths; choosing a template inserts it into the composer for review before sending.
 - Optional recurring local jobs with an approval/review queue.

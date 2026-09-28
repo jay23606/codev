@@ -22,6 +22,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Copy any message from its context menu, including while another response is running
 - Read-only Plan mode, explicit Code task mode, Stop control that retains partial output, and current agent-tool status
 - Project switcher with pinned projects, project-specific instructions and reusable knowledge notes, and conversations scoped to each project
+- Optional personal instructions apply across chats, plans, and code tasks; they are stored locally and included with requests to the configured Ollama server
 - Optional root `AGENTS.md` is read through project-bounded file access and included as capped project guidance in local requests
 - Git status, per-file staged/unstaged diff review, sending selected diff lines to the chat composer, staging, unstaging, reviewed local commits, and local branch creation/switching from a project's menu; branch operations require a clean tree, and commits are never pushed automatically
 - Optional project-folder context: selected source/config files are read locally and sent to the local Ollama server as bounded context

@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private double _chatFontSize = 14;
     private List<PromptTemplate> _promptTemplates = [];
     private Uri _ollamaEndpoint = OllamaEndpoint.Default;
+    private string _personalInstructions = "";
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
     private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
@@ -94,6 +95,7 @@ public partial class MainWindow : Window
                 _completionNotificationsEnabled = settings?.CompletionNotifications ?? true;
                 _promptTemplates = PromptTemplateCatalog.Normalize(settings?.PromptTemplates);
                 if (OllamaEndpoint.TryParse(settings?.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
+                _personalInstructions = PersonalAgentInstructions.Normalize(settings?.PersonalInstructions);
             }
         }
         catch { _isDarkTheme = true; }
@@ -104,7 +106,7 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
-            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled, _promptTemplates, _ollamaEndpoint.ToString()), JsonOptions));
+            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled, _promptTemplates, _ollamaEndpoint.ToString(), _personalInstructions), JsonOptions));
         }
         catch { }
     }
@@ -1598,6 +1600,8 @@ public partial class MainWindow : Window
                 : turn.IsPlanMode
                     ? "You are Codev in read-only Plan mode. Give a concise, ordered implementation plan with key files, risks, and checks. Do not edit files, run commands, or claim that any work has been done. Ask a short clarifying question only if a missing detail blocks a useful plan."
                     : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
+            var personalInstructions = PersonalAgentInstructions.Build(_personalInstructions);
+            if (!string.IsNullOrWhiteSpace(personalInstructions)) system += "\n\n" + personalInstructions;
             var project = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
             if (project is not null && !string.IsNullOrWhiteSpace(project.Instructions))
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + project.Instructions;
@@ -2445,7 +2449,14 @@ public partial class MainWindow : Window
         Grid.SetRow(completionNotifications, 3); layout.Children.Add(completionNotifications);
         var preview = new TextBlock { Text = "The quick brown fox jumps over the lazy dog.", FontSize = _chatFontSize, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrush("MainTextBrush"), Margin = new Thickness(0, 4, 0, 14) };
         slider.ValueChanged += (_, _) => { sizeLabel.Text = $"{slider.Value:0} pt"; preview.FontSize = slider.Value; };
-        Grid.SetRow(preview, 4); layout.Children.Add(preview);
+        var lowerTools = new Grid();
+        lowerTools.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        lowerTools.ColumnDefinitions.Add(new ColumnDefinition());
+        var personalInstructions = new Button { Content = "Personal instructions…", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(12, 7, 12, 7), VerticalAlignment = VerticalAlignment.Center };
+        personalInstructions.Click += (_, _) => EditPersonalInstructions();
+        lowerTools.Children.Add(personalInstructions);
+        Grid.SetColumn(preview, 1); lowerTools.Children.Add(preview);
+        Grid.SetRow(lowerTools, 4); layout.Children.Add(lowerTools);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
         var apply = new Button { Content = "Apply", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
@@ -2602,6 +2613,48 @@ public partial class MainWindow : Window
         dialog.ShowDialog();
     }
 
+    private void EditPersonalInstructions()
+    {
+        var editor = new Window
+        {
+            Title = "Personal instructions", Width = 600, Height = 480,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.Children.Add(new TextBlock
+        {
+            Text = $"These preferences are included in every chat, plan, and code task, in addition to project-specific instructions. They are sent to the configured Ollama server with each request. Keep them under {PersonalAgentInstructions.MaxCharacters:N0} characters.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
+        });
+        var input = new TextBox
+        {
+            Text = _personalInstructions, MaxLength = PersonalAgentInstructions.MaxCharacters,
+            AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            FontSize = 13, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"),
+            BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(10)
+        };
+        Grid.SetRow(input, 1); layout.Children.Add(input);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var save = new Button { Content = "Save instructions", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        save.Click += (_, _) =>
+        {
+            _personalInstructions = PersonalAgentInstructions.Normalize(input.Text);
+            SaveThemePreference();
+            editor.DialogResult = true;
+            editor.Close();
+        };
+        buttons.Children.Add(cancel); buttons.Children.Add(save);
+        Grid.SetRow(buttons, 2); layout.Children.Add(buttons);
+        editor.Content = layout;
+        editor.ShowDialog();
+    }
+
     private PromptTemplate? EditPromptTemplate(PromptTemplate? original)
     {
         var editor = new Window
@@ -2707,7 +2760,7 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
         bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions, double? Temperature);
-    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null);
+    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null, string? PersonalInstructions = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);
