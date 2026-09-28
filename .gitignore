@@ -6,3 +6,4 @@ obj/
 *.cache
 artifacts/
 publish/
+Codev.Tests/TestResults/
