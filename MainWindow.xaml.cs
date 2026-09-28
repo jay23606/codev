@@ -228,6 +228,7 @@ public partial class MainWindow : Window
             _loadingModel = false;
             RefreshContextPicker(_active);
             ConnectionLabel.Text = _models.Count == 0 ? "No supported local models found" : $"Ollama · {_models.Count} coding models";
+            RefreshConversationLists();
         }
         catch
         {
@@ -237,6 +238,7 @@ public partial class MainWindow : Window
             _loadingModel = false;
             RefreshContextPicker(_active);
             ConnectionLabel.Text = "Ollama is not reachable";
+            RefreshConversationLists();
         }
     }
 
@@ -384,6 +386,16 @@ public partial class MainWindow : Window
         var recent = inWorkspace.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt);
         if (!string.IsNullOrWhiteSpace(search)) recent = recent.Where(c => c.Title.Contains(search, StringComparison.OrdinalIgnoreCase)).OrderByDescending(c => c.UpdatedAt);
         FillConversationList(RecentList, recent);
+    }
+
+    private static string FormatRelativeTime(DateTimeOffset updatedAt)
+    {
+        var age = DateTimeOffset.Now - updatedAt;
+        if (age < TimeSpan.FromMinutes(1)) return "now";
+        if (age < TimeSpan.FromHours(1)) return $"{(int)age.TotalMinutes}m ago";
+        if (age < TimeSpan.FromDays(1)) return $"{(int)age.TotalHours}h ago";
+        if (age < TimeSpan.FromDays(7)) return $"{(int)age.TotalDays}d ago";
+        return updatedAt.LocalDateTime.ToString("MMM d");
     }
 
     private static bool SameWorkspace(string? conversationPath, string? workspacePath) =>
@@ -650,8 +662,23 @@ public partial class MainWindow : Window
                 DockPanel.SetDock(badge, Dock.Right);
                 row.Children.Add(badge);
             }
-            var caption = new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 12, Foreground = ThemeBrush("SidebarTextBrush"), VerticalAlignment = VerticalAlignment.Center };
+            var modelLabel = FindModelOption(item.Model)?.DisplayName ?? item.Model;
+            var shortModel = modelLabel.Split('·')[0].Trim();
+            var details = new List<string> { shortModel };
+            if (item.LastPromptTokens > 0)
+            {
+                var contextLimit = item.LastPromptContext > 0 ? item.LastPromptContext : item.NumCtx > 0 ? item.NumCtx : MaxContextForModel(item.LastPromptModel.Length > 0 ? item.LastPromptModel : item.Model);
+                details.Add($"{FormatTokenCount(item.LastPromptTokens)}/{FormatContextLimit(contextLimit)}");
+            }
+            if (!string.IsNullOrWhiteSpace(item.ProjectPath)) details.Add(Path.GetFileName(item.ProjectPath));
+            if (item.FileChanges.Count > 0) details.Add($"{item.FileChanges.Count} changes");
+            details.Add(FormatRelativeTime(item.UpdatedAt));
+            var caption = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            caption.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 12, Foreground = ThemeBrush("SidebarTextBrush") });
+            caption.Children.Add(new TextBlock { Text = string.Join(" · ", details), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 9, Foreground = ThemeBrush("SidebarMutedBrush"), Margin = new Thickness(0, 2, 0, 0) });
             row.Children.Add(caption);
+            var contextText = item.LastPromptTokens > 0 ? $"Last prompt: {FormatTokenCount(item.LastPromptTokens)} / {FormatContextLimit(item.LastPromptContext > 0 ? item.LastPromptContext : item.NumCtx > 0 ? item.NumCtx : MaxContextForModel(item.LastPromptModel.Length > 0 ? item.LastPromptModel : item.Model))}" : "No prompt usage reported yet";
+            button.ToolTip = $"{title}\nModel: {modelLabel}\nWorkspace: {item.ProjectPath ?? "Quick chat"}\n{contextText}\nChanged files: {item.FileChanges.Count}\nLast activity: {item.UpdatedAt.LocalDateTime:g}\n{requestStatus}";
             button.Content = row;
             button.Click += (_, _) => SelectConversation(item);
             var menu = new ContextMenu();
@@ -1375,6 +1402,7 @@ public partial class MainWindow : Window
         if (_active.NumCtx > maxContext) _active.NumCtx = 0;
         RefreshContextPicker(_active);
         UpdateContextBudgetLabel(_active);
+        RefreshConversationLists();
         _ = SaveAsync();
     }
 
@@ -1383,6 +1411,7 @@ public partial class MainWindow : Window
         if (_updatingContext || _active is null || ContextPicker.SelectedValue is not int context) return;
         _active.NumCtx = context;
         UpdateContextBudgetLabel(_active);
+        RefreshConversationLists();
         _ = SaveAsync();
     }
 

@@ -75,6 +75,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 ### 3. Sessions and parallel work
 
 - [x] Hardware-aware serial Ollama request queue; each queued turn keeps its conversation, model, context size, mode, project, and selected context files, with running/queued indicators in the sidebar.
+- [x] Sidebar session summaries show each conversation's model, latest prompt/context use, project, changed-file count, and last activity.
 - Tabs or a session switcher for many conversations, with pause, resume, per-session cancel, and clear busy/queued states.
 - More than one independent agent task at once, subject to available RAM and model-load limits; communicate when local hardware serializes inference.
 - Optional Git worktree per task so parallel edits cannot collide in the same checkout.
