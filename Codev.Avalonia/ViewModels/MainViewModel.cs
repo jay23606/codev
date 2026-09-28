@@ -317,7 +317,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsPlanMode => ActiveConversation?.IsPlanMode ?? false;
     public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
     public bool IsCodeTask => ActiveConversation?.IsCodeTask ?? false;
-    public string CodeTaskLabel => IsCodeTask ? "Code task on" : "Code task";
+    public string CodeTaskLabel => IsCodeTask ? "Code task on" : CanEnterCodeTaskMode ? "Enable Code task" : "Code task unavailable";
     public string ConversationModeCycleTooltip => IsCodeTask
         ? "Ctrl+Shift+M switches Code task back to Chat."
         : IsPlanMode
@@ -330,12 +330,18 @@ public sealed class MainViewModel : ViewModelBase
         reason is not "Wait for the current response to finish before changing conversation mode.";
     public string CodeTaskUnavailableReason => GetCodeTaskUnavailableReason() ?? "";
     public string CodeTaskTooltip => IsCodeTask
-        ? "Code task is on. Click to return to Chat mode. File changes and every shell command still need approval."
-        : GetCodeTaskUnavailableReason() ?? "Enable Code task. File changes and every shell command still need approval.";
+        ? $"Code task is on. {ProjectCommandPermissionMode switch
+        {
+            Codev.ProjectCommandPermissionMode.Allowlist => "Exact saved allow rules can skip approval; unlisted commands still ask.",
+            Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
+            _ => "Commands ask every time."
+        }} Change this under Project actions → Command permissions. File changes still require review."
+        : GetCodeTaskUnavailableReason() ?? "Enable Code task. Commands still follow the separate project command-approval policy.";
 
     private void NotifyCodeTaskAvailabilityProperties()
     {
         OnPropertyChanged(nameof(CanEnterCodeTaskMode));
+        OnPropertyChanged(nameof(CodeTaskLabel));
         OnPropertyChanged(nameof(ShowCodeTaskUnavailableReason));
         OnPropertyChanged(nameof(CodeTaskUnavailableReason));
         OnPropertyChanged(nameof(CodeTaskTooltip));
