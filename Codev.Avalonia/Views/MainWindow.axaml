@@ -82,6 +82,8 @@
                     </StackPanel>
                 </ScrollViewer>
                 <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
+                    <Button Classes="nav" Content="⇩  Export all chats…" Click="ExportBackup_Click" ToolTip.Tip="Save all conversations as a portable local JSON backup" />
+                    <Button Classes="nav" Content="⇧  Import chats…" Click="ImportBackup_Click" ToolTip.Tip="Add conversations from a Codev JSON backup without replacing existing history" />
                     <Button Classes="nav" Content="{Binding ThemeLabel}" Command="{Binding ToggleThemeCommand}" />
                 </StackPanel>
                 <Border Grid.Row="5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="4,13,4,3">
@@ -97,7 +99,7 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
@@ -119,6 +121,7 @@
                     </ComboBox>
                     <Button Grid.Column="3" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
                     <Button Grid.Column="4" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
+                    <Button Grid.Column="5" Classes="soft" Content="⇩ Export" Click="ExportConversation_Click" ToolTip.Tip="Save this conversation as a Markdown file" />
                 </Grid>
             </Border>
             <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">

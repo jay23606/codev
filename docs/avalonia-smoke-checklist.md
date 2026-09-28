@@ -19,14 +19,18 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [ ] Verify Enter sends, Shift+Enter inserts a newline, Ctrl/Cmd+N creates a conversation, Ctrl/Cmd+F focuses search, and Ctrl/Cmd+L focuses the composer.
 - [ ] Scroll upward during streaming and verify auto-follow pauses; return to the bottom and verify it resumes.
 - [ ] Pin a conversation, find it through search, archive it, and restore it.
+- [x] Export the active conversation as Markdown and verify its content and metadata.
+- [ ] Export all chats to a JSON backup and verify the selected file is written.
+- [x] Import a synthetic JSON backup and verify it adds a conversation with a new ID while keeping existing chats; confirm rollback checkpoint paths are not restored.
 - [ ] Delete the disposable conversation and verify it no longer appears in recents, pins, or search.
 
 ## Not yet supported in Avalonia
 
-Project file browsing and previews, Plan and Code task modes, reviewed edits, command approval, Git, export, conversation backup/import, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Keep the Windows WPF release checklist separate until those workflows are ported.
+Project file browsing and previews, Plan and Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Keep the Windows WPF release checklist separate until those workflows are ported.
 
 ## Run record
 
 | Date | Commit | OS | Model / context | Result | Notes |
 |---|---|---|---|---|---|
 | 2026-09-28 | working tree after `b180f46` | Windows 11 | Qwen3.6 35B-A3B | Partial pass | Avalonia restored the active conversation/model and had no blank model entries. New chats inherited Qwen3.6. Attached a disposable project, selected one JS file and verified the local response returned its exact test value; Ollama CPU inference took about two minutes. Remaining checklist items are unverified. |
+| 2026-09-28 | working tree after `a34594e` | Windows 11 | Qwen3.6 35B-A3B | Partial pass | Exported a disposable empty conversation as Markdown and verified its title/model metadata. Imported a synthetic backup through the native file picker; it received a new ID and existing conversations remained present. Core backup tests verify checkpoint paths are stripped. Full-history JSON export and remaining checklist items are unverified. |

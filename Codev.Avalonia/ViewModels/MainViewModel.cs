@@ -23,6 +23,7 @@ public sealed class MainViewModel : ViewModelBase
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
     private static readonly string ActiveConversationPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-active-conversation.json");
+    private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
     private Codev.Conversation? _active;
     private string _searchText = "";
@@ -291,6 +292,42 @@ public sealed class MainViewModel : ViewModelBase
         ContextActionStatus = message;
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
+    }
+
+    public async Task<string> ExportActiveConversationMarkdownAsync()
+    {
+        if (ActiveConversation is not { } conversation) throw new InvalidOperationException("There is no active conversation to export.");
+        await SavePendingDraftAsync();
+        return Codev.ConversationMarkdownExporter.Export(conversation);
+    }
+
+    public async Task<string> ExportConversationBackupAsync()
+    {
+        await SavePendingDraftAsync();
+        return Codev.ConversationBackupService.Export(_conversations, BackupJsonOptions);
+    }
+
+    public async Task<int> ImportConversationBackupAsync(string json)
+    {
+        await SavePendingDraftAsync();
+        var imported = Codev.ConversationBackupService.Import(json, BackupJsonOptions);
+        foreach (var conversation in imported.OrderBy(item => item.UpdatedAt))
+        {
+            conversation.IsArchived = false;
+            if (!string.IsNullOrWhiteSpace(conversation.ProjectPath) && !Directory.Exists(conversation.ProjectPath))
+                conversation.ProjectPath = null;
+            _conversations.Insert(0, conversation);
+        }
+        _showArchived = false;
+        OnPropertyChanged(nameof(ShowArchived));
+        OnPropertyChanged(nameof(ArchiveViewLabel));
+        RebuildLists();
+        if (imported.Count > 0)
+            SelectConversation(imported.OrderByDescending(item => item.UpdatedAt).First());
+        Persist();
+        await _persistenceTask;
+        ReportContextActionStatus($"Imported {imported.Count} conversation(s). Existing history was left unchanged.");
+        return imported.Count;
     }
 
     public Codev.ContextFileSelectionResult AddContextFiles(IEnumerable<string> paths)

@@ -5,6 +5,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using System.Collections.Specialized;
 using System.IO;
+using System.Text;
 
 namespace Codev.Avalonia.Views;
 
@@ -151,6 +152,127 @@ public partial class MainWindow : Window
         {
             viewModel.ReportContextActionStatus($"Could not add project files: {ex.Message}");
         }
+    }
+
+    private async void ExportConversation_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        if (!StorageProvider.CanSave)
+        {
+            viewModel.ReportContextActionStatus("This platform does not provide a local save dialog.");
+            return;
+        }
+        try
+        {
+            var conversation = viewModel.ActiveConversation;
+            if (conversation is null) return;
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Export conversation",
+                SuggestedFileName = $"{SafeExportName(conversation.Title)}.md",
+                DefaultExtension = "md",
+                ShowOverwritePrompt = true,
+                FileTypeChoices = [new FilePickerFileType("Markdown document") { Patterns = ["*.md"] }]
+            });
+            if (file is null) return;
+            var markdown = await viewModel.ExportActiveConversationMarkdownAsync();
+            await WriteTextFileAsync(file, markdown);
+            viewModel.ReportContextActionStatus($"Exported conversation · {file.Name}");
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportContextActionStatus($"Could not export conversation: {ex.Message}");
+        }
+    }
+
+    private async void ExportBackup_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        if (!StorageProvider.CanSave)
+        {
+            viewModel.ReportContextActionStatus("This platform does not provide a local save dialog.");
+            return;
+        }
+        try
+        {
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Export all Codev conversations",
+                SuggestedFileName = $"codev-backup-{DateTime.Now:yyyy-MM-dd}.codev.json",
+                DefaultExtension = "json",
+                ShowOverwritePrompt = true,
+                FileTypeChoices = [new FilePickerFileType("Codev conversation backup") { Patterns = ["*.codev.json", "*.json"] }]
+            });
+            if (file is null) return;
+            var backup = await viewModel.ExportConversationBackupAsync();
+            await WriteTextFileAsync(file, backup);
+            viewModel.ReportContextActionStatus($"Backup saved · {file.Name}");
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportContextActionStatus($"Could not create conversation backup: {ex.Message}");
+        }
+    }
+
+    private async void ImportBackup_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        if (!StorageProvider.CanOpen)
+        {
+            viewModel.ReportContextActionStatus("This platform does not provide a local file picker.");
+            return;
+        }
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Import Codev conversation backup",
+                AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType("Codev conversation backup") { Patterns = ["*.codev.json", "*.json"] }]
+            });
+            var file = files.FirstOrDefault();
+            if (file is null) return;
+            viewModel.ReportContextActionStatus($"Reading backup · {file.Name}");
+            var json = await ReadTextFileAsync(file, 100_000_000);
+            var importedCount = await viewModel.ImportConversationBackupAsync(json);
+            viewModel.ReportContextActionStatus($"Imported {importedCount} conversation(s). Existing history was left unchanged.");
+        }
+        catch (Exception ex)
+        {
+            viewModel.ReportContextActionStatus($"Could not import backup. Existing history was left unchanged. {ex.Message}");
+        }
+    }
+
+    private static async Task WriteTextFileAsync(IStorageFile file, string contents)
+    {
+        await using var stream = await file.OpenWriteAsync();
+        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        await writer.WriteAsync(contents);
+    }
+
+    private static async Task<string> ReadTextFileAsync(IStorageFile file, int maxBytes)
+    {
+        await using var stream = await file.OpenReadAsync();
+        if (stream.CanSeek && stream.Length > maxBytes)
+            throw new InvalidDataException("The selected backup is larger than the 100 MB import limit.");
+        using var buffer = new MemoryStream();
+        var chunk = new byte[64 * 1024];
+        while (true)
+        {
+            var read = await stream.ReadAsync(chunk.AsMemory());
+            if (read == 0) break;
+            if (buffer.Length + read > maxBytes)
+                throw new InvalidDataException("The selected backup is larger than the 100 MB import limit.");
+            buffer.Write(chunk, 0, read);
+        }
+        return Encoding.UTF8.GetString(buffer.ToArray()).TrimStart('\uFEFF');
+    }
+
+    private static string SafeExportName(string title)
+    {
+        var invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        var cleaned = new string(title.Select(character => invalid.Contains(character) ? '-' : character).ToArray()).Trim(' ', '.');
+        return string.IsNullOrWhiteSpace(cleaned) ? "codev-conversation" : cleaned;
     }
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
