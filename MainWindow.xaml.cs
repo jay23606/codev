@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly SerialAsyncQueue<QueuedTurn> _requestQueue = new();
     private Task _queueProcessorTask = Task.CompletedTask;
     private readonly SemaphoreSlim _storeGate = new(1, 1);
+    private readonly SemaphoreSlim _projectsStoreGate = new(1, 1);
     private string? _projectPath;
     private CancellationTokenSource? _requestCancellation;
     private Conversation? _activeRequestConversation;
@@ -218,12 +219,17 @@ public partial class MainWindow : Window
 
     private async Task SaveProjectsAsync()
     {
+        var gateHeld = false;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(ProjectsPath)!);
-            await File.WriteAllTextAsync(ProjectsPath, JsonSerializer.Serialize(_projects, JsonOptions));
+            await _projectsStoreGate.WaitAsync();
+            gateHeld = true;
+            var snapshot = ProjectPersistence.CreateSnapshot(_projects);
+            var json = await Task.Run(() => JsonSerializer.Serialize(snapshot, JsonOptions));
+            await AtomicTextFile.WriteAsync(ProjectsPath, json);
         }
         catch (Exception ex) { ConnectionLabel.Text = $"Projects could not be saved: {ex.Message}"; }
+        finally { if (gateHeld) _projectsStoreGate.Release(); }
     }
 
     private WorkspaceProject EnsureProject(string path)
