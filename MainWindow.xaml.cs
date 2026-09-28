@@ -530,8 +530,13 @@ public partial class MainWindow : Window
             FontFamily = new FontFamily("Consolas"), FontSize = 11, Background = ThemeBrush("MainSurfaceAltBrush"),
             Foreground = ThemeBrush("MainTextBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), Padding = new Thickness(10)
         };
-        Grid.SetColumn(diffBox, 1);
-        body.Children.Add(diffBox);
+        var diffPanel = new DockPanel { Margin = new Thickness(6, 0, 0, 0) };
+        var askAboutDiff = new Button { Content = "Ask Codev about selection", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(11, 6, 11, 6), Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, IsEnabled = false, ToolTip = "Add the selected diff lines to the composer; this does not send them" };
+        DockPanel.SetDock(askAboutDiff, Dock.Bottom);
+        diffPanel.Children.Add(askAboutDiff);
+        diffPanel.Children.Add(diffBox);
+        Grid.SetColumn(diffPanel, 1);
+        body.Children.Add(diffPanel);
         layout.Children.Add(body);
         dialog.Content = layout;
 
@@ -596,6 +601,15 @@ public partial class MainWindow : Window
                 diffBox.Text = string.IsNullOrWhiteSpace(diff) ? "Git reported no textual diff for this file (it may be binary or unchanged since the index was refreshed)." : diff;
             }
             catch (Exception ex) { if (version == diffVersion) diffBox.Text = "Could not load diff: " + ex.Message; }
+        };
+        diffBox.SelectionChanged += (_, _) => askAboutDiff.IsEnabled = files.SelectedItem is ListBoxItem { Tag: GitFileStatus } && !string.IsNullOrWhiteSpace(diffBox.SelectedText);
+        askAboutDiff.Click += (_, _) =>
+        {
+            if (files.SelectedItem is not ListBoxItem { Tag: GitFileStatus file } || string.IsNullOrWhiteSpace(diffBox.SelectedText)) return;
+            PromptBox.Text = GitDiffPromptBuilder.AppendSelection(PromptBox.Text, file.DisplayPath, diffBox.SelectedText);
+            dialog.Close();
+            PromptBox.Focus();
+            PromptBox.CaretIndex = PromptBox.Text.Length;
         };
         stageButton.Click += async (_, _) =>
         {
