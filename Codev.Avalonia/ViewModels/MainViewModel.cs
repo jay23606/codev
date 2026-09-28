@@ -74,11 +74,18 @@ public sealed class MainViewModel : ViewModelBase
     private long _modelSelectionRevision;
     private bool _isLoadingModels;
     private string _contextEstimateLabel = "No project files will be included.";
+    private int _readingWidth = 800;
 
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
     public ObservableCollection<Codev.ChatMessage> Messages { get; } = [];
     public ObservableCollection<Codev.PromptTemplate> PromptTemplates { get; } = [];
+    public ObservableCollection<Codev.SamplingPreset> SamplingPresets { get; } = [];
+    public double ReadingWidth => _readingWidth == 0 ? double.PositiveInfinity : _readingWidth;
+    public bool IsCompactReadingWidth => _readingWidth == 640;
+    public bool IsStandardReadingWidth => _readingWidth == 800;
+    public bool IsWideReadingWidth => _readingWidth == 960;
+    public bool IsFullReadingWidth => _readingWidth == 0;
     public ObservableCollection<string> SelectedContextFiles { get; } = [];
     public ObservableCollection<Codev.GitDiffComment> PendingDiffComments { get; } = [];
     public ObservableCollection<Codev.TaskChecklistItem> TaskChecklistItems { get; } = [];
@@ -900,6 +907,26 @@ public sealed class MainViewModel : ViewModelBase
     {
         PromptTemplates.Clear();
         foreach (var template in Codev.PromptTemplateCatalog.Normalize(templates)) PromptTemplates.Add(template);
+        PersistSettings();
+    }
+
+    public void SaveSamplingPresets(IEnumerable<Codev.SamplingPreset?> presets)
+    {
+        SamplingPresets.Clear();
+        foreach (var preset in Codev.SamplingPresetCatalog.Normalize(presets)) SamplingPresets.Add(preset);
+        PersistSettings();
+    }
+
+    public void SetReadingWidth(int width)
+    {
+        var normalized = Codev.AvaloniaUiSettings.NormalizeReadingWidth(width);
+        if (_readingWidth == normalized) return;
+        _readingWidth = normalized;
+        OnPropertyChanged(nameof(ReadingWidth));
+        OnPropertyChanged(nameof(IsCompactReadingWidth));
+        OnPropertyChanged(nameof(IsStandardReadingWidth));
+        OnPropertyChanged(nameof(IsWideReadingWidth));
+        OnPropertyChanged(nameof(IsFullReadingWidth));
         PersistSettings();
     }
 
@@ -2187,20 +2214,28 @@ public sealed class MainViewModel : ViewModelBase
                 ? Codev.AvaloniaUiSettings.Deserialize(File.ReadAllText(SettingsPath))
                 : Codev.AvaloniaUiSettings.Default;
             _isDarkTheme = !string.Equals(settings.Theme, "light", StringComparison.OrdinalIgnoreCase);
+            _readingWidth = Codev.AvaloniaUiSettings.NormalizeReadingWidth(settings.ReadingWidth);
             if (Codev.OllamaEndpoint.TryParse(settings.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
             var templates = settings.PromptTemplates ?? LoadLegacyPromptTemplates();
             foreach (var template in Codev.PromptTemplateCatalog.Normalize(templates)) PromptTemplates.Add(template);
+            foreach (var preset in Codev.SamplingPresetCatalog.Normalize(settings.SamplingPresets)) SamplingPresets.Add(preset);
             if (settings.PromptTemplates is null && PromptTemplates.Count > 0) PersistSettings();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { _isDarkTheme = true; }
         if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
         OnPropertyChanged(nameof(ThemeLabel));
+        OnPropertyChanged(nameof(ReadingWidth));
+        OnPropertyChanged(nameof(IsCompactReadingWidth));
+        OnPropertyChanged(nameof(IsStandardReadingWidth));
+        OnPropertyChanged(nameof(IsWideReadingWidth));
+        OnPropertyChanged(nameof(IsFullReadingWidth));
         OnPropertyChanged(nameof(OllamaEndpointDisplay));
     }
 
     private void PersistSettings()
     {
-        var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString(), PromptTemplates.ToList());
+        var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString(),
+            PromptTemplates.ToList(), SamplingPresets.ToList(), _readingWidth);
         var revision = Interlocked.Increment(ref _settingsRevision);
         _settingsPersistenceTask = Task.Run(async () =>
         {

@@ -103,6 +103,8 @@ Each user prompt also has a **Rewind** action. It asks before removing that prom
 
 Use **More → Export conversation…** to save Markdown or a standalone HTML transcript. The HTML file includes rendered Markdown/code/tables, its own offline styling, reviewed-file summaries and bounded Codev-managed diffs; it omits full local paths and checkpoint locations. Before saving, Codev offers a review of masked matches for common secret patterns and can redact the selected matches. Secret detection is heuristic and can miss credentials.
 
+Use **More → Reading width** to choose 640, 800, or 960 pixels for the prompt composer and conversation content, or switch to **Full width**. The selected width persists across sessions. The default is 800 pixels.
+
 Build a self-contained Windows app:
 
 ```powershell

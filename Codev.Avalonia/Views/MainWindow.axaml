@@ -173,6 +173,12 @@
                                     <MenuItem Header="Markdown…" Click="ExportConversation_Click" />
                                     <MenuItem Header="Standalone HTML…" Click="ExportConversationHtml_Click" />
                                 </MenuItem>
+                                <MenuItem Header="Reading width">
+                                    <MenuItem Header="Compact · 640 px" IsChecked="{Binding IsCompactReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="640" ToggleType="Radio" />
+                                    <MenuItem Header="Standard · 800 px" IsChecked="{Binding IsStandardReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="800" ToggleType="Radio" />
+                                    <MenuItem Header="Wide · 960 px" IsChecked="{Binding IsWideReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="960" ToggleType="Radio" />
+                                    <MenuItem Header="Full width" IsChecked="{Binding IsFullReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="0" ToggleType="Radio" />
+                                </MenuItem>
                                 <Separator />
                                 <MenuItem Header="Advanced model settings…" Click="AdvancedModelSettings_Click" IsEnabled="{Binding IsLocalModel}" />
                                 <MenuItem Header="Thinking mode" ToggleType="CheckBox" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsEnabled="{Binding IsLocalModel}" />
@@ -215,9 +221,9 @@
                 <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
-                            <StackPanel IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="760" Margin="48,0,24,0" Spacing="4">
+                            <StackPanel IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="{Binding ReadingWidth}" Margin="48,0,24,0" Spacing="4">
                                 <Border HorizontalAlignment="Right" Padding="16,10" CornerRadius="15" Background="{DynamicResource UserBubbleBrush}">
-                                    <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
+                                    <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
                                 </Border>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
                                     <Button Content="Edit prompt" Classes="soft" Padding="7,3" FontSize="10"
@@ -234,13 +240,13 @@
                                             ToolTip.Tip="Restore conversation to before this prompt; project files stay unchanged" />
                                 </StackPanel>
                             </StackPanel>
-                            <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="800" Margin="24,0,24,0" Spacing="8">
+                            <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Stretch" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" Margin="24,0,24,0" Spacing="8">
                                 <Expander Header="Model thinking" IsExpanded="False" IsVisible="{Binding HasThinking}" ToolTip.Tip="Thinking returned separately by the local Ollama model. It is saved with this reply but excluded from future prompts.">
-                                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
-                                        <md:MarkdownScrollViewer Markdown="{Binding Thinking}" SelectionEnabled="True" />
+                                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}">
+                                        <md:MarkdownScrollViewer Markdown="{Binding Thinking}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
                                     </Border>
                                 </Expander>
-                                <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
+                                <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
                                 <TextBlock Text="{Binding GenerationStatsLabel}" IsVisible="{Binding HasGenerationStats}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" Margin="2,0,0,0" ToolTip.Tip="Generation stats reported by Ollama; first-token time is measured by Codev." />
                                 <Button Content="Summarize up to here" Classes="soft" HorizontalAlignment="Left" Padding="7,3" FontSize="10"
                                         Command="{Binding $parent[Window].DataContext.SummarizeConversationUpToCommand}"
@@ -253,7 +259,7 @@
             </ScrollViewer>
             <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,8,22,8">
                 <Grid>
-                    <StackPanel MaxWidth="800" HorizontalAlignment="Stretch" Spacing="4">
+                    <StackPanel MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Stretch" Spacing="4">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />

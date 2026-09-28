@@ -22,17 +22,35 @@ public sealed class AvaloniaUiSettingsTests
 
         Assert.Equal("light", settings.Theme);
         Assert.Equal("https://ollama.example/base/", settings.OllamaEndpoint);
+        Assert.Equal(800, settings.ReadingWidth);
+    }
+
+    [Theory]
+    [InlineData(640, 640)]
+    [InlineData(800, 800)]
+    [InlineData(960, 960)]
+    [InlineData(0, 0)]
+    [InlineData(900, 800)]
+    [InlineData(-1, 800)]
+    public void Reading_width_accepts_supported_values_and_defaults_invalid_values(int input, int expected)
+    {
+        var settings = AvaloniaUiSettings.Deserialize($"{{\"ReadingWidth\":{input}}}");
+
+        Assert.Equal(expected, settings.ReadingWidth);
     }
 
     [Fact]
     public void Round_trips_saved_prompt_templates()
     {
         var original = new AvaloniaUiSettings("dark", OllamaEndpoint.Default.ToString(),
-            [new PromptTemplate("Review", "Review this project carefully.")]);
+            [new PromptTemplate("Review", "Review this project carefully.")],
+            [new SamplingPreset("Precise", Temperature: 0.25, TopP: 0.9, NumPredict: 2048)], 960);
 
         var restored = AvaloniaUiSettings.Deserialize(AvaloniaUiSettings.Serialize(original));
 
         Assert.Equal(original.PromptTemplates, restored.PromptTemplates);
+        Assert.Equal(original.SamplingPresets, restored.SamplingPresets);
+        Assert.Equal(original.ReadingWidth, restored.ReadingWidth);
     }
 
     [Fact]

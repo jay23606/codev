@@ -525,6 +525,12 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
     }
 
+    private void ReadingWidth_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string value } && int.TryParse(value, out var width) && DataContext is ViewModels.MainViewModel viewModel)
+            viewModel.SetReadingWidth(width);
+    }
+
     private async Task<string?> EditConversationPromptAsync(int messageIndex, string original)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation ||
@@ -613,6 +619,131 @@ public partial class MainWindow : Window
             ["repeat_penalty"] = SettingField(hints["repeat_penalty"], conversation.RepeatPenalty),
             ["num_predict"] = SettingField(hints["num_predict"], conversation.NumPredict)
         };
+        var presetPicker = new ComboBox { MinWidth = 180, ItemsSource = viewModel.SamplingPresets.Select(preset => preset.Name).ToArray() };
+        var presetStatus = new TextBlock
+        {
+            Text = viewModel.SamplingPresets.Count == 0 ? "No saved presets yet. Presets are optional and user-defined." : $"{viewModel.SamplingPresets.Count} saved preset(s)",
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        };
+        void RefreshPresets(string? selectName = null)
+        {
+            presetPicker.ItemsSource = viewModel.SamplingPresets.Select(preset => preset.Name).ToArray();
+            presetPicker.SelectedIndex = -1;
+            if (selectName is not null) presetPicker.SelectedItem = selectName;
+            presetStatus.Text = viewModel.SamplingPresets.Count == 0 ? "No saved presets yet. Presets are optional and user-defined." : $"{viewModel.SamplingPresets.Count} saved preset(s)";
+        }
+        var applyPreset = new Button { Content = "Apply", Classes = { "soft" }, IsEnabled = false };
+        var savePreset = new Button { Content = "Save / update…", Classes = { "soft" } };
+        var removePreset = new Button { Content = "Remove", Classes = { "soft" }, IsEnabled = false };
+        var importPreset = new Button { Content = "Import…", Classes = { "soft" } };
+        var exportPreset = new Button { Content = "Export…", Classes = { "soft" }, IsEnabled = false };
+        presetPicker.SelectionChanged += (_, _) =>
+        {
+            var selected = presetPicker.SelectedItem is string name && viewModel.SamplingPresets.FirstOrDefault(preset => preset.Name == name) is not null;
+            applyPreset.IsEnabled = selected;
+            removePreset.IsEnabled = selected;
+            exportPreset.IsEnabled = selected;
+        };
+        applyPreset.Click += (_, _) =>
+        {
+            if (presetPicker.SelectedItem is not string name || viewModel.SamplingPresets.FirstOrDefault(preset => preset.Name == name) is not { } preset) return;
+            fields["temperature"].Text = FormatPresetValue(preset.Temperature);
+            fields["top_p"].Text = FormatPresetValue(preset.TopP);
+            fields["top_k"].Text = preset.TopK?.ToString(CultureInfo.InvariantCulture) ?? "";
+            fields["presence_penalty"].Text = FormatPresetValue(preset.PresencePenalty);
+            fields["repeat_penalty"].Text = FormatPresetValue(preset.RepeatPenalty);
+            fields["num_predict"].Text = preset.NumPredict?.ToString(CultureInfo.InvariantCulture) ?? "";
+            presetStatus.Text = $"Loaded '{preset.Name}' into the fields. Press Save to apply it to this conversation.";
+        };
+        savePreset.Click += async (_, _) =>
+        {
+            if (!TryReadDouble(fields["temperature"], 0, 2, out var temperature) ||
+                !TryReadDouble(fields["top_p"], 0, 1, out var topP) ||
+                !TryReadInt(fields["top_k"], 1, 1000, out var topK) ||
+                !TryReadDouble(fields["presence_penalty"], 0, 2, out var presencePenalty) ||
+                !TryReadDouble(fields["repeat_penalty"], 0, 2, out var repeatPenalty) ||
+                !TryReadInt(fields["num_predict"], 1, 131072, out var numPredict) ||
+                !(temperature.HasValue || topP.HasValue || topK.HasValue || presencePenalty.HasValue || repeatPenalty.HasValue || numPredict.HasValue))
+            {
+                presetStatus.Text = "Enter at least one valid setting before saving a preset; leave other fields blank for model defaults.";
+                return;
+            }
+            var name = await PromptSamplingPresetNameAsync(dialogOwner: this, presetPicker.SelectedItem as string);
+            if (name is null) return;
+            var preset = new Codev.SamplingPreset(name, temperature, topP, topK, presencePenalty, repeatPenalty, numPredict);
+            if (!Codev.SamplingPresetCatalog.TryNormalize(preset, out preset))
+            {
+                presetStatus.Text = $"Preset names must be 1–{Codev.SamplingPresetCatalog.MaxNameLength} characters.";
+                return;
+            }
+            var presets = viewModel.SamplingPresets.ToList();
+            var index = presets.FindIndex(existing => existing.Name.Equals(preset.Name, StringComparison.OrdinalIgnoreCase));
+            if (index < 0 && presets.Count >= Codev.SamplingPresetCatalog.MaxPresets)
+            {
+                presetStatus.Text = $"You can save up to {Codev.SamplingPresetCatalog.MaxPresets} presets.";
+                return;
+            }
+            if (index < 0) presets.Add(preset); else presets[index] = preset;
+            viewModel.SaveSamplingPresets(presets);
+            RefreshPresets(preset.Name);
+        };
+        removePreset.Click += (_, _) =>
+        {
+            if (presetPicker.SelectedItem is not string name) return;
+            viewModel.SaveSamplingPresets(viewModel.SamplingPresets.Where(preset => preset.Name != name));
+            RefreshPresets();
+        };
+        importPreset.Click += async (_, _) =>
+        {
+            if (!StorageProvider.CanOpen) { presetStatus.Text = "This platform does not provide a local file picker."; return; }
+            try
+            {
+                var filesToOpen = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Import sampling preset",
+                    AllowMultiple = false,
+                    FileTypeFilter = [new FilePickerFileType("Codev sampling preset") { Patterns = ["*.codev-preset.json", "*.json"] }]
+                });
+                var file = filesToOpen.FirstOrDefault();
+                if (file is null) return;
+                var preset = Codev.SamplingPresetCatalog.Deserialize(await ReadTextFileAsync(file, 32_000));
+                var presets = viewModel.SamplingPresets.ToList();
+                var index = presets.FindIndex(existing => existing.Name.Equals(preset.Name, StringComparison.OrdinalIgnoreCase));
+                if (index < 0 && presets.Count >= Codev.SamplingPresetCatalog.MaxPresets)
+                {
+                    presetStatus.Text = $"You can save up to {Codev.SamplingPresetCatalog.MaxPresets} presets. Remove one before importing.";
+                    return;
+                }
+                if (index < 0) presets.Add(preset); else presets[index] = preset;
+                viewModel.SaveSamplingPresets(presets);
+                RefreshPresets(preset.Name);
+                presetStatus.Text = $"Imported '{preset.Name}'. Apply it to load the fields, then press Save to use it.";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            { presetStatus.Text = $"Could not import preset: {ex.Message}"; }
+        };
+        exportPreset.Click += async (_, _) =>
+        {
+            if (presetPicker.SelectedItem is not string name || viewModel.SamplingPresets.FirstOrDefault(preset => preset.Name == name) is not { } preset) return;
+            if (!StorageProvider.CanSave) { presetStatus.Text = "This platform does not provide a local save dialog."; return; }
+            try
+            {
+                var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = "Export sampling preset",
+                    SuggestedFileName = $"{SafeExportName(preset.Name)}.codev-preset.json",
+                    DefaultExtension = "json",
+                    ShowOverwritePrompt = true,
+                    FileTypeChoices = [new FilePickerFileType("Codev sampling preset") { Patterns = ["*.codev-preset.json", "*.json"] }]
+                });
+                if (file is null) return;
+                await WriteTextFileAsync(file, Codev.SamplingPresetCatalog.Serialize(preset));
+                presetStatus.Text = $"Exported '{preset.Name}' · {file.Name}";
+            }
+            catch (Exception ex) { presetStatus.Text = $"Could not export preset: {ex.Message}"; }
+        };
+        string FormatPresetValue(double? value) => value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "";
         var panel = new StackPanel { Spacing = 8, Margin = new Thickness(20) };
         panel.Children.Add(new TextBlock
         {
@@ -623,6 +754,11 @@ public partial class MainWindow : Window
         });
         var loadDefaults = new Button { Content = "Load model defaults…", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left };
         var status = new TextBlock { Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
+        panel.Children.Add(new TextBlock { Text = "Your sampling presets", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        panel.Children.Add(presetPicker);
+        panel.Children.Add(new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 6, Children = { applyPreset, savePreset, removePreset } });
+        panel.Children.Add(new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 6, Children = { importPreset, exportPreset } });
+        panel.Children.Add(presetStatus);
         panel.Children.Add(loadDefaults);
         panel.Children.Add(status);
         foreach (var (name, field) in fields)
@@ -656,7 +792,16 @@ public partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
             Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
-            Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto }
+            Content = new Border
+            {
+                Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+                Child = new ScrollViewer
+                {
+                    Background = this.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+                    Content = panel,
+                    VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+                }
+            }
         };
         loadDefaults.Click += async (_, _) =>
         {
@@ -738,6 +883,68 @@ public partial class MainWindow : Window
             value = null;
             return false;
         }
+    }
+
+    private static async Task<string?> PromptSamplingPresetNameAsync(Window dialogOwner, string? currentName)
+    {
+        var nameBox = new TextBox
+        {
+            Text = currentName ?? "",
+            MaxLength = Codev.SamplingPresetCatalog.MaxNameLength,
+            Watermark = "e.g. Focused coding",
+            MinWidth = 300
+        };
+        var error = new TextBlock
+        {
+            Text = $"Choose a name of 1–{Codev.SamplingPresetCatalog.MaxNameLength} characters.",
+            IsVisible = false,
+            Foreground = global::Avalonia.Media.Brushes.IndianRed
+        };
+        var save = new Button { Content = "Save", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var buttons = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+            Children = { cancel, save }
+        };
+        var panel = new StackPanel
+        {
+            Margin = new Thickness(18),
+            Spacing = 10,
+            Children =
+            {
+                new TextBlock { Text = "Preset name" },
+                nameBox,
+                error,
+                buttons
+            }
+        };
+        var dialog = new Window
+        {
+            Title = currentName is null ? "Save sampling preset" : "Update sampling preset",
+            Width = 400,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = dialogOwner.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+            Foreground = dialogOwner.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+            Content = panel
+        };
+        cancel.Click += (_, _) => dialog.Close(null);
+        save.Click += (_, _) =>
+        {
+            var name = nameBox.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(name) || name.Length > Codev.SamplingPresetCatalog.MaxNameLength)
+            {
+                error.IsVisible = true;
+                return;
+            }
+            dialog.Close(name);
+        };
+        dialog.Opened += (_, _) => nameBox.Focus();
+        return await dialog.ShowDialog<string?>(dialogOwner);
     }
 
     private async void LoadedModels_Click(object? sender, RoutedEventArgs e)
