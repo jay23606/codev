@@ -61,12 +61,13 @@ public partial class MainWindow : Window
 
     private void Composer_DragOver(object? sender, DragEventArgs e)
     {
-        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) && (DataContext as ViewModels.MainViewModel)?.HasProject == true
-            ? DragDropEffects.Copy : DragDropEffects.None;
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
     }
 
     private void Composer_Drop(object? sender, DragEventArgs e)
     {
+        if (!e.DataTransfer.Contains(DataFormat.File)) return;
+        e.Handled = true;
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         var paths = e.DataTransfer.TryGetFiles()?.Select(file => file.TryGetLocalPath())
             .Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToArray() ?? [];
