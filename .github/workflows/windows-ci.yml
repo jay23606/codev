@@ -36,6 +36,9 @@ jobs:
       - name: Run portable tests
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
 
+      - name: Build Avalonia UI spike
+        run: dotnet build Codev.Avalonia/Codev.Avalonia.csproj --configuration Release
+
   build-and-test:
     runs-on: windows-latest
     steps:

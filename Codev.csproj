@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Remove="Codev.Tests\**\*.cs" />
     <Compile Remove="Codev.Windows.Tests\**\*.cs" />
+    <Compile Remove="Codev.Avalonia\**\*.cs" />
     <Compile Remove="Codev.Core\**\*.cs" />
     <Page Remove="Codev.Tests\**\*.xaml" />
     <ApplicationDefinition Remove="Codev.Tests\**\*.xaml" />
