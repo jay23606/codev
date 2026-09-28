@@ -499,7 +499,7 @@ public partial class MainWindow : Window
         };
         var includeProjectContext = new CheckBox
         {
-            Content = "Include attached project files in hosted prompts (otherwise they stay local)",
+            Content = "Allow hosted coding tools to receive project files and tool output when requested",
             IsChecked = viewModel.IncludeProjectContextForHosted,
             MaxWidth = 390
         };

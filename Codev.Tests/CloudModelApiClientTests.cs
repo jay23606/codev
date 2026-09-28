@@ -119,6 +119,56 @@ public sealed class CloudModelApiClientTests
     }
 
     [Fact]
+    public async Task Openai_responses_tool_calls_keep_response_items_and_usage_without_leaking_key()
+    {
+        HttpRequestMessage? observed = null;
+        string? body = null;
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            observed = request;
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return Json("""
+                {"status":"completed","output":[
+                  {"type":"reasoning","id":"rs_123","summary":[]},
+                  {"type":"function_call","id":"fc_123","call_id":"call_123","name":"list_files","arguments":"{\"relative_directory\":\"\"}"}
+                ],"usage":{"input_tokens":321}}
+                """);
+        }));
+        var requestBody = await new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("secret-api-key", "gpt-example",
+            new[] { new { role = "user", content = "inspect this workspace" } },
+            [new { type = "function", name = "list_files", description = "List files", parameters = new { type = "object" }, strict = false }]);
+
+        Assert.Equal("Bearer", observed!.Headers.Authorization!.Scheme);
+        Assert.Equal("secret-api-key", observed.Headers.Authorization.Parameter);
+        Assert.Equal("https://api.openai.com/v1/responses", observed.RequestUri!.ToString());
+        Assert.Contains("\"store\":false", body);
+        Assert.Contains("\"tool_choice\":\"auto\"", body);
+        Assert.Contains("\"type\":\"function\"", body);
+        Assert.DoesNotContain("secret-api-key", body);
+        Assert.Equal(321, requestBody.InputTokens);
+        Assert.Single(requestBody.FunctionCalls);
+        Assert.Equal("call_123", requestBody.FunctionCalls[0].GetProperty("call_id").GetString());
+        Assert.Equal("list_files", requestBody.FunctionCalls[0].GetProperty("name").GetString());
+        Assert.Equal(2, requestBody.OutputItems.Count);
+    }
+
+    [Theory]
+    [InlineData("incomplete", "The response was incomplete (max_output_tokens).")]
+    [InlineData("failed", "quota limit reached")]
+    public async Task Openai_tool_responses_report_incomplete_and_failed_turns(string status, string expected)
+    {
+        var payload = status == "failed"
+            ? "{\"status\":\"failed\",\"error\":{\"message\":\"quota limit reached\"}}"
+            : "{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}";
+        using var http = new HttpClient(new StubHandler(_ => Json(payload)));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("key", "gpt-example", Array.Empty<object>(), Array.Empty<object>()));
+
+        Assert.Contains(expected, exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Anthropic_requests_put_system_in_its_top_level_field()
     {
         HttpRequestMessage? observed = null;

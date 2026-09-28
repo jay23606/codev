@@ -117,13 +117,14 @@
                         <TextBlock Text="PROJECT" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
-                        <Button Classes="soft" Content="Project actions…" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding HasProject}">
+                        <Button Classes="soft" Content="Project actions…" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding CanOpenProjectActions}">
                             <Button.Flyout>
                                 <MenuFlyout>
-                                    <MenuItem Header="Git status and changes…" Click="GitStatus_Click" />
+                                    <MenuItem Header="Allow OpenAI coding tools to receive project files and tool results" ToggleType="CheckBox" IsChecked="{Binding IncludeProjectContextForHosted, Mode=TwoWay}" IsEnabled="{Binding IsOpenAIModel}" ToolTip.Tip="This conversation's requested file contents and command output may be sent to OpenAI." />
+                                    <MenuItem Header="Git status and changes…" IsEnabled="{Binding HasProject}" Click="GitStatus_Click" />
                                     <MenuItem Header="{Binding FileChangesLabel}" IsEnabled="{Binding CanReviewFileChanges}" Click="ReviewFileChanges_Click" />
                                     <MenuItem Header="{Binding ProjectTrustLabel}" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />
-                                    <MenuItem Header="Command permissions…" Click="ProjectCommandPermissions_Click" ToolTip.Tip="Choose whether exact saved command rules may skip approval for this project" />
+                                    <MenuItem Header="Command permissions…" IsEnabled="{Binding HasProject}" Click="ProjectCommandPermissions_Click" ToolTip.Tip="Choose whether exact saved command rules may skip approval for this project" />
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>

@@ -15,6 +15,8 @@ public static class CloudModelProviders
 
 public sealed record CloudModel(string Provider, string Id, string DisplayName);
 public sealed record CloudChatMessage(string Role, string Content);
+public sealed record OpenAiToolResponse(IReadOnlyList<JsonElement> OutputItems, IReadOnlyList<JsonElement> FunctionCalls,
+    string OutputText, int? InputTokens);
 
 /// <summary>Small REST client for hosted model discovery and text streaming. API keys are supplied per request; persistence is handled by the OS credential vault.</summary>
 public sealed class CloudModelApiClient(HttpClient http)
@@ -22,6 +24,53 @@ public sealed class CloudModelApiClient(HttpClient http)
     private static readonly Uri OpenAiBase = new("https://api.openai.com/v1/");
     private static readonly Uri AnthropicBase = new("https://api.anthropic.com/v1/");
     private const string AnthropicVersion = "2023-06-01";
+
+    public async Task<OpenAiToolResponse> CreateOpenAiToolResponseAsync(string apiKey, string model,
+        object input, IReadOnlyList<object> tools, CancellationToken cancellationToken = default,
+        Func<string, Task>? onRequestPayload = null)
+    {
+        Validate(CloudModelProviders.OpenAI, apiKey);
+        if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose an OpenAI model first.", nameof(model));
+        var payload = new Dictionary<string, object>
+        {
+            ["model"] = model,
+            ["input"] = input,
+            ["tools"] = tools,
+            ["tool_choice"] = "auto",
+            ["stream"] = false,
+            ["store"] = false,
+            ["max_output_tokens"] = 4096
+        };
+        var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
+        using var request = CreateRequest(HttpMethod.Post, new Uri(OpenAiBase, "responses"), CloudModelProviders.OpenAI, apiKey);
+        request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
+        if (onRequestPayload is not null) await onRequestPayload(payloadJson).ConfigureAwait(false);
+        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        var root = document.RootElement;
+        if (GetString(root, "status") is { } status && status != "completed")
+        {
+            var detail = root.TryGetProperty("error", out var error) && GetString(error, "message") is { Length: > 0 } message
+                ? message
+                : root.TryGetProperty("incomplete_details", out var incomplete) && GetString(incomplete, "reason") is { Length: > 0 } reason
+                    ? $"The response was incomplete ({reason})." : $"The response ended with status '{status}'.";
+            throw new InvalidOperationException($"OpenAI {detail}");
+        }
+        var outputItems = root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Array
+            ? output.EnumerateArray().Select(item => item.Clone()).ToArray() : [];
+        var calls = outputItems.Where(item => GetString(item, "type") == "function_call").ToArray();
+        var outputText = new StringBuilder();
+        foreach (var item in outputItems.Where(item => GetString(item, "type") == "message"))
+            if (item.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+                foreach (var block in content.EnumerateArray())
+                    if (GetString(block, "type") == "output_text" && GetString(block, "text") is { } text) outputText.Append(text);
+                    else if (GetString(block, "type") == "refusal" && GetString(block, "refusal") is { } refusal) outputText.Append(refusal);
+        int? inputTokens = root.TryGetProperty("usage", out var usage) && usage.TryGetProperty("input_tokens", out var inputTokenValue) &&
+            inputTokenValue.TryGetInt32(out var count) && count >= 0 ? count : null;
+        return new OpenAiToolResponse(outputItems, calls, outputText.ToString(), inputTokens);
+    }
 
     public async Task<IReadOnlyList<CloudModel>> ListModelsAsync(string provider, string apiKey, CancellationToken cancellationToken = default)
     {

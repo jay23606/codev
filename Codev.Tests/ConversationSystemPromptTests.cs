@@ -21,8 +21,18 @@ public sealed class ConversationSystemPromptTests
 
         Assert.Contains("Ordinary chat is read-only", prompt, StringComparison.Ordinal);
         Assert.Contains("you have no tools", prompt, StringComparison.Ordinal);
-        Assert.Contains("Code task mode with loopback Ollama", prompt, StringComparison.Ordinal);
+        Assert.Contains("trusted-project Code task mode", prompt, StringComparison.Ordinal);
         Assert.Contains("each proposed file change and each command requires separate approval", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Hosted_code_task_prompt_identifies_openai_backend()
+    {
+        var prompt = ConversationSystemPrompt.Build(isCodeTask: true, isPlanMode: false, isLocal: false);
+
+        Assert.Contains("connected OpenAI API", prompt, StringComparison.Ordinal);
+        Assert.Contains("available tools", prompt, StringComparison.Ordinal);
+        Assert.Contains("explicit user approval", prompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
