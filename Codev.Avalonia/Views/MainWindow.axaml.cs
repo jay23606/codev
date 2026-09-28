@@ -761,10 +761,25 @@ public partial class MainWindow : Window
         panel.Children.Add(presetStatus);
         panel.Children.Add(loadDefaults);
         panel.Children.Add(status);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Sampling parameters",
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+            FontSize = 13,
+            FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+            Margin = new Thickness(0, 8, 0, 2)
+        });
         foreach (var (name, field) in fields)
         {
             var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
-            header.Children.Add(new TextBlock { Text = name, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center });
+            header.Children.Add(new TextBlock
+            {
+                Text = name,
+                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+                FontSize = 12,
+                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+                VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center
+            });
             var useDefault = new Button { Content = "Default", Classes = { "soft" }, Padding = new Thickness(7, 2), FontSize = 10 };
             useDefault.Click += (_, _) => field.Text = "";
             global::Avalonia.Controls.Grid.SetColumn(useDefault, 1);

@@ -287,7 +287,7 @@ public sealed class MainViewModel : ViewModelBase
         ? "Task checklist · no steps yet"
         : $"Task checklist · {TaskChecklistItems.Count(item => item.Status == Codev.TaskChecklistService.Completed)}/{TaskChecklistItems.Count} done";
     public bool HasQueuedTurns => _requestQueue.Count > 0;
-    public bool HasModels => Models.Count > 0;
+    public bool HasModels => Models.Any(choice => !string.IsNullOrWhiteSpace(choice.Name) && !string.IsNullOrWhiteSpace(choice.DisplayName));
     public string UserSlashCommandsFolder => UserSlashCommandsPath;
     public string? ProjectSlashCommandsFolder => HasProject && IsProjectTrusted
         ? Path.Combine(ActiveConversation!.ProjectPath!, ".codev", "commands")
@@ -2348,7 +2348,7 @@ public sealed class MainViewModel : ViewModelBase
                 if (Provider == "ollama" && allChoices.Length > 0)
                 {
                     var resolved = Codev.OllamaModelSelection.ResolveInstalledTag(Model, allChoices.Select(item => item.Name));
-                    if (resolved is not null && !resolved.Equals(Model, StringComparison.Ordinal)) Model = resolved;
+                    if (resolved is not null && (SelectedModel is null || !resolved.Equals(Model, StringComparison.Ordinal))) Model = resolved;
                     else OnPropertyChanged(nameof(Model));
                 }
                 OnPropertyChanged(nameof(SelectedModel));
