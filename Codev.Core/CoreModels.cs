@@ -24,6 +24,7 @@ public sealed class Conversation
     public int LastPromptTokens { get; set; }
     public int LastPromptContext { get; set; }
     public string LastPromptModel { get; set; } = "";
+    public string LastPromptProvider { get; set; } = "";
     public string CompactionSummary { get; set; } = "";
     public int CompactionThroughMessageCount { get; set; }
     public bool IsPinned { get; set; }

@@ -1485,7 +1485,7 @@ public sealed class MainViewModel : ViewModelBase
             if (root.TryGetProperty("error", out var apiError)) throw new InvalidOperationException(apiError.GetString() ?? apiError.ToString());
             if (root.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
             {
-                await RecordPromptTokenUsageAsync(conversation, turn.Model, turn.NumCtx, promptTokens);
+                await RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, turn.NumCtx, promptTokens);
             }
             var message = root.GetProperty("message");
             if (message.TryGetProperty("thinking", out var thinkingChunk) && thinkingChunk.GetString() is { Length: > 0 } thinkingText)
@@ -1586,13 +1586,14 @@ public sealed class MainViewModel : ViewModelBase
         });
     }
 
-    private async Task RecordPromptTokenUsageAsync(Codev.Conversation conversation, string model, int contextLimit, int promptTokens)
+    private async Task RecordPromptTokenUsageAsync(Codev.Conversation conversation, string provider, string model, int contextLimit, int promptTokens)
     {
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             conversation.LastPromptTokens = promptTokens;
             conversation.LastPromptContext = contextLimit;
             conversation.LastPromptModel = model;
+            conversation.LastPromptProvider = provider;
             _lastPromptMessageCounts[conversation.Id] = conversation.Messages.Count;
             if (_lastPromptContexts.TryGetValue(conversation.Id, out var snapshot))
                 _lastPromptContexts[conversation.Id] = snapshot with { ActualPromptTokens = promptTokens };
@@ -1822,7 +1823,7 @@ public sealed class MainViewModel : ViewModelBase
                     using var json = System.Text.Json.JsonDocument.Parse(line);
                     if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
                     if (json.RootElement.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
-                        await RecordPromptTokenUsageAsync(conversation, savedTurn.Model, savedTurn.NumCtx, promptTokens);
+                        await RecordPromptTokenUsageAsync(conversation, savedTurn.Provider, savedTurn.Model, savedTurn.NumCtx, promptTokens);
                     if (json.RootElement.TryGetProperty("message", out var message))
                     {
                         if (message.TryGetProperty("thinking", out var thinkingChunk) && thinkingChunk.GetString() is { Length: > 0 } thinkingDelta)
@@ -1846,7 +1847,7 @@ public sealed class MainViewModel : ViewModelBase
                 await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
                                    savedTurn.Provider, apiKey, savedTurn.Model, cloudMessages, token.Token,
                                    onInputTokenCount: inputTokens => RecordPromptTokenUsageAsync(
-                                       conversation, savedTurn.Model, 0, inputTokens),
+                                       conversation, savedTurn.Provider, savedTurn.Model, 0, inputTokens),
                                    onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body)))
                 {
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);

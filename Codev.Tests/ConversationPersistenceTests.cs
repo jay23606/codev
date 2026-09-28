@@ -26,6 +26,10 @@ public sealed class ConversationPersistenceTests
             OutputStyle = ConversationOutputStyles.Explanatory,
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
+            LastPromptTokens = 321,
+            LastPromptContext = 4096,
+            LastPromptModel = "claude-sonnet-test",
+            LastPromptProvider = CloudModelProviders.Anthropic,
             CompactionSummary = "Accepted older context.",
             CompactionThroughMessageCount = 2,
             Messages = [new("user", "before"), new ChatMessage("assistant", "reply")
@@ -53,6 +57,8 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(ConversationOutputStyles.Explanatory, snapshot.OutputStyle);
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.True(snapshot.IncludeRepoMap);
+        Assert.Equal(321, snapshot.LastPromptTokens);
+        Assert.Equal(CloudModelProviders.Anthropic, snapshot.LastPromptProvider);
         Assert.Equal("Accepted older context.", snapshot.CompactionSummary);
         Assert.Equal(2, snapshot.CompactionThroughMessageCount);
         Assert.Equal("unsent prompt", snapshot.Draft);

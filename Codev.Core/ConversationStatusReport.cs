@@ -40,10 +40,24 @@ public static class ConversationStatusReport
         var canIncludeRepoMap = !string.IsNullOrWhiteSpace(conversation.ProjectPath) &&
             (conversation.ContextFiles.Count > 0 || projectFolderTrusted) &&
             (!CloudModelProviders.IsCloud(conversation.Provider) || conversation.IncludeProjectContextForHosted);
+        var lastPromptUsage = conversation.LastPromptTokens > 0 &&
+            conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
+            conversation.LastPromptProvider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase)
+            ? CloudModelProviders.IsCloud(conversation.Provider)
+                ? $"{conversation.LastPromptTokens:N0} provider-reported input tokens"
+                : conversation.LastPromptContext > 0
+                    ? $"{conversation.LastPromptTokens:N0} input tokens · {Math.Round(100d * conversation.LastPromptTokens / conversation.LastPromptContext):N0}% of {conversation.LastPromptContext:N0} tokens"
+                    : $"{conversation.LastPromptTokens:N0} input tokens · context usage unavailable"
+            : "not available for the selected model yet";
+        var compaction = string.IsNullOrWhiteSpace(conversation.CompactionSummary)
+            ? "off"
+            : $"active · first {Math.Max(0, conversation.CompactionThroughMessageCount):N0} messages summarized for future prompts";
 
         return string.Join('\n',
             $"Model: {provider} · {conversation.Model}",
             $"Context window: {context}",
+            $"Last request usage: {lastPromptUsage}",
+            $"Conversation summary: {compaction}",
             $"Temperature: {temperature}",
             $"Thinking: {(CloudModelProviders.IsCloud(conversation.Provider) ? "unavailable for hosted providers" : conversation.ThinkEnabled ? "requested" : "off")}",
             $"Mode: {(conversation.IsCodeTask ? "Code task" : conversation.IsPlanMode ? "Plan" : "Chat")}",

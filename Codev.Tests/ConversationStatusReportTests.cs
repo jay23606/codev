@@ -90,4 +90,71 @@ public sealed class ConversationStatusReportTests
         Assert.Contains("Mode: Code task", report);
         Assert.Contains("Tools and file changes: available with per-change and per-command approval", report);
     }
+
+    [Fact]
+    public void Status_reports_last_local_usage_and_active_compaction_without_leaking_summary()
+    {
+        var report = ConversationStatusReport.Build(new Conversation
+        {
+            Model = "qwen3-coder:30b",
+            NumCtx = 32_768,
+            LastPromptTokens = 26_214,
+            LastPromptContext = 32_768,
+            LastPromptModel = "qwen3-coder:30b",
+            LastPromptProvider = "ollama",
+            CompactionSummary = "private summary text",
+            CompactionThroughMessageCount = 8
+        }, false, 0, false, false);
+
+        Assert.Contains("Last request usage: 26,214 input tokens · 80% of 32,768 tokens", report);
+        Assert.Contains("Conversation summary: active · first 8 messages summarized for future prompts", report);
+        Assert.DoesNotContain("private summary text", report);
+    }
+
+    [Fact]
+    public void Hosted_status_labels_provider_usage_without_inventing_context_percentage()
+    {
+        var report = ConversationStatusReport.Build(new Conversation
+        {
+            Provider = CloudModelProviders.OpenAI,
+            Model = "hosted-model",
+            LastPromptTokens = 1_024,
+            LastPromptModel = "hosted-model",
+            LastPromptProvider = CloudModelProviders.OpenAI
+        }, false, 0, false, true);
+
+        Assert.Contains("Last request usage: 1,024 provider-reported input tokens", report);
+        Assert.DoesNotContain("% of", report);
+    }
+
+    [Fact]
+    public void Status_does_not_attribute_usage_from_a_different_selected_model()
+    {
+        var report = ConversationStatusReport.Build(new Conversation
+        {
+            Model = "new-model",
+            LastPromptTokens = 12_000,
+            LastPromptContext = 16_384,
+            LastPromptModel = "previous-model",
+            LastPromptProvider = "ollama"
+        }, false, 0, false, false);
+
+        Assert.Contains("Last request usage: not available for the selected model yet", report);
+    }
+
+    [Fact]
+    public void Status_does_not_attribute_usage_from_a_different_provider_with_same_model_id()
+    {
+        var report = ConversationStatusReport.Build(new Conversation
+        {
+            Provider = CloudModelProviders.OpenAI,
+            Model = "same-model-id",
+            LastPromptTokens = 12_000,
+            LastPromptContext = 16_384,
+            LastPromptModel = "same-model-id",
+            LastPromptProvider = "ollama"
+        }, false, 0, false, true);
+
+        Assert.Contains("Last request usage: not available for the selected model yet", report);
+    }
 }

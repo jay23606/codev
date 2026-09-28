@@ -24,6 +24,7 @@ public static class ConversationPersistence
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptContext = conversation.LastPromptContext,
             LastPromptModel = conversation.LastPromptModel,
+            LastPromptProvider = conversation.LastPromptProvider,
             CompactionSummary = conversation.CompactionSummary,
             CompactionThroughMessageCount = conversation.CompactionThroughMessageCount,
             IsPinned = conversation.IsPinned,
