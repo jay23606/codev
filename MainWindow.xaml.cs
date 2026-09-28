@@ -380,6 +380,13 @@ public partial class MainWindow : Window
                     retry.Click += async (_, _) => await ResendFromUserMessageAsync(conversation, conversation.Messages[^2]);
                     menu.Items.Add(retry);
                 }
+                if (!isUser && messageIndex == conversation.Messages.Count - 1 &&
+                    InterruptedResponse.TryGetPartial(message.Content, out _))
+                {
+                    var continueResponse = new MenuItem { Header = "Continue response" };
+                    continueResponse.Click += async (_, _) => await ContinueInterruptedResponseAsync(conversation, messageIndex);
+                    menu.Items.Add(continueResponse);
+                }
                 if (menu.Items.Count > 0) border.ContextMenu = menu;
             }
             MessagesList.Items.Add(border);
@@ -398,6 +405,22 @@ public partial class MainWindow : Window
         RenderMessages();
         _ = SaveAsync();
         PromptBox.Focus();
+        await SendPromptAsync();
+    }
+
+    private async Task ContinueInterruptedResponseAsync(Conversation conversation, int assistantIndex)
+    {
+        if (!ReferenceEquals(_active, conversation) || conversation.PendingRequestCount > 0 ||
+            ReferenceEquals(_activeRequestConversation, conversation) || assistantIndex != conversation.Messages.Count - 1 ||
+            conversation.Messages[assistantIndex].Role != "assistant" ||
+            !InterruptedResponse.TryGetPartial(conversation.Messages[assistantIndex].Content, out var partial)) return;
+
+        conversation.Messages[assistantIndex] = new ChatMessage("assistant", partial);
+        RenderMessages();
+        PromptBox.Text = "Continue from where your previous response stopped. Do not repeat the content already provided; finish the remaining answer and task.";
+        PromptBox.CaretIndex = PromptBox.Text.Length;
+        PromptBox.Focus();
+        await SaveAsync();
         await SendPromptAsync();
     }
 
