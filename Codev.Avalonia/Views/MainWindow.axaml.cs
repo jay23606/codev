@@ -70,6 +70,77 @@ public partial class MainWindow : Window
             _followOutput = true;
     }
 
+    private async void ConfigureCloudProvider_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        var provider = new ComboBox { ItemsSource = new[] { "OpenAI", "Anthropic" }, SelectedIndex = 0, MinWidth = 180 };
+        var apiKey = new TextBox { MinWidth = 360, PasswordChar = '•', Watermark = "Paste API key (or leave blank to use the environment variable)" };
+        var acknowledgement = new CheckBox
+        {
+            Content = "I understand that prompts, conversation history, and selected project context will be sent to the provider and API usage may incur separate charges.",
+            IsChecked = viewModel.CloudRequestsEnabled,
+            MaxWidth = 390
+        };
+        var includeProjectContext = new CheckBox
+        {
+            Content = "Include attached project files in hosted prompts (otherwise they stay local)",
+            IsChecked = viewModel.IncludeProjectContextForHosted,
+            MaxWidth = 390
+        };
+        var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var connect = new Button { Content = "Connect and load models", MinWidth = 170 };
+        var disable = new Button { Content = "Disable hosted requests", MinWidth = 170 };
+        var cancel = new Button { Content = "Close", MinWidth = 80 };
+        var buttons = new StackPanel
+        {
+            Orientation = global::Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+            Children = { disable, cancel, connect }
+        };
+        var dialog = new Window
+        {
+            Title = "Connect hosted models",
+            Width = 500,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock { Text = "Choose a provider" },
+                    provider,
+                    new TextBlock { Text = "API key · used only in this Codev session" },
+                    apiKey,
+                    new TextBlock
+                    {
+                        Text = "Set OPENAI_API_KEY or ANTHROPIC_API_KEY to avoid pasting a key each launch. Codev does not write keys to conversation history or settings files.",
+                        TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                        MaxWidth = 440
+                    },
+                    acknowledgement,
+                    includeProjectContext,
+                    status,
+                    buttons
+                }
+            }
+        };
+        connect.Click += async (_, _) =>
+        {
+            var providerId = provider.SelectedItem?.ToString() == "Anthropic" ? Codev.CloudModelProviders.Anthropic : Codev.CloudModelProviders.OpenAI;
+            viewModel.IncludeProjectContextForHosted = includeProjectContext.IsChecked == true;
+            var connected = await viewModel.ConnectCloudProviderAsync(providerId, apiKey.Text, acknowledgement.IsChecked == true);
+            status.Text = viewModel.ConnectionStatus;
+            if (connected) dialog.Close();
+        };
+        disable.Click += (_, _) => { viewModel.DisableCloudProviders(); dialog.Close(); };
+        cancel.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(this);
+    }
+
     private void Composer_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;

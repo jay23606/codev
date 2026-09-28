@@ -30,6 +30,8 @@ public sealed class MainViewModel : ViewModelBase
     private string _searchText = "";
     private string _draft = "";
     private string _model = "qwen3-coder:30b";
+    private string _provider = "ollama";
+    private bool _cloudRequestsEnabled;
     private int _contextSize;
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly SemaphoreSlim _persistGate = new(1, 1);
@@ -40,6 +42,7 @@ public sealed class MainViewModel : ViewModelBase
     private long _persistenceRevision;
     private long _activeConversationRevision;
     private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly Dictionary<string, string> _cloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
     private readonly Queue<QueuedChatTurn> _requestQueue = new();
@@ -119,6 +122,11 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ContextLabel));
                 OnPropertyChanged(nameof(ArchiveLabel));
                 OnPropertyChanged(nameof(Model));
+                OnPropertyChanged(nameof(Provider));
+                OnPropertyChanged(nameof(IsLocalModel));
+                OnPropertyChanged(nameof(IsHostedModel));
+                OnPropertyChanged(nameof(ProviderStatusLabel));
+                OnPropertyChanged(nameof(IncludeProjectContextForHosted));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
                 RefreshContextSizes(Model);
@@ -146,6 +154,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Count > 0;
     public bool IsModelPickerPlaceholderVisible => !HasModels;
+    public string ProviderStatusLabel => IsLocalModel ? "Chat · local Ollama streaming" : $"Chat · {Provider} hosted model";
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading local models…" :
         ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase) ? "No local models installed" : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
@@ -187,19 +196,71 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (string.IsNullOrWhiteSpace(value) || string.Equals(Model, value, StringComparison.OrdinalIgnoreCase)) return;
             if (ActiveConversation is null) SetProperty(ref _model, value);
-            else { ActiveConversation.Model = value; OnPropertyChanged(); OnPropertyChanged(nameof(SelectedModel)); Persist(); }
+            else { ActiveConversation.Model = value; ActiveConversation.Provider = "ollama"; OnPropertyChanged(); OnPropertyChanged(nameof(Provider)); OnPropertyChanged(nameof(IsLocalModel)); OnPropertyChanged(nameof(ProviderStatusLabel)); OnPropertyChanged(nameof(SelectedModel)); Persist(); }
+            _provider = "ollama";
             RefreshContextSizes(value);
             _ = WarmModelAsync(value);
         }
     }
 
-    public ModelChoice? SelectedModel
+    public string Provider => ActiveConversation?.Provider ?? _provider;
+    public bool IsLocalModel => Provider == "ollama";
+    public bool IsHostedModel => Codev.CloudModelProviders.IsCloud(Provider);
+    public bool CloudRequestsEnabled => _cloudRequestsEnabled;
+    public bool IncludeProjectContextForHosted
     {
-        get => Models.FirstOrDefault(choice => RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase));
+        get => ActiveConversation?.IncludeProjectContextForHosted ?? false;
         set
         {
-            if (value is not null && !string.Equals(Model, value.Name, StringComparison.OrdinalIgnoreCase)) Model = value.Name;
+            if (ActiveConversation is not { } conversation || conversation.IncludeProjectContextForHosted == value) return;
+            conversation.IncludeProjectContextForHosted = value;
+            OnPropertyChanged();
+            Persist();
         }
+    }
+
+    public ModelChoice? SelectedModel
+    {
+        get => Models.FirstOrDefault(choice => choice.Provider.Equals(Provider, StringComparison.OrdinalIgnoreCase) &&
+            RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase));
+        set
+        {
+            if (value is not null) SelectModel(value);
+        }
+    }
+
+    private void SelectModel(ModelChoice choice)
+    {
+        if (string.Equals(Provider, choice.Provider, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(Model, choice.Name, StringComparison.OrdinalIgnoreCase)) return;
+        if (ActiveConversation is null)
+        {
+            _model = choice.Name;
+            _provider = choice.Provider;
+            OnPropertyChanged(nameof(Model));
+            OnPropertyChanged(nameof(Provider));
+            OnPropertyChanged(nameof(IsLocalModel));
+            OnPropertyChanged(nameof(IsHostedModel));
+            OnPropertyChanged(nameof(ProviderStatusLabel));
+            OnPropertyChanged(nameof(SelectedModel));
+        }
+        else
+        {
+            ActiveConversation.Model = choice.Name;
+            ActiveConversation.Provider = choice.Provider;
+            OnPropertyChanged(nameof(Model));
+            OnPropertyChanged(nameof(Provider));
+            OnPropertyChanged(nameof(IsLocalModel));
+            OnPropertyChanged(nameof(IsHostedModel));
+            OnPropertyChanged(nameof(ProviderStatusLabel));
+            OnPropertyChanged(nameof(SelectedModel));
+            Persist();
+        }
+        RefreshContextSizes(choice.Name);
+        if (choice.Provider == "ollama") _ = WarmModelAsync(choice.Name);
+        else ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(choice.Provider)
+            ? $"Hosted model selected · {choice.DisplayName}"
+            : $"{choice.DisplayName} selected · connect its API key to send";
     }
 
     public int ContextSize
@@ -229,6 +290,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             Title = "New conversation",
             Model = Model,
+            Provider = Provider,
             NumCtx = ContextSize,
             UpdatedAt = DateTimeOffset.Now
         };
@@ -309,15 +371,23 @@ public sealed class MainViewModel : ViewModelBase
     private void SelectConversation(Codev.Conversation conversation)
     {
         var previousModel = Model;
+        var previousProvider = Provider;
         ActiveConversation = conversation;
         _model = conversation.Model;
+        _provider = conversation.Provider;
         if (conversation.NumCtx > Codev.OllamaContextSizes.MaximumFor(conversation.Model))
         {
             conversation.NumCtx = 0;
             Persist();
         }
         RefreshContextSizes(conversation.Model);
-        if (!string.Equals(previousModel, conversation.Model, StringComparison.OrdinalIgnoreCase)) _ = WarmModelAsync(conversation.Model);
+        if (conversation.Provider == "ollama")
+        {
+            if (previousProvider != conversation.Provider || !string.Equals(previousModel, conversation.Model, StringComparison.OrdinalIgnoreCase)) _ = WarmModelAsync(conversation.Model);
+        }
+        else ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(conversation.Provider)
+            ? $"Hosted model selected · {conversation.Model}"
+            : $"{conversation.Model} selected · connect its API key to send";
         Draft = conversation.Draft;
         Messages.Clear();
         foreach (var message in conversation.Messages) Messages.Add(message);
@@ -326,6 +396,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
         OnPropertyChanged(nameof(HasSelectedContextFiles));
+        OnPropertyChanged(nameof(IncludeProjectContextForHosted));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(ContextLabel));
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
@@ -475,6 +546,11 @@ public sealed class MainViewModel : ViewModelBase
     private async Task SendDraftAsync()
     {
         if (ActiveConversation is not { } conversation || string.IsNullOrWhiteSpace(Draft)) return;
+        if (conversation.Provider != "ollama" && (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(conversation.Provider)))
+        {
+            ReportContextActionStatus("Connect the selected provider and acknowledge that prompts and selected project context will be sent off-device before sending.");
+            return;
+        }
         var text = Draft.Trim();
         if (conversation.Title == "New conversation") conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
         else if (conversation.Messages.Count == 0) conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
@@ -488,7 +564,8 @@ public sealed class MainViewModel : ViewModelBase
         Messages.Add(conversation.Messages[^1]);
         var assistantIndex = conversation.Messages.Count - 1;
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
-            false, false, conversation.ProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature);
+            false, false, conversation.ProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
+            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -528,6 +605,17 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+    private async Task AppendAssistantDeltaAsync(Codev.Conversation conversation, int assistantIndex, System.Text.StringBuilder output, string delta)
+    {
+        if (delta.Length == 0) return;
+        output.Append(delta);
+        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", output.ToString());
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+        });
+    }
+
     private async Task ExecuteQueuedTurnAsync(QueuedChatTurn turn)
     {
         var conversation = turn.Conversation;
@@ -545,51 +633,59 @@ public sealed class MainViewModel : ViewModelBase
         await _persistenceTask;
         try
         {
+            var systemPrompt = savedTurn.Provider == "ollama"
+                ? "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only."
+                : "You are Codev, a practical coding assistant. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only; you do not have tools to edit files or run commands.";
             var priorMessages = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
-                .Prepend(new Codev.ChatMessage("system", "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only."))
+                .Prepend(new Codev.ChatMessage("system", systemPrompt))
                 .ToList();
-            if (!string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && Directory.Exists(savedTurn.ProjectPath))
+            if ((savedTurn.Provider == "ollama" || savedTurn.IncludeProjectContext) && !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && Directory.Exists(savedTurn.ProjectPath))
             {
                 var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
                     savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
                 priorMessages.Add(new Codev.ChatMessage("system", projectContext));
             }
-            var history = Codev.OllamaConversationHistory.Normalize(priorMessages)
-                .Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
-            var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["stream"] = true };
-            var options = new Dictionary<string, object>();
-            if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
-            if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
-            if (options.Count > 0) payload["options"] = options;
-            using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/chat")) { Content = JsonContent.Create(payload) };
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token.Token);
-            if (!response.IsSuccessStatusCode)
-            {
-                var details = await response.Content.ReadAsStringAsync(token.Token);
-                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).\n{details}");
-            }
-            await using var stream = await response.Content.ReadAsStreamAsync(token.Token);
-            using var reader = new StreamReader(stream);
+            var normalizedHistory = Codev.OllamaConversationHistory.Normalize(priorMessages);
             var output = new System.Text.StringBuilder();
-            while (await reader.ReadLineAsync(token.Token) is { } line)
+            if (savedTurn.Provider == "ollama")
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                using var json = System.Text.Json.JsonDocument.Parse(line);
-                if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
-                if (json.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var chunk))
+                var history = normalizedHistory.Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
+                var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["stream"] = true };
+                var options = new Dictionary<string, object>();
+                if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
+                if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
+                if (options.Count > 0) payload["options"] = options;
+                using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/chat")) { Content = JsonContent.Create(payload) };
+                using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token.Token);
+                if (!response.IsSuccessStatusCode)
                 {
-                    output.Append(chunk.GetString());
-                    var responseText = output.ToString();
-                    conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", responseText);
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
-                    });
+                    var details = await response.Content.ReadAsStringAsync(token.Token);
+                    throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).\n{details}");
+                }
+                await using var stream = await response.Content.ReadAsStreamAsync(token.Token);
+                using var reader = new StreamReader(stream);
+                while (await reader.ReadLineAsync(token.Token) is { } line)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    using var json = System.Text.Json.JsonDocument.Parse(line);
+                    if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
+                    if (json.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var chunk))
+                        await AppendAssistantDeltaAsync(conversation, assistantIndex, output, chunk.GetString() ?? "");
+                }
+            }
+            else
+            {
+                if (!_cloudRequestsEnabled || !_cloudApiKeys.TryGetValue(savedTurn.Provider, out var apiKey))
+                    throw new InvalidOperationException("Reconnect this hosted provider and approve cloud requests before resuming the queued turn.");
+                var cloudMessages = normalizedHistory.Select(message => new Codev.CloudChatMessage(message.Role, message.Content)).ToArray();
+                await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(savedTurn.Provider, apiKey, savedTurn.Model, cloudMessages, token.Token))
+                {
+                    await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
                 }
             }
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
-                conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Ollama returned an empty response.");
+                conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "The selected provider returned an empty response.");
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -742,29 +838,38 @@ public sealed class MainViewModel : ViewModelBase
                 .Select(group => group.First()).ToArray();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                var connectedCloudChoices = Models.Where(choice => choice.Provider != "ollama").ToArray();
                 Models.Clear();
                 foreach (var model in allChoices) Models.Add(model);
+                foreach (var model in connectedCloudChoices) Models.Add(model);
+                if (Provider != "ollama" && !Models.Any(choice => choice.Provider == Provider && choice.Name.Equals(Model, StringComparison.OrdinalIgnoreCase)))
+                    Models.Add(new ModelChoice(Model, $"{Provider} · {Model} (connect key)", Provider));
                 OnPropertyChanged(nameof(HasModels));
                 OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
-                if (Models.Count > 0)
+                if (Provider == "ollama" && allChoices.Length > 0)
                 {
-                    var resolved = Codev.OllamaModelSelection.ResolveInstalledTag(Model, Models.Select(item => item.Name));
+                    var resolved = Codev.OllamaModelSelection.ResolveInstalledTag(Model, allChoices.Select(item => item.Name));
                     if (resolved is not null && !resolved.Equals(Model, StringComparison.Ordinal)) Model = resolved;
                     else OnPropertyChanged(nameof(Model));
                 }
                 OnPropertyChanged(nameof(SelectedModel));
                 RefreshContextSizes(Model);
-                if (Models.Count == 0) ConnectionStatus = "Ollama connected · no local models installed";
+                if (Provider != "ollama")
+                    ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Provider) ? $"Hosted model selected · {Model}" : $"{Provider} model selected · connect its API key to send";
+                else if (allChoices.Length == 0) ConnectionStatus = "Ollama connected · no local models installed";
                 else
                 {
-                    ConnectionStatus = $"Ollama connected · {Models.Count} local model(s)";
+                    ConnectionStatus = $"Ollama connected · {allChoices.Length} local model(s)";
                     _ = WarmModelAsync(Model);
                 }
             });
         }
         catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException)
         {
-            await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = "Ollama is not reachable at 127.0.0.1:11434");
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (Provider == "ollama") ConnectionStatus = "Ollama is not reachable at 127.0.0.1:11434";
+            });
         }
         finally
         {
@@ -774,6 +879,67 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     public Task RefreshModelsAsync() => LoadModelsAsync();
+
+    public async Task<bool> ConnectCloudProviderAsync(string provider, string? apiKey, bool allowCloudRequests)
+    {
+        if (!CloudModelProviders.IsCloud(provider)) return false;
+        var environmentName = provider == CloudModelProviders.OpenAI ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+        var key = string.IsNullOrWhiteSpace(apiKey) ? Environment.GetEnvironmentVariable(environmentName) : apiKey;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            ReportContextActionStatus($"Enter a {provider} API key or set {environmentName} in the environment.");
+            return false;
+        }
+        if (!allowCloudRequests)
+        {
+            _cloudRequestsEnabled = false;
+            OnPropertyChanged(nameof(CloudRequestsEnabled));
+            ReportContextActionStatus("Enable the cloud data and billing acknowledgement before connecting hosted models.");
+            return false;
+        }
+
+        _cloudRequestsEnabled = true;
+        _cloudApiKeys[provider] = key.Trim();
+        OnPropertyChanged(nameof(CloudRequestsEnabled));
+        ConnectionStatus = $"Connecting to {provider} · loading available models…";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var choices = await new Codev.CloudModelApiClient(_http).ListModelsAsync(provider, key.Trim(), timeout.Token);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                foreach (var old in Models.Where(choice => choice.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase)).ToArray()) Models.Remove(old);
+                foreach (var model in choices.OrderBy(choice => choice.DisplayName, StringComparer.OrdinalIgnoreCase))
+                    Models.Add(new ModelChoice(model.Id, $"{provider} · {model.DisplayName}", provider));
+                if (Provider.Equals(provider, StringComparison.OrdinalIgnoreCase) && !Models.Any(choice => choice.Provider == provider && choice.Name.Equals(Model, StringComparison.OrdinalIgnoreCase)))
+                    Models.Add(new ModelChoice(Model, $"{provider} · {Model}", provider));
+                OnPropertyChanged(nameof(HasModels));
+                OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
+                OnPropertyChanged(nameof(SelectedModel));
+                ConnectionStatus = $"Connected to {provider} · {choices.Count} model(s) available";
+            });
+            return true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException or InvalidOperationException)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = $"Could not connect to {provider}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void DisableCloudProviders()
+    {
+        _cloudRequestsEnabled = false;
+        _cloudApiKeys.Clear();
+        foreach (var choice in Models.Where(model => model.Provider != "ollama").ToArray()) Models.Remove(choice);
+        if (Provider != "ollama" && ActiveConversation is { } conversation)
+            Models.Add(new ModelChoice(conversation.Model, $"{Provider} · {conversation.Model} (connect key)", Provider));
+        OnPropertyChanged(nameof(CloudRequestsEnabled));
+        OnPropertyChanged(nameof(HasModels));
+        OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
+        OnPropertyChanged(nameof(SelectedModel));
+        ConnectionStatus = "Hosted requests disabled · local chats remain available";
+    }
 
     private void RebuildLists()
     {
@@ -1022,7 +1188,7 @@ public sealed class MainViewModel : ViewModelBase
     private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;
 }
 
-public sealed record ModelChoice(string Name, string DisplayName);
+public sealed record ModelChoice(string Name, string DisplayName, string Provider = "ollama");
 public sealed record ContextSizeChoice(int Value, string DisplayName);
 
 public sealed class RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null) : ICommand

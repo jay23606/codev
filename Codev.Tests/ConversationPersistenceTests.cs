@@ -11,6 +11,9 @@ public sealed class ConversationPersistenceTests
         {
             Title = "Snapshot",
             Draft = "unsent prompt",
+            Model = "claude-sonnet-test",
+            Provider = CloudModelProviders.Anthropic,
+            IncludeProjectContextForHosted = true,
             Messages = [new("user", "before")],
             ContextFiles = ["src/a.cs"],
             PendingTurns = [turn]
@@ -24,6 +27,8 @@ public sealed class ConversationPersistenceTests
         source.PendingTurns[0] = turn with { Model = "model-b" };
 
         Assert.Equal("Snapshot", snapshot.Title);
+        Assert.Equal(CloudModelProviders.Anthropic, snapshot.Provider);
+        Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.Equal("unsent prompt", snapshot.Draft);
         Assert.Equal("before", snapshot.Messages[0].Content);
         Assert.Equal("src/a.cs", Assert.Single(snapshot.ContextFiles));

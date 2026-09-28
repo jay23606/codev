@@ -12,6 +12,8 @@ public static class ConversationPersistence
             Title = conversation.Title,
             Draft = conversation.Draft,
             Model = conversation.Model,
+            Provider = conversation.Provider,
+            IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             NumCtx = conversation.NumCtx,
             Temperature = conversation.Temperature,
             LastPromptTokens = conversation.LastPromptTokens,

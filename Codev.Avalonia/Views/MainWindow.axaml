@@ -98,6 +98,7 @@
                     </StackPanel>
                 </ScrollViewer>
                 <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
+                    <Button Classes="nav" Content="☁  Connect hosted models…" Click="ConfigureCloudProvider_Click" ToolTip.Tip="Connect OpenAI or Anthropic using an API key; cloud requests require an explicit acknowledgement" />
                     <Button Classes="nav" Content="⇩  Export all chats…" Click="ExportBackup_Click" ToolTip.Tip="Save all conversations as a portable local JSON backup" />
                     <Button Classes="nav" Content="⇧  Import chats…" Click="ImportBackup_Click" ToolTip.Tip="Add conversations from a Codev JSON backup without replacing existing history" />
                     <Button Classes="nav" Content="{Binding ThemeLabel}" Command="{Binding ToggleThemeCommand}" />
@@ -128,7 +129,7 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <TextBlock Grid.Column="1" Width="250" IsVisible="{Binding IsModelPickerPlaceholderVisible}" Text="{Binding ModelPickerPlaceholder}" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="The model picker appears after Ollama's installed models are loaded." />
-                    <ComboBox Grid.Column="2" Width="112" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context sent to Ollama; larger values use more memory.">
+                    <ComboBox Grid.Column="2" Width="112" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" IsEnabled="{Binding IsLocalModel}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context for local Ollama models; hosted providers control their context windows.">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ContextSizeChoice">
                                 <TextBlock Text="{Binding DisplayName}" />
@@ -183,7 +184,7 @@
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="Chat · local Ollama streaming" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ProviderStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding QueueStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
