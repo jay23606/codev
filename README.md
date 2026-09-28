@@ -36,7 +36,7 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 - Choose up to 24 project-relative source files for a conversation; right-click Add files to remove one file or clear the selection
 - Browse project text files, filter the list, preview them read-only, and add a selected file directly to chat context; the shared source allowlist covers common .NET, JavaScript/TypeScript, Python, Java, Go, Rust, C/C++, Kotlin, Swift, PHP, Ruby, Dart, and web component files while excluding binaries and archives
 - Drop supported project source/text files onto the composer to add them to local context; files outside the active project, secret files, excluded files, and binary/unsupported types are ignored
-- Explicit Code task mode with project-scoped list/read/search tools and approval-gated file creation/replacement; changes create local recovery checkpoints and can be reviewed, restored, or undone/redone through Files
+- Explicit Code task mode with project-scoped list/read/search tools and approval-gated file creation/replacement; OpenAI-hosted Code tasks use strict function schemas backed by local argument validation. Changes create local recovery checkpoints and can be reviewed, restored, or undone/redone through Files
 - Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json` on Windows (other systems use the per-user local application data folder, under `Codev`) and is written atomically; unreadable history is preserved before Codev switches to a separate recovery file
 - Create a local JSON backup of all conversations and import one additively; imports receive new conversation IDs and do not replace current history
 

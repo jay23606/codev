@@ -2328,17 +2328,7 @@ public sealed class MainViewModel : ViewModelBase
     {
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(CreateCodeTaskToolSchemas(shell), JsonSerializerOptions.Web));
         return document.RootElement.EnumerateArray().Select(item =>
-        {
-            var function = item.GetProperty("function");
-            return (object)new Dictionary<string, object>
-            {
-                ["type"] = "function",
-                ["name"] = function.GetProperty("name").GetString()!,
-                ["description"] = function.GetProperty("description").GetString()!,
-                ["parameters"] = function.GetProperty("parameters").Clone(),
-                ["strict"] = false
-            };
-        }).ToArray();
+            (object)Codev.OpenAiStrictFunctionToolAdapter.Convert(item)).ToArray();
     }
 
     private async Task SetConnectionStatusAsync(string status) => await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = status);
