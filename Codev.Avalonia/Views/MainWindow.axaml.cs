@@ -5,6 +5,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 
@@ -17,12 +18,13 @@ public partial class MainWindow : Window
     private bool _scrollPending;
     private Codev.ProjectFileMention? _activeFileMention;
     private CancellationTokenSource? _fileMentionSearch;
+    private CancellationTokenSource? _slashCommandSearch;
 
     public MainWindow()
     {
         InitializeComponent();
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
-        Closed += (_, _) => _fileMentionSearch?.Cancel();
+        Closed += (_, _) => { _fileMentionSearch?.Cancel(); _slashCommandSearch?.Cancel(); };
         DataContextChanged += (_, _) => ObserveMessages();
         DataContextChanged += (_, _) => ConfigureAgentInteractions();
         ObserveMessages();
@@ -493,6 +495,9 @@ public partial class MainWindow : Window
 
     private async void Composer_TextChanged(object? sender, TextChangedEventArgs e)
     {
+        _slashCommandSearch?.Cancel();
+        _slashCommandSearch?.Dispose();
+        _slashCommandSearch = null;
         _fileMentionSearch?.Cancel();
         _fileMentionSearch?.Dispose();
         _fileMentionSearch = null;
@@ -505,16 +510,26 @@ public partial class MainWindow : Window
             return;
         }
 
-        var commands = Codev.SlashCommandCatalog.Suggest(text, ComposerTextBox.CaretIndex);
-        if (commands.Count > 0)
+        if (Codev.SlashCommandCatalog.TryGetCommandToken(text, ComposerTextBox.CaretIndex, out _, out _))
         {
             FileMentionPopup.IsOpen = false;
             _activeFileMention = null;
-            SlashCommandListBox.ItemsSource = commands;
-            SlashCommandListBox.SelectedIndex = -1;
-            SlashCommandPopup.IsOpen = true;
+            var slashSearch = _slashCommandSearch = new CancellationTokenSource();
+            var slashCaretIndex = ComposerTextBox.CaretIndex;
+            try
+            {
+                await Task.Delay(100, slashSearch.Token);
+                var commands = await viewModel.GetSlashCommandSuggestionsAsync(text, slashCaretIndex, slashSearch.Token);
+                if (slashSearch.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) ||
+                    ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != slashCaretIndex) return;
+                SlashCommandListBox.ItemsSource = commands;
+                SlashCommandListBox.SelectedIndex = -1;
+                SlashCommandPopup.IsOpen = commands.Count > 0;
+            }
+            catch (OperationCanceledException) { }
             return;
         }
+
         SlashCommandPopup.IsOpen = false;
 
         if (!Codev.ProjectFileMentionParser.TryGet(text, ComposerTextBox.CaretIndex, out var mention))
@@ -547,7 +562,7 @@ public partial class MainWindow : Window
     private async Task ApplySlashCommandAsync(Codev.SlashCommandDefinition command)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel ||
-            !Codev.SlashCommandCatalog.Suggest(ComposerTextBox.Text, ComposerTextBox.CaretIndex).Contains(command))
+            SlashCommandListBox.Items?.OfType<Codev.SlashCommandDefinition>().Contains(command) != true)
             return;
 
         SlashCommandPopup.IsOpen = false;
@@ -599,6 +614,11 @@ public partial class MainWindow : Window
                 ComposerTextBox.Text = "";
                 ExportConversation_Click(this, new RoutedEventArgs());
                 break;
+            case Codev.SlashCommandAction.OpenCommandsFolder:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                await ShowSlashCommandFoldersAsync(viewModel);
+                break;
             case Codev.SlashCommandAction.InitProject:
             case Codev.SlashCommandAction.ReviewProject:
                 viewModel.Draft = command.Prompt ?? "";
@@ -606,7 +626,100 @@ public partial class MainWindow : Window
                 ComposerTextBox.CaretIndex = ComposerTextBox.Text?.Length ?? 0;
                 ComposerTextBox.Focus();
                 break;
+            case Codev.SlashCommandAction.UserPrompt:
+                if (command.ArgumentNames is { Count: > 0 } argumentNames &&
+                    Codev.SlashCommandCatalog.TryGetCommandToken(ComposerTextBox.Text, ComposerTextBox.CaretIndex, out var token, out var hasArguments) &&
+                    !hasArguments && token.Equals(command.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    viewModel.Draft = command.Name + " ";
+                    ComposerTextBox.Text = viewModel.Draft;
+                    ComposerTextBox.CaretIndex = ComposerTextBox.Text.Length;
+                    ComposerTextBox.Focus();
+                    viewModel.ReportContextActionStatus($"Fill the named arguments: {string.Join(" ", argumentNames.Select(argument => argument + "=<value>"))}. Quote values containing spaces.");
+                    break;
+                }
+                var expansion = await viewModel.ExpandSlashCommandAsync(command, ComposerTextBox.Text ?? "");
+                if (!expansion.Success)
+                {
+                    viewModel.ReportContextActionStatus(expansion.Error);
+                    break;
+                }
+                viewModel.Draft = expansion.Prompt;
+                ComposerTextBox.Text = expansion.Prompt;
+                ComposerTextBox.CaretIndex = ComposerTextBox.Text.Length;
+                ComposerTextBox.Focus();
+                break;
         }
+    }
+
+    private async Task ShowSlashCommandFoldersAsync(ViewModels.MainViewModel viewModel)
+    {
+        var projectFolder = viewModel.ProjectSlashCommandsFolder;
+        var dialog = new Window
+        {
+            Title = "Custom slash commands",
+            Width = 560,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        var content = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Add a .md file to either folder. Its filename becomes the slash command, for example inspect.md creates /inspect. User commands work in every chat; project commands load only for an attached trusted project. Project commands override user commands with the same name. Markdown is treated as prompt text only; Codev never executes scripts from command files.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        });
+        content.Children.Add(new Border
+        {
+            Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
+            Padding = new Thickness(10),
+            CornerRadius = new CornerRadius(6),
+            Child = new TextBlock
+            {
+                Text = "---\ndescription: Review a named area\narguments: area, file\n---\nReview {{area}} in {{file}}. Return actionable findings only.",
+                FontFamily = "Cascadia Code",
+                FontSize = 10,
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+            }
+        });
+        content.Children.Add(new TextBlock { Text = "User commands · available in all conversations", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        content.Children.Add(new TextBox { Text = viewModel.UserSlashCommandsFolder, IsReadOnly = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MinHeight = 44 });
+        var openUser = new Button { Content = "Open user commands folder", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left };
+        openUser.Click += async (_, _) => await OpenCommandFolderAsync(viewModel.UserSlashCommandsFolder, viewModel);
+        content.Children.Add(openUser);
+        content.Children.Add(new TextBlock { Text = "Project commands · trusted project only", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Margin = new Thickness(0, 5, 0, 0) });
+        content.Children.Add(new TextBox
+        {
+            Text = projectFolder ?? (viewModel.HasProject ? "Trust this project to enable its .codev/commands folder." : "Attach and trust a project to use project commands."),
+            IsReadOnly = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MinHeight = 44
+        });
+        var openProject = new Button { Content = "Open project commands folder", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left, IsEnabled = projectFolder is not null };
+        if (projectFolder is not null) openProject.Click += async (_, _) => await OpenCommandFolderAsync(projectFolder, viewModel);
+        content.Children.Add(openProject);
+        var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right };
+        close.Click += (_, _) => dialog.Close();
+        content.Children.Add(close);
+        dialog.Content = content;
+        await dialog.ShowDialog(this);
+    }
+
+    private static async Task OpenCommandFolderAsync(string path, ViewModels.MainViewModel viewModel)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            var opener = OperatingSystem.IsWindows() ? "explorer.exe" : OperatingSystem.IsMacOS() ? "open" : "xdg-open";
+            var start = new ProcessStartInfo(opener) { UseShellExecute = false };
+            start.ArgumentList.Add(path);
+            Process.Start(start);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            viewModel.ReportContextActionStatus($"Could not open the command folder: {ex.Message}");
+        }
+        await Task.CompletedTask;
     }
 
     private void FileMentionSuggestion_Click(object? sender, RoutedEventArgs e)

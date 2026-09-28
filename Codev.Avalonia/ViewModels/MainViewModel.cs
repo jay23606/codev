@@ -26,6 +26,8 @@ public sealed class MainViewModel : ViewModelBase
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-trusted-folders.json");
     private static readonly string ActiveConversationPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-active-conversation.json");
+    private static readonly string UserSlashCommandsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "commands");
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
     private readonly Codev.ProjectFolderTrustRegistry _projectFolderTrust = Codev.ProjectFolderTrustRegistry.Load(ProjectTrustPath);
@@ -54,6 +56,7 @@ public sealed class MainViewModel : ViewModelBase
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
     private bool _isUnloadingModel;
+    private string _lastSlashCommandWarning = "";
     private readonly Queue<QueuedChatTurn> _requestQueue = new();
     private bool _queuePaused;
     private bool _queueProcessorRunning;
@@ -215,6 +218,10 @@ public sealed class MainViewModel : ViewModelBase
     public bool HasPendingDiffComments => PendingDiffComments.Count > 0;
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Count > 0;
+    public string UserSlashCommandsFolder => UserSlashCommandsPath;
+    public string? ProjectSlashCommandsFolder => HasProject && IsProjectTrusted
+        ? Path.Combine(ActiveConversation!.ProjectPath!, ".codev", "commands")
+        : null;
     public bool IsModelPickerPlaceholderVisible => !HasModels;
     public string ProviderStatusLabel => $"{(IsCodeTask ? "Code task" : IsPlanMode ? "Plan" : "Chat")} · {(IsLocalModel ? (Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "local Ollama" : "remote Ollama") : $"{Provider} hosted model")}";
     public bool IsPlanMode => ActiveConversation?.IsPlanMode ?? false;
@@ -696,6 +703,45 @@ public sealed class MainViewModel : ViewModelBase
         ContextActionStatus = message;
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
+    }
+
+    public async Task<IReadOnlyList<Codev.SlashCommandDefinition>> GetSlashCommandSuggestionsAsync(
+        string draft, int caretIndex, CancellationToken cancellationToken = default)
+    {
+        if (!Codev.SlashCommandCatalog.TryGetCommandToken(draft, caretIndex, out var token, out var hasArguments)) return [];
+        var projectPath = ActiveConversation?.ProjectPath;
+        var loaded = await Codev.CustomSlashCommandService.LoadAsync(UserSlashCommandsPath, projectPath,
+            IsProjectTrusted, cancellationToken);
+        if (loaded.Warnings.Count > 0)
+        {
+            var warning = loaded.Warnings[0];
+            if (!warning.Equals(_lastSlashCommandWarning, StringComparison.Ordinal))
+            {
+                _lastSlashCommandWarning = warning;
+                ReportContextActionStatus("Custom command: " + warning);
+            }
+        }
+
+        IReadOnlyList<Codev.SlashCommandDefinition> builtIns = hasArguments
+            ? Array.Empty<Codev.SlashCommandDefinition>()
+            : Codev.SlashCommandCatalog.Suggest(draft, caretIndex);
+        var userCommands = loaded.Commands.Where(command => hasArguments
+            ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
+            : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
+        return builtIns.Concat(userCommands).ToArray();
+    }
+
+    public async Task<Codev.SlashCommandExpansionResult> ExpandSlashCommandAsync(
+        Codev.SlashCommandDefinition command, string invocation, CancellationToken cancellationToken = default)
+    {
+        if (!command.IsCustom) return new(false, "", "The selected command is not user-defined.");
+        var loaded = await Codev.CustomSlashCommandService.LoadAsync(UserSlashCommandsPath,
+            ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
+        var current = loaded.Commands.FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.Scope, command.Scope, StringComparison.OrdinalIgnoreCase));
+        return current is null
+            ? new(false, "", "That command is no longer available. Check its Markdown file and project trust setting.")
+            : Codev.CustomSlashCommandService.Expand(current, invocation);
     }
 
     public async Task<string> ExportActiveConversationMarkdownAsync()

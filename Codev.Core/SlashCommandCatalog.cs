@@ -9,10 +9,17 @@ public enum SlashCommandAction
     SelectModel,
     TogglePlan,
     ReviewProject,
-    ShowStatus
+    ShowStatus,
+    OpenCommandsFolder,
+    UserPrompt
 }
 
-public sealed record SlashCommandDefinition(string Name, string Description, SlashCommandAction Action, string? Prompt = null);
+public sealed record SlashCommandDefinition(string Name, string Description, SlashCommandAction Action, string? Prompt = null,
+    IReadOnlyList<string>? ArgumentNames = null, string? Scope = null, string? FilePath = null)
+{
+    public bool IsCustom => Action == SlashCommandAction.UserPrompt;
+    public string ScopeLabel => Scope switch { "project" => "PROJECT", "user" => "USER", _ => "BUILT IN" };
+}
 
 /// <summary>Built-in composer commands that are currently backed by implemented Codev actions.</summary>
 public static class SlashCommandCatalog
@@ -21,6 +28,7 @@ public static class SlashCommandCatalog
     [
         new("/clear", "Clear this conversation's messages", SlashCommandAction.ClearConversation),
         new("/code", "Toggle trusted-project Code task mode", SlashCommandAction.ToggleCodeTask),
+        new("/commands", "Open the folders for user and trusted-project commands", SlashCommandAction.OpenCommandsFolder),
         new("/export", "Export this conversation as Markdown", SlashCommandAction.ExportConversation),
         new("/init", "Prepare a prompt to draft project guidance", SlashCommandAction.InitProject,
             "Inspect this project and draft a concise AGENTS.md with its purpose, layout, build and test commands, and important conventions. Do not overwrite or edit any file automatically. If Code task mode is available, propose AGENTS.md as a new file for my review; otherwise show the complete draft in your response."),
@@ -44,4 +52,17 @@ public static class SlashCommandCatalog
 
     public static bool IsExactCommand(string? draft, SlashCommandDefinition command) =>
         string.Equals(draft?.Trim(), command.Name, StringComparison.OrdinalIgnoreCase);
+
+    public static bool TryGetCommandToken(string? draft, int? caretIndex, out string token, out bool hasArguments)
+    {
+        token = "";
+        hasArguments = false;
+        if (string.IsNullOrEmpty(draft) || !draft.StartsWith('/') ||
+            (caretIndex is not null && caretIndex != draft.Length) || draft.Contains('\n') || draft.Contains('\r')) return false;
+        var separator = draft.IndexOfAny([' ', '\t']);
+        token = separator < 0 ? draft : draft[..separator];
+        if (token.Skip(1).Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_'))) return false;
+        hasArguments = separator >= 0;
+        return true;
+    }
 }
