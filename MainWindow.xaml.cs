@@ -468,9 +468,11 @@ public partial class MainWindow : Window
     {
         FillProjectsList();
         var search = SearchBox.Text?.Trim();
-        var inWorkspace = _conversations.Where(c => ConversationSearch.IsInScope(c, _activeProject?.Path, SearchAllProjectsCheck.IsChecked == true) && c.IsArchived == _showArchived && ConversationSearch.Matches(c, search));
+        var inWorkspace = _conversations.Where(c => ConversationSearch.IsInScope(c, _activeProject?.Path, SearchAllProjectsCheck.IsChecked == true) && c.IsArchived == _showArchived && ConversationSearch.Matches(c, search)).ToList();
         FillConversationList(PinnedList, inWorkspace.Where(c => c.IsPinned).OrderByDescending(c => c.UpdatedAt));
         FillConversationList(RecentList, inWorkspace.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt));
+        SearchEmptyState.Visibility = SearchPanel.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(search) && inWorkspace.Count == 0
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static string FormatRelativeTime(DateTimeOffset updatedAt)

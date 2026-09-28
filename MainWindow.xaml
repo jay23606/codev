@@ -90,6 +90,7 @@
                             <CheckBox x:Name="SearchAllProjectsCheck" Grid.Row="1" Content="Search all projects" Margin="5,6,0,0" FontSize="11" Foreground="{DynamicResource SidebarMutedBrush}" Checked="SearchScope_Changed" Unchecked="SearchScope_Changed" ToolTip="Include conversations from projects other than the one currently selected"/>
                         </Grid>
                         <ItemsControl x:Name="RecentList"/>
+                        <TextBlock x:Name="SearchEmptyState" Text="No conversations match this search." TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,5,12,8" Visibility="Collapsed"/>
                     </StackPanel>
                 </ScrollViewer>
             </DockPanel>
