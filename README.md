@@ -7,7 +7,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 ## First preview
 
 - A chat-first desktop layout, with dark mode as the default and light mode available
-- Independent persistent conversations with per-chat autosaved composer drafts, pinning, and debounced title/message search; search can match all query words across a conversation and optionally include all projects
+- Independent persistent conversations with per-chat autosaved composer drafts and a local-save indicator, pinning, and debounced title/message search; search can match all query words across a conversation and optionally include all projects
 - Find within the active conversation with message excerpts and direct navigation (`Ctrl+Shift+F`)
 - Optional completion toasts for responses that finish while you are away from their conversation
 - Conversation rename and archive/restore, with permanent deletion available from the archive view

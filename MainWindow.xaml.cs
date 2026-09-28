@@ -73,7 +73,7 @@ public partial class MainWindow : Window
         contextMenu.Items.Add(clearContext);
         AddContextButton.ContextMenu = contextMenu;
         _conversationSearchDebounce.Tick += (_, _) => { _conversationSearchDebounce.Stop(); RefreshConversationLists(); };
-        _draftSaveDebounce.Tick += async (_, _) => { _draftSaveDebounce.Stop(); await SaveAsync(); };
+        _draftSaveDebounce.Tick += async (_, _) => await SaveDraftAsync();
         LoadThemePreference();
         SearchAllProjectsCheck.IsChecked = _searchAllProjects;
         ApplyTheme();
@@ -341,6 +341,7 @@ public partial class MainWindow : Window
         _active = conversation;
         PromptBox.Text = conversation.Draft ?? "";
         PromptBox.CaretIndex = PromptBox.Text.Length;
+        DraftStatusLabel.Text = string.IsNullOrEmpty(conversation.Draft) ? "" : "Draft saved locally";
         ExportConversationButton.IsEnabled = true;
         FindInConversationButton.IsEnabled = true;
         _codeTaskMode = false;
@@ -2371,8 +2372,24 @@ public partial class MainWindow : Window
     {
         if (_active is null || _isClosing) return;
         _active.Draft = PromptBox.Text;
+        DraftStatusLabel.Text = string.IsNullOrEmpty(PromptBox.Text) ? "" : "Saving draft…";
         _draftSaveDebounce.Stop();
         _draftSaveDebounce.Start();
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        _draftSaveDebounce.Stop();
+        var conversation = _active;
+        if (conversation is null || string.IsNullOrEmpty(conversation.Draft))
+        {
+            DraftStatusLabel.Text = "";
+            return;
+        }
+        DraftStatusLabel.Text = "Saving draft…";
+        var saved = await SaveAsync();
+        if (ReferenceEquals(_active, conversation) && !_isClosing)
+            DraftStatusLabel.Text = saved ? "Draft saved locally" : "Draft could not be saved";
     }
 
     private void FindInConversation_Click(object sender, RoutedEventArgs e)
