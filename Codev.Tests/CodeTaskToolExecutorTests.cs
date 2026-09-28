@@ -69,6 +69,24 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Command_copied_from_project_text_is_flagged_before_approval_and_rejection_runs_nothing()
+    {
+        const string command = "npm install && npm test";
+        File.WriteAllText(Path.Combine(_root, "README.md"), $"Setup instructions: `{command}`\n");
+        CodeTaskCommandProposal? proposal = null;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), value => { proposal = value; return Task.FromResult(false); });
+
+        await ExecuteAsync(executor, "read_file", """{"relative_path":"README.md"}""");
+        var result = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command }));
+
+        Assert.Equal("Rejected by user; the command was not run.", result);
+        Assert.Equal(command, proposal!.Command);
+        Assert.Equal("File: README.md", proposal.MatchingUntrustedSource);
+        Assert.Contains("File: README.md", proposal.ContextSources!);
+    }
+
+    [Fact]
     public async Task Approved_new_file_creates_only_a_supported_project_file()
     {
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,

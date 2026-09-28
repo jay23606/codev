@@ -302,7 +302,8 @@ public partial class MainWindow : Window
         return await dialog.ShowDialog<bool>(this);
     }
 
-    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName, bool isVerification, IReadOnlyList<string>? contextSources)
+    private async Task<bool> ApproveAgentCommandAsync(string command, string projectPath, string shellName, bool isVerification,
+        IReadOnlyList<string>? contextSources, string? matchingUntrustedSource)
     {
         var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
         layout.Children.Add(new TextBlock
@@ -310,6 +311,14 @@ public partial class MainWindow : Window
             Text = $"Project files and command output may contain instructions aimed at the model, and the proposed command may reflect them. Review this exact command against your request. It runs through {shellName} with your account permissions and can access files and services available to your account; Codev cannot sandbox it to the project folder.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
+        if (!string.IsNullOrWhiteSpace(matchingUntrustedSource))
+            layout.Children.Add(new TextBlock
+            {
+                Text = $"POTENTIAL INSTRUCTION FOLLOWING: this exact command appears in untrusted output from {matchingUntrustedSource}. Text appearing in a project file does not make a command safe or relevant to your request.",
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+            });
         if (contextSources is { Count: > 0 })
             layout.Children.Add(new TextBlock
             {

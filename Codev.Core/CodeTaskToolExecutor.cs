@@ -6,7 +6,7 @@ namespace Codev;
 public sealed record CodeTaskFileProposal(string RelativePath, string Before, string After, bool IsNewFile, string? ProposedPatch = null,
     IReadOnlyList<string>? ContextSources = null);
 public sealed record CodeTaskCommandProposal(string Command, string ProjectPath, string ShellName, bool IsVerification = false,
-    IReadOnlyList<string>? ContextSources = null);
+    IReadOnlyList<string>? ContextSources = null, string? MatchingUntrustedSource = null);
 
 /// <summary>Executes the bounded Code task tools. Mutations and shell commands require UI-provided approval.</summary>
 public sealed class CodeTaskToolExecutor(
@@ -20,6 +20,7 @@ public sealed class CodeTaskToolExecutor(
     IEnumerable<string>? initialContextSources = null)
 {
     private int _failedVerifications;
+    private readonly List<(string Source, string Content)> _untrustedContents = [];
     private readonly List<string> _contextSources = initialContextSources?
         .Where(source => !string.IsNullOrWhiteSpace(source))
         .Select(ShortenSource)
@@ -55,6 +56,7 @@ public sealed class CodeTaskToolExecutor(
     {
         var content = Truncate(await files.ReadFileAsync(relativePath, cancellationToken));
         AddContextSource("File: " + relativePath);
+        TrackUntrustedContent("File: " + relativePath, content);
         return UntrustedToolOutput.Format("project file", content, relativePath);
     }
 
@@ -62,17 +64,42 @@ public sealed class CodeTaskToolExecutor(
     {
         var results = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken));
         AddContextSource("Search results for: " + query);
-        return UntrustedToolOutput.Format("project search results", Truncate(results));
+        results = Truncate(results);
+        TrackUntrustedContent("Search results for: " + query, results);
+        return UntrustedToolOutput.Format("project search results", results);
     }
 
     private void AddContextSource(string source)
     {
         source = ShortenSource(source);
-        if (_contextSources.Count < 20 && !_contextSources.Contains(source, StringComparer.OrdinalIgnoreCase))
-            _contextSources.Add(source);
+        if (_contextSources.Contains(source, StringComparer.OrdinalIgnoreCase)) return;
+        if (_contextSources.Count == 20) _contextSources.RemoveAt(0);
+        _contextSources.Add(source);
     }
 
     private static string ShortenSource(string source) => source.Length <= 240 ? source : source[..240] + "…";
+
+    private void TrackUntrustedContent(string source, string content)
+    {
+        if (_untrustedContents.Count == 16) _untrustedContents.RemoveAt(0);
+        _untrustedContents.Add((ShortenSource(source), content.Length <= 8000 ? content : content[..8000]));
+    }
+
+    private string? FindCommandSource(string command)
+    {
+        var normalizedCommand = NormalizeCommand(command);
+        if (normalizedCommand.Length < 8) return null;
+        foreach (var (source, content) in _untrustedContents)
+        {
+            if (content.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Any(line => NormalizeCommand(line).Contains(normalizedCommand, StringComparison.OrdinalIgnoreCase)))
+                return source;
+        }
+        return null;
+    }
+
+    private static string NormalizeCommand(string value) =>
+        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     private async Task<string> CreateFileAsync(string relativePath, string content, CancellationToken cancellationToken)
     {
@@ -125,7 +152,8 @@ public sealed class CodeTaskToolExecutor(
         if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
             return "Rejected: command must contain 1–4,000 characters.";
         var shell = ShellCommandResolver.ResolveCurrent();
-        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, ContextSources: _contextSources.ToArray())))
+        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
+                ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command))))
             return "Rejected by user; the command was not run.";
         status?.Invoke($"Code task · starting approved {shell.DisplayName} command…");
         var progress = new Progress<TimeSpan>(elapsed =>
@@ -134,6 +162,7 @@ public sealed class CodeTaskToolExecutor(
         {
             var output = await files.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, commandProgress ?? progress);
             AddContextSource("Output from approved command: " + command);
+            TrackUntrustedContent("Output from approved command: " + command, output);
             return UntrustedToolOutput.Format("approved command output", Truncate(output, 8000));
         }
         finally { status?.Invoke("Code task · Thinking…"); }
@@ -148,7 +177,8 @@ public sealed class CodeTaskToolExecutor(
             return "Rejected: verification command must contain 1–4,000 characters.";
         if (RepairBudgetExhausted) return RepairLimitMessage;
         var shell = ShellCommandResolver.ResolveCurrent();
-        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true, ContextSources: _contextSources.ToArray())))
+        if (!await approveCommand(new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true,
+                ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command))))
             return "Verification rejected by user; it was not run and no result is available.";
 
         status?.Invoke("Code task · running approved verification…");
@@ -158,6 +188,7 @@ public sealed class CodeTaskToolExecutor(
                 status?.Invoke($"Code task · verification running · {elapsed:mm\\:ss}"));
             var output = await files.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, progress);
             AddContextSource("Output from approved verification: " + command);
+            TrackUntrustedContent("Output from approved verification: " + command, output);
             var exitMatch = Regex.Match(output, @"(?:^|\n)Exit code: (-?\d+)\s*$", RegexOptions.CultureInvariant);
             if (exitMatch.Success && int.TryParse(exitMatch.Groups[1].Value, out var exitCode) && exitCode == 0)
                 return "Verification PASSED (exit code 0).\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000));

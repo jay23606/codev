@@ -296,7 +296,7 @@ public sealed class MainViewModel : ViewModelBase
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
     public Func<Codev.ConversationCompactionProposal, Task>? ShowCompactionProposalAsync { get; set; }
-    public Func<string, string, string, bool, IReadOnlyList<string>?, Task<bool>>? ApproveProjectCommandAsync { get; set; }
+    public Func<string, string, string, bool, IReadOnlyList<string>?, string?, Task<bool>>? ApproveProjectCommandAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
         ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase)
@@ -1569,7 +1569,7 @@ public sealed class MainViewModel : ViewModelBase
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
                 (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After, proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false))),
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
-                (ApproveProjectCommandAsync?.Invoke(proposal.Command, proposal.ProjectPath, proposal.ShellName, proposal.IsVerification, proposal.ContextSources) ?? Task.FromResult(false))),
+                (ApproveProjectCommandAsync?.Invoke(proposal.Command, proposal.ProjectPath, proposal.ShellName, proposal.IsVerification, proposal.ContextSources, proposal.MatchingUntrustedSource) ?? Task.FromResult(false))),
             status: message => _ = SetConnectionStatusAsync(message), initialContextSources: initialContextSources);
         var transcript = new System.Text.StringBuilder();
         for (var round = 0; round < 8; round++)
