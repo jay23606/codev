@@ -20,6 +20,18 @@ public sealed class CodeTaskToolExecutor(
     IEnumerable<string>? initialContextSources = null,
     Func<CodeTaskCommandProposal, Task<CommandApprovalOutcome>>? permissionApproval = null)
 {
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> ToolArgumentLimits =
+        new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
+        {
+            ["list_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_directory"] = 240 },
+            ["read_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240 },
+            ["search_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["query"] = 1_000 },
+            ["create_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
+            ["write_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
+            ["apply_patch"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["patch"] = 500_000 },
+            ["verify_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 },
+            ["run_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 }
+        };
     private int _failedVerifications;
     private readonly List<(string Source, string Content)> _untrustedContents = [];
     private readonly List<string> _contextSources = initialContextSources?
@@ -31,9 +43,9 @@ public sealed class CodeTaskToolExecutor(
 
     public async Task<string> ExecuteAsync(string name, JsonElement arguments, CancellationToken cancellationToken = default)
     {
-        string Arg(string key) => arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty(key, out var value)
-            ? value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.ToString()
-            : "";
+        if (ToolArgumentLimits.ContainsKey(name) && ValidateToolArguments(name, arguments) is { } error)
+            return "Rejected: " + error;
+        string Arg(string key) => arguments.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
         try
         {
             return name switch
@@ -51,6 +63,24 @@ public sealed class CodeTaskToolExecutor(
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { return "Error: " + ex.Message; }
+    }
+
+    private static string? ValidateToolArguments(string name, JsonElement arguments)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object) return "tool arguments must be a JSON object.";
+        var limits = ToolArgumentLimits[name];
+        foreach (var property in arguments.EnumerateObject())
+            if (!limits.ContainsKey(property.Name)) return $"'{property.Name}' is not an accepted argument for {name}.";
+        foreach (var (key, maxLength) in limits)
+        {
+            if (!arguments.TryGetProperty(key, out var value)) return $"required argument '{key}' is missing.";
+            if (value.ValueKind != JsonValueKind.String) return $"argument '{key}' must be a string.";
+            var text = value.GetString() ?? "";
+            if (text.Length > maxLength) return $"argument '{key}' exceeds the {maxLength}-character limit.";
+            if (key != "relative_directory" && key != "content" && string.IsNullOrWhiteSpace(text))
+                return $"argument '{key}' cannot be empty.";
+        }
+        return null;
     }
 
     private async Task<string> ReadFileAsync(string relativePath, CancellationToken cancellationToken)

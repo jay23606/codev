@@ -31,6 +31,21 @@ public sealed class TaskChecklistServiceTests
         Assert.StartsWith("Rejected:", result);
     }
 
+    [Theory]
+    [InlineData("{\"items\":[],\"extra\":\"ignored before\"}")]
+    [InlineData("{\"items\":[{\"text\":\"step\",\"status\":\"pending\",\"extra\":true}]}")]
+    public void Checklist_tool_rejects_unknown_fields_without_changing_existing_items(string json)
+    {
+        var existing = new TaskChecklistItem(Guid.NewGuid(), "Keep this step");
+        var conversation = new Conversation { TaskChecklist = [existing] };
+        using var arguments = JsonDocument.Parse(json);
+
+        Assert.False(TaskChecklistService.TryReplaceFromModel(conversation, arguments.RootElement, out var result));
+
+        Assert.Equal(existing, Assert.Single(conversation.TaskChecklist));
+        Assert.StartsWith("Rejected:", result);
+    }
+
     [Fact]
     public void Checklist_updates_are_bounded_and_prompt_state_is_structured()
     {

@@ -9,6 +9,41 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
 
     public CodeTaskToolExecutorTests() => Directory.CreateDirectory(_root);
 
+    [Theory]
+    [InlineData("create_file", "{\"relative_path\":[\"unsafe.js\"],\"content\":\"x\"}", "must be a string")]
+    [InlineData("run_command", "{\"command\":\"echo no\",\"skip_approval\":true}", "not an accepted argument")]
+    [InlineData("read_file", "{\"relative_path\":\"\"}", "cannot be empty")]
+    public async Task Tool_arguments_are_validated_before_tool_side_effects(string name, string json, string expected)
+    {
+        var reviewCalled = false;
+        var approvalCalled = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => { reviewCalled = true; return Task.FromResult(true); },
+            _ => { approvalCalled = true; return Task.FromResult(true); });
+
+        var result = await ExecuteAsync(executor, name, json);
+
+        Assert.Contains(expected, result, StringComparison.Ordinal);
+        Assert.False(reviewCalled);
+        Assert.False(approvalCalled);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(_root));
+    }
+
+    [Fact]
+    public async Task File_proposals_reject_contents_over_schema_limit_before_review()
+    {
+        var reviewCalled = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => { reviewCalled = true; return Task.FromResult(true); }, _ => Task.FromResult(false));
+        var json = JsonSerializer.Serialize(new { relative_path = "large.txt", content = new string('x', 500_001) });
+
+        var result = await ExecuteAsync(executor, "create_file", json);
+
+        Assert.Contains("exceeds the 500000-character limit", result, StringComparison.Ordinal);
+        Assert.False(reviewCalled);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(_root));
+    }
+
     [Fact]
     public async Task Rejected_new_file_proposal_leaves_the_project_unchanged()
     {

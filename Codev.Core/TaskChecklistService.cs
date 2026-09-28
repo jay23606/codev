@@ -20,6 +20,11 @@ public static class TaskChecklistService
             result = "Rejected: items must be an array of checklist entries.";
             return false;
         }
+        if (arguments.EnumerateObject().Any(property => property.Name != "items"))
+        {
+            result = "Rejected: items is the only accepted checklist argument.";
+            return false;
+        }
         if (items.GetArrayLength() > MaxItems)
         {
             result = $"Rejected: a checklist can contain at most {MaxItems} items.";
@@ -29,7 +34,7 @@ public static class TaskChecklistService
         var parsed = new List<TaskChecklistItem>();
         foreach (var item in items.EnumerateArray())
         {
-            if (item.ValueKind != JsonValueKind.Object ||
+            if (item.ValueKind != JsonValueKind.Object || item.EnumerateObject().Any(property => property.Name is not ("text" or "status")) ||
                 !item.TryGetProperty("text", out var textElement) || textElement.ValueKind != JsonValueKind.String ||
                 !item.TryGetProperty("status", out var statusElement) || statusElement.ValueKind != JsonValueKind.String)
             {
