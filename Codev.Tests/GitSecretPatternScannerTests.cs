@@ -25,4 +25,20 @@ public sealed class GitSecretPatternScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void Scan_finds_provider_specific_formats_and_ignores_obvious_placeholders()
+    {
+        var stripe = "sk_live_" + new string('1', 24);
+        var google = "AIza" + new string('2', 35);
+        var npm = "npm_" + new string('3', 36);
+        var diff = "diff --git a/.env b/.env\n+++ b/.env\n@@ -0,0 +1,5 @@\n+stripe = " + stripe + "\n+google = " + google + "\n+npm = " + npm + "\n+api_key = \"your_api_key_here\"\n+password = \"example-password-value\"";
+
+        var findings = GitSecretPatternScanner.Scan(new GitWorkingTreeReview("main", [".env"], diff, false));
+
+        Assert.Contains(findings, finding => finding.Kind == "Stripe secret key");
+        Assert.Contains(findings, finding => finding.Kind == "Google API key");
+        Assert.Contains(findings, finding => finding.Kind == "npm token");
+        Assert.DoesNotContain(findings, finding => finding.Kind == "credential-like assignment");
+    }
 }

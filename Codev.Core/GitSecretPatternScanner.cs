@@ -15,6 +15,12 @@ public static partial class GitSecretPatternScanner
     private static partial Regex AwsAccessKey();
     [GeneratedRegex(@"(?i)(?:sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,})")]
     private static partial Regex AiProviderKey();
+    [GeneratedRegex(@"\bsk_live_[A-Za-z0-9]{20,}\b")]
+    private static partial Regex StripeSecretKey();
+    [GeneratedRegex(@"\bAIza[0-9A-Za-z_-]{35}\b")]
+    private static partial Regex GoogleApiKey();
+    [GeneratedRegex(@"\bnpm_[A-Za-z0-9]{36}\b")]
+    private static partial Regex NpmToken();
     [GeneratedRegex(@"(?i)(?:xox[baprs]-[A-Za-z0-9-]{10,})")]
     private static partial Regex SlackToken();
     [GeneratedRegex(@"(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")]
@@ -46,12 +52,17 @@ public static partial class GitSecretPatternScanner
                     AddIfMatched(GitHubToken(), "GitHub token");
                     AddIfMatched(AwsAccessKey(), "AWS access key");
                     AddIfMatched(AiProviderKey(), "AI provider key");
+                    AddIfMatched(StripeSecretKey(), "Stripe secret key");
+                    AddIfMatched(GoogleApiKey(), "Google API key");
+                    AddIfMatched(NpmToken(), "npm token");
                     AddIfMatched(SlackToken(), "Slack token");
                     AddIfMatched(PrivateKeyHeader(), "private key");
                     AddIfMatched(GenericCredential(), "credential-like assignment");
                     void AddIfMatched(Regex regex, string kind)
                     {
-                        if (findings.Count < MaxFindings && regex.IsMatch(text) && !findings.Any(f => f.FilePath == path && f.Line == lineNumber && f.Kind == kind))
+                        var match = regex.Match(text);
+                        if (findings.Count < MaxFindings && match.Success && !(kind == "credential-like assignment" && IsPlaceholder(match.Groups[1].Value)) &&
+                            !findings.Any(f => f.FilePath == path && f.Line == lineNumber && f.Kind == kind))
                             findings.Add(new GitSecretFinding(path, lineNumber, kind));
                     }
                 }
@@ -60,6 +71,15 @@ public static partial class GitSecretPatternScanner
             else if (line.StartsWith(' ') && !line.StartsWith("\\ ")) lineNumber++;
         }
         return findings;
+    }
+
+    private static bool IsPlaceholder(string value)
+    {
+        var normalized = value.Trim(' ', '\'', '"', '`', '<', '>').ToLowerInvariant();
+        return normalized is "example" or "placeholder" or "changeme" or "change_me" or "dummy" or "test" or "none" or "null" or "redacted" ||
+            normalized.StartsWith("your_", StringComparison.Ordinal) || normalized.StartsWith("your-", StringComparison.Ordinal) ||
+            normalized.StartsWith("replace_", StringComparison.Ordinal) || normalized.StartsWith("replace-", StringComparison.Ordinal) ||
+            normalized.StartsWith("example_", StringComparison.Ordinal) || normalized.StartsWith("example-", StringComparison.Ordinal);
     }
 
     [GeneratedRegex(@"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")]
