@@ -177,6 +177,7 @@
                         <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <Button Classes="soft" Content="Open project" Padding="8,4" FontSize="10" Click="AttachProject_Click" ToolTip.Tip="Attach a local folder as read-only context for this conversation" />
+                                <Button Classes="soft" Content="Browse files" Padding="8,4" FontSize="10" IsEnabled="{Binding HasProject}" Click="BrowseProjectFiles_Click" ToolTip.Tip="Filter and preview supported project text files, then add one to chat context" />
                                 <Button Classes="soft" Content="＋ Add files" Padding="8,4" FontSize="10" IsEnabled="{Binding HasProject}" Click="AddContextFiles_Click" ToolTip.Tip="Select supported source and text files from the attached project" />
                                 <Button Classes="soft" Content="Clear selection" Padding="8,4" FontSize="10" IsVisible="{Binding HasSelectedContextFiles}" Command="{Binding ClearContextFilesCommand}" />
                                 <TextBlock Text="{Binding ContextLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />

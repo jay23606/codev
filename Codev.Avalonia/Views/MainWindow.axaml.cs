@@ -305,6 +305,23 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void BrowseProjectFiles_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel ||
+            viewModel.ActiveConversation?.ProjectPath is not { } projectPath || !Directory.Exists(projectPath)) return;
+        try
+        {
+            var browser = new ProjectFileBrowserWindow(projectPath, viewModel.ActiveConversation.ContextFiles);
+            var selectedPath = await browser.ShowDialog<string?>(this);
+            if (selectedPath is not null && viewModel.AddProjectFileMention(selectedPath))
+                viewModel.ReportContextActionStatus($"Added {selectedPath} to this conversation's context");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            viewModel.ReportContextActionStatus($"Could not browse project files: {ex.Message}");
+        }
+    }
+
     private async void ExportConversation_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;

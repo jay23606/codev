@@ -11,6 +11,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [ ] Change context size, switch conversations, and verify context size is stored per conversation and capped for the selected model.
 - [x] Attach a disposable project folder, select a supported source file, and verify the local response uses its bounded read-only context.
 - [ ] Clear selection and verify the bounded default file set is used; confirm `.env`, unsupported files, and paths outside the project are excluded in the UI flow.
+- [ ] Browse project files, filter and preview a source file read-only, add it to context, and verify unsupported, sensitive, excluded and outside-project files are not listed.
 - [x] In a new disposable conversation, send a short prompt; verify streaming, right-aligned user bubble, left-aligned assistant response without role labels or Copy buttons, and selectable Markdown.
 - [ ] Toggle Plan mode; verify it is visibly selected, persists after restart, produces a read-only ordered plan, and is captured per queued turn.
 - [ ] Type `@` in the composer with a project attached; verify safe project-relative suggestions appear, selecting one adds it to context and replaces the mention, and sensitive/excluded/outside-project files never appear.
@@ -31,7 +32,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 
 ## Not yet supported in Avalonia
 
-Project file browsing and previews, Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Avalonia Plan mode is implemented but still needs the manual interaction check above. Keep the Windows WPF release checklist separate until those workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
+Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Project file browsing and read-only previews are implemented but still need the manual interaction check above. Avalonia Plan mode is implemented but still needs the manual interaction check above. Keep the Windows WPF release checklist separate until those workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
 
 ## Run record
 
