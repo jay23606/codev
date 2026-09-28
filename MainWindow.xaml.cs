@@ -479,6 +479,8 @@ public partial class MainWindow : Window
             openItem.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = project.Path, UseShellExecute = true });
             var instructionsItem = new MenuItem { Header = "Edit project instructions…" };
             instructionsItem.Click += async (_, _) => await EditProjectInstructionsAsync(project);
+            var knowledgeItem = new MenuItem { Header = "Edit project knowledge…" };
+            knowledgeItem.Click += async (_, _) => await EditProjectKnowledgeAsync(project);
             var exclusionsItem = new MenuItem { Header = "Context exclusions…" };
             exclusionsItem.Click += async (_, _) => await EditProjectContextExclusionsAsync(project);
             var searchContentsItem = new MenuItem { Header = "Search project contents…" };
@@ -489,6 +491,7 @@ public partial class MainWindow : Window
             browseItem.Click += (_, _) => BrowseProjectFiles(project);
             menu.Items.Add(pinItem);
             menu.Items.Add(instructionsItem);
+            menu.Items.Add(knowledgeItem);
             menu.Items.Add(exclusionsItem);
             menu.Items.Add(gitStatusItem);
             menu.Items.Add(searchContentsItem);
@@ -842,6 +845,44 @@ public partial class MainWindow : Window
         var cancel = new Button { Content = "Cancel", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
         var save = new Button { Content = "Save instructions", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
         save.Click += (_, _) => { project.Instructions = input.Text.Trim(); editor.DialogResult = true; editor.Close(); };
+        buttons.Children.Add(cancel); buttons.Children.Add(save);
+        Grid.SetRow(buttons, 2); layout.Children.Add(buttons);
+        editor.Content = layout;
+        if (editor.ShowDialog() == true) await SaveProjectsAsync();
+    }
+
+    private async Task EditProjectKnowledgeAsync(WorkspaceProject project)
+    {
+        var editor = new Window
+        {
+            Title = $"Project knowledge · {project.Name}", Width = 600, Height = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var help = new TextBlock
+        {
+            Text = "Store project facts that are useful across chats, such as architecture notes, domain terms, or API conventions. This text is sent to the local model for each request in this project, up to 20,000 characters.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
+        };
+        layout.Children.Add(help);
+        var input = new TextBox
+        {
+            Text = project.Knowledge, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontSize = 13,
+            Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"),
+            BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1),
+            Padding = new Thickness(10), MinHeight = 240
+        };
+        Grid.SetRow(input, 1); layout.Children.Add(input);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+        var cancel = new Button { Content = "Cancel", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var save = new Button { Content = "Save knowledge", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        save.Click += (_, _) => { project.Knowledge = input.Text.Trim(); editor.DialogResult = true; editor.Close(); };
         buttons.Children.Add(cancel); buttons.Children.Add(save);
         Grid.SetRow(buttons, 2); layout.Children.Add(buttons);
         editor.Content = layout;
@@ -1521,6 +1562,8 @@ public partial class MainWindow : Window
             var project = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
             if (project is not null && !string.IsNullOrWhiteSpace(project.Instructions))
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + project.Instructions;
+            if (project is not null)
+                system += "\n\n" + ProjectKnowledgeContext.Build(project.Knowledge);
             if (!string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
             {
                 system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
@@ -2457,6 +2500,7 @@ public sealed class WorkspaceProject
     public string Path { get; set; } = "";
     public bool IsPinned { get; set; }
     public string Instructions { get; set; } = "";
+    public string Knowledge { get; set; } = "";
     public List<string> ContextExclusions { get; set; } = [];
     public DateTimeOffset LastOpenedAt { get; set; } = DateTimeOffset.Now;
 }

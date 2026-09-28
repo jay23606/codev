@@ -30,7 +30,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Rename, archive, and restore conversations | Done; permanently delete is available from the archive view |
 | Choose a project folder and include bounded source/config excerpts | Select project-relative chat context files or use safe bounded excerpts; Code task mode can list/read/search supported text files |
 | File explorer and preview | Project context menu opens a safe text-file browser with filtering, read-only preview, and Add to chat context |
-| Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and safe project context implemented; reusable knowledge files pending |
+| Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and bounded reusable project knowledge included in local model context |
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
 | Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, rollback, and unified text diffs implemented |
 | Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
@@ -55,7 +55,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 - [x] Project/workspace switcher with recent and pinned projects; each workspace maps to a chosen local folder.
 - [x] Multiple conversations belonging to each project, plus ungrouped quick chats.
-- [x] Project instructions and context exclusions persisted locally and applied to project chat context; reusable knowledge files and user-selected source lists remain.
+- [x] Project instructions, reusable knowledge notes, and context exclusions persist locally; instructions and knowledge are applied to project chat context, and knowledge is capped at 20,000 characters. User-selected source lists remain.
 - [x] Deliberately select project-relative files for chat context; if none are selected, use the existing bounded safe excerpt.
 - [x] Project file browser with filtering, safe read-only previews, and direct add-to-context; richer tree navigation and file diffs remain.
 - [x] Approximate source-context token count versus the selected model context limit, with tooltip distinguishing it from Ollama's actual prompt count.
