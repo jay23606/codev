@@ -142,8 +142,28 @@
                             <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
                         </Grid>
-                        <Grid ColumnDefinitions="*,Auto">
+                        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
                             <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button Classes="soft" Content="Open project" Padding="8,4" FontSize="10" Click="AttachProject_Click" ToolTip.Tip="Attach a local folder as read-only context for this conversation" />
+                                <Button Classes="soft" Content="＋ Add files" Padding="8,4" FontSize="10" IsEnabled="{Binding HasProject}" Click="AddContextFiles_Click" ToolTip.Tip="Select supported source and text files from the attached project" />
+                                <Button Classes="soft" Content="Clear selection" Padding="8,4" FontSize="10" IsVisible="{Binding HasSelectedContextFiles}" Command="{Binding ClearContextFilesCommand}" />
+                                <TextBlock Text="{Binding ContextLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <ItemsControl Grid.Row="1" Grid.ColumnSpan="2" ItemsSource="{Binding SelectedContextFiles}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate><DataTemplate x:DataType="x:String">
+                                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="6,2" Margin="0,0,5,4">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <TextBlock Text="{Binding}" FontSize="10" VerticalAlignment="Center" />
+                                            <Button Content="×" Padding="2,0" Background="Transparent" BorderThickness="0" Command="{Binding $parent[Window].DataContext.RemoveContextFileCommand}" CommandParameter="{Binding}" ToolTip.Tip="Remove this file from chat context" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate></ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="Chat · local Ollama streaming" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding QueueStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />

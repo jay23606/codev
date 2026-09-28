@@ -9,6 +9,8 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [x] Confirm the installed-model picker lists local Ollama tags and refreshes when opened, with no blank entries.
 - [x] Close and relaunch with a known conversation open; verify Codev reopens that conversation and its installed model is visibly selected. With no Ollama models installed, verify a clear empty-state label appears and the model selector is hidden; while loading or when Ollama is unavailable, verify a status label appears instead of blank options.
 - [ ] Change context size, switch conversations, and verify context size is stored per conversation and capped for the selected model.
+- [x] Attach a disposable project folder, select a supported source file, and verify the local response uses its bounded read-only context.
+- [ ] Clear selection and verify the bounded default file set is used; confirm `.env`, unsupported files, and paths outside the project are excluded in the UI flow.
 - [x] In a new disposable conversation, send a short prompt; verify streaming, right-aligned user bubble, left-aligned assistant response without role labels or Copy buttons, and selectable Markdown.
 - [ ] Send a follow-up while a response is running; verify it queues, the first answer completes, and the follow-up then runs.
 - [ ] Start another response, queue a follow-up, close and relaunch the app, verify the turn is paused, then explicitly resume it.
@@ -21,10 +23,10 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 
 ## Not yet supported in Avalonia
 
-Project context/file browsing, Plan and Code task modes, reviewed edits, command approval, Git, export, conversation backup/import, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Keep the Windows WPF release checklist separate until those workflows are ported.
+Project file browsing and previews, Plan and Code task modes, reviewed edits, command approval, Git, export, conversation backup/import, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Keep the Windows WPF release checklist separate until those workflows are ported.
 
 ## Run record
 
 | Date | Commit | OS | Model / context | Result | Notes |
 |---|---|---|---|---|---|
-| 2026-09-28 | working tree after `fe09757` | Windows 11 | Qwen3.6 35B-A3B; Devstral chat smoke | Partial pass | Avalonia launch was responsive; last-active conversation/model selection restored; picker had no blank items; Devstral streamed a local chat successfully. Qwen3.6 was already resident and its status changed to Ready. Remaining checklist items are unverified. |
+| 2026-09-28 | working tree after `b180f46` | Windows 11 | Qwen3.6 35B-A3B | Partial pass | Avalonia restored the active conversation/model and had no blank model entries. New chats inherited Qwen3.6. Attached a disposable project, selected one JS file and verified the local response returned its exact test value; Ollama CPU inference took about two minutes. Remaining checklist items are unverified. |

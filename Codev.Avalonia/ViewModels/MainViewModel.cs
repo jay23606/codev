@@ -52,6 +52,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
     public ObservableCollection<Codev.ChatMessage> Messages { get; } = [];
+    public ObservableCollection<string> SelectedContextFiles { get; } = [];
     public ObservableCollection<ContextSizeChoice> ContextSizes { get; } = [];
     public ICommand NewConversationCommand { get; }
     public ICommand SelectConversationCommand { get; }
@@ -62,6 +63,8 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ResumeQueueCommand { get; }
     public ICommand CancelQueuedCommand { get; }
     public ICommand ToggleThemeCommand { get; }
+    public ICommand RemoveContextFileCommand { get; }
+    public ICommand ClearContextFilesCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
     [
     ];
@@ -74,6 +77,8 @@ public sealed class MainViewModel : ViewModelBase
         ArchiveConversationCommand = new RelayCommand(_ => ArchiveConversation(), _ => ActiveConversation is not null);
         ToggleArchiveViewCommand = new RelayCommand(_ => { ShowArchived = !ShowArchived; RebuildLists(); });
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
+        RemoveContextFileCommand = new RelayCommand(value => { if (value is string path) RemoveContextFile(path); });
+        ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
         SendCommand = new RelayCommand(_ =>
         {
             if (string.IsNullOrWhiteSpace(Draft)) StopGeneration();
@@ -125,7 +130,13 @@ public sealed class MainViewModel : ViewModelBase
     public string ArchiveLabel => ActiveConversation?.IsArchived == true ? "Restore" : "Archive";
     public string MessageCountLabel => $"Local conversation · {Messages.Count} messages";
     public string ProjectLabel => ActiveConversation?.ProjectPath is { Length: > 0 } path ? Path.GetFileName(path) + " · " + path : "No project folder attached";
-    public string ContextLabel => ActiveConversation?.ContextFiles.Count > 0 ? $"{ActiveConversation.ContextFiles.Count} context files" : "No project context";
+    public bool HasProject => ActiveConversation?.ProjectPath is { Length: > 0 } path && Directory.Exists(path);
+    public bool HasSelectedContextFiles => SelectedContextFiles.Count > 0;
+    public string ContextLabel => !HasProject ? "No project context" : SelectedContextFiles.Count > 0
+        ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included"
+        : "Project attached · bounded source files included automatically";
+    public string ContextActionStatus { get; private set; } = "";
+    public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
     public string ThemeLabel => _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
     public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) ? "■" : "↑";
@@ -211,7 +222,13 @@ public sealed class MainViewModel : ViewModelBase
     public void NewConversation()
     {
         ShowArchived = false;
-        var conversation = new Codev.Conversation { Title = "New conversation", UpdatedAt = DateTimeOffset.Now };
+        var conversation = new Codev.Conversation
+        {
+            Title = "New conversation",
+            Model = Model,
+            NumCtx = ContextSize,
+            UpdatedAt = DateTimeOffset.Now
+        };
         _conversations.Insert(0, conversation);
         SelectConversation(conversation);
         Persist();
@@ -233,12 +250,93 @@ public sealed class MainViewModel : ViewModelBase
         Draft = conversation.Draft;
         Messages.Clear();
         foreach (var message in conversation.Messages) Messages.Add(message);
+        Reset(SelectedContextFiles, conversation.ContextFiles);
+        ContextActionStatus = "";
+        OnPropertyChanged(nameof(ContextActionStatus));
+        OnPropertyChanged(nameof(HasContextActionStatus));
+        OnPropertyChanged(nameof(HasSelectedContextFiles));
+        OnPropertyChanged(nameof(HasProject));
+        OnPropertyChanged(nameof(ContextLabel));
+        ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(MessageCountLabel));
         OnPropertyChanged(nameof(ProjectLabel));
         OnPropertyChanged(nameof(ContextLabel));
         OnPropertyChanged(nameof(PinLabel));
         OnPropertyChanged(nameof(ArchiveLabel));
         PersistLastActiveConversationId(conversation.Id);
+    }
+
+    public void SetProjectFolder(string path)
+    {
+        if (ActiveConversation is not { } conversation) return;
+        if (!Directory.Exists(path)) throw new DirectoryNotFoundException("The selected project folder no longer exists.");
+        var fullPath = Path.GetFullPath(path);
+        if (!string.Equals(conversation.ProjectPath, fullPath, StringComparison.OrdinalIgnoreCase))
+            conversation.ContextFiles.Clear();
+        conversation.ProjectPath = fullPath;
+        Reset(SelectedContextFiles, conversation.ContextFiles);
+        ContextActionStatus = "Project attached. Bounded source files will be included with local chat requests.";
+        OnPropertyChanged(nameof(ProjectLabel));
+        OnPropertyChanged(nameof(HasProject));
+        OnPropertyChanged(nameof(ContextLabel));
+        OnPropertyChanged(nameof(ContextActionStatus));
+        OnPropertyChanged(nameof(HasContextActionStatus));
+        OnPropertyChanged(nameof(HasSelectedContextFiles));
+        ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
+        Persist();
+    }
+
+    public void ReportContextActionStatus(string message)
+    {
+        ContextActionStatus = message;
+        OnPropertyChanged(nameof(ContextActionStatus));
+        OnPropertyChanged(nameof(HasContextActionStatus));
+    }
+
+    public Codev.ContextFileSelectionResult AddContextFiles(IEnumerable<string> paths)
+    {
+        if (ActiveConversation is not { ProjectPath: { Length: > 0 } projectPath } conversation || !Directory.Exists(projectPath))
+            return new Codev.ContextFileSelectionResult(0, paths.Count());
+        var service = new Codev.WorkspaceFileService(projectPath);
+        var result = Codev.ProjectContextSelection.AddFiles(service, conversation.ContextFiles, paths);
+        Reset(SelectedContextFiles, conversation.ContextFiles);
+        ContextActionStatus = result.AddedCount > 0
+            ? $"Added {result.AddedCount} file(s) to local chat context" + (result.IgnoredCount > 0 ? $" · ignored {result.IgnoredCount} unsupported, outside, duplicate, or over-limit file(s)" : "")
+            : "No supported project files were added. Files outside the project and sensitive files are excluded.";
+        OnPropertyChanged(nameof(ContextActionStatus));
+        OnPropertyChanged(nameof(HasContextActionStatus));
+        OnPropertyChanged(nameof(ContextLabel));
+        OnPropertyChanged(nameof(HasSelectedContextFiles));
+        ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
+        Persist();
+        return result;
+    }
+
+    private void RemoveContextFile(string path)
+    {
+        if (ActiveConversation is not { } conversation || !Codev.ProjectContextSelection.RemoveFile(conversation.ContextFiles, path)) return;
+        Reset(SelectedContextFiles, conversation.ContextFiles);
+        ContextActionStatus = $"Removed {path} from chat context";
+        OnPropertyChanged(nameof(ContextActionStatus));
+        OnPropertyChanged(nameof(HasContextActionStatus));
+        OnPropertyChanged(nameof(ContextLabel));
+        OnPropertyChanged(nameof(HasSelectedContextFiles));
+        ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
+        Persist();
+    }
+
+    private void ClearContextFiles()
+    {
+        if (ActiveConversation is not { } conversation || conversation.ContextFiles.Count == 0) return;
+        conversation.ContextFiles.Clear();
+        SelectedContextFiles.Clear();
+        ContextActionStatus = "File selections cleared. Bounded project source files will be included automatically.";
+        OnPropertyChanged(nameof(ContextActionStatus));
+        OnPropertyChanged(nameof(HasContextActionStatus));
+        OnPropertyChanged(nameof(ContextLabel));
+        OnPropertyChanged(nameof(HasSelectedContextFiles));
+        ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
+        Persist();
     }
 
     private void TogglePin()
@@ -339,9 +437,17 @@ public sealed class MainViewModel : ViewModelBase
         await _persistenceTask;
         try
         {
-            var history = Codev.OllamaConversationHistory.Normalize(
-                conversation.Messages.Take(assistantIndex).Select(message => new Codev.ChatMessage(message.Role, message.Content))
-                    .Prepend(new Codev.ChatMessage("system", "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only.")))
+            var priorMessages = conversation.Messages.Take(assistantIndex)
+                .Select(message => new Codev.ChatMessage(message.Role, message.Content))
+                .Prepend(new Codev.ChatMessage("system", "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only."))
+                .ToList();
+            if (!string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && Directory.Exists(savedTurn.ProjectPath))
+            {
+                var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
+                    savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
+                priorMessages.Add(new Codev.ChatMessage("system", projectContext));
+            }
+            var history = Codev.OllamaConversationHistory.Normalize(priorMessages)
                 .Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
             var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["stream"] = true };
             var options = new Dictionary<string, object>();

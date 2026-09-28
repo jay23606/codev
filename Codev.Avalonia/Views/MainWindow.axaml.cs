@@ -1,8 +1,10 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using System.Collections.Specialized;
+using System.IO;
 
 namespace Codev.Avalonia.Views;
 
@@ -79,6 +81,76 @@ public partial class MainWindow : Window
     private async void ModelPicker_DropDownOpened(object? sender, EventArgs e)
     {
         if (DataContext is ViewModels.MainViewModel viewModel) await viewModel.RefreshModelsAsync();
+    }
+
+    private async void AttachProject_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        if (!StorageProvider.CanPickFolder)
+        {
+            viewModel.ReportContextActionStatus("This platform does not provide a local folder picker.");
+            return;
+        }
+        viewModel.ReportContextActionStatus("Opening local project folder picker…");
+        try
+        {
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Attach a local project folder",
+                AllowMultiple = false
+            });
+            var path = folders.FirstOrDefault()?.TryGetLocalPath();
+            if (path is null)
+            {
+                viewModel.ReportContextActionStatus("No project folder was selected.");
+                return;
+            }
+            viewModel.SetProjectFolder(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        {
+            viewModel.ReportContextActionStatus($"Could not attach project folder: {ex.Message}");
+        }
+    }
+
+    private async void AddContextFiles_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || !viewModel.HasProject || viewModel.ActiveConversation?.ProjectPath is not { } projectPath) return;
+        if (!StorageProvider.CanOpen)
+        {
+            viewModel.ReportContextActionStatus("This platform does not provide a local project file picker.");
+            return;
+        }
+        viewModel.ReportContextActionStatus("Opening local project file picker…");
+        try
+        {
+            var start = await StorageProvider.TryGetFolderFromPathAsync(projectPath);
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Add project files as local chat context",
+                AllowMultiple = true,
+                SuggestedStartLocation = start,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Supported source and text files")
+                    {
+                        Patterns = ["*.cs", "*.xaml", "*.csproj", "*.sln", "*.md", "*.txt", "*.json", "*.js", "*.jsx", "*.ts", "*.tsx", "*.py", "*.html", "*.css", "*.sql", "*.xml", "*.yml", "*.yaml", "*.toml", "*.props", "*.targets", "*.ps1", "*.sh", "*.bat"]
+                    },
+                    new FilePickerFileType("All files") { Patterns = ["*.*"] }
+                ]
+            });
+            var paths = files.Select(file => file.TryGetLocalPath()).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToArray();
+            if (paths.Length == 0)
+            {
+                viewModel.ReportContextActionStatus("No project files were selected.");
+                return;
+            }
+            viewModel.AddContextFiles(paths);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        {
+            viewModel.ReportContextActionStatus($"Could not add project files: {ex.Message}");
+        }
     }
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
