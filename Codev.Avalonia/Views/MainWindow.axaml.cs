@@ -33,4 +33,21 @@ public partial class MainWindow : Window
     {
         if (DataContext is ViewModels.MainViewModel viewModel) await viewModel.RefreshModelsAsync();
     }
+
+    private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        var primaryModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+        if (primaryModifier && e.Key == Key.N)
+            viewModel.NewConversationCommand.Execute(null);
+        else if (primaryModifier && e.Key == Key.F)
+            SearchTextBox.Focus();
+        else if (primaryModifier && e.Key == Key.L)
+            ComposerTextBox.Focus();
+        else if (e.Key == Key.Escape && viewModel.IsGenerating)
+            viewModel.SendCommand.Execute(null);
+        else
+            return;
+        e.Handled = true;
+    }
 }

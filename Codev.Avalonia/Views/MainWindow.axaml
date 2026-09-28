@@ -5,6 +5,7 @@
         xmlns:md="https://github.com/whistyun/Markdown.Avalonia"
         x:Class="Codev.Avalonia.Views.MainWindow"
         x:DataType="vm:MainViewModel"
+        KeyDown="MainWindow_KeyDown"
         Title="Codev"
         Width="1440" Height="960" MinWidth="1000" MinHeight="650"
         Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}">
@@ -62,7 +63,7 @@
                     </StackPanel>
                 </Grid>
                 <Button Grid.Row="1" Classes="nav" Content="＋   New conversation" Command="{Binding NewConversationCommand}" Background="#D97757" Foreground="White" Margin="0,0,0,4" />
-                <TextBox Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" />
+                <TextBox x:Name="SearchTextBox" Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" />
                 <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="2">
                         <TextBlock Text="PINNED" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" Margin="9,4,0,5" />
