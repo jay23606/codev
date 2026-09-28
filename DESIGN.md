@@ -2,7 +2,7 @@
 
 ## Product direction
 
-Codev is a standalone Windows coding workspace for local models. It takes inspiration from the clear conversation experience of Claude Desktop and the project/thread, coding-agent, and review workflows of Codex, while keeping inference on the user's Ollama installation. It does not depend on VS Code.
+Codev is a standalone coding workspace for local models. Today it ships as a Windows desktop app; macOS and Linux are planned through an Avalonia UI port (see roadmap section 7). It takes inspiration from the clear conversation experience of Claude Desktop and the project/thread, coding-agent, and review workflows of Codex, while keeping inference on the user's Ollama installation. It does not depend on VS Code.
 
 The goal is to make project work feel organized and reviewable: each task has its own conversation and working state; the agent can inspect a chosen project, propose changes, run approved checks, and show exactly what happened; the user remains in control of file changes, commands, network access, and concurrent work.
 
@@ -113,6 +113,52 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - Notification controls are available for conversation completions; a run history for background tasks remains.
 - Optional cloud connectors only as opt-in integrations, clearly separated from the local-only default.
 
+### 7. Cross-platform (macOS and Linux) — planned
+
+The current build targets `net9.0-windows` with WPF, which only runs on Windows. Most non-UI code is plain .NET and should already be portable (persistence, backup, search, Markdown export, the Ollama client and request options, Git integration, unified diffs, project context selection, and the `Codev.Tests` project), but this has not been built or run off Windows yet.
+
+Chosen approach: port the UI to [Avalonia UI](https://avaloniaui.net/), which is XAML-based (closest to WPF), MIT-licensed and free for commercial use, and has first-class Linux support including Wayland. Alternatives considered: Uno Platform (free, also covers web/mobile, but WinUI-style XAML is further from WPF), .NET MAUI (no official Linux support), Eto.Forms (native controls; harder to match Codev's custom Markdown/code rendering), and a web/Electron front end (a full UI rewrite). Avalonia's paid products (Accelerate tooling, XPF, premium support) are optional and not required; XPF is irrelevant because the UI is being rewritten rather than run as-is.
+
+- [ ] Verify portability first: build and run `Codev.Tests` on Linux and macOS in CI before any UI work, and record which tests fail.
+- [ ] Split non-UI code into a shared `Codev.Core` library targeting plain `net9.0`; the WPF app and the Avalonia app both reference it.
+- [ ] Replace the hard-coded `powershell.exe` command tool with a shell abstraction: PowerShell on Windows, the user's `$SHELL` (or `bash`/`sh`) on macOS and Linux, and a configurable override. The approval, timeout, bounded-output and process-tree-kill behavior stays identical on every OS, and the prompt must name the shell actually used.
+- [ ] Use `Environment.SpecialFolder.LocalApplicationData` for the data folder instead of `%LOCALAPPDATA%\Codev`, and migrate nothing silently: an existing Windows folder is left where it is.
+- [ ] Make the "open folder" action per-OS (`explorer`/`open`/`xdg-open`) and reword the Git-not-found message so it is not Windows-specific.
+- [ ] Port the UI to Avalonia. The riskiest parts are the rich Markdown renderer with copy buttons, syntax coloring, scrollable tables, drag-and-drop of files onto the composer, and theming (dark default, light option).
+- [ ] Add macOS and Linux to CI alongside Windows, and publish per-OS builds (`win-x64`, `osx-arm64`/`osx-x64`, `linux-x64`).
+- [ ] Decide whether to keep the WPF app alongside Avalonia during the transition or retire it once Avalonia reaches parity.
+
+### 8. Claude-inspired features worth adding
+
+These come from a review of Claude Code and the Claude apps (checked 2026-09-27; see references below). Only features that work with a local Ollama model, or can be done locally, are listed; cloud and subscription services (Cowork, Remote Control, cloud routines, Slack integration) are out of scope. Grouped by how much work they should take. Effort is a rough guess, not a measured estimate.
+
+**Small (mostly composer/prompt plumbing):**
+
+- Slash commands in the composer (`/plan`, `/code`, `/clear`, `/model`, `/compact`, `/export`), with autocomplete. Mirrors Claude Code's built-in commands and reuses existing actions.
+- Permission modes for the command tool: ask every time (today's behavior, the default), auto-approve read-only commands, or a per-project allowlist of exact commands. Never auto-approve file writes without review; keep the "not sandboxed" warning visible.
+- Output styles: saved system-prompt presets (concise, explanatory, code-only) chosen per conversation, like Claude's styles.
+- `@`-mention project files in the composer to add them to context, as an alternative to the file picker and drag-and-drop.
+- Fuller context breakdown: show what is using the context window (system prompt, instructions, knowledge, files, history) rather than one token count.
+
+**Medium:**
+
+- Context compaction: summarize older turns in place when a conversation nears the model's context limit (like `/compact`), showing the summary and keeping the original messages recoverable in the archive/export.
+- Rewind: restore a conversation and its files to an earlier message together. Builds on existing checkpoints and branch-from-message. Same caveat Claude Code has: changes made by shell commands are not tracked by file checkpoints, so say so.
+- Skills: folders of markdown instructions (optionally with scripts) that the model loads on demand, for user and project scope. This is the shape of the pending "executable skill workflows" item; scripts run through the same approval-gated command tool.
+- Auto-suggested memory: after a task, propose short notes to save into project knowledge (accepted or rejected by the user), rather than saving anything silently.
+- Show model reasoning for Ollama models that support a thinking mode, as a collapsible block, and let the user turn it off per conversation.
+- Hooks: user-configured commands that run before or after tool actions (for example, format after each approved edit, run tests before a commit). Each hook is visible in settings, logged in the run history, and disabled by default.
+- Headless mode (`codev -p "prompt"` with piped input) once the shared core library exists, for scripting and CI. Read-only unless explicitly allowed.
+- Preview for HTML/SVG/Markdown code blocks, shown in a sandboxed pane with scripts and network access off (a local, simplified take on Claude's artifacts).
+
+**Large / later:**
+
+- Custom subagents with their own instructions and tool limits, run through the serial queue; depends on the parallel-session and worktree work in section 3.
+- MCP client support (already listed in section 6), including per-server enablement, visible permissions and logs.
+- Opt-in web search/fetch tool, clearly marked as leaving the machine and off by default, consistent with the local-first principle.
+
+**Deliberately not planned:** voice mode, cloud-hosted agents, and phone/browser remote control, because they need a hosted service Codev does not have.
+
 ## Product principles
 
 - **Local first:** the default inference endpoint is Ollama on localhost; show clearly if a request would leave the machine.
@@ -131,10 +177,13 @@ The feature comparison is based on official product documentation checked on 202
 - Anthropic's current Windows desktop supports Claude Code and Cowork on eligible plans; Cowork's visual agent can work with local files and long-running/parallel tasks in an isolated VM. See [Claude Desktop availability and Cowork](https://support.claude.com/en/articles/10065433-install-claude-desktop) and [Windows deployment requirements](https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows).
 - Claude Desktop also exposes local extensions and connected tools; see Anthropic's [connector overview](https://support.anthropic.com/en/articles/11817150-connect-your-tools-to-unlock-a-smarter-more-capable-ai-companion).
 
+- Claude Code's [overview](https://code.claude.com/docs/en/overview) and [extension guide](https://code.claude.com/docs/en/features-overview) describe the memory files, skills, hooks, subagents, checkpoints and rewind, permission modes, MCP, and scheduled tasks that section 8 draws from.
+- Avalonia's licensing is described on its [GitHub page](https://github.com/AvaloniaUI/Avalonia) and [pricing page](https://avaloniaui.net/pricing); the framework is MIT-licensed.
+
 We use these products as workflow references, not as an exhaustive checklist or a promise to reproduce paid/cloud features. Product capabilities change, so revisit these references when planning each milestone.
 
 ## Implementation choices
 
-- C# and modern .NET WPF provide a native Windows desktop app independent of VS Code.
+- C# and modern .NET WPF provide a native Windows desktop app independent of VS Code. Avalonia UI is the planned path to macOS and Linux (section 7); shared logic should move into a UI-free core library so both front ends use it.
 - Ollama's HTTP API provides local model discovery and inference, reusing the user's existing model files and CPU-only runtime configuration.
-- Conversations and UI preferences are stored locally under `%LOCALAPPDATA%\Codev`; move from JSON to versioned SQLite when project/task state needs transactions, indexing, or migrations.
+- Conversations and UI preferences are stored locally under `%LOCALAPPDATA%\Codev` on Windows (the per-user local application data folder on other platforms once ported); move from JSON to versioned SQLite when project/task state needs transactions, indexing, or migrations.
