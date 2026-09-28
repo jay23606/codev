@@ -10,7 +10,8 @@ namespace Codev;
 
 public static class MarkdownRenderer
 {
-    public static StackPanel Render(string markdown, Brush foreground, Brush muted, Brush codeBackground, Brush accent, double baseFontSize = 14)
+    public static StackPanel Render(string markdown, Brush foreground, Brush muted, Brush codeBackground, Brush accent, double baseFontSize = 14,
+        Brush? keyword = null, Brush? type = null, Brush? stringLiteral = null, Brush? number = null, Brush? comment = null)
     {
         baseFontSize = Math.Clamp(baseFontSize, 12, 22);
         var panel = new StackPanel();
@@ -25,7 +26,7 @@ public static class MarkdownRenderer
             {
                 if (inCode)
                 {
-                    panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent, baseFontSize));
+                    panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent, baseFontSize, foreground, keyword, type, stringLiteral, number, comment));
                     code.Clear();
                     language = null;
                     inCode = false;
@@ -81,11 +82,12 @@ public static class MarkdownRenderer
             AddInlineMarkdown(block, text, foreground, accent, codeBackground);
             panel.Children.Add(block);
         }
-        if (inCode) panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent, baseFontSize));
+        if (inCode) panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent, baseFontSize, foreground, keyword, type, stringLiteral, number, comment));
         return panel;
     }
 
-    private static Border RenderCode(string code, string? language, Brush background, Brush muted, Brush accent, double baseFontSize)
+    private static Border RenderCode(string code, string? language, Brush background, Brush muted, Brush accent, double baseFontSize,
+        Brush foreground, Brush? keyword, Brush? type, Brush? stringLiteral, Brush? number, Brush? comment)
     {
         var frame = new Border { Background = background, CornerRadius = new CornerRadius(8), Padding = new Thickness(10), Margin = new Thickness(0, 5, 0, 10) };
         var stack = new StackPanel();
@@ -96,7 +98,20 @@ public static class MarkdownRenderer
         copy.Click += (_, _) => { try { Clipboard.SetText(code); copy.Content = "Copied"; } catch { copy.Content = "Copy failed"; } };
         DockPanel.SetDock(copy, Dock.Right); header.Children.Add(copy);
         stack.Children.Add(header);
-        var codeText = new TextBlock { Text = code, FontFamily = new FontFamily("Consolas"), FontSize = Math.Clamp(baseFontSize - 2, 10, 20), Foreground = accent, TextWrapping = TextWrapping.NoWrap };
+        var codeText = new TextBlock { FontFamily = new FontFamily("Consolas"), FontSize = Math.Clamp(baseFontSize - 2, 10, 20), Foreground = foreground, TextWrapping = TextWrapping.NoWrap };
+        foreach (var token in CodeSyntaxHighlighter.Tokenize(code, language))
+        {
+            var color = token.Kind switch
+            {
+                CodeTokenKind.Keyword => keyword ?? accent,
+                CodeTokenKind.Type => type ?? accent,
+                CodeTokenKind.String => stringLiteral ?? accent,
+                CodeTokenKind.Number => number ?? accent,
+                CodeTokenKind.Comment => comment ?? muted,
+                _ => foreground
+            };
+            codeText.Inlines.Add(new Run(token.Text) { Foreground = color });
+        }
         stack.Children.Add(new ScrollViewer { Content = codeText, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false });
         frame.Child = stack;
         return frame;

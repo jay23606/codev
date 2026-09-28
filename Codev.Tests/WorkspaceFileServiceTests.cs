@@ -220,6 +220,36 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Fenced_javascript_runs_receive_syntax_colors()
+    {
+        var keywordBrush = Brushes.MediumPurple;
+        var stringBrush = Brushes.LightGreen;
+        var hasColoredKeyword = false;
+        var hasColoredString = false;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var rendered = MarkdownRenderer.Render("```javascript\nconst message = \"hello\";\n```", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral,
+                    keyword: keywordBrush, stringLiteral: stringBrush);
+                var frame = rendered.Children.OfType<Border>().Single();
+                var scroll = ((StackPanel)frame.Child!).Children.OfType<ScrollViewer>().Single();
+                var runs = ((TextBlock)scroll.Content).Inlines.OfType<Run>().ToArray();
+                hasColoredKeyword = runs.Any(run => run.Text == "const" && ReferenceEquals(run.Foreground, keywordBrush));
+                hasColoredString = runs.Any(run => run.Text == "\"hello\"" && ReferenceEquals(run.Foreground, stringBrush));
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start(); thread.Join();
+        if (failure is not null) throw failure;
+
+        Assert.True(hasColoredKeyword);
+        Assert.True(hasColoredString);
+    }
+
+    [Fact]
     public void Markdown_text_size_scales_body_and_headings_and_is_bounded()
     {
         double headingSize = 0;

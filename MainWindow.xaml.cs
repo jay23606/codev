@@ -110,7 +110,9 @@ public partial class MainWindow : Window
                 ["InputTextBrush"] = "#ECECE6", ["MessageBubbleBrush"] = "#343530", ["MessageTextBrush"] = "#E4E5DF",
                 ["UserLabelBrush"] = "#D29A7F", ["AssistantLabelBrush"] = "#A2A49C", ["WelcomeAccentBackgroundBrush"] = "#44352F",
                 ["WelcomeAccentBrush"] = "#E18A6A", ["ComboPopupBrush"] = "#2B2C29", ["ComboHoverBrush"] = "#383A35",
-                ["ComboSelectedBrush"] = "#48443F", ["ComboSelectedTextBrush"] = "#F4F1EA"
+                ["ComboSelectedBrush"] = "#48443F", ["ComboSelectedTextBrush"] = "#F4F1EA",
+                ["SyntaxKeywordBrush"] = "#C792EA", ["SyntaxTypeBrush"] = "#82AAFF", ["SyntaxStringBrush"] = "#C3E88D",
+                ["SyntaxNumberBrush"] = "#F78C6C", ["SyntaxCommentBrush"] = "#7F8C7D"
             }
             : new Dictionary<string, string>
             {
@@ -124,7 +126,9 @@ public partial class MainWindow : Window
                 ["InputTextBrush"] = "#272925", ["MessageBubbleBrush"] = "#EFEEE8", ["MessageTextBrush"] = "#2A2B27",
                 ["UserLabelBrush"] = "#9A6A55", ["AssistantLabelBrush"] = "#7D8077", ["WelcomeAccentBackgroundBrush"] = "#F3E3DC",
                 ["WelcomeAccentBrush"] = "#C66F53", ["ComboPopupBrush"] = "#FFFFFF", ["ComboHoverBrush"] = "#F0F1EC",
-                ["ComboSelectedBrush"] = "#F4E1D8", ["ComboSelectedTextBrush"] = "#45352F"
+                ["ComboSelectedBrush"] = "#F4E1D8", ["ComboSelectedTextBrush"] = "#45352F",
+                ["SyntaxKeywordBrush"] = "#7C3AED", ["SyntaxTypeBrush"] = "#1D4ED8", ["SyntaxStringBrush"] = "#287A37",
+                ["SyntaxNumberBrush"] = "#B45309", ["SyntaxCommentBrush"] = "#788178"
             };
 
         foreach (var (key, value) in palette)
@@ -316,7 +320,8 @@ public partial class MainWindow : Window
             var isUser = message.Role == "user";
             FrameworkElement body = isUser
                 ? new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = _chatFontSize, LineHeight = _chatFontSize * 1.6, Foreground = ThemeBrush("MessageTextBrush") }
-                : MarkdownRenderer.Render(message.Content, ThemeBrush("MessageTextBrush"), ThemeBrush("MutedTextBrush"), ThemeBrush("MessageBubbleBrush"), ThemeBrush("WelcomeAccentBrush"), _chatFontSize);
+                : MarkdownRenderer.Render(message.Content, ThemeBrush("MessageTextBrush"), ThemeBrush("MutedTextBrush"), ThemeBrush("MessageBubbleBrush"), ThemeBrush("WelcomeAccentBrush"), _chatFontSize,
+                    ThemeBrush("SyntaxKeywordBrush"), ThemeBrush("SyntaxTypeBrush"), ThemeBrush("SyntaxStringBrush"), ThemeBrush("SyntaxNumberBrush"), ThemeBrush("SyntaxCommentBrush"));
             var content = new StackPanel();
             content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
