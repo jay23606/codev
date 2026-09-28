@@ -17,6 +17,7 @@ public static class ConversationHistoryClearService
         conversation.LastPromptContext = 0;
         conversation.LastPromptModel = "";
         conversation.LastPromptProvider = "";
+        conversation.TaskChecklist.Clear();
         ConversationCompactionService.Clear(conversation);
         conversation.UpdatedAt = DateTimeOffset.Now;
         return true;

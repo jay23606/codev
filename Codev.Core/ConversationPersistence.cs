@@ -27,6 +27,7 @@ public static class ConversationPersistence
             LastPromptProvider = conversation.LastPromptProvider,
             CompactionSummary = conversation.CompactionSummary,
             CompactionThroughMessageCount = conversation.CompactionThroughMessageCount,
+            TaskChecklist = Codev.TaskChecklistService.NormalizeImported(conversation.TaskChecklist).ToList(),
             IsPinned = conversation.IsPinned,
             IsArchived = conversation.IsArchived,
             UpdatedAt = conversation.UpdatedAt,

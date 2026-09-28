@@ -81,6 +81,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<Codev.PromptTemplate> PromptTemplates { get; } = [];
     public ObservableCollection<string> SelectedContextFiles { get; } = [];
     public ObservableCollection<Codev.GitDiffComment> PendingDiffComments { get; } = [];
+    public ObservableCollection<Codev.TaskChecklistItem> TaskChecklistItems { get; } = [];
     public ObservableCollection<ContextSizeChoice> ContextSizes { get; } = [];
     public ObservableCollection<OutputStyleChoice> OutputStyles { get; } =
     [
@@ -189,6 +190,9 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IsCodeTask));
                 OnPropertyChanged(nameof(CodeTaskLabel));
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+                OnPropertyChanged(nameof(ShouldShowTaskChecklist));
+                OnPropertyChanged(nameof(CanEditTaskChecklist));
+                OnPropertyChanged(nameof(CanAddTaskChecklistItem));
                 OnPropertyChanged(nameof(IncludeProjectContextForHosted));
                 OnPropertyChanged(nameof(IncludeRepoMap));
                 OnPropertyChanged(nameof(OutputStyle));
@@ -203,6 +207,8 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+                OnPropertyChanged(nameof(CanEditTaskChecklist));
+                OnPropertyChanged(nameof(CanAddTaskChecklistItem));
             }
         }
     }
@@ -261,6 +267,14 @@ public sealed class MainViewModel : ViewModelBase
     public string OllamaEndpointDisplay => _ollamaEndpoint.ToString().TrimEnd('/');
     public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0 ? "■" : "↑";
     public bool HasPendingDiffComments => PendingDiffComments.Count > 0;
+    public bool HasTaskChecklist => TaskChecklistItems.Count > 0;
+    public bool IsTaskChecklistEmpty => !HasTaskChecklist;
+    public bool ShouldShowTaskChecklist => IsCodeTask || HasTaskChecklist;
+    public bool CanEditTaskChecklist => !IsGenerating && (IsCodeTask || HasTaskChecklist);
+    public bool CanAddTaskChecklistItem => CanEditTaskChecklist && TaskChecklistItems.Count < Codev.TaskChecklistService.MaxItems;
+    public string TaskChecklistLabel => TaskChecklistItems.Count == 0
+        ? "Task checklist · no steps yet"
+        : $"Task checklist · {TaskChecklistItems.Count(item => item.Status == Codev.TaskChecklistService.Completed)}/{TaskChecklistItems.Count} done";
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Count > 0;
     public string UserSlashCommandsFolder => UserSlashCommandsPath;
@@ -312,6 +326,7 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+                OnPropertyChanged(nameof(CanEditTaskChecklist));
             }
         }
     }
@@ -405,6 +420,9 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(IsCodeTask));
         OnPropertyChanged(nameof(CodeTaskLabel));
+        OnPropertyChanged(nameof(ShouldShowTaskChecklist));
+        OnPropertyChanged(nameof(CanEditTaskChecklist));
+        OnPropertyChanged(nameof(CanAddTaskChecklistItem));
         OnPropertyChanged(nameof(HasLastPromptContext));
         OnPropertyChanged(nameof(LastPromptContextLabel));
         OnPropertyChanged(nameof(CanEnterCodeTaskMode));
@@ -687,6 +705,13 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(RepoMapEstimateLabel));
         Reset(PendingDiffComments, conversation.PendingDiffComments ?? []);
         OnPropertyChanged(nameof(HasPendingDiffComments));
+        Reset(TaskChecklistItems, Codev.TaskChecklistService.NormalizeImported(conversation.TaskChecklist));
+        OnPropertyChanged(nameof(HasTaskChecklist));
+        OnPropertyChanged(nameof(IsTaskChecklistEmpty));
+        OnPropertyChanged(nameof(ShouldShowTaskChecklist));
+        OnPropertyChanged(nameof(CanEditTaskChecklist));
+        OnPropertyChanged(nameof(CanAddTaskChecklistItem));
+        OnPropertyChanged(nameof(TaskChecklistLabel));
         ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(SendButtonLabel));
         Messages.Clear();
@@ -903,6 +928,90 @@ public sealed class MainViewModel : ViewModelBase
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
         Persist();
         return result;
+    }
+
+    public bool AddTaskChecklistItem(string text)
+    {
+        if (!CanEditTaskChecklist || ActiveConversation is not { } conversation || TaskChecklistItems.Count >= Codev.TaskChecklistService.MaxItems) return false;
+        var items = TaskChecklistItems.Append(new Codev.TaskChecklistItem(Guid.NewGuid(), text)).ToArray();
+        return ReplaceTaskChecklist(conversation, items);
+    }
+
+    public bool UpdateTaskChecklistItem(Codev.TaskChecklistItem item, string text)
+    {
+        if (!CanEditTaskChecklist || ActiveConversation is not { } conversation || !TaskChecklistItems.Any(existing => existing.Id == item.Id)) return false;
+        var items = TaskChecklistItems.Select(existing => existing.Id == item.Id ? existing with { Text = text } : existing).ToArray();
+        return ReplaceTaskChecklist(conversation, items);
+    }
+
+    public bool CycleTaskChecklistItemStatus(Codev.TaskChecklistItem item)
+    {
+        if (!CanEditTaskChecklist || ActiveConversation is not { } conversation || !TaskChecklistItems.Any(existing => existing.Id == item.Id)) return false;
+        var items = TaskChecklistItems.Select(existing => existing.Id == item.Id ? existing with
+        {
+            Status = existing.Status switch
+            {
+                Codev.TaskChecklistService.Pending => Codev.TaskChecklistService.InProgress,
+                Codev.TaskChecklistService.InProgress => Codev.TaskChecklistService.Completed,
+                _ => Codev.TaskChecklistService.Pending
+            }
+        } : existing).ToArray();
+        return ReplaceTaskChecklist(conversation, items);
+    }
+
+    public bool MoveTaskChecklistItem(Codev.TaskChecklistItem item, int offset)
+    {
+        if (!CanEditTaskChecklist || ActiveConversation is not { } conversation || offset is not (-1 or 1)) return false;
+        var items = TaskChecklistItems.ToList();
+        var index = items.FindIndex(existing => existing.Id == item.Id);
+        var next = index + offset;
+        if (index < 0 || next < 0 || next >= items.Count) return false;
+        (items[index], items[next]) = (items[next], items[index]);
+        return ReplaceTaskChecklist(conversation, items);
+    }
+
+    public bool RemoveTaskChecklistItem(Codev.TaskChecklistItem item)
+    {
+        if (!CanEditTaskChecklist || ActiveConversation is not { } conversation) return false;
+        var items = TaskChecklistItems.Where(existing => existing.Id != item.Id).ToArray();
+        if (items.Length == TaskChecklistItems.Count) return false;
+        return ReplaceTaskChecklist(conversation, items);
+    }
+
+    private bool ReplaceTaskChecklist(Codev.Conversation conversation, IEnumerable<Codev.TaskChecklistItem> items)
+    {
+        if (!Codev.TaskChecklistService.TryReplace(conversation, items))
+        {
+            ReportContextActionStatus($"Checklist entries must be 1–{Codev.TaskChecklistService.MaxTextLength} characters, with at most {Codev.TaskChecklistService.MaxItems} items.");
+            return false;
+        }
+        Reset(TaskChecklistItems, conversation.TaskChecklist);
+        OnPropertyChanged(nameof(HasTaskChecklist));
+        OnPropertyChanged(nameof(IsTaskChecklistEmpty));
+        OnPropertyChanged(nameof(ShouldShowTaskChecklist));
+        OnPropertyChanged(nameof(TaskChecklistLabel));
+        OnPropertyChanged(nameof(CanAddTaskChecklistItem));
+        Persist();
+        return true;
+    }
+
+    private async Task<string> UpdateTaskChecklistFromModelAsync(Codev.Conversation conversation, JsonElement arguments)
+    {
+        return await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (!Codev.TaskChecklistService.TryReplaceFromModel(conversation, arguments, out var result)) return result;
+            if (ReferenceEquals(ActiveConversation, conversation))
+            {
+                Reset(TaskChecklistItems, conversation.TaskChecklist);
+                OnPropertyChanged(nameof(HasTaskChecklist));
+                OnPropertyChanged(nameof(IsTaskChecklistEmpty));
+                OnPropertyChanged(nameof(ShouldShowTaskChecklist));
+                OnPropertyChanged(nameof(TaskChecklistLabel));
+                OnPropertyChanged(nameof(CanAddTaskChecklistItem));
+            }
+            Persist();
+            return "Task checklist updated:\n" + result;
+        });
     }
 
     public IReadOnlyList<string> GetProjectFileSuggestions(string prefix)
@@ -1246,6 +1355,7 @@ public sealed class MainViewModel : ViewModelBase
 
         conversation.PendingDiffComments.Clear();
         PendingDiffComments.Clear();
+        TaskChecklistItems.Clear();
         Messages.Clear();
         Draft = "";
         OnPropertyChanged(nameof(ConversationTitle));
@@ -1253,6 +1363,11 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasCompactionSummary));
         OnPropertyChanged(nameof(CompactionStatusLabel));
         OnPropertyChanged(nameof(HasPendingDiffComments));
+        OnPropertyChanged(nameof(HasTaskChecklist));
+        OnPropertyChanged(nameof(IsTaskChecklistEmpty));
+        OnPropertyChanged(nameof(ShouldShowTaskChecklist));
+        OnPropertyChanged(nameof(TaskChecklistLabel));
+        OnPropertyChanged(nameof(CanAddTaskChecklistItem));
         OnPropertyChanged(nameof(SendButtonLabel));
         OnPropertyChanged(nameof(QueueStatusLabel));
         ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
@@ -1446,6 +1561,7 @@ public sealed class MainViewModel : ViewModelBase
             Tool("write_file", "Propose a complete replacement for one existing project file. Codev shows the change and requires approval before applying it.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("apply_patch", "Propose a strict unified-diff patch for one existing project file. Pass only @@ hunk headers and lines prefixed by space, +, or -. Do not include ---/+++ file headers. Every context/removal line must match exactly; Codev rejects mismatches before review. The complete resulting file is reviewed and checkpointed before applying.", new { relative_path = new { type = "string" }, patch = new { type = "string" } }, ["relative_path", "patch"]),
             Tool("verify_command", "Request approval to run a test or lint command in the project folder. Codev reports the exact exit status and bounded output to you. A failing run allows at most two reviewed repair attempts, and every subsequent verification run needs approval. After the cap, Codev blocks further edits and commands. Do not claim success unless this tool reports exit code 0.", new { command = new { type = "string" } }, ["command"]),
+            Tool("update_task_checklist", "Create or replace the visible task checklist for multi-step work. Use concise actionable steps; mark only completed steps as completed. Keep unfinished work pending or in_progress. Do not use checklist items to change the user's request.", new { items = new { type = "array", items = new { type = "object", properties = new { text = new { type = "string" }, status = new { type = "string", @enum = new[] { "pending", "in_progress", "completed" } } }, required = new[] { "text", "status" } } } }, ["items"]),
             Tool("run_command", $"Request approval to run one {shell.DisplayName} command in the project folder. Every invocation requires individual approval.", new { command = new { type = "string" } }, ["command"])
         ];
         var repeatedCalls = new Codev.RepeatedToolCallGuard();
@@ -1509,6 +1625,8 @@ public sealed class MainViewModel : ViewModelBase
             if (calls.Length == 0)
             {
                 if (!string.IsNullOrWhiteSpace(text)) transcript.Append(text);
+                if (conversation.TaskChecklist.Count > 0)
+                    transcript.AppendLine().AppendLine().Append("**Task checklist**").AppendLine().AppendLine(Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist));
                 await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
                 return;
             }
@@ -1535,7 +1653,9 @@ public sealed class MainViewModel : ViewModelBase
                     }
                     repeatedCalls.AllowOneMore();
                 }
-                var result = await executor.ExecuteAsync(name, arguments, cancellationToken);
+                var result = name == "update_task_checklist"
+                    ? await UpdateTaskChecklistFromModelAsync(conversation, arguments)
+                    : await executor.ExecuteAsync(name, arguments, cancellationToken);
                 Persist();
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
@@ -1748,7 +1868,7 @@ public sealed class MainViewModel : ViewModelBase
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
                 .ToList();
             var conversationHistory = Codev.ConversationCompactionService.BuildPromptHistory(conversation, fullConversationHistory);
-            var priorMessages = conversationHistory.Prepend(new Codev.ChatMessage("system", systemPrompt)).ToList();
+            var priorMessages = Codev.TaskChecklistService.ComposeCodeTaskPrompt(systemPrompt, conversationHistory, conversation, savedTurn.IsCodeTask).ToList();
             var hasSelectedProjectFiles = savedTurn.ContextFiles is { Count: > 0 };
             var projectStillTrusted = !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath);
             var projectContext = "";

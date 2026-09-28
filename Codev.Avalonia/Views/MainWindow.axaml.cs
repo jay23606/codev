@@ -80,6 +80,52 @@ public partial class MainWindow : Window
         viewModel.AddContextFiles(paths);
     }
 
+    private async void AddTaskChecklistItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || !viewModel.CanEditTaskChecklist) return;
+        var input = new TextBox { Watermark = "Describe one actionable step", MaxLength = Codev.TaskChecklistService.MaxTextLength, MinWidth = 420 };
+        var dialog = new Window { Title = "Add checklist step", Width = 500, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, CanResize = false };
+        var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" }, IsCancel = true };
+        var add = new Button { Content = "Add step", Classes = { "soft" }, IsDefault = true };
+        cancel.Click += (_, _) => dialog.Close(false);
+        add.Click += (_, _) => dialog.Close(true);
+        actions.Children.Add(cancel);
+        actions.Children.Add(add);
+        dialog.Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children = { new TextBlock { Text = "Checklist text is task guidance only; it does not grant file or command permissions.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap }, input, actions } };
+        if (await dialog.ShowDialog<bool>(this)) viewModel.AddTaskChecklistItem(input.Text ?? "");
+    }
+
+    private void TaskChecklistStatus_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && (sender as Button)?.Tag is Codev.TaskChecklistItem item)
+            viewModel.CycleTaskChecklistItemStatus(item);
+    }
+
+    private void TaskChecklistText_LostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && sender is TextBox input && input.Tag is Codev.TaskChecklistItem item)
+            viewModel.UpdateTaskChecklistItem(item, input.Text ?? "");
+    }
+
+    private void TaskChecklistMoveUp_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && (sender as Button)?.Tag is Codev.TaskChecklistItem item)
+            viewModel.MoveTaskChecklistItem(item, -1);
+    }
+
+    private void TaskChecklistMoveDown_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && (sender as Button)?.Tag is Codev.TaskChecklistItem item)
+            viewModel.MoveTaskChecklistItem(item, 1);
+    }
+
+    private void TaskChecklistRemove_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && (sender as Button)?.Tag is Codev.TaskChecklistItem item)
+            viewModel.RemoveTaskChecklistItem(item);
+    }
+
     private void ScheduleScrollToLatest()
     {
         if (_scrollPending) return;

@@ -27,6 +27,8 @@ public sealed class Conversation
     public string LastPromptProvider { get; set; } = "";
     public string CompactionSummary { get; set; } = "";
     public int CompactionThroughMessageCount { get; set; }
+    private List<TaskChecklistItem> _taskChecklist = [];
+    public List<TaskChecklistItem> TaskChecklist { get => _taskChecklist; set => _taskChecklist = TaskChecklistService.NormalizeImported(value).ToList(); }
     public bool IsPinned { get; set; }
     public bool IsArchived { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
@@ -43,6 +45,17 @@ public sealed class Conversation
 public sealed record FileChangeRecord(string RelativePath, string? CheckpointPath, DateTimeOffset ChangedAt, string Kind, bool PreviousFileExisted = true);
 
 public sealed record GitDiffComment(string RelativePath, string SelectedDiff, string Comment);
+
+public sealed record TaskChecklistItem(Guid Id, string Text, string Status = TaskChecklistService.Pending)
+{
+    [JsonIgnore]
+    public string DisplayStatus => Status switch
+    {
+        TaskChecklistService.InProgress => "In progress",
+        TaskChecklistService.Completed => "Done",
+        _ => "To do"
+    };
+}
 
 public sealed record ChatMessage(string Role, string Content)
 {

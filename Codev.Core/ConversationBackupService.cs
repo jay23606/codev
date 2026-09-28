@@ -29,6 +29,7 @@ public static class ConversationBackupService
             LastPromptProvider = conversation.LastPromptProvider,
             CompactionSummary = conversation.CompactionSummary,
             CompactionThroughMessageCount = conversation.CompactionThroughMessageCount,
+            TaskChecklist = TaskChecklistService.NormalizeImported(conversation.TaskChecklist).ToList(),
             IsPinned = conversation.IsPinned,
             IsArchived = conversation.IsArchived,
             UpdatedAt = conversation.UpdatedAt,
@@ -75,6 +76,7 @@ public static class ConversationBackupService
             item.CompactionThroughMessageCount = string.IsNullOrWhiteSpace(item.CompactionSummary) ||
                 !ConversationCompactionService.IsValidBoundary(item.Messages, item.CompactionThroughMessageCount)
                 ? 0 : item.CompactionThroughMessageCount;
+            item.TaskChecklist = TaskChecklistService.NormalizeImported(item.TaskChecklist).ToList();
             item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;

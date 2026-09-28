@@ -19,6 +19,7 @@ public sealed class ConversationHistoryClearServiceTests
             LastPromptModel = "claude-sonnet",
             CompactionSummary = "Old summary",
             CompactionThroughMessageCount = 2,
+            TaskChecklist = [new TaskChecklistItem(Guid.NewGuid(), "Old task")],
             Messages = [new("user", "hello"), new("assistant", "world")],
             FileChanges = [new("src/App.cs", "checkpoint.json", DateTimeOffset.UnixEpoch, "Edit")]
         };
@@ -33,6 +34,7 @@ public sealed class ConversationHistoryClearServiceTests
         Assert.Empty(conversation.LastPromptModel);
         Assert.Empty(conversation.CompactionSummary);
         Assert.Equal(0, conversation.CompactionThroughMessageCount);
+        Assert.Empty(conversation.TaskChecklist);
         Assert.Equal("claude-sonnet", conversation.Model);
         Assert.Equal(CloudModelProviders.Anthropic, conversation.Provider);
         Assert.Equal(@"C:\work\repo", conversation.ProjectPath);

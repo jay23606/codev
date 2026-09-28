@@ -120,7 +120,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
+        <Grid Grid.Column="1" RowDefinitions="62,Auto,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
                 <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
@@ -161,7 +161,31 @@
                     <Button Grid.Column="12" Classes="soft" Content="Full history" IsVisible="{Binding HasCompactionSummary}" Click="RestoreFullHistory_Click" ToolTip.Tip="Remove the summary and use the complete transcript in future prompts again." />
                 </Grid>
             </Border>
-            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
+            <Border Grid.Row="1" IsVisible="{Binding ShouldShowTaskChecklist}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="28,8">
+                <Expander Header="{Binding TaskChecklistLabel}" IsExpanded="True">
+                    <StackPanel Spacing="6" MaxWidth="920" HorizontalAlignment="Stretch">
+                        <TextBlock Text="For multi-step Code tasks, the model can maintain these steps. Edit or reorder them when needed; checklist text never grants permissions." IsVisible="{Binding HasTaskChecklist}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="The checklist will appear when a multi-step task needs one." IsVisible="{Binding IsTaskChecklistEmpty}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
+                        <ScrollViewer MaxHeight="165" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding TaskChecklistItems}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="core:TaskChecklistItem">
+                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2">
+                                            <Button Content="{Binding DisplayStatus}" Classes="soft" Tag="{Binding}" Click="TaskChecklistStatus_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Cycle between to do, in progress, and done" />
+                                            <TextBox Grid.Column="1" Text="{Binding Text}" MaxLength="240" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" Tag="{Binding}" LostFocus="TaskChecklistText_LostFocus" VerticalContentAlignment="Center" />
+                                            <Button Grid.Column="2" Content="↑" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveUp_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step up" />
+                                            <Button Grid.Column="3" Content="↓" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveDown_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step down" />
+                                            <Button Grid.Column="4" Content="×" Classes="soft" Tag="{Binding}" Click="TaskChecklistRemove_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Remove this step" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <Button Content="＋ Add step" Classes="soft" HorizontalAlignment="Left" Click="AddTaskChecklistItem_Click" IsEnabled="{Binding CanAddTaskChecklistItem}" ToolTip.Tip="Add a checklist step" />
+                    </StackPanel>
+                </Expander>
+            </Border>
+            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
                 <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
@@ -197,7 +221,7 @@
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
-            <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,14,22,18">
+            <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,14,22,18">
                         <Grid ColumnDefinitions="*,790,*">
                     <StackPanel Grid.Column="1" Spacing="7">
                         <Grid ColumnDefinitions="*,Auto">
