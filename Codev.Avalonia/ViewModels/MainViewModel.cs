@@ -11,6 +11,7 @@ using Avalonia.Styling;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using System.Diagnostics;
 
 namespace Codev.Avalonia.ViewModels;
 
@@ -832,12 +833,14 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (!Models.Any(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase))) return;
         var revision = Interlocked.Increment(ref _modelSelectionRevision);
+        var displayName = Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName;
+        var stopwatch = Stopwatch.StartNew();
         var next = new CancellationTokenSource();
         next.CancelAfter(TimeSpan.FromMinutes(5));
         var previous = Interlocked.Exchange(ref _modelLoadCancellation, next);
         previous?.Cancel();
         previous?.Dispose();
-        await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = $"Loading {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName}…");
+        await SetModelLoadingStatusAsync(displayName, stopwatch.Elapsed, revision);
         try
         {
             if (await IsModelLoadedAsync(model, next.Token))
@@ -854,6 +857,7 @@ public sealed class MainViewModel : ViewModelBase
             var loadRequest = _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, next.Token);
             HttpResponseMessage? loadResponse = null;
             var ready = false;
+            var lastProgressUpdate = TimeSpan.Zero;
             while (!next.IsCancellationRequested)
             {
                 if (await IsModelLoadedAsync(model, next.Token))
@@ -869,6 +873,11 @@ public sealed class MainViewModel : ViewModelBase
                         var details = await loadResponse.Content.ReadAsStringAsync(next.Token);
                         throw new InvalidOperationException($"Ollama returned HTTP {(int)loadResponse.StatusCode} ({loadResponse.ReasonPhrase}). {details}");
                     }
+                }
+                if (stopwatch.Elapsed - lastProgressUpdate >= TimeSpan.FromSeconds(5))
+                {
+                    lastProgressUpdate = stopwatch.Elapsed;
+                    await SetModelLoadingStatusAsync(displayName, stopwatch.Elapsed, revision);
                 }
                 await Task.Delay(TimeSpan.FromMilliseconds(750), next.Token);
             }
@@ -891,7 +900,7 @@ public sealed class MainViewModel : ViewModelBase
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (revision == Interlocked.Read(ref _modelSelectionRevision))
-                    ConnectionStatus = $"Model load timed out · {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName} may still be loading in Ollama";
+                    ConnectionStatus = $"Model load timed out · {displayName} may still be loading in Ollama";
             });
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException)
@@ -923,6 +932,13 @@ public sealed class MainViewModel : ViewModelBase
                 ConnectionStatus = $"Ready · {Models.First(choice => choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase)).DisplayName}";
         });
     }
+
+    private Task SetModelLoadingStatusAsync(string displayName, TimeSpan elapsed, long revision) =>
+        Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (revision == Interlocked.Read(ref _modelSelectionRevision))
+                ConnectionStatus = $"Loading {displayName} · {elapsed:mm\\:ss} elapsed";
+        }).GetTask();
 
     private sealed class OllamaTags { [JsonPropertyName("models")] public List<OllamaTag>? Models { get; set; } }
     private sealed class OllamaTag { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
