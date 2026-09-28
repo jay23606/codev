@@ -450,17 +450,122 @@ public partial class MainWindow : Window
             exclusionsItem.Click += async (_, _) => await EditProjectContextExclusionsAsync(project);
             var searchContentsItem = new MenuItem { Header = "Search project contents…" };
             searchContentsItem.Click += (_, _) => SearchProjectContents(project);
+            var gitStatusItem = new MenuItem { Header = "Git status & branches…" };
+            gitStatusItem.Click += async (_, _) => await ShowGitStatusAsync(project);
             var browseItem = new MenuItem { Header = "Browse project files…" };
             browseItem.Click += (_, _) => BrowseProjectFiles(project);
             menu.Items.Add(pinItem);
             menu.Items.Add(instructionsItem);
             menu.Items.Add(exclusionsItem);
+            menu.Items.Add(gitStatusItem);
             menu.Items.Add(searchContentsItem);
             menu.Items.Add(browseItem);
             menu.Items.Add(openItem);
             button.ContextMenu = menu;
         }
         ProjectsList.Items.Add(button);
+    }
+
+    private async Task ShowGitStatusAsync(WorkspaceProject project)
+    {
+        GitRepositoryService service;
+        GitRepositoryStatus status;
+        IReadOnlyList<string> branches;
+        try
+        {
+            service = new GitRepositoryService(project.Path);
+            status = await service.GetStatusAsync();
+            branches = await service.GetLocalBranchesAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Git status is unavailable.\n\n{ex.Message}", "Git status", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Git status", Width = 720, Height = 520, MinWidth = 560, MinHeight = 380,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new DockPanel { Margin = new Thickness(18) };
+        var header = new StackPanel();
+        var rootLabel = new TextBlock { Text = status.Root, FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = status.Root };
+        header.Children.Add(rootLabel);
+        var branchRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 10) };
+        branchRow.Children.Add(new TextBlock { Text = "Branch", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+        var branchPicker = new ComboBox { Width = 210, ItemsSource = branches, SelectedItem = status.Branch, IsEnabled = branches.Count > 0 };
+        branchRow.Children.Add(branchPicker);
+        var switchButton = new Button { Content = "Switch…", Style = (Style)FindResource("SoftButton"), Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(11, 6, 11, 6) };
+        branchRow.Children.Add(switchButton);
+        var refreshButton = new Button { Content = "Refresh", Style = (Style)FindResource("SoftButton"), Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(11, 6, 11, 6) };
+        branchRow.Children.Add(refreshButton);
+        header.Children.Add(branchRow);
+        var summary = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8), Foreground = ThemeBrush("MutedTextBrush") };
+        header.Children.Add(summary);
+        DockPanel.SetDock(header, Dock.Top);
+        layout.Children.Add(header);
+
+        var files = new ListBox { Background = ThemeBrush("MainSurfaceAltBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), Foreground = ThemeBrush("MainTextBrush") };
+        layout.Children.Add(files);
+        dialog.Content = layout;
+
+        void RenderStatus(GitRepositoryStatus value)
+        {
+            var tracking = value.Upstream is null ? "no upstream" : value.Upstream + (value.Ahead > 0 || value.Behind > 0 ? $" · ahead {value.Ahead}, behind {value.Behind}" : " · up to date");
+            summary.Text = value.HasChanges ? $"{value.Files.Count} changed file(s) · {tracking}" : $"Working tree clean · {tracking}";
+            files.Items.Clear();
+            if (!value.HasChanges)
+                files.Items.Add(new ListBoxItem { Content = "No staged, unstaged, or untracked changes.", IsEnabled = false, Padding = new Thickness(8) });
+            foreach (var file in value.Files)
+                files.Items.Add(new ListBoxItem
+                {
+                    Content = $"{file.State.Replace(' ', '·')}   {file.Path}",
+                    ToolTip = $"Index: {file.Staged} · Working tree: {file.WorkingTree} · {file.Path}",
+                    FontFamily = new FontFamily("Consolas"), Padding = new Thickness(8)
+                });
+            switchButton.IsEnabled = !value.HasChanges && branches.Count > 0 && branchPicker.SelectedItem is string selected && selected != value.Branch;
+        }
+
+        async Task RefreshAsync()
+        {
+            try
+            {
+                status = await service.GetStatusAsync();
+                branches = await service.GetLocalBranchesAsync();
+                branchPicker.ItemsSource = branches;
+                branchPicker.SelectedItem = branches.Contains(status.Branch, StringComparer.Ordinal) ? status.Branch : null;
+                RenderStatus(status);
+            }
+            catch (Exception ex)
+            {
+                summary.Text = "Could not refresh Git status: " + ex.Message;
+                files.Items.Clear();
+                switchButton.IsEnabled = false;
+            }
+        }
+
+        branchPicker.SelectionChanged += (_, _) => RenderStatus(status);
+        refreshButton.Click += async (_, _) => await RefreshAsync();
+        switchButton.Click += async (_, _) =>
+        {
+            if (branchPicker.SelectedItem is not string selected || selected == status.Branch || status.HasChanges) return;
+            var answer = MessageBox.Show(dialog, $"Switch from '{status.Branch}' to '{selected}'? Git will update the project files to match that branch.", "Switch Git branch", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes) return;
+            try
+            {
+                await service.SwitchBranchAsync(selected);
+                await RefreshAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(dialog, $"Could not switch branches.\n\n{ex.Message}", "Git branch switch failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                await RefreshAsync();
+            }
+        };
+        RenderStatus(status);
+        dialog.ShowDialog();
     }
 
     private void OpenWorkspace(WorkspaceProject? project)

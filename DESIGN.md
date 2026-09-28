@@ -85,7 +85,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 4. Git and change management
 
-- Git status and branch picker for the selected project.
+- [x] Git status and local branch picker from the project menu, with staged/working-tree indicators; switching branches requires a clean tree and explicit confirmation.
 - Review staged/unstaged diffs, inspect changed files, and comment on a selected diff hunk.
 - Stage/unstage and commit with user review; no automatic push or publish by default.
 - Compare and merge a task worktree into the chosen branch, or discard/recover it through a clearly reviewable action.
