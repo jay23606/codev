@@ -80,6 +80,17 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Backup_import_normalizes_null_drafts_and_caps_oversized_drafts()
+    {
+        var nullDraft = Assert.Single(ConversationBackupService.Import("[{\"Draft\":null,\"Messages\":[]}]", Options));
+        Assert.Equal("", nullDraft.Draft);
+
+        var oversized = new Conversation { Draft = new string('x', 500_001) };
+        var imported = Assert.Single(ConversationBackupService.Import(JsonSerializer.Serialize(new[] { oversized }, Options), Options));
+        Assert.Equal(500_000, imported.Draft.Length);
+    }
+
+    [Fact]
     public void Import_marks_interrupted_assistant_turns_as_interrupted()
     {
         var json = """[{"Messages":[{"Role":"user","Content":"hello"},{"Role":"assistant","Content":""}]}]""";
