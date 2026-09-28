@@ -1454,7 +1454,9 @@ public partial class MainWindow : Window
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         var primaryModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
-        if (primaryModifier && e.Key == Key.N)
+        if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.M)
+            viewModel.CycleConversationMode();
+        else if (primaryModifier && e.Key == Key.N)
             viewModel.NewConversationCommand.Execute(null);
         else if (primaryModifier && e.Key == Key.F)
             SearchTextBox.Focus();

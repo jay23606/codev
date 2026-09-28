@@ -142,8 +142,8 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="Plan mode gives read-only implementation plans and cannot edit files or run commands" />
-                    <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="Requires a trusted project and a local Ollama model with tool-call support. File changes and every shell command need your approval." />
+                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="Ctrl+Shift+M cycles Chat, Plan, and Code task. Plan mode cannot edit files or run commands." />
+                    <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="Ctrl+Shift+M cycles Chat, Plan, and Code task. Code task requires a trusted project and local Ollama; file changes and every shell command still need approval." />
                     <Button Grid.Column="5" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
                     <Button Grid.Column="6" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
                     <Button Grid.Column="7" Classes="soft" Content="⇩ Export" Click="ExportConversation_Click" ToolTip.Tip="Save this conversation as a Markdown file" />

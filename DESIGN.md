@@ -30,6 +30,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Avalonia conversation portability | Export one conversation as Markdown; export all chats to JSON and additively import a backup without replacing existing history or restoring checkpoint contents |
 | Avalonia conversation organization | Rename and permanently delete chats from their sidebar context menu; archive and restore from that menu; active requests and queued turns block archive/delete |
 | Avalonia queued follow-ups | Prompts can be queued during generation; each turn snapshots its model/context, queued turns persist and restore paused with explicit resume, and queued turns can be canceled |
+| Avalonia conversation mode shortcut | `Ctrl+Shift+M` cycles Chat, Plan, and eligible Code task modes; Code task still requires a trusted project and loopback Ollama, and all existing approvals remain in effect |
 | Avalonia `/status` | A local status report shows provider/model (including whether Ollama is remote), context window, temperature, mode, project/context scope, folder trust, queue state, and hosted-request state without sending the command to a model |
 | Avalonia project context estimate | Shows an approximate token cost for safely selected or automatically bounded project files before sending, states that history is excluded, and makes the hosted-context opt-in visible |
 | Ollama endpoint, per-conversation context size, and temperature | WPF and Avalonia validate configurable HTTP(S) endpoints, default to localhost, and require confirmation before sending to a changed non-local server; Avalonia persists endpoint with backward-compatible theme settings and disables redirects; context choices run through the model's max and temperature is optional (0–2), preserving Ollama's model default when unset |
@@ -203,7 +204,7 @@ The Avalonia prototype already implements model discovery and streamed text chat
 | Phase | Items | Why first |
 |---|---|---|
 | 0. Validate | V1, V2, V4 | Cheap, and the results change what the rest should be (section 9) |
-| 1. Cheap, high value | X1, D1, E2, A1, A6, B1, B4, C5 | Small changes that make the agent safer and easier to see into |
+| 1. Cheap, high value | X1, D1, A1, A6, B1, B4, C5 | Small changes that make the agent safer and easier to see into |
 | 2. Recover and review | C3, A2, C1, C2, B3 | Rewind, compaction and better review make long agent tasks survivable |
 | 3. Smarter context | A3, A5, A8, B2, B6, B9, D2 | Cuts wasted tokens; skills and structured calls make agents more reliable, and folder trust (B9) must be in place before any project-provided skill, hook, agent or command file is read |
 | 4. Extend | D3, D4, D6, B12, A9, E4, E6, E7 | Extension points, once the basics are solid |
@@ -331,7 +332,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | ID | Feature | Size | Depends on | Tier |
 |---|---|---|---|---|
 | E1 | Output styles | S | none | Done |
-| E2 | One-key Plan/Code toggle | S | none | Core |
+| E2 | Plan/Code mode shortcut | S | none | Done |
 | E3 | Themes and key bindings | S–M | none | Later |
 | E4 | Self-contained HTML export | S | none | Later |
 | E5 | Preview for HTML/SVG code blocks | M | none | Speculative |
@@ -343,7 +344,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | E11 | Follow the agent | S–M | none | Later |
 
 - **E1 Output styles (implemented in Avalonia).** A per-conversation selector offers balanced, concise, explanatory, and code-only styles. The selection is stored with conversations and captured in each queued turn; it changes response presentation only, never tools or permissions. Even code-only responses must disclose failures, caveats, and unverified work.
-- **E2 Plan/Code toggle.** A single shortcut and a clear on-screen indicator for the current mode, since accidental edits are the risk.
+- **E2 Plan/Code toggle (implemented in Avalonia).** `Ctrl+Shift+M` cycles Chat → Plan → Code task → Chat. The current mode remains visible on the mode controls and in the provider/mode status. Code task is included in the cycle only when the conversation has a trusted project and a loopback Ollama model; otherwise cycling from Plan returns to Chat with an explanation. The shortcut never bypasses per-file review or command approval, and mode changes are blocked while a response is running. Broader rebindable shortcuts remain under E3.
 - **E3 Themes and key bindings.** Custom themes and rebindable shortcuts; section 5 already lists broader shortcut customization as remaining.
 - **E4 HTML export.** Export a conversation as one self-contained HTML file (rendered Markdown, code, diffs) to email or commit, alongside the Markdown and JSON exports. Replaces the hosted share links other tools offer, which Codev will not do. Strip local file paths and offer to redact secrets first.
 - **E5 Preview.** Render HTML, SVG and Markdown code blocks in a sandboxed pane with scripts and network turned off (a small local take on Claude's artifacts).
@@ -375,7 +376,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 
 | Tier | Items |
 |---|---|
-| Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
+| Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1 |
 | Later | A3, A4, A5, A8, A10, A12, B2, B10, B11, B12, C2, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 

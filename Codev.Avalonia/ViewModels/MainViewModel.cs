@@ -221,7 +221,8 @@ public sealed class MainViewModel : ViewModelBase
     public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
     public bool IsCodeTask => ActiveConversation?.IsCodeTask ?? false;
     public string CodeTaskLabel => IsCodeTask ? "Code task on" : "Code task";
-    public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (IsLocalModel && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted && !IsPlanMode));
+    public bool CanEnterCodeTaskMode => !IsGenerating && IsLocalModel && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted;
+    public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (CanEnterCodeTaskMode && !IsPlanMode));
     public Func<string, string, string, bool, string?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
     public Func<string, string, string, bool, Task<bool>>? ApproveProjectCommandAsync { get; set; }
@@ -316,12 +317,34 @@ public sealed class MainViewModel : ViewModelBase
     private void TogglePlanMode()
     {
         if (ActiveConversation is not { } conversation || IsGenerating) return;
-        conversation.IsPlanMode = !conversation.IsPlanMode;
-        if (conversation.IsPlanMode) conversation.IsCodeTask = false;
+        SetConversationMode(conversation.IsPlanMode ? ConversationMode.Chat : ConversationMode.Plan);
+    }
+
+    public void CycleConversationMode()
+    {
+        if (ActiveConversation is not { } conversation) return;
+        if (IsGenerating)
+        {
+            ReportContextActionStatus("Wait for the current response to finish before changing conversation mode.");
+            return;
+        }
+        var current = conversation.IsCodeTask ? ConversationMode.CodeTask : conversation.IsPlanMode ? ConversationMode.Plan : ConversationMode.Chat;
+        var next = Codev.ConversationModeCycle.Next(current, CanEnterCodeTaskMode);
+        SetConversationMode(next);
+        if (current == ConversationMode.Plan && next == ConversationMode.Chat)
+            ReportContextActionStatus("Code task mode needs a trusted project folder and loopback Ollama. Switched to Chat mode.");
+    }
+
+    private void SetConversationMode(ConversationMode mode)
+    {
+        if (ActiveConversation is not { } conversation) return;
+        conversation.IsPlanMode = mode == ConversationMode.Plan;
+        conversation.IsCodeTask = mode == ConversationMode.CodeTask;
         OnPropertyChanged(nameof(IsPlanMode));
         OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(IsCodeTask));
         OnPropertyChanged(nameof(CodeTaskLabel));
+        OnPropertyChanged(nameof(CanEnterCodeTaskMode));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         OnPropertyChanged(nameof(ProviderStatusLabel));
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -332,22 +355,13 @@ public sealed class MainViewModel : ViewModelBase
     private void ToggleCodeTaskMode()
     {
         if (ActiveConversation is not { } conversation || IsGenerating) return;
-        if (conversation.IsCodeTask) conversation.IsCodeTask = false;
+        if (conversation.IsCodeTask) SetConversationMode(ConversationMode.Chat);
         else if (!CanToggleCodeTaskMode)
         {
             ReportContextActionStatus("Code task mode requires a trusted project folder and a loopback Ollama endpoint. Trust the attached folder and use local Ollama first.");
             return;
         }
-        else { conversation.IsCodeTask = true; conversation.IsPlanMode = false; }
-        OnPropertyChanged(nameof(IsCodeTask));
-        OnPropertyChanged(nameof(CodeTaskLabel));
-        OnPropertyChanged(nameof(IsPlanMode));
-        OnPropertyChanged(nameof(PlanModeLabel));
-        OnPropertyChanged(nameof(CanToggleCodeTaskMode));
-        OnPropertyChanged(nameof(ProviderStatusLabel));
-        ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
-        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
-        Persist();
+        else SetConversationMode(ConversationMode.CodeTask);
     }
     public bool CloudRequestsEnabled => _cloudRequestsEnabled;
     public bool IncludeProjectContextForHosted
