@@ -535,9 +535,9 @@ public sealed class MainViewModel : ViewModelBase
             else
                 ReportContextActionStatus($"{(securityFocused ? "/security-review" : "/review")} complete · {snapshot.Files.Count} files · read-only local second opinion");
             var truncationNote = snapshot.Truncated ? "\n\n_Codev capped the review input; some changed content may not have been included._" : "";
-            if (securityFocused && snapshot.Truncated) localFindings = [];
             var secretReport = securityFocused
-                ? localFindings.Count == 0 ? "No common secret patterns were found on added lines." : string.Join("\n", localFindings.Select(f => $"- Possible {f.Kind} in `{f.FilePath}:{f.Line}` (value hidden)"))
+                ? (snapshot.Truncated ? "The diff was truncated; this scan covers only the included portion and may miss findings.\n" : "") +
+                  (localFindings.Count == 0 ? "No common secret patterns were found on added lines." : string.Join("\n", localFindings.Select(f => $"- Possible {f.Kind} in `{f.FilePath}:{f.Line}` (value hidden)")) )
                 : null;
             var body = securityFocused
                 ? "Local secret-pattern scan\n" + secretReport + (modelFindings is null ? "" : "\n\nLocal model security review\n" + modelFindings)
