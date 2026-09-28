@@ -84,7 +84,11 @@
                         <TextBlock Text="PINNED" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,1,0,8"/>
                         <ItemsControl x:Name="PinnedList"/>
                         <TextBlock Text="RECENTS" FontSize="9" Foreground="{DynamicResource SidebarMutedBrush}" Margin="12,18,0,8"/>
-                        <TextBox x:Name="SearchBox" Margin="8,0,8,7" Padding="8,7" FontSize="12" Foreground="{DynamicResource SidebarTextBrush}" Background="{DynamicResource SidebarInputBrush}" TextChanged="SearchBox_TextChanged" Visibility="Collapsed" ToolTip="Search conversation titles and messages in the current project or chat list"/>
+                        <Grid x:Name="SearchPanel" Margin="8,0,8,7" Visibility="Collapsed">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBox x:Name="SearchBox" Padding="8,7" FontSize="12" Foreground="{DynamicResource SidebarTextBrush}" Background="{DynamicResource SidebarInputBrush}" TextChanged="SearchBox_TextChanged" ToolTip="Search conversation titles and messages"/>
+                            <CheckBox x:Name="SearchAllProjectsCheck" Grid.Row="1" Content="Search all projects" Margin="5,6,0,0" FontSize="11" Foreground="{DynamicResource SidebarMutedBrush}" Checked="SearchScope_Changed" Unchecked="SearchScope_Changed" ToolTip="Include conversations from projects other than the one currently selected"/>
+                        </Grid>
                         <ItemsControl x:Name="RecentList"/>
                     </StackPanel>
                 </ScrollViewer>

@@ -465,7 +465,7 @@ public partial class MainWindow : Window
     {
         FillProjectsList();
         var search = SearchBox.Text?.Trim();
-        var inWorkspace = _conversations.Where(c => SameWorkspace(c.ProjectPath, _activeProject?.Path) && c.IsArchived == _showArchived && ConversationSearch.Matches(c, search));
+        var inWorkspace = _conversations.Where(c => ConversationSearch.IsInScope(c, _activeProject?.Path, SearchAllProjectsCheck.IsChecked == true) && c.IsArchived == _showArchived && ConversationSearch.Matches(c, search));
         FillConversationList(PinnedList, inWorkspace.Where(c => c.IsPinned).OrderByDescending(c => c.UpdatedAt));
         FillConversationList(RecentList, inWorkspace.Where(c => !c.IsPinned).OrderByDescending(c => c.UpdatedAt));
     }
@@ -1176,7 +1176,7 @@ public partial class MainWindow : Window
             var caption = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             caption.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 12, Foreground = ThemeBrush("SidebarTextBrush") });
             caption.Children.Add(new TextBlock { Text = string.Join(" · ", details), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 9, Foreground = ThemeBrush("SidebarMutedBrush"), Margin = new Thickness(0, 2, 0, 0) });
-            if (SearchBox.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(SearchBox.Text) && ConversationSearch.FindMessageExcerpt(item, SearchBox.Text) is { } excerpt)
+            if (SearchPanel.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(SearchBox.Text) && ConversationSearch.FindMessageExcerpt(item, SearchBox.Text) is { } excerpt)
                 caption.Children.Add(new TextBlock { Text = "↳ " + excerpt, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 9, Foreground = ThemeBrush("WelcomeAccentBrush"), Margin = new Thickness(0, 2, 0, 0) });
             row.Children.Add(caption);
             var contextText = item.LastPromptTokens > 0 ? $"Last prompt: {FormatTokenCount(item.LastPromptTokens)} / {FormatContextLimit(item.LastPromptContext > 0 ? item.LastPromptContext : item.NumCtx > 0 ? item.NumCtx : MaxContextForModel(item.LastPromptModel.Length > 0 ? item.LastPromptModel : item.Model))}" : "No prompt usage reported yet";
@@ -2315,15 +2315,20 @@ public partial class MainWindow : Window
 
     private void SearchFocus_Click(object sender, RoutedEventArgs e)
     {
-        SearchBox.Visibility = SearchBox.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
-        if (SearchBox.Visibility == Visibility.Visible) SearchBox.Focus();
+        SearchPanel.Visibility = SearchPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        if (SearchPanel.Visibility == Visibility.Visible) SearchBox.Focus();
         else SearchBox.Clear();
+    }
+
+    private void SearchScope_Changed(object sender, RoutedEventArgs e)
+    {
+        if (IsInitialized) RefreshConversationLists();
     }
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         _conversationSearchDebounce.Stop();
-        if (SearchBox.Visibility != Visibility.Visible || string.IsNullOrWhiteSpace(SearchBox.Text)) RefreshConversationLists();
+        if (SearchPanel.Visibility != Visibility.Visible || string.IsNullOrWhiteSpace(SearchBox.Text)) RefreshConversationLists();
         else _conversationSearchDebounce.Start();
     }
 

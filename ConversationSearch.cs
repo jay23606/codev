@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace Codev;
 
 public static class ConversationSearch
@@ -8,6 +10,20 @@ public static class ConversationSearch
         if (string.IsNullOrWhiteSpace(search)) return true;
         if ((conversation.Title ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)) return true;
         return conversation.Messages.Any(message => (message.Content ?? "").Contains(search, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool IsInScope(Conversation conversation, string? activeWorkspacePath, bool includeAllProjects)
+    {
+        if (includeAllProjects) return true;
+        if (conversation.ProjectPath is null) return activeWorkspacePath is null;
+        if (activeWorkspacePath is null) return false;
+        try
+        {
+            return string.Equals(Path.GetFullPath(conversation.ProjectPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(activeWorkspacePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch { return string.Equals(conversation.ProjectPath, activeWorkspacePath, StringComparison.OrdinalIgnoreCase); }
     }
 
     public static string? FindMessageExcerpt(Conversation conversation, string? query, int maxLength = 120)
