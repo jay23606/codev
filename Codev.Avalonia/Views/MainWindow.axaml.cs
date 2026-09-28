@@ -449,6 +449,283 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void GitStatus_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation?.ProjectPath is not { } projectPath || !Directory.Exists(projectPath)) return;
+        var service = new Codev.GitRepositoryService(projectPath);
+        Codev.GitRepositoryStatus status;
+        IReadOnlyList<string> branches;
+        try
+        {
+            status = await service.GetStatusAsync();
+            branches = await service.GetLocalBranchesAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowGitInfoAsync("Git status is unavailable", ex.Message);
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Git status · " + Path.GetFileName(status.Root),
+            Width = 980,
+            Height = 680,
+            MinWidth = 680,
+            MinHeight = 460,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = null
+        };
+        var layout = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto") };
+        var header = new StackPanel { Spacing = 8 };
+        header.Children.Add(new TextBlock { Text = status.Root, FontSize = 11, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush, TextTrimming = global::Avalonia.Media.TextTrimming.CharacterEllipsis });
+        var branchRow = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
+        branchRow.Children.Add(new TextBlock { Text = "Branch", VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center });
+        var branchPicker = new ComboBox { MinWidth = 170, ItemsSource = branches, SelectedItem = status.Branch };
+        branchRow.Children.Add(branchPicker);
+        var switchBranch = new Button { Content = "Switch…", Classes = { "soft" } };
+        var createBranch = new Button { Content = "New branch…", Classes = { "soft" } };
+        var refresh = new Button { Content = "Refresh", Classes = { "soft" } };
+        branchRow.Children.Add(switchBranch);
+        branchRow.Children.Add(createBranch);
+        branchRow.Children.Add(refresh);
+        header.Children.Add(branchRow);
+        var summary = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        header.Children.Add(summary);
+        Grid.SetRow(header, 0);
+        layout.Children.Add(header);
+
+        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("250,*"), ColumnSpacing = 10, Margin = new Thickness(0, 14, 0, 12) };
+        var left = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+        var files = new ListBox();
+        var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 7, Margin = new Thickness(0, 8, 0, 0) };
+        var stage = new Button { Content = "Stage selected", Classes = { "soft" }, IsEnabled = false };
+        var commit = new Button { Content = "Review staged diff & commit…", Classes = { "soft" }, IsEnabled = false };
+        actions.Children.Add(stage);
+        actions.Children.Add(commit);
+        Grid.SetRow(actions, 1);
+        left.Children.Add(files);
+        left.Children.Add(actions);
+        body.Children.Add(left);
+
+        var diffBox = new TextBox
+        {
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+            FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+            FontSize = 11,
+            Padding = new Thickness(10),
+            Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+        };
+        var diffScroll = new ScrollViewer { Content = diffBox, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+        Grid.SetColumn(diffScroll, 1);
+        body.Children.Add(diffScroll);
+        Grid.SetRow(body, 1);
+        layout.Children.Add(body);
+
+        var footer = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var close = new Button { Content = "Close", Classes = { "soft" } };
+        close.Click += (_, _) => dialog.Close();
+        footer.Children.Add(close);
+        Grid.SetRow(footer, 2);
+        layout.Children.Add(footer);
+        dialog.Content = layout;
+
+        var diffRevision = 0;
+        void RenderStatus(Codev.GitRepositoryStatus value)
+        {
+            var tracking = value.Upstream is null ? "no upstream" : value.Upstream + (value.Ahead > 0 || value.Behind > 0 ? $" · ahead {value.Ahead}, behind {value.Behind}" : " · up to date");
+            summary.Text = value.HasChanges ? $"{value.Files.Count} changed file(s) · {tracking}" : $"Working tree clean · {tracking}";
+            files.Items.Clear();
+            stage.IsEnabled = false;
+            diffBox.Text = value.HasChanges ? "Select a changed file to inspect its staged and unstaged diff." : "The working tree is clean.";
+            if (!value.HasChanges) files.Items.Add(new ListBoxItem { Content = "No staged, unstaged, or untracked changes.", IsEnabled = false });
+            foreach (var file in value.Files)
+                files.Items.Add(new ListBoxItem
+                {
+                    Content = $"{file.State.Replace(' ', '·')}   {file.DisplayPath}",
+                    Tag = file,
+                    FontFamily = new global::Avalonia.Media.FontFamily("Consolas")
+                });
+            commit.IsEnabled = value.Files.Any(file => file.Staged != " ");
+            UpdateBranchButtons(value);
+        }
+
+        void UpdateBranchButtons(Codev.GitRepositoryStatus value)
+        {
+            var selected = branchPicker.SelectedItem as string;
+            switchBranch.IsEnabled = !value.HasChanges && branches.Count > 0 && selected is not null && selected != value.Branch;
+            createBranch.IsEnabled = !value.HasChanges;
+        }
+
+        async Task RefreshAsync()
+        {
+            try
+            {
+                status = await service.GetStatusAsync();
+                branches = await service.GetLocalBranchesAsync();
+                branchPicker.ItemsSource = branches;
+                branchPicker.SelectedItem = branches.Contains(status.Branch, StringComparer.Ordinal) ? status.Branch : null;
+                RenderStatus(status);
+            }
+            catch (Exception ex)
+            {
+                summary.Text = "Could not refresh Git status: " + ex.Message;
+                files.Items.Clear();
+                switchBranch.IsEnabled = false;
+                createBranch.IsEnabled = false;
+                stage.IsEnabled = false;
+                commit.IsEnabled = false;
+                diffBox.Text = "Git status could not be loaded.";
+            }
+        }
+
+        files.SelectionChanged += async (_, _) =>
+        {
+            var revision = ++diffRevision;
+            if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file })
+            {
+                stage.IsEnabled = false;
+                return;
+            }
+            stage.Content = file.Staged != " " && file.WorkingTree == " " ? "Unstage selected" : "Stage selected";
+            stage.IsEnabled = true;
+            diffBox.Text = "Loading diff…";
+            try
+            {
+                var diff = await service.GetFileDiffAsync(file);
+                if (revision == diffRevision)
+                    diffBox.Text = string.IsNullOrWhiteSpace(diff) ? "Git reported no textual diff for this file (it may be binary or unchanged since status was refreshed)." : diff;
+            }
+            catch (Exception ex) { if (revision == diffRevision) diffBox.Text = "Could not load diff: " + ex.Message; }
+        };
+        branchPicker.SelectionChanged += (_, _) => UpdateBranchButtons(status);
+        refresh.Click += async (_, _) => await RefreshAsync();
+        stage.Click += async (_, _) =>
+        {
+            if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file }) return;
+            try
+            {
+                if (file.Staged != " " && file.WorkingTree == " ") await service.UnstageFileAsync(file.Path);
+                else await service.StageFileAsync(file.Path);
+                await RefreshAsync();
+            }
+            catch (Exception ex) { await ShowGitInfoAsync("Could not update the Git index", ex.Message, dialog); await RefreshAsync(); }
+        };
+        switchBranch.Click += async (_, _) =>
+        {
+            if (branchPicker.SelectedItem is not string selected) return;
+            if (!await ConfirmGitActionAsync(dialog, "Switch local branch?", $"Switch to {selected}? The working tree must be clean.")) return;
+            try { await service.SwitchBranchAsync(selected); await RefreshAsync(); }
+            catch (Exception ex) { await ShowGitInfoAsync("Could not switch branch", ex.Message, dialog); await RefreshAsync(); }
+        };
+        createBranch.Click += async (_, _) =>
+        {
+            var nameBox = new TextBox { Watermark = "feature/my-change", MinWidth = 300 };
+            var createWindow = new Window
+            {
+                Title = "Create local branch",
+                Width = 430,
+                SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children = { new TextBlock { Text = "Create and switch to a new branch. The working tree must be clean." }, nameBox } }
+            };
+            var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+            var cancel = new Button { Content = "Cancel", Classes = { "soft" } };
+            var create = new Button { Content = "Create branch", Classes = { "soft" } };
+            cancel.Click += (_, _) => createWindow.Close(false);
+            create.Click += (_, _) => createWindow.Close(true);
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(create);
+            ((StackPanel)createWindow.Content!).Children.Add(buttons);
+            if (await createWindow.ShowDialog<bool>(dialog) != true) return;
+            try { await service.CreateAndSwitchBranchAsync(nameBox.Text ?? ""); await RefreshAsync(); }
+            catch (Exception ex) { await ShowGitInfoAsync("Could not create branch", ex.Message, dialog); await RefreshAsync(); }
+        };
+        commit.Click += async (_, _) => await ReviewAndCommitAsync(service, dialog, RefreshAsync);
+        RenderStatus(status);
+        await dialog.ShowDialog(this);
+    }
+
+    private async Task ReviewAndCommitAsync(Codev.GitRepositoryService service, Window owner, Func<Task> refresh)
+    {
+        Codev.GitStagedReview stagedReview;
+        try { stagedReview = await service.GetStagedReviewAsync(); }
+        catch (Exception ex) { await ShowGitInfoAsync("Could not review staged changes", ex.Message, owner); return; }
+        if (string.IsNullOrWhiteSpace(stagedReview.Diff))
+        {
+            await ShowGitInfoAsync("No textual changes to review", "The staged changes do not contain a textual diff. No commit was created.", owner);
+            return;
+        }
+        var layout = new StackPanel { Margin = new Thickness(16), Spacing = 10 };
+        layout.Children.Add(new TextBlock { Text = "Review the exact staged diff. Unstaged working-tree edits will not be included.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
+        var diff = new TextBox { Text = stagedReview.Diff, IsReadOnly = true, AcceptsReturn = true, AcceptsTab = true, TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap, FontFamily = new global::Avalonia.Media.FontFamily("Consolas"), FontSize = 11, Padding = new Thickness(10), Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush, Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush };
+        layout.Children.Add(new ScrollViewer { Content = diff, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Height = 440 });
+        var message = new TextBox { Watermark = "Commit message", MinWidth = 360 };
+        layout.Children.Add(message);
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" } };
+        var commit = new Button { Content = "Create local commit", Classes = { "soft" } };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(commit);
+        layout.Children.Add(buttons);
+        var dialog = new Window { Title = "Review staged changes", Width = 900, Height = 620, MinWidth = 640, MinHeight = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        cancel.Click += (_, _) => dialog.Close();
+        commit.Click += async (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(message.Text)) { await ShowGitInfoAsync("Commit message required", "Enter a commit message first.", dialog); return; }
+            if (!await ConfirmGitActionAsync(dialog, "Create local commit?", $"{message.Text.Trim()}\n\nThis creates a local commit and will not push to GitHub.")) return;
+            commit.IsEnabled = false;
+            try
+            {
+                await service.CommitAsync(message.Text, stagedReview);
+                dialog.Close();
+                await refresh();
+            }
+            catch (Exception ex) { commit.IsEnabled = true; await ShowGitInfoAsync("Could not create commit", ex.Message, dialog); }
+        };
+        await dialog.ShowDialog(owner);
+    }
+
+    private async Task<bool> ConfirmGitActionAsync(Window owner, string title, string message)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 470,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children = { new TextBlock { Text = message, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap } } }
+        };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" } };
+        var confirm = new Button { Content = "Confirm", Classes = { "soft" } };
+        cancel.Click += (_, _) => dialog.Close(false);
+        confirm.Click += (_, _) => dialog.Close(true);
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(confirm);
+        ((StackPanel)dialog.Content!).Children.Add(buttons);
+        return await dialog.ShowDialog<bool>(owner);
+    }
+
+    private async Task ShowGitInfoAsync(string title, string message, Window? owner = null)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children = { new TextBlock { Text = message, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap }, new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right } } }
+        };
+        var panel = (StackPanel)dialog.Content!;
+        ((Button)panel.Children[1]).Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(owner ?? this);
+    }
+
     private async void AddContextFiles_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || !viewModel.HasProject || viewModel.ActiveConversation?.ProjectPath is not { } projectPath) return;
