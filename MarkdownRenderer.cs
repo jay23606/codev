@@ -10,8 +10,9 @@ namespace Codev;
 
 public static class MarkdownRenderer
 {
-    public static StackPanel Render(string markdown, Brush foreground, Brush muted, Brush codeBackground, Brush accent)
+    public static StackPanel Render(string markdown, Brush foreground, Brush muted, Brush codeBackground, Brush accent, double baseFontSize = 14)
     {
+        baseFontSize = Math.Clamp(baseFontSize, 12, 22);
         var panel = new StackPanel();
         var lines = (markdown ?? "").Replace("\r\n", "\n").Split('\n');
         var code = new StringBuilder();
@@ -24,7 +25,7 @@ public static class MarkdownRenderer
             {
                 if (inCode)
                 {
-                    panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent));
+                    panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent, baseFontSize));
                     code.Clear();
                     language = null;
                     inCode = false;
@@ -53,7 +54,7 @@ public static class MarkdownRenderer
             }
 
             var text = line;
-            var fontSize = 14d;
+            var fontSize = baseFontSize;
             var weight = FontWeights.Normal;
             var italic = false;
             var margin = new Thickness(0, 0, 0, 5);
@@ -61,12 +62,12 @@ public static class MarkdownRenderer
             {
                 text = text[2..]; italic = true; margin = new Thickness(13, 2, 0, 7);
             }
-            else if (text.StartsWith("###### ", StringComparison.Ordinal)) { text = text[7..]; fontSize = 14; weight = FontWeights.SemiBold; margin = new Thickness(0, 7, 0, 5); }
-            else if (text.StartsWith("##### ", StringComparison.Ordinal)) { text = text[6..]; fontSize = 15; weight = FontWeights.SemiBold; margin = new Thickness(0, 8, 0, 5); }
-            else if (text.StartsWith("#### ", StringComparison.Ordinal)) { text = text[5..]; fontSize = 16; weight = FontWeights.SemiBold; margin = new Thickness(0, 8, 0, 5); }
-            else if (text.StartsWith("### ", StringComparison.Ordinal)) { text = text[4..]; fontSize = 17; weight = FontWeights.SemiBold; margin = new Thickness(0, 9, 0, 5); }
-            else if (text.StartsWith("## ", StringComparison.Ordinal)) { text = text[3..]; fontSize = 19; weight = FontWeights.SemiBold; margin = new Thickness(0, 11, 0, 6); }
-            else if (text.StartsWith("# ", StringComparison.Ordinal)) { text = text[2..]; fontSize = 22; weight = FontWeights.SemiBold; margin = new Thickness(0, 13, 0, 7); }
+            else if (text.StartsWith("###### ", StringComparison.Ordinal)) { text = text[7..]; fontSize = baseFontSize; weight = FontWeights.SemiBold; margin = new Thickness(0, 7, 0, 5); }
+            else if (text.StartsWith("##### ", StringComparison.Ordinal)) { text = text[6..]; fontSize = baseFontSize * 1.07; weight = FontWeights.SemiBold; margin = new Thickness(0, 8, 0, 5); }
+            else if (text.StartsWith("#### ", StringComparison.Ordinal)) { text = text[5..]; fontSize = baseFontSize * 1.14; weight = FontWeights.SemiBold; margin = new Thickness(0, 8, 0, 5); }
+            else if (text.StartsWith("### ", StringComparison.Ordinal)) { text = text[4..]; fontSize = baseFontSize * 1.21; weight = FontWeights.SemiBold; margin = new Thickness(0, 9, 0, 5); }
+            else if (text.StartsWith("## ", StringComparison.Ordinal)) { text = text[3..]; fontSize = baseFontSize * 1.36; weight = FontWeights.SemiBold; margin = new Thickness(0, 11, 0, 6); }
+            else if (text.StartsWith("# ", StringComparison.Ordinal)) { text = text[2..]; fontSize = baseFontSize * 1.57; weight = FontWeights.SemiBold; margin = new Thickness(0, 13, 0, 7); }
             else if (text.StartsWith("- ", StringComparison.Ordinal) || text.StartsWith("* ", StringComparison.Ordinal) || text.StartsWith("+ ", StringComparison.Ordinal))
             { text = "•   " + text[2..]; margin = new Thickness(10, 0, 0, 4); }
             else
@@ -76,15 +77,15 @@ public static class MarkdownRenderer
                     margin = new Thickness(10, 0, 0, 4);
             }
 
-            var block = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = fontSize, FontWeight = weight, FontStyle = italic ? FontStyles.Italic : FontStyles.Normal, Foreground = foreground, Margin = margin, LineHeight = 22 };
+            var block = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = fontSize, FontWeight = weight, FontStyle = italic ? FontStyles.Italic : FontStyles.Normal, Foreground = foreground, Margin = margin, LineHeight = baseFontSize * 1.6 };
             AddInlineMarkdown(block, text, foreground, accent, codeBackground);
             panel.Children.Add(block);
         }
-        if (inCode) panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent));
+        if (inCode) panel.Children.Add(RenderCode(code.ToString().TrimEnd('\n'), language, codeBackground, muted, accent, baseFontSize));
         return panel;
     }
 
-    private static Border RenderCode(string code, string? language, Brush background, Brush muted, Brush accent)
+    private static Border RenderCode(string code, string? language, Brush background, Brush muted, Brush accent, double baseFontSize)
     {
         var frame = new Border { Background = background, CornerRadius = new CornerRadius(8), Padding = new Thickness(10), Margin = new Thickness(0, 5, 0, 10) };
         var stack = new StackPanel();
@@ -95,7 +96,7 @@ public static class MarkdownRenderer
         copy.Click += (_, _) => { try { Clipboard.SetText(code); copy.Content = "Copied"; } catch { copy.Content = "Copy failed"; } };
         DockPanel.SetDock(copy, Dock.Right); header.Children.Add(copy);
         stack.Children.Add(header);
-        var codeText = new TextBlock { Text = code, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = accent, TextWrapping = TextWrapping.NoWrap };
+        var codeText = new TextBlock { Text = code, FontFamily = new FontFamily("Consolas"), FontSize = Math.Clamp(baseFontSize - 2, 10, 20), Foreground = accent, TextWrapping = TextWrapping.NoWrap };
         stack.Children.Add(new ScrollViewer { Content = codeText, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false });
         frame.Child = stack;
         return frame;

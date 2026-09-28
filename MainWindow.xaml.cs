@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private bool _showArchived;
     private Guid? _codeTaskConversationId;
     private bool _isDarkTheme = true;
+    private double _chatFontSize = 14;
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
     private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
@@ -59,6 +60,7 @@ public partial class MainWindow : Window
         AddContextButton.ContextMenu = contextMenu;
         LoadThemePreference();
         ApplyTheme();
+        ApplyChatTextSize();
         LoadProjects();
         LoadConversations();
         foreach (var path in _conversations.Select(c => c.ProjectPath).Where(p => !string.IsNullOrWhiteSpace(p))) EnsureProject(path!);
@@ -76,6 +78,7 @@ public partial class MainWindow : Window
             {
                 var settings = JsonSerializer.Deserialize<UiSettings>(File.ReadAllText(ThemePath), JsonOptions);
                 _isDarkTheme = !string.Equals(settings?.Theme, "light", StringComparison.OrdinalIgnoreCase);
+                _chatFontSize = settings?.ChatFontSize is double storedSize && double.IsFinite(storedSize) ? Math.Clamp(storedSize, 12, 22) : 14;
             }
         }
         catch { _isDarkTheme = true; }
@@ -86,7 +89,7 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
-            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light"), JsonOptions));
+            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize), JsonOptions));
         }
         catch { }
     }
@@ -311,8 +314,8 @@ public partial class MainWindow : Window
             var message = conversation.Messages[messageIndex];
             var isUser = message.Role == "user";
             FrameworkElement body = isUser
-                ? new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 23, Foreground = ThemeBrush("MessageTextBrush") }
-                : MarkdownRenderer.Render(message.Content, ThemeBrush("MessageTextBrush"), ThemeBrush("MutedTextBrush"), ThemeBrush("MessageBubbleBrush"), ThemeBrush("WelcomeAccentBrush"));
+                ? new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap, FontSize = _chatFontSize, LineHeight = _chatFontSize * 1.6, Foreground = ThemeBrush("MessageTextBrush") }
+                : MarkdownRenderer.Render(message.Content, ThemeBrush("MessageTextBrush"), ThemeBrush("MutedTextBrush"), ThemeBrush("MessageBubbleBrush"), ThemeBrush("WelcomeAccentBrush"), _chatFontSize);
             var content = new StackPanel();
             content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
@@ -1622,8 +1625,48 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(this, $"Appearance: {(_isDarkTheme ? "Dark" : "Light")} (use the appearance button above Settings to switch).\n\nCodev connects to Ollama at http://127.0.0.1:11434. Conversations and preferences are stored on this device in %LOCALAPPDATA%\\Codev.", "Codev settings", MessageBoxButton.OK, MessageBoxImage.Information);
+        var editor = new Window
+        {
+            Title = "Codev settings", Width = 540, Height = 300,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.NoResize
+        };
+        var layout = new Grid { Margin = new Thickness(20) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var help = new TextBlock
+        {
+            Text = $"Appearance: {(_isDarkTheme ? "Dark" : "Light")} · inference: local Ollama at http://127.0.0.1:11434. Chat size is stored on this device.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 15)
+        };
+        layout.Children.Add(help);
+        var sizeRow = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+        sizeRow.ColumnDefinitions.Add(new ColumnDefinition()); sizeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        sizeRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        sizeRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        sizeRow.Children.Add(new TextBlock { Text = "Chat text size", FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush("MainTextBrush") });
+        var sizeLabel = new TextBlock { Text = $"{_chatFontSize:0} pt", Foreground = ThemeBrush("MutedTextBrush"), HorizontalAlignment = HorizontalAlignment.Right };
+        Grid.SetColumn(sizeLabel, 1); sizeRow.Children.Add(sizeLabel);
+        var slider = new Slider { Minimum = 12, Maximum = 22, Value = _chatFontSize, TickFrequency = 1, IsSnapToTickEnabled = true, Margin = new Thickness(0, 8, 0, 0), Foreground = ThemeBrush("WelcomeAccentBrush"), Focusable = true };
+        Grid.SetRow(slider, 1); Grid.SetColumnSpan(slider, 2); sizeRow.Children.Add(slider);
+        Grid.SetRow(sizeRow, 1); layout.Children.Add(sizeRow);
+        var preview = new TextBlock { Text = "The quick brown fox jumps over the lazy dog.", FontSize = _chatFontSize, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrush("MainTextBrush"), Margin = new Thickness(0, 4, 0, 14) };
+        slider.ValueChanged += (_, _) => { sizeLabel.Text = $"{slider.Value:0} pt"; preview.FontSize = slider.Value; };
+        Grid.SetRow(preview, 2); layout.Children.Add(preview);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var apply = new Button { Content = "Apply", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        apply.Click += (_, _) => { _chatFontSize = slider.Value; ApplyChatTextSize(); SaveThemePreference(); RenderMessages(); editor.DialogResult = true; editor.Close(); };
+        buttons.Children.Add(cancel); buttons.Children.Add(apply);
+        Grid.SetRow(buttons, 3); layout.Children.Add(buttons);
+        editor.Content = layout;
+        editor.ShowDialog();
     }
+
+    private void ApplyChatTextSize() => PromptBox.FontSize = Math.Clamp(_chatFontSize, 12, 22);
 
     private void ToggleTheme_Click(object sender, RoutedEventArgs e)
     {
@@ -1662,7 +1705,7 @@ public partial class MainWindow : Window
     private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
         bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions);
-    private sealed record UiSettings(string Theme);
+    private sealed record UiSettings(string Theme, double? ChatFontSize = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);

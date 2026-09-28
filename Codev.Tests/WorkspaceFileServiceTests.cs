@@ -201,6 +201,34 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         Assert.True(hasCopy);
     }
 
+    [Fact]
+    public void Markdown_text_size_scales_body_and_headings_and_is_bounded()
+    {
+        double headingSize = 0;
+        double bodySize = 0;
+        double clampedSize = 0;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var rendered = MarkdownRenderer.Render("# Heading\n\nBody", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral, baseFontSize: 18);
+                headingSize = rendered.Children.OfType<TextBlock>().First(block => block.Inlines.OfType<Run>().Any(run => run.Text.Contains("Heading", StringComparison.Ordinal))).FontSize;
+                bodySize = rendered.Children.OfType<TextBlock>().First(block => block.Inlines.OfType<Run>().Any(run => run.Text.Contains("Body", StringComparison.Ordinal))).FontSize;
+                var clamped = MarkdownRenderer.Render("Body", Brushes.White, Brushes.Gray, Brushes.Black, Brushes.Coral, baseFontSize: 100);
+                clampedSize = clamped.Children.OfType<TextBlock>().Single().FontSize;
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start(); thread.Join();
+        if (failure is not null) throw failure;
+
+        Assert.Equal(18, bodySize);
+        Assert.Equal(18 * 1.57, headingSize, 4);
+        Assert.Equal(22, clampedSize);
+    }
+
     private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
