@@ -22,9 +22,14 @@ public sealed class ConversationBackupServiceTests
             ThinkEnabled = true,
             OutputStyle = ConversationOutputStyles.Concise,
             IncludeRepoMap = true,
+            Temperature = 0.25,
+            TopP = 0.8,
+            TopK = 40,
+            PresencePenalty = 0.2,
+            RepeatPenalty = 1.1,
+            NumPredict = 4096,
             CompactionSummary = "Earlier decisions and user goal.",
             CompactionThroughMessageCount = 2,
-            Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
             PendingDiffComments = [new("src/app.cs", "+ change", "Check the error path.")],
             PendingRequestCount = 3,
@@ -47,6 +52,11 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal("Earlier decisions and user goal.", imported.CompactionSummary);
         Assert.Equal(2, imported.CompactionThroughMessageCount);
         Assert.Equal(source.Temperature, imported.Temperature);
+        Assert.Equal(source.TopP, imported.TopP);
+        Assert.Equal(source.TopK, imported.TopK);
+        Assert.Equal(source.PresencePenalty, imported.PresencePenalty);
+        Assert.Equal(source.RepeatPenalty, imported.RepeatPenalty);
+        Assert.Equal(source.NumPredict, imported.NumPredict);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
         Assert.Equal("I will inspect the failing path.", imported.Messages[1].Thinking);

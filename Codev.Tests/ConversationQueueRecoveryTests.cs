@@ -8,7 +8,8 @@ public sealed class ConversationQueueRecoveryTests
         var early = new Conversation { Messages = [new("user", "first"), new("assistant", "Queued request was not sent before Codev closed.")] };
         var late = new Conversation { Messages = [new("user", "second"), new("assistant", "")] };
         var invalid = new Conversation { Messages = [new("user", "not an assistant placeholder")] };
-        var earlyTurn = new PersistedQueuedTurn(1, "model-a", 8192, true, false, @"C:\project", ["a.cs"], ["obj"], DateTimeOffset.UnixEpoch, 0.2, ThinkEnabled: true);
+        var earlyTurn = new PersistedQueuedTurn(1, "model-a", 8192, true, false, @"C:\project", ["a.cs"], ["obj"], DateTimeOffset.UnixEpoch, 0.2, ThinkEnabled: true,
+            TopP: 0.8, TopK: 40, PresencePenalty: 0.2, RepeatPenalty: 1.1, NumPredict: 4096);
         var lateTurn = new PersistedQueuedTurn(1, "model-b", 16384, false, true, null, [], [], DateTimeOffset.UnixEpoch.AddMinutes(1), Provider: CloudModelProviders.OpenAI, IncludeProjectContext: true, IncludeRepoMap: true);
         early.PendingTurns = [earlyTurn];
         late.PendingTurns = [lateTurn];
@@ -21,6 +22,11 @@ public sealed class ConversationQueueRecoveryTests
         Assert.True(restored[0].Turn.IsCodeTask);
         Assert.Equal(0.2, restored[0].Turn.Temperature);
         Assert.True(restored[0].Turn.ThinkEnabled);
+        Assert.Equal(0.8, restored[0].Turn.TopP);
+        Assert.Equal(40, restored[0].Turn.TopK);
+        Assert.Equal(0.2, restored[0].Turn.PresencePenalty);
+        Assert.Equal(1.1, restored[0].Turn.RepeatPenalty);
+        Assert.Equal(4096, restored[0].Turn.NumPredict);
         Assert.False(restored[1].Turn.ThinkEnabled);
         Assert.Equal(["a.cs"], restored[0].Turn.ContextFiles);
         Assert.Equal(CloudModelProviders.OpenAI, restored[1].Turn.Provider);

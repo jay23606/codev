@@ -12,6 +12,11 @@ public sealed class ConversationStatusReportTests
             Model = "qwen3-coder:30b",
             NumCtx = 65536,
             Temperature = 0.2,
+            TopP = 0.85,
+            TopK = 40,
+            PresencePenalty = 0.5,
+            RepeatPenalty = 1.1,
+            NumPredict = 2048,
             IsPlanMode = true,
             ProjectPath = @"C:\work\app",
             ContextFiles = ["src/app.cs"]
@@ -23,6 +28,7 @@ public sealed class ConversationStatusReportTests
         Assert.Contains("Context window: 65,536 tokens", report);
         Assert.Contains("Temperature: 0.2", report);
         Assert.Contains("Thinking: off", report);
+        Assert.Contains("Sampling overrides: temperature=0.2, top_p=0.85, top_k=40, presence_penalty=0.5, repeat_penalty=1.1, num_predict=2048", report);
         Assert.Contains("Mode: Plan", report);
         Assert.Contains("Project: app", report);
         Assert.DoesNotContain(@"C:\work\app", report, StringComparison.OrdinalIgnoreCase);

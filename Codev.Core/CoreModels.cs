@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 namespace Codev;
 
 public sealed record PersistedQueuedTurn(int AssistantIndex, string Model, int NumCtx, bool IsCodeTask, bool IsPlanMode,
-    string? ProjectPath, List<string>? ContextFiles, List<string>? ContextExclusions, DateTimeOffset EnqueuedAt, double? Temperature = null, string Provider = "ollama", bool IncludeProjectContext = false, bool IncludeRepoMap = false, string OutputStyle = ConversationOutputStyles.Balanced, bool ThinkEnabled = false);
+    string? ProjectPath, List<string>? ContextFiles, List<string>? ContextExclusions, DateTimeOffset EnqueuedAt, double? Temperature = null, string Provider = "ollama", bool IncludeProjectContext = false, bool IncludeRepoMap = false, string OutputStyle = ConversationOutputStyles.Balanced, bool ThinkEnabled = false,
+    double? TopP = null, int? TopK = null, double? PresencePenalty = null, double? RepeatPenalty = null, int? NumPredict = null);
 
 public sealed class Conversation
 {
@@ -21,6 +22,11 @@ public sealed class Conversation
     public bool IncludeRepoMap { get; set; }
     public int NumCtx { get; set; }
     public double? Temperature { get; set; }
+    public double? TopP { get; set; }
+    public int? TopK { get; set; }
+    public double? PresencePenalty { get; set; }
+    public double? RepeatPenalty { get; set; }
+    public int? NumPredict { get; set; }
     public int LastPromptTokens { get; set; }
     public int LastPromptContext { get; set; }
     public string LastPromptModel { get; set; } = "";

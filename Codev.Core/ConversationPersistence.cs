@@ -20,7 +20,12 @@ public static class ConversationPersistence
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,
             NumCtx = conversation.NumCtx,
-            Temperature = conversation.Temperature,
+            Temperature = ConversationSamplingSettings.NormalizeTemperature(conversation.Temperature),
+            TopP = ConversationSamplingSettings.NormalizeProbability(conversation.TopP),
+            TopK = ConversationSamplingSettings.NormalizeTopK(conversation.TopK),
+            PresencePenalty = ConversationSamplingSettings.NormalizePenalty(conversation.PresencePenalty),
+            RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(conversation.RepeatPenalty),
+            NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(conversation.NumPredict),
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptContext = conversation.LastPromptContext,
             LastPromptModel = conversation.LastPromptModel,
@@ -40,7 +45,12 @@ public static class ConversationPersistence
             {
                 ContextFiles = turn.ContextFiles is null ? [] : [.. turn.ContextFiles],
                 ContextExclusions = turn.ContextExclusions is null ? [] : [.. turn.ContextExclusions],
-                OutputStyle = ConversationOutputStyles.Normalize(turn.OutputStyle)
+                OutputStyle = ConversationOutputStyles.Normalize(turn.OutputStyle),
+                TopP = ConversationSamplingSettings.NormalizeProbability(turn.TopP),
+                TopK = ConversationSamplingSettings.NormalizeTopK(turn.TopK),
+                PresencePenalty = ConversationSamplingSettings.NormalizePenalty(turn.PresencePenalty),
+                RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(turn.RepeatPenalty),
+                NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(turn.NumPredict)
             }).ToList() ?? []
         }).ToList();
     }

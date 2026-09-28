@@ -20,6 +20,7 @@ public static class ConversationStatusReport
             ? "managed by provider"
             : conversation.NumCtx > 0 ? $"{conversation.NumCtx:N0} tokens" : "model default";
         var temperature = conversation.Temperature is double value ? value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : "model default";
+        var sampling = $"temperature={temperature}, top_p={Format(conversation.TopP)}, top_k={conversation.TopK?.ToString() ?? "model default"}, presence_penalty={Format(conversation.PresencePenalty)}, repeat_penalty={Format(conversation.RepeatPenalty)}, num_predict={conversation.NumPredict?.ToString() ?? "model default"}";
         var project = string.IsNullOrWhiteSpace(conversation.ProjectPath) ? "not attached" : FolderName(conversation.ProjectPath);
         var projectContext = string.IsNullOrWhiteSpace(conversation.ProjectPath)
             ? "none"
@@ -70,6 +71,7 @@ public static class ConversationStatusReport
             $"Conversation summary: {compaction}",
             $"Temperature: {temperature}",
             $"Thinking: {(CloudModelProviders.IsCloud(conversation.Provider) ? "unavailable for hosted providers" : conversation.ThinkEnabled ? "requested" : "off")}",
+            $"Sampling overrides: {(conversation.Provider == "ollama" ? sampling : "unavailable for hosted providers")}",
             $"Mode: {(conversation.IsCodeTask ? "Code task" : conversation.IsPlanMode ? "Plan" : "Chat")}",
             $"Project: {project}",
             $"Folder trust: {folderTrust}",
@@ -100,4 +102,8 @@ public static class ConversationStatusReport
         }
         return "configured remote host";
     }
+
+    private static string Format(double? value) => value is double number
+        ? number.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+        : "model default";
 }

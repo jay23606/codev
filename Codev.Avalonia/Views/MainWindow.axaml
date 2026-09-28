@@ -155,7 +155,10 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <ToggleButton Grid.Column="9" Classes="soft" Content="Think" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsVisible="{Binding IsLocalModel}" ToolTip.Tip="Ask a thinking-capable Ollama model to return its separate thinking trace. The trace stays collapsed below the reply. Unsupported models use their default behavior." />
+                    <StackPanel Grid.Column="9" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <ToggleButton Classes="soft" Content="Think" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsVisible="{Binding IsLocalModel}" ToolTip.Tip="Ask a thinking-capable Ollama model to return its separate thinking trace. The trace stays collapsed below the reply. Unsupported models use their default behavior." />
+                        <Button Classes="soft" Content="{Binding AdvancedModelSettingsLabel}" Click="AdvancedModelSettings_Click" IsEnabled="{Binding IsLocalModel}" ToolTip.Tip="Override Ollama sampling parameters and maximum generated tokens for this conversation. Blank fields use the model defaults." />
+                    </StackPanel>
                     <Button Grid.Column="10" Classes="soft" Content="Memory" Click="LoadedModels_Click" ToolTip.Tip="See models currently loaded by Ollama and their reported memory use; unload a model when the queue is idle." />
                     <Button Grid.Column="11" Classes="soft" Content="Compact" Click="CompactConversation_Click" ToolTip.Tip="Summarize older turns for future prompts, review the summary, and keep the full transcript." />
                     <Button Grid.Column="12" Classes="soft" Content="Full history" IsVisible="{Binding HasCompactionSummary}" Click="RestoreFullHistory_Click" ToolTip.Tip="Remove the summary and use the complete transcript in future prompts again." />

@@ -22,7 +22,12 @@ public static class ConversationBackupService
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,
             NumCtx = conversation.NumCtx,
-            Temperature = conversation.Temperature,
+            Temperature = ConversationSamplingSettings.NormalizeTemperature(conversation.Temperature),
+            TopP = ConversationSamplingSettings.NormalizeProbability(conversation.TopP),
+            TopK = ConversationSamplingSettings.NormalizeTopK(conversation.TopK),
+            PresencePenalty = ConversationSamplingSettings.NormalizePenalty(conversation.PresencePenalty),
+            RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(conversation.RepeatPenalty),
+            NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(conversation.NumPredict),
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptContext = conversation.LastPromptContext,
             LastPromptModel = conversation.LastPromptModel,
@@ -78,6 +83,11 @@ public static class ConversationBackupService
                 ? 0 : item.CompactionThroughMessageCount;
             item.TaskChecklist = TaskChecklistService.NormalizeImported(item.TaskChecklist).ToList();
             item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
+            item.TopP = ConversationSamplingSettings.NormalizeProbability(item.TopP);
+            item.TopK = ConversationSamplingSettings.NormalizeTopK(item.TopK);
+            item.PresencePenalty = ConversationSamplingSettings.NormalizePenalty(item.PresencePenalty);
+            item.RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(item.RepeatPenalty);
+            item.NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(item.NumPredict);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;
             item.PendingTurns = [];

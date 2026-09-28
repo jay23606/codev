@@ -197,6 +197,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IncludeRepoMap));
                 OnPropertyChanged(nameof(OutputStyle));
                 OnPropertyChanged(nameof(ThinkEnabled));
+                OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
                 OnPropertyChanged(nameof(CanIncludeRepoMap));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
@@ -388,6 +389,25 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged();
             Persist();
         }
+    }
+
+    public string AdvancedModelSettingsLabel => ActiveConversation is { } conversation &&
+        (conversation.Temperature.HasValue || conversation.TopP.HasValue || conversation.TopK.HasValue ||
+         conversation.PresencePenalty.HasValue || conversation.RepeatPenalty.HasValue || conversation.NumPredict.HasValue)
+        ? "Advanced ·" : "Advanced";
+
+    public void SetSamplingSettings(double? temperature, double? topP, int? topK,
+        double? presencePenalty, double? repeatPenalty, int? numPredict)
+    {
+        if (ActiveConversation is not { } conversation) return;
+        conversation.Temperature = Codev.ConversationSamplingSettings.NormalizeTemperature(temperature);
+        conversation.TopP = Codev.ConversationSamplingSettings.NormalizeProbability(topP);
+        conversation.TopK = Codev.ConversationSamplingSettings.NormalizeTopK(topK);
+        conversation.PresencePenalty = Codev.ConversationSamplingSettings.NormalizePenalty(presencePenalty);
+        conversation.RepeatPenalty = Codev.ConversationSamplingSettings.NormalizePenalty(repeatPenalty);
+        conversation.NumPredict = Codev.ConversationSamplingSettings.NormalizeOutputTokens(numPredict);
+        OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
+        Persist();
     }
 
     private void TogglePlanMode()
@@ -1286,7 +1306,8 @@ public sealed class MainViewModel : ViewModelBase
             conversation.ProjectPath, hasExplicitProjectFiles, projectTrusted);
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
             conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
-            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle, conversation.ThinkEnabled);
+            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle, conversation.ThinkEnabled,
+            conversation.TopP, conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, conversation.NumPredict);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -1584,10 +1605,8 @@ public sealed class MainViewModel : ViewModelBase
                 ["think"] = turn.ThinkEnabled,
                 ["stream"] = false
             };
-            var options = new Dictionary<string, object>();
-            if (turn.NumCtx > 0) options["num_ctx"] = turn.NumCtx;
-            if (turn.Temperature is { } temperature) options["temperature"] = temperature;
-            if (options.Count > 0) payload["options"] = options;
+            if (Codev.OllamaRequestOptions.Build(turn.NumCtx, turn.Temperature, turn.TopP, turn.TopK,
+                turn.PresencePenalty, turn.RepeatPenalty, turn.NumPredict) is { } options) payload["options"] = options;
             using var request = new HttpRequestMessage(HttpMethod.Post,
                 Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"));
             var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
@@ -1598,7 +1617,7 @@ public sealed class MainViewModel : ViewModelBase
                 new Codev.PromptContextSection("Current model messages and tool results",
                     string.Join("\n\n", history.Select(message => $"[{message.Role}]\n{message.Content}"))),
                 new Codev.PromptContextSection("Available tool schemas", JsonSerializer.Serialize(tools, JsonSerializerOptions.Web)),
-                new Codev.PromptContextSection("Generation controls", $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}")
+                new Codev.PromptContextSection("Generation controls", $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}; top_p={turn.TopP?.ToString() ?? "model default"}; top_k={turn.TopK?.ToString() ?? "model default"}; presence_penalty={turn.PresencePenalty?.ToString() ?? "model default"}; repeat_penalty={turn.RepeatPenalty?.ToString() ?? "model default"}; num_predict={turn.NumPredict?.ToString() ?? "model default"}")
             };
             await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create("ollama", turn.Model,
                 turn.NumCtx, roundSections, roundMessages, payloadJson));
@@ -1940,10 +1959,8 @@ public sealed class MainViewModel : ViewModelBase
                 else
                 {
                 var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["think"] = savedTurn.ThinkEnabled, ["stream"] = true };
-                var options = new Dictionary<string, object>();
-                if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
-                if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
-                if (options.Count > 0) payload["options"] = options;
+                if (Codev.OllamaRequestOptions.Build(savedTurn.NumCtx, savedTurn.Temperature, savedTurn.TopP, savedTurn.TopK,
+                    savedTurn.PresencePenalty, savedTurn.RepeatPenalty, savedTurn.NumPredict) is { } options) payload["options"] = options;
                 var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
                 await SetLastPromptRequestBodyAsync(conversation, payloadJson);
                 using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"))

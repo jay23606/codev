@@ -6,6 +6,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using System.Collections.Specialized;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -521,6 +522,102 @@ public partial class MainWindow : Window
         };
         cancel.Click += (_, _) => dialog.Close();
         await dialog.ShowDialog(this);
+    }
+
+    private async void AdvancedModelSettings_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation) return;
+        var fields = new Dictionary<string, TextBox>(StringComparer.Ordinal)
+        {
+            ["temperature"] = SettingField("0–2 · lower is more focused", conversation.Temperature),
+            ["top_p"] = SettingField("0–1 · nucleus sampling", conversation.TopP),
+            ["top_k"] = SettingField("1–1000 · candidate token limit", conversation.TopK),
+            ["presence_penalty"] = SettingField("0–2 · reduce repeated topics", conversation.PresencePenalty),
+            ["repeat_penalty"] = SettingField("0–2 · reduce repeated text", conversation.RepeatPenalty),
+            ["num_predict"] = SettingField("1–131072 · maximum generated tokens", conversation.NumPredict)
+        };
+        var panel = new StackPanel { Spacing = 8, Margin = new Thickness(20) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Blank means the model's default. Values are saved with this conversation and captured for queued turns. Maximum tokens limits the combined reasoning and answer output; a higher limit can take longer and use more memory.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MaxWidth = 470,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+        });
+        foreach (var (name, field) in fields)
+        {
+            panel.Children.Add(new TextBlock { Text = name, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+            global::Avalonia.Automation.AutomationProperties.SetName(field, name);
+            panel.Children.Add(field);
+        }
+        var status = new TextBlock { Foreground = global::Avalonia.Media.Brushes.IndianRed, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
+        panel.Children.Add(status);
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var dialog = new Window
+        {
+            Title = "Advanced model settings",
+            Width = 520,
+            Height = 700,
+            MinHeight = 560,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = this.FindResource("MainSurfaceBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("MainTextBrush") as global::Avalonia.Media.IBrush,
+            Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto }
+        };
+        var reset = new Button { Content = "Reset all to model defaults" };
+        reset.Click += (_, _) =>
+        {
+            viewModel.SetSamplingSettings(null, null, null, null, null, null);
+            dialog.Close();
+        };
+        buttons.Children.Add(reset);
+        buttons.Children.Add(new Button { Content = "Cancel", IsCancel = true });
+        var save = new Button { Content = "Save", IsDefault = true };
+        save.Click += (_, _) =>
+        {
+            if (!TryReadDouble(fields["temperature"], 0, 2, out var temperature) ||
+                !TryReadDouble(fields["top_p"], 0, 1, out var topP) ||
+                !TryReadInt(fields["top_k"], 1, 1000, out var topK) ||
+                !TryReadDouble(fields["presence_penalty"], 0, 2, out var presencePenalty) ||
+                !TryReadDouble(fields["repeat_penalty"], 0, 2, out var repeatPenalty) ||
+                !TryReadInt(fields["num_predict"], 1, 131072, out var numPredict))
+            {
+                status.Text = "Enter a number within the range shown for each setting, or leave it blank to use the model default.";
+                return;
+            }
+            viewModel.SetSamplingSettings(temperature, topP, topK, presencePenalty, repeatPenalty, numPredict);
+            dialog.Close();
+        };
+        buttons.Children.Add(save);
+        panel.Children.Add(buttons);
+        await dialog.ShowDialog(this);
+
+        static TextBox SettingField(string hint, object? value) => new()
+        {
+            Watermark = $"Model default · {hint}",
+            Text = value is null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture),
+            MinWidth = 280
+        };
+
+        static bool TryReadDouble(TextBox field, double min, double max, out double? value)
+        {
+            var text = field.Text?.Trim();
+            if (string.IsNullOrEmpty(text)) { value = null; return true; }
+            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) && double.IsFinite(parsed) && parsed >= min && parsed <= max)
+            { value = parsed; return true; }
+            value = null;
+            return false;
+        }
+
+        static bool TryReadInt(TextBox field, int min, int max, out int? value)
+        {
+            var text = field.Text?.Trim();
+            if (string.IsNullOrEmpty(text)) { value = null; return true; }
+            if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed >= min && parsed <= max)
+            { value = parsed; return true; }
+            value = null;
+            return false;
+        }
     }
 
     private async void LoadedModels_Click(object? sender, RoutedEventArgs e)
