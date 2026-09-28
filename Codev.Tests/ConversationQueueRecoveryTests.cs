@@ -22,6 +22,7 @@ public sealed class ConversationQueueRecoveryTests
         Assert.Equal(0.2, restored[0].Turn.Temperature);
         Assert.Equal(["a.cs"], restored[0].Turn.ContextFiles);
         Assert.Equal(CloudModelProviders.OpenAI, restored[1].Turn.Provider);
+        Assert.True(restored[1].Turn.IsPlanMode);
         Assert.True(restored[1].Turn.IncludeProjectContext);
         Assert.Single(early.PendingTurns);
         Assert.Empty(invalid.PendingTurns);

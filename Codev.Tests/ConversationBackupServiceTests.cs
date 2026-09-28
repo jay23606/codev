@@ -17,6 +17,7 @@ public sealed class ConversationBackupServiceTests
             Draft = "an unsent prompt draft",
             Model = "qwen3-coder:30b",
             Provider = CloudModelProviders.OpenAI,
+            IsPlanMode = true,
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
             PendingRequestCount = 3,
@@ -31,6 +32,7 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(source.Draft, imported.Draft);
         Assert.Equal(source.Model, imported.Model);
         Assert.Equal(source.Provider, imported.Provider);
+        Assert.True(imported.IsPlanMode);
         Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);

@@ -15,6 +15,7 @@ public static class ConversationBackupService
             Draft = conversation.Draft,
             Model = conversation.Model,
             Provider = conversation.Provider,
+            IsPlanMode = conversation.IsPlanMode,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             NumCtx = conversation.NumCtx,
             Temperature = conversation.Temperature,

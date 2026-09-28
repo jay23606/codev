@@ -69,6 +69,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ResumeQueueCommand { get; }
     public ICommand CancelQueuedCommand { get; }
     public ICommand ToggleThemeCommand { get; }
+    public ICommand TogglePlanModeCommand { get; }
     public ICommand RemoveContextFileCommand { get; }
     public ICommand ClearContextFilesCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
@@ -83,6 +84,7 @@ public sealed class MainViewModel : ViewModelBase
         ArchiveConversationCommand = new RelayCommand(_ => ArchiveConversation(), _ => ActiveConversation is not null);
         ToggleArchiveViewCommand = new RelayCommand(_ => { ShowArchived = !ShowArchived; RebuildLists(); });
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
+        TogglePlanModeCommand = new RelayCommand(_ => TogglePlanMode(), _ => ActiveConversation is not null && !IsGenerating);
         RemoveContextFileCommand = new RelayCommand(value => { if (value is string path) RemoveContextFile(path); });
         ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
         SendCommand = new RelayCommand(_ =>
@@ -126,6 +128,8 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IsLocalModel));
                 OnPropertyChanged(nameof(IsHostedModel));
                 OnPropertyChanged(nameof(ProviderStatusLabel));
+                OnPropertyChanged(nameof(IsPlanMode));
+                OnPropertyChanged(nameof(PlanModeLabel));
                 OnPropertyChanged(nameof(IncludeProjectContextForHosted));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
@@ -133,6 +137,7 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)TogglePinCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ArchiveConversationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)CancelQueuedCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -154,7 +159,9 @@ public sealed class MainViewModel : ViewModelBase
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Count > 0;
     public bool IsModelPickerPlaceholderVisible => !HasModels;
-    public string ProviderStatusLabel => IsLocalModel ? "Chat · local Ollama streaming" : $"Chat · {Provider} hosted model";
+    public string ProviderStatusLabel => $"{(IsPlanMode ? "Plan" : "Chat")} · {(IsLocalModel ? "local Ollama streaming" : $"{Provider} hosted model")}";
+    public bool IsPlanMode => ActiveConversation?.IsPlanMode ?? false;
+    public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading local models…" :
         ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase) ? "No local models installed" : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
@@ -172,6 +179,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(QueueStatusLabel));
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)StopGenerationCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -206,6 +214,16 @@ public sealed class MainViewModel : ViewModelBase
     public string Provider => ActiveConversation?.Provider ?? _provider;
     public bool IsLocalModel => Provider == "ollama";
     public bool IsHostedModel => Codev.CloudModelProviders.IsCloud(Provider);
+
+    private void TogglePlanMode()
+    {
+        if (ActiveConversation is not { } conversation || IsGenerating) return;
+        conversation.IsPlanMode = !conversation.IsPlanMode;
+        OnPropertyChanged(nameof(IsPlanMode));
+        OnPropertyChanged(nameof(PlanModeLabel));
+        OnPropertyChanged(nameof(ProviderStatusLabel));
+        Persist();
+    }
     public bool CloudRequestsEnabled => _cloudRequestsEnabled;
     public bool IncludeProjectContextForHosted
     {
@@ -291,6 +309,7 @@ public sealed class MainViewModel : ViewModelBase
             Title = "New conversation",
             Model = Model,
             Provider = Provider,
+            IsPlanMode = IsPlanMode,
             NumCtx = ContextSize,
             UpdatedAt = DateTimeOffset.Now
         };
@@ -397,6 +416,8 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasContextActionStatus));
         OnPropertyChanged(nameof(HasSelectedContextFiles));
         OnPropertyChanged(nameof(IncludeProjectContextForHosted));
+        OnPropertyChanged(nameof(IsPlanMode));
+        OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(ContextLabel));
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
@@ -564,7 +585,7 @@ public sealed class MainViewModel : ViewModelBase
         Messages.Add(conversation.Messages[^1]);
         var assistantIndex = conversation.Messages.Count - 1;
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
-            false, false, conversation.ProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
+            false, conversation.IsPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
             conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
@@ -633,9 +654,7 @@ public sealed class MainViewModel : ViewModelBase
         await _persistenceTask;
         try
         {
-            var systemPrompt = savedTurn.Provider == "ollama"
-                ? "You are Codev, a practical coding assistant running locally. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only."
-                : "You are Codev, a practical coding assistant. Be concise, focus on useful implementation details, and do not claim to have changed files or run commands. Ordinary chat is read-only; you do not have tools to edit files or run commands.";
+            var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsPlanMode, savedTurn.Provider == "ollama");
             var priorMessages = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
                 .Prepend(new Codev.ChatMessage("system", systemPrompt))

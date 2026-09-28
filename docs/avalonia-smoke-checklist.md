@@ -12,6 +12,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [x] Attach a disposable project folder, select a supported source file, and verify the local response uses its bounded read-only context.
 - [ ] Clear selection and verify the bounded default file set is used; confirm `.env`, unsupported files, and paths outside the project are excluded in the UI flow.
 - [x] In a new disposable conversation, send a short prompt; verify streaming, right-aligned user bubble, left-aligned assistant response without role labels or Copy buttons, and selectable Markdown.
+- [ ] Toggle Plan mode; verify it is visibly selected, persists after restart, produces a read-only ordered plan, and is captured per queued turn.
 - [ ] Send a follow-up while a response is running; verify it queues, the first answer completes, and the follow-up then runs.
 - [ ] Start another response, queue a follow-up, close and relaunch the app, verify the turn is paused, then explicitly resume it.
 - [ ] Queue a follow-up and cancel it before it starts; verify it is labeled canceled and does not run.
@@ -29,7 +30,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 
 ## Not yet supported in Avalonia
 
-Project file browsing and previews, Plan and Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Keep the Windows WPF release checklist separate until those workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
+Project file browsing and previews, Code task modes, reviewed edits, command approval, Git, endpoint settings, and WPF feature-parity workflows are not covered by this checklist. Avalonia Plan mode is implemented but still needs the manual interaction check above. Keep the Windows WPF release checklist separate until those workflows are ported. Conversation rename, archive/restore, and permanent deletion are implemented in Avalonia but still need manual interaction verification.
 
 ## Run record
 

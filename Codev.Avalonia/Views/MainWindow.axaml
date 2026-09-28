@@ -116,7 +116,7 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
@@ -136,9 +136,10 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Grid.Column="3" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
-                    <Button Grid.Column="4" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
-                    <Button Grid.Column="5" Classes="soft" Content="⇩ Export" Click="ExportConversation_Click" ToolTip.Tip="Save this conversation as a Markdown file" />
+                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="Plan mode gives read-only implementation plans and cannot edit files or run commands" />
+                    <Button Grid.Column="4" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
+                    <Button Grid.Column="5" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
+                    <Button Grid.Column="6" Classes="soft" Content="⇩ Export" Click="ExportConversation_Click" ToolTip.Tip="Save this conversation as a Markdown file" />
                 </Grid>
             </Border>
             <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">

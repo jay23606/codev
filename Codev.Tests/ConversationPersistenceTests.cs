@@ -13,6 +13,7 @@ public sealed class ConversationPersistenceTests
             Draft = "unsent prompt",
             Model = "claude-sonnet-test",
             Provider = CloudModelProviders.Anthropic,
+            IsPlanMode = true,
             IncludeProjectContextForHosted = true,
             Messages = [new("user", "before")],
             ContextFiles = ["src/a.cs"],
@@ -28,6 +29,7 @@ public sealed class ConversationPersistenceTests
 
         Assert.Equal("Snapshot", snapshot.Title);
         Assert.Equal(CloudModelProviders.Anthropic, snapshot.Provider);
+        Assert.True(snapshot.IsPlanMode);
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.Equal("unsent prompt", snapshot.Draft);
         Assert.Equal("before", snapshot.Messages[0].Content);
