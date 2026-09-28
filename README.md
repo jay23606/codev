@@ -25,6 +25,7 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 - Assistant Markdown formatting with scrollable tables, clickable HTTP(S) links, and fenced code blocks with syntax coloring and a Copy button
 - Copy any message from its context menu, including while another response is running
 - Read-only Plan mode, explicit Code task mode, Stop control that retains partial output, and current agent-tool status
+- Code tasks stop after eight tool rounds and ask before a tool call repeats with identical arguments three times in a row
 - Project switcher with pinned projects, project-specific instructions and reusable knowledge notes, and conversations scoped to each project
 - Optional personal instructions apply across chats, plans, and code tasks; they are stored locally and included with requests to the configured Ollama server
 - Optional root `AGENTS.md` is read through project-bounded file access and included as capped project guidance in local requests

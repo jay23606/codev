@@ -1879,6 +1879,7 @@ public partial class MainWindow : Window
             Tool("write_file", "Propose the complete replacement contents of one existing project file. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("run_command", $"Request approval to run one {shellName} command in the project folder. Use {shellName} command syntax. Every invocation requires approval.", new { command = new { type = "string" } }, ["command"])
         };
+        var repeatedCalls = new RepeatedToolCallGuard();
         for (var round = 0; round < 8; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1917,6 +1918,20 @@ public partial class MainWindow : Window
                 var name = function.GetProperty("name").GetString() ?? "";
                 SetAgentStatus(conversation, $"Code task · {name.Replace('_', ' ')}");
                 var arguments = function.TryGetProperty("arguments", out var args) ? args : default;
+                if (repeatedCalls.Record(name, arguments) >= RepeatedToolCallGuard.ConfirmationThreshold)
+                {
+                    var decision = MessageBox.Show(this,
+                        $"The model has requested the same '{name.Replace('_', ' ')}' operation {RepeatedToolCallGuard.ConfirmationThreshold} times in a row with identical arguments. Continue with this call once? Choose No to stop the code task.",
+                        "Repeated tool call detected", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                    if (decision != MessageBoxResult.Yes)
+                    {
+                        assistantText.Append("\n\nCode task stopped because the model repeated the same tool call. You can send a follow-up with more guidance.");
+                        conversation.Messages[assistantIndex] = new ChatMessage("assistant", assistantText.ToString());
+                        RenderAgentTranscript(conversation);
+                        return;
+                    }
+                    repeatedCalls.AllowOneMore();
+                }
                 var result = await ExecuteAgentToolAsync(name, arguments, service, conversation, cancellationToken);
                 history.Add(new OllamaMessage("tool", result, null, name));
                 assistantText.Append("\n\n").Append("Tool ").Append(name).Append(": ").Append(result.Length > 1400 ? result[..1400] + "… [truncated in transcript]" : result);
