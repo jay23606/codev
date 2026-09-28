@@ -54,6 +54,7 @@ public sealed class MainViewModel : ViewModelBase
     private CancellationTokenSource? _modelLoadCancellation;
     private long _modelSelectionRevision;
     private bool _isLoadingModels;
+    private string _contextEstimateLabel = "No project files will be included.";
 
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
@@ -151,6 +152,7 @@ public sealed class MainViewModel : ViewModelBase
     public string ContextLabel => !HasProject ? "No project context" : SelectedContextFiles.Count > 0
         ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included"
         : "Project attached · bounded source files included automatically";
+    public string ContextEstimateLabel => _contextEstimateLabel;
     public string ContextActionStatus { get; private set; } = "";
     public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
@@ -207,6 +209,7 @@ public sealed class MainViewModel : ViewModelBase
             else { ActiveConversation.Model = value; ActiveConversation.Provider = "ollama"; OnPropertyChanged(); OnPropertyChanged(nameof(Provider)); OnPropertyChanged(nameof(IsLocalModel)); OnPropertyChanged(nameof(ProviderStatusLabel)); OnPropertyChanged(nameof(SelectedModel)); Persist(); }
             _provider = "ollama";
             RefreshContextSizes(value);
+            RefreshContextEstimate();
             _ = WarmModelAsync(value);
         }
     }
@@ -233,6 +236,7 @@ public sealed class MainViewModel : ViewModelBase
             if (ActiveConversation is not { } conversation || conversation.IncludeProjectContextForHosted == value) return;
             conversation.IncludeProjectContextForHosted = value;
             OnPropertyChanged();
+            RefreshContextEstimate();
             Persist();
         }
     }
@@ -275,6 +279,7 @@ public sealed class MainViewModel : ViewModelBase
             Persist();
         }
         RefreshContextSizes(choice.Name);
+        RefreshContextEstimate();
         if (choice.Provider == "ollama") _ = WarmModelAsync(choice.Name);
         else ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(choice.Provider)
             ? $"Hosted model selected · {choice.DisplayName}"
@@ -411,6 +416,7 @@ public sealed class MainViewModel : ViewModelBase
         Messages.Clear();
         foreach (var message in conversation.Messages) Messages.Add(message);
         Reset(SelectedContextFiles, conversation.ContextFiles);
+        RefreshContextEstimate();
         ContextActionStatus = "";
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
@@ -442,6 +448,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ProjectLabel));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(ContextLabel));
+        RefreshContextEstimate();
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
         OnPropertyChanged(nameof(HasSelectedContextFiles));
@@ -505,6 +512,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
         OnPropertyChanged(nameof(ContextLabel));
+        RefreshContextEstimate();
         OnPropertyChanged(nameof(HasSelectedContextFiles));
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
         Persist();
@@ -542,6 +550,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
         OnPropertyChanged(nameof(ContextLabel));
+        RefreshContextEstimate();
         OnPropertyChanged(nameof(HasSelectedContextFiles));
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
         Persist();
@@ -556,9 +565,36 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ContextActionStatus));
         OnPropertyChanged(nameof(HasContextActionStatus));
         OnPropertyChanged(nameof(ContextLabel));
+        RefreshContextEstimate();
         OnPropertyChanged(nameof(HasSelectedContextFiles));
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
         Persist();
+    }
+
+    private void RefreshContextEstimate()
+    {
+        var conversation = ActiveConversation;
+        var projectAvailable = conversation?.ProjectPath is { Length: > 0 } path && Directory.Exists(path);
+        var hostedProvider = conversation is not null && Codev.CloudModelProviders.IsCloud(conversation.Provider);
+        var includeHostedContext = conversation?.IncludeProjectContextForHosted == true;
+        var estimatedTokens = 0;
+        if (projectAvailable && (!hostedProvider || includeHostedContext))
+        {
+            try
+            {
+                estimatedTokens = new Codev.WorkspaceFileService(conversation!.ProjectPath!)
+                    .EstimateContextTokens(conversation.ContextFiles);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            {
+                _contextEstimateLabel = "Project context estimate unavailable.";
+                OnPropertyChanged(nameof(ContextEstimateLabel));
+                return;
+            }
+        }
+        _contextEstimateLabel = Codev.ProjectContextEstimateLabel.Format(projectAvailable, hostedProvider,
+            includeHostedContext, estimatedTokens);
+        OnPropertyChanged(nameof(ContextEstimateLabel));
     }
 
     private void TogglePin()

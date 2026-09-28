@@ -174,7 +174,7 @@
                                 </Border>
                             </Popup>
                         </Grid>
-                        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <Button Classes="soft" Content="Open project" Padding="8,4" FontSize="10" Click="AttachProject_Click" ToolTip.Tip="Attach a local folder as read-only context for this conversation" />
                                 <Button Classes="soft" Content="Browse files" Padding="8,4" FontSize="10" IsEnabled="{Binding HasProject}" Click="BrowseProjectFiles_Click" ToolTip.Tip="Filter and preview supported project text files, then add one to chat context" />
@@ -193,7 +193,8 @@
                                     </Border>
                                 </DataTemplate></ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ContextEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Orientation="Horizontal" Spacing="6">
