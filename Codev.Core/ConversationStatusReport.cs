@@ -4,7 +4,8 @@ namespace Codev;
 public static class ConversationStatusReport
 {
     public static string Build(Conversation conversation, bool isGenerating, int queuedTurns, bool queuePaused,
-        bool hostedRequestsEnabled, bool projectFolderTrusted = false, string? projectFolderTrustRoot = null)
+        bool hostedRequestsEnabled, bool projectFolderTrusted = false, string? projectFolderTrustRoot = null,
+        string? ollamaEndpoint = null, bool ollamaEndpointIsLocal = true)
     {
         ArgumentNullException.ThrowIfNull(conversation);
 
@@ -12,7 +13,7 @@ public static class ConversationStatusReport
         {
             CloudModelProviders.OpenAI => "OpenAI API",
             CloudModelProviders.Anthropic => "Anthropic API",
-            _ => "Ollama (local)"
+            _ => ollamaEndpointIsLocal ? "Ollama (local)" : $"Ollama (remote · {ollamaEndpoint})"
         };
         var context = CloudModelProviders.IsCloud(conversation.Provider)
             ? "managed by provider"

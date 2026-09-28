@@ -99,6 +99,7 @@
                 </ScrollViewer>
                 <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
                     <Button Classes="nav" Content="☁  Connect hosted models…" Click="ConfigureCloudProvider_Click" ToolTip.Tip="Connect OpenAI or Anthropic using an API key; cloud requests require an explicit acknowledgement" />
+                    <Button Classes="nav" Content="⚙  Settings…" Click="Settings_Click" ToolTip.Tip="Configure the Ollama server endpoint" />
                     <Button Classes="nav" Content="⇩  Export all chats…" Click="ExportBackup_Click" ToolTip.Tip="Save all conversations as a portable local JSON backup" />
                     <Button Classes="nav" Content="⇧  Import chats…" Click="ImportBackup_Click" ToolTip.Tip="Add conversations from a Codev JSON backup without replacing existing history" />
                     <Button Classes="nav" Content="{Binding ThemeLabel}" Command="{Binding ToggleThemeCommand}" />

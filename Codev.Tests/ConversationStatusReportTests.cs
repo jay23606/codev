@@ -69,6 +69,15 @@ public sealed class ConversationStatusReportTests
     }
 
     [Fact]
+    public void Remote_ollama_status_does_not_claim_requests_stay_local()
+    {
+        var report = ConversationStatusReport.Build(new Conversation { Model = "qwen3-coder:30b" }, false, 0, false, false,
+            ollamaEndpoint: "https://ollama.example/api", ollamaEndpointIsLocal: false);
+
+        Assert.Contains("Model: Ollama (remote · https://ollama.example/api) · qwen3-coder:30b", report);
+    }
+
+    [Fact]
     public void Code_task_status_reports_approval_gated_tools()
     {
         var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true, ProjectPath = @"C:\work\repo" }, false, 0, false, false, projectFolderTrusted: true);

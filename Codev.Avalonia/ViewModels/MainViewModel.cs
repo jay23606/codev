@@ -39,12 +39,15 @@ public sealed class MainViewModel : ViewModelBase
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private Task _persistenceTask = Task.CompletedTask;
-    private Task _themePersistenceTask = Task.CompletedTask;
+    private Task _settingsPersistenceTask = Task.CompletedTask;
+    private readonly SemaphoreSlim _settingsPersistGate = new(1, 1);
+    private long _settingsRevision;
     private Task _activeConversationPersistenceTask = Task.CompletedTask;
     private readonly SemaphoreSlim _activeConversationPersistGate = new(1, 1);
     private long _persistenceRevision;
     private long _activeConversationRevision;
-    private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly HttpClient _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+    private Uri _ollamaEndpoint = Codev.OllamaEndpoint.Default;
     private readonly Dictionary<string, string> _cloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
@@ -112,7 +115,7 @@ public sealed class MainViewModel : ViewModelBase
         RestoreQueuedTurns();
         var startupConversation = Codev.ConversationStartupSelection.Choose(_conversations, LoadLastActiveConversationId());
         if (startupConversation is not null) SelectConversation(startupConversation);
-        LoadTheme();
+        LoadSettings();
         _ = LoadModelsAsync();
     }
 
@@ -178,21 +181,24 @@ public sealed class MainViewModel : ViewModelBase
     public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
     public string ThemeLabel => _isDarkTheme ? "☼  Switch to light mode" : "☾  Switch to dark mode";
+    public string OllamaEndpointDisplay => _ollamaEndpoint.ToString().TrimEnd('/');
     public string SendButtonLabel => IsGenerating && string.IsNullOrWhiteSpace(Draft) ? "■" : "↑";
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Count > 0;
     public bool IsModelPickerPlaceholderVisible => !HasModels;
-    public string ProviderStatusLabel => $"{(IsCodeTask ? "Code task" : IsPlanMode ? "Plan" : "Chat")} · {(IsLocalModel ? "local Ollama" : $"{Provider} hosted model")}";
+    public string ProviderStatusLabel => $"{(IsCodeTask ? "Code task" : IsPlanMode ? "Plan" : "Chat")} · {(IsLocalModel ? (Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "local Ollama" : "remote Ollama") : $"{Provider} hosted model")}";
     public bool IsPlanMode => ActiveConversation?.IsPlanMode ?? false;
     public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
     public bool IsCodeTask => ActiveConversation?.IsCodeTask ?? false;
     public string CodeTaskLabel => IsCodeTask ? "Code task on" : "Code task";
-    public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (IsLocalModel && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted && !IsPlanMode));
+    public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (IsLocalModel && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) && Models.Any(choice => choice.Provider == "ollama" && RemoveLatestTag(choice.Name).Equals(RemoveLatestTag(Model), StringComparison.OrdinalIgnoreCase)) && HasProject && IsProjectTrusted && !IsPlanMode));
     public Func<string, string, string, bool, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<string, string, string, Task<bool>>? ApproveProjectCommandAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
-    public string ModelPickerPlaceholder => _isLoadingModels ? "Loading local models…" :
-        ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase) ? "No local models installed" : "Ollama unavailable";
+    public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
+        ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase)
+            ? Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "No local models installed" : "No models available from server"
+            : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
     public string QueueStatusLabel => HasQueuedTurns
         ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · resume when ready" : $"{_requestQueue.Count} request(s) queued"
@@ -269,7 +275,7 @@ public sealed class MainViewModel : ViewModelBase
         if (conversation.IsCodeTask) conversation.IsCodeTask = false;
         else if (!CanToggleCodeTaskMode)
         {
-            ReportContextActionStatus("Code task mode requires a trusted project folder and a local Ollama model. Trust the attached folder first.");
+            ReportContextActionStatus("Code task mode requires a trusted project folder and a loopback Ollama endpoint. Trust the attached folder and use local Ollama first.");
             return;
         }
         else { conversation.IsCodeTask = true; conversation.IsPlanMode = false; }
@@ -768,9 +774,9 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("Connect the selected provider and acknowledge that prompts and selected project context will be sent off-device before sending.");
             return;
         }
-        if (conversation.IsCodeTask && (conversation.Provider != "ollama" || string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath)))
+        if (conversation.IsCodeTask && (conversation.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) || string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath)))
         {
-            ReportContextActionStatus("Code task was not queued: it requires a local Ollama model and a currently trusted project folder.");
+            ReportContextActionStatus("Code task was not queued: it requires a loopback Ollama endpoint and a currently trusted project folder.");
             return;
         }
         if (conversation.Title == "New conversation") conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
@@ -817,7 +823,7 @@ public sealed class MainViewModel : ViewModelBase
         var assistantMessage = new Codev.ChatMessage("assistant", Codev.ConversationStatusReport.Build(
             conversation, ReferenceEquals(_generationConversation, conversation) && IsGenerating,
             conversation.PendingRequestCount, _queuePaused, _cloudRequestsEnabled,
-            trustRoot is not null, trustRoot));
+            trustRoot is not null, trustRoot, OllamaEndpointDisplay, Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint)));
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(assistantMessage);
         conversation.Draft = "";
@@ -899,7 +905,7 @@ public sealed class MainViewModel : ViewModelBase
             if (turn.Temperature is { } temperature) options["temperature"] = temperature;
             if (options.Count > 0) payload["options"] = options;
             using var request = new HttpRequestMessage(HttpMethod.Post,
-                Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/chat")) { Content = JsonContent.Create(payload) };
+                Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(payload) };
             using var response = await _http.SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
@@ -993,8 +999,8 @@ public sealed class MainViewModel : ViewModelBase
         await _persistenceTask;
         try
         {
-            if (savedTurn.IsCodeTask && savedTurn.Provider != "ollama")
-                throw new InvalidOperationException("Code task turns can only run through local Ollama. Re-select a local model and queue the task again.");
+            if (savedTurn.IsCodeTask && (savedTurn.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint)))
+                throw new InvalidOperationException("Code task turns can only run through a loopback Ollama endpoint. Switch to local Ollama before resuming this task.");
             var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama");
             var priorMessages = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
@@ -1029,7 +1035,7 @@ public sealed class MainViewModel : ViewModelBase
                 if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
                 if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
                 if (options.Count > 0) payload["options"] = options;
-                using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/chat")) { Content = JsonContent.Create(payload) };
+                using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(payload) };
                 using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token.Token);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -1169,29 +1175,71 @@ public sealed class MainViewModel : ViewModelBase
         _isDarkTheme = !_isDarkTheme;
         if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
         OnPropertyChanged(nameof(ThemeLabel));
-        PersistTheme();
+        PersistSettings();
     }
 
-    private void LoadTheme()
+    private void LoadSettings()
     {
         try
         {
             if (File.Exists(SettingsPath))
-                _isDarkTheme = !string.Equals(JsonSerializer.Deserialize<string>(File.ReadAllText(SettingsPath)), "light", StringComparison.OrdinalIgnoreCase);
+            {
+                var settings = Codev.AvaloniaUiSettings.Deserialize(File.ReadAllText(SettingsPath));
+                _isDarkTheme = !string.Equals(settings.Theme, "light", StringComparison.OrdinalIgnoreCase);
+                if (Codev.OllamaEndpoint.TryParse(settings.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { _isDarkTheme = true; }
         if (Application.Current is { } app) app.RequestedThemeVariant = _isDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
         OnPropertyChanged(nameof(ThemeLabel));
+        OnPropertyChanged(nameof(OllamaEndpointDisplay));
     }
 
-    private void PersistTheme()
+    private void PersistSettings()
     {
-        var theme = _isDarkTheme ? "dark" : "light";
-        _themePersistenceTask = Task.Run(async () =>
+        var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString());
+        var revision = Interlocked.Increment(ref _settingsRevision);
+        _settingsPersistenceTask = Task.Run(async () =>
         {
-            try { await Codev.AtomicTextFile.WriteAsync(SettingsPath, JsonSerializer.Serialize(theme)).ConfigureAwait(false); }
+            await _settingsPersistGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (revision == Interlocked.Read(ref _settingsRevision))
+                    await Codev.AtomicTextFile.WriteAsync(SettingsPath, Codev.AvaloniaUiSettings.Serialize(settings)).ConfigureAwait(false);
+            }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            finally { _settingsPersistGate.Release(); }
         });
+    }
+
+    public async Task<bool> SetOllamaEndpointAsync(string value)
+    {
+        if (!Codev.OllamaEndpoint.TryParse(value, out var endpoint, out var error))
+        {
+            ReportContextActionStatus(error);
+            return false;
+        }
+        if (_ollamaEndpoint == endpoint) return true;
+        if (IsGenerating || HasQueuedTurns)
+        {
+            ConnectionStatus = "Wait for the current response and queued turns to finish before changing the Ollama endpoint.";
+            return false;
+        }
+        if (_isLoadingModels)
+        {
+            ConnectionStatus = "Wait for local model discovery to finish before changing the Ollama endpoint.";
+            return false;
+        }
+        Interlocked.Increment(ref _modelSelectionRevision);
+        _modelLoadCancellation?.Cancel();
+        _ollamaEndpoint = endpoint;
+        OnPropertyChanged(nameof(OllamaEndpointDisplay));
+        OnPropertyChanged(nameof(ProviderStatusLabel));
+        OnPropertyChanged(nameof(CanToggleCodeTaskMode));
+        ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
+        PersistSettings();
+        await LoadModelsAsync();
+        return true;
     }
 
     public async Task LoadModelsAsync()
@@ -1201,7 +1249,8 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ModelPickerPlaceholder));
         try
         {
-            var response = await _http.GetFromJsonAsync<OllamaTags>(Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/tags"));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var response = await _http.GetFromJsonAsync<OllamaTags>(Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/tags"), timeout.Token);
             var installed = response?.Models?.Select(model => model.Name)
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
@@ -1241,19 +1290,21 @@ public sealed class MainViewModel : ViewModelBase
                 RefreshContextSizes(Model);
                 if (Provider != "ollama")
                     ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Provider) ? $"Hosted model selected · {Model}" : $"{Provider} model selected · connect its API key to send";
-                else if (allChoices.Length == 0) ConnectionStatus = "Ollama connected · no local models installed";
+                else if (allChoices.Length == 0) ConnectionStatus = $"Ollama connected · no models installed{(Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "" : " on remote server")}";
                 else
                 {
-                    ConnectionStatus = $"Ollama connected · {allChoices.Length} local model(s)";
+                    ConnectionStatus = $"Ollama connected · {allChoices.Length} model(s) · {(Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "local" : "remote")}";
                     _ = WarmModelAsync(Model);
                 }
             });
         }
-        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or OperationCanceledException)
         {
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (Provider == "ollama") ConnectionStatus = "Ollama is not reachable at 127.0.0.1:11434";
+                if (Provider == "ollama") ConnectionStatus = ex is OperationCanceledException
+                    ? $"Ollama did not respond within 20 seconds at {_ollamaEndpoint.GetLeftPart(UriPartial.Authority)}"
+                    : $"Ollama is not reachable at {_ollamaEndpoint.GetLeftPart(UriPartial.Authority)}";
             });
         }
         finally
@@ -1359,7 +1410,7 @@ public sealed class MainViewModel : ViewModelBase
         Persist();
         try { await _persistenceTask; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        try { await _themePersistenceTask; }
+        try { await _settingsPersistenceTask; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         try { await _activeConversationPersistenceTask; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
@@ -1472,7 +1523,7 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             var payload = new Dictionary<string, object> { ["model"] = model, ["keep_alive"] = "5m", ["stream"] = true };
-            using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/generate"))
+            using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/generate"))
             {
                 Content = JsonContent.Create(payload)
             };
@@ -1541,7 +1592,7 @@ public sealed class MainViewModel : ViewModelBase
     private async Task<bool> IsModelLoadedAsync(string model, CancellationToken cancellationToken)
     {
         var running = await _http.GetFromJsonAsync<OllamaRunningModels>(
-            Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/ps"), cancellationToken);
+            Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/ps"), cancellationToken);
         return running?.Models?.Any(item => !string.IsNullOrWhiteSpace(item.Name) &&
             RemoveLatestTag(item.Name).Equals(RemoveLatestTag(model), StringComparison.OrdinalIgnoreCase)) == true;
     }

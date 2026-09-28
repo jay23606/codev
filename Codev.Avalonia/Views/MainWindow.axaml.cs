@@ -194,6 +194,72 @@ public partial class MainWindow : Window
         return await dialog.ShowDialog<bool>(this);
     }
 
+    private async void Settings_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        var endpoint = new TextBox { Text = viewModel.OllamaEndpointDisplay, MinWidth = 380 };
+        var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var save = new Button { Content = "Save and reconnect", MinWidth = 150 };
+        var close = new Button { Content = "Close", MinWidth = 80 };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { close, save } };
+        var dialog = new Window
+        {
+            Title = "Settings",
+            Width = 500,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock { Text = "Ollama server URL" },
+                    endpoint,
+                    new TextBlock { Text = "Default: http://127.0.0.1:11434. A non-local server receives prompts and any project context you choose to include. Credentials in the URL are not supported.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxWidth = 440 },
+                    status,
+                    buttons
+                }
+            }
+        };
+        close.Click += (_, _) => dialog.Close();
+        save.Click += async (_, _) =>
+        {
+            if (!Codev.OllamaEndpoint.TryParse(endpoint.Text, out var parsed, out var error))
+            {
+                status.Text = error;
+                return;
+            }
+            if (parsed != Codev.OllamaEndpoint.Default && !Codev.OllamaEndpoint.IsLoopback(parsed) && parsed != new Uri(viewModel.OllamaEndpointDisplay + "/"))
+            {
+                var confirmation = new Window
+                {
+                    Title = "Connect to a remote Ollama server?",
+                    Width = 460,
+                    SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children = { new TextBlock { Text = $"Requests, prompts, and selected project context will be sent to:\n\n{parsed.GetLeftPart(UriPartial.Authority)}\n\nContinue only if you trust this server.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap } } }
+                };
+                var choices = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+                var cancel = new Button { Content = "Cancel" };
+                var connect = new Button { Content = "Connect" };
+                cancel.Click += (_, _) => confirmation.Close(false);
+                connect.Click += (_, _) => confirmation.Close(true);
+                choices.Children.Add(cancel);
+                choices.Children.Add(connect);
+                ((StackPanel)confirmation.Content!).Children.Add(choices);
+                if (await confirmation.ShowDialog<bool>(dialog) != true) return;
+            }
+            save.IsEnabled = false;
+            var connected = await viewModel.SetOllamaEndpointAsync(endpoint.Text ?? "");
+            status.Text = viewModel.ConnectionStatus;
+            save.IsEnabled = true;
+            if (connected) dialog.Close();
+        };
+        await dialog.ShowDialog(this);
+    }
+
     private async void ConfigureCloudProvider_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
