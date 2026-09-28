@@ -141,3 +141,9 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Edit the suggestion and confirm the normal staged-diff review and explicit commit confirmation still run; reject or cancel and verify no commit is created.
 - Change the staged tree while drafting from another process and confirm Codev discards the stale suggestion with a clear message; switch to a hosted provider or an untrusted project and confirm the diff is never sent remotely.
 - Run `/pr-description` against a local base branch and verify the title and description appear as selectable text, the Testing section is honest, and no PR is created. Switch to hosted provider or untrusted project and confirm the branch diff is never sent remotely.
+
+## WPF task checklist parity
+
+- In an Ollama Code task, ask for a multi-step change and verify the model creates a visible checklist; confirm checklist items are re-sent on the next task request.
+- Open **Checklist**, edit text and status, add/remove steps, and move steps up/down; verify persistence after restart and that an existing checklist remains visible in Plan mode.
+- Try invalid or over-limit items and verify they are rejected without losing the previous checklist; confirm the checklist control is hidden for ordinary chats with no checklist.

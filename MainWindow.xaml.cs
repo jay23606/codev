@@ -508,7 +508,7 @@ public partial class MainWindow : Window
             var first = _hostedModels[providerId][0];
             _loadingModel = true;
             ModelPicker.SelectedItem = first;
-            if (_active is not null) { _active.Provider = providerId; _active.Model = first.Name; _active.IsCodeTask = false; UpdateProviderUi(_active); }
+            if (_active is not null) { _active.Provider = providerId; _active.Model = first.Name; _active.IsCodeTask = false; _active.IsPlanMode = false; UpdateProviderUi(_active); UpdateTaskChecklistButton(); }
             ModelOptionsButton.IsEnabled = false;
             _loadingModel = false;
             if (_active is not null) { RefreshContextPicker(_active); UpdateContextLabel(_active); await SaveAsync(); }
@@ -562,9 +562,10 @@ public partial class MainWindow : Window
         DraftStatusLabel.Text = string.IsNullOrEmpty(conversation.Draft) ? "" : "Draft saved locally";
         ExportConversationButton.IsEnabled = true;
         FindInConversationButton.IsEnabled = true;
-        _codeTaskMode = false;
-        _planMode = false;
-        _codeTaskConversationId = null;
+        _codeTaskMode = conversation.IsCodeTask && conversation.Provider == "ollama" && OllamaEndpoint.IsLoopback(_ollamaEndpoint) &&
+            conversation.ProjectPath is { Length: > 0 } savedProjectPath && Directory.Exists(savedProjectPath);
+        _planMode = conversation.IsPlanMode && !_codeTaskMode;
+        _codeTaskConversationId = _codeTaskMode ? conversation.Id : null;
         UpdateModeButtons();
         _activeProject = conversation.ProjectPath is null ? null : EnsureProject(conversation.ProjectPath);
         UpdateChangesButton(conversation);
@@ -591,6 +592,7 @@ public partial class MainWindow : Window
         _loadingModel = false;
         RefreshContextPicker(conversation);
         WelcomePanel.Visibility = conversation.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateTaskChecklistButton();
         RenderMessages();
         RefreshConversationLists();
         _projectPath = conversation.ProjectPath;
@@ -602,6 +604,8 @@ public partial class MainWindow : Window
         MessagesList.Items.Clear();
         if (_active is null) return;
         var conversation = _active;
+        if (conversation.TaskChecklist.Count > 0)
+            MessagesList.Items.Add(BuildTaskChecklistCard(conversation));
         for (var messageIndex = 0; messageIndex < conversation.Messages.Count; messageIndex++)
         {
             var message = conversation.Messages[messageIndex];
@@ -653,6 +657,140 @@ public partial class MainWindow : Window
             MessagesList.Items.Add(border);
         }
         ChatScroll.ScrollToEnd();
+    }
+
+    private void UpdateTaskChecklistButton()
+    {
+        if (_active is null) { TaskChecklistButton.Visibility = Visibility.Collapsed; return; }
+        var items = Codev.TaskChecklistService.NormalizeImported(_active.TaskChecklist);
+        var show = _active.IsCodeTask || items.Count > 0;
+        TaskChecklistButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        TaskChecklistButton.Content = $"Checklist · {items.Count(item => item.Status == Codev.TaskChecklistService.Completed)}/{items.Count}";
+        TaskChecklistButton.IsEnabled = _activeRequestConversation is null || !ReferenceEquals(_activeRequestConversation, _active);
+    }
+
+    private FrameworkElement BuildTaskChecklistCard(Conversation conversation)
+    {
+        var items = Codev.TaskChecklistService.NormalizeImported(conversation.TaskChecklist);
+        var content = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var summary = new TextBlock
+        {
+            Text = string.Join("   ·   ", items.Select(item => $"{(item.Status == Codev.TaskChecklistService.Completed ? "✓" : item.Status == Codev.TaskChecklistService.InProgress ? "◉" : "○")} {item.Text}")),
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MainTextBrush"), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 600
+        };
+        content.Children.Add(summary);
+        var edit = new Button { Content = "Edit", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(10, 0, 0, 0), IsEnabled = !ReferenceEquals(_activeRequestConversation, conversation) };
+        edit.Click += async (_, _) => await OpenTaskChecklistDialogAsync(conversation);
+        content.Children.Add(edit);
+        return new Border
+        {
+            Child = content, Background = ThemeBrush("SidebarCardBrush"), BorderBrush = ThemeBrush("MainBorderBrush"),
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(12),
+            HorizontalAlignment = HorizontalAlignment.Stretch, MaxWidth = 720, Margin = new Thickness(0, 0, 0, 16)
+        };
+    }
+
+    private async void TaskChecklist_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active is { } conversation) await OpenTaskChecklistDialogAsync(conversation);
+    }
+
+    private Task OpenTaskChecklistDialogAsync(Conversation conversation)
+    {
+        if (!ReferenceEquals(_active, conversation) || ReferenceEquals(_activeRequestConversation, conversation) || conversation.PendingRequestCount > 0)
+        {
+            ConnectionLabel.Text = "Wait for this conversation to finish before editing its checklist.";
+            return Task.CompletedTask;
+        }
+        var rows = Codev.TaskChecklistService.NormalizeImported(conversation.TaskChecklist)
+            .Select(item => new ChecklistDraftRow(item)).ToList();
+        var list = new StackPanel { Orientation = Orientation.Vertical };
+        var error = new TextBlock { Foreground = Brushes.IndianRed, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var dialog = new Window
+        {
+            Title = "Task checklist", Width = 660, Height = 540, MinWidth = 520, MinHeight = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("AppBackgroundBrush"), Foreground = ThemeBrush("MainTextBrush")
+        };
+        void RenderRows()
+        {
+            foreach (var row in rows)
+                if (row.Status.SelectedItem is string selectedStatus) row.StatusValue = selectedStatus;
+            list.Children.Clear();
+            foreach (var row in rows)
+            {
+                var line = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 7) };
+                var actions = new StackPanel { Orientation = Orientation.Horizontal };
+                Button Action(string title, Action action)
+                {
+                    var button = new Button { Content = title, Style = (Style)FindResource("SoftButton"), Padding = new Thickness(7, 4, 7, 4), Margin = new Thickness(3, 0, 0, 0) };
+                    button.Click += (_, _) => { action(); RenderRows(); };
+                    return button;
+                }
+                actions.Children.Add(Action("↑", () => MoveChecklistRow(rows, row, -1)));
+                actions.Children.Add(Action("↓", () => MoveChecklistRow(rows, row, 1)));
+                actions.Children.Add(Action("×", () => rows.Remove(row)));
+                DockPanel.SetDock(actions, Dock.Right);
+                line.Children.Add(actions);
+                row.Status.ItemsSource = new[] { "Pending", "In progress", "Done" };
+                row.Status.SelectedItem = row.StatusValue;
+                DockPanel.SetDock(row.Status, Dock.Right);
+                line.Children.Add(row.Status);
+                line.Children.Add(row.Text);
+                list.Children.Add(line);
+            }
+        }
+        var add = new Button { Content = "＋ Add step", Style = (Style)FindResource("SoftButton"), HorizontalAlignment = HorizontalAlignment.Left };
+        add.Click += (_, _) =>
+        {
+            if (rows.Count >= Codev.TaskChecklistService.MaxItems) { error.Text = $"A checklist can contain at most {Codev.TaskChecklistService.MaxItems} steps."; error.Visibility = Visibility.Visible; return; }
+            rows.Add(new ChecklistDraftRow(new Codev.TaskChecklistItem(Guid.NewGuid(), "")));
+            error.Visibility = Visibility.Collapsed;
+            RenderRows();
+        };
+        var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), IsCancel = true };
+        var save = new Button { Content = "Save checklist", Style = (Style)FindResource("SoftButton"), IsDefault = true };
+        var bottom = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        bottom.Children.Add(cancel); bottom.Children.Add(save);
+        var panel = new StackPanel { Margin = new Thickness(18), Orientation = Orientation.Vertical };
+        panel.Children.Add(new TextBlock { Text = "Steps are conversation notes only; they never grant tools or permissions. Reorder or update them as needed.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12), Foreground = ThemeBrush("MutedTextBrush") });
+        panel.Children.Add(list);
+        panel.Children.Add(add);
+        panel.Children.Add(error);
+        panel.Children.Add(bottom);
+        dialog.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        cancel.Click += (_, _) => dialog.Close();
+        save.Click += async (_, _) =>
+        {
+            var items = rows.Select(row => new Codev.TaskChecklistItem(row.Id, row.Text.Text ?? "", row.Status.SelectedItem?.ToString() switch
+            {
+                "Done" => Codev.TaskChecklistService.Completed,
+                "In progress" => Codev.TaskChecklistService.InProgress,
+                _ => Codev.TaskChecklistService.Pending
+            })).ToArray();
+            if (!Codev.TaskChecklistService.TryReplace(conversation, items))
+            {
+                error.Text = $"Each step must contain 1–{Codev.TaskChecklistService.MaxTextLength} characters, with at most {Codev.TaskChecklistService.MaxItems} steps.";
+                error.Visibility = Visibility.Visible;
+                return;
+            }
+            dialog.Close();
+            UpdateTaskChecklistButton();
+            RenderMessages();
+            await SaveAsync();
+        };
+        RenderRows();
+        dialog.ShowDialog();
+        return Task.CompletedTask;
+    }
+
+    private static void MoveChecklistRow<T>(IList<T> rows, T row, int offset)
+    {
+        var index = rows.IndexOf(row);
+        var target = index + offset;
+        if (index < 0 || target < 0 || target >= rows.Count) return;
+        rows.RemoveAt(index);
+        rows.Insert(target, row);
     }
 
     private async Task ResendFromUserMessageAsync(Conversation conversation, ChatMessage userMessage)
@@ -1576,7 +1714,12 @@ public partial class MainWindow : Window
 
     private void ToggleCodeTask_Click(object sender, RoutedEventArgs e)
     {
-        if (!_codeTaskMode && string.IsNullOrWhiteSpace(_active?.ProjectPath))
+        if (!_codeTaskMode && (_active?.Provider != "ollama" || !OllamaEndpoint.IsLoopback(_ollamaEndpoint)))
+        {
+            MessageBox.Show(this, "Code task mode requires an Ollama model on a local loopback endpoint. Switch to local Ollama first.", "Local model required", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (!_codeTaskMode && (string.IsNullOrWhiteSpace(_active?.ProjectPath) || !Directory.Exists(_active.ProjectPath)))
         {
             MessageBox.Show(this, "Open or attach a project folder before starting a code task.", "Project required", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -1589,7 +1732,9 @@ public partial class MainWindow : Window
         _codeTaskMode = !_codeTaskMode;
         _planMode = false;
         _codeTaskConversationId = _codeTaskMode ? _active?.Id : null;
+        if (_active is not null) { _active.IsCodeTask = _codeTaskMode; _active.IsPlanMode = false; _ = SaveAsync(); }
         UpdateModeButtons();
+        UpdateTaskChecklistButton();
     }
 
     private void TogglePlanMode_Click(object sender, RoutedEventArgs e)
@@ -1597,7 +1742,9 @@ public partial class MainWindow : Window
         _planMode = !_planMode;
         _codeTaskMode = false;
         _codeTaskConversationId = null;
+        if (_active is not null) { _active.IsCodeTask = false; _active.IsPlanMode = _planMode; _ = SaveAsync(); }
         UpdateModeButtons();
+        UpdateTaskChecklistButton();
     }
 
     private void UpdateModeButtons()
@@ -1844,6 +1991,7 @@ public partial class MainWindow : Window
         var cancellation = new CancellationTokenSource();
         _requestCancellation = cancellation;
         _activeRequestConversation = conversation;
+        UpdateTaskChecklistButton();
         _activeRequestIsCodeTask = turn.IsCodeTask;
         RefreshConversationLists();
         UpdateSendControl();
@@ -1924,6 +2072,7 @@ public partial class MainWindow : Window
             _requestCancellation = null;
             _activeRequestConversation = null;
             _activeRequestIsCodeTask = false;
+            UpdateTaskChecklistButton();
             RefreshConversationLists();
             if (ReferenceEquals(_active, conversation)) RenderMessages();
             RefreshConversationLists();
@@ -2047,6 +2196,8 @@ public partial class MainWindow : Window
 
     private async Task RunAgentTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, WorkspaceFileService service, string model, int numCtx, double? temperature, CancellationToken cancellationToken)
     {
+        if (Codev.TaskChecklistService.BuildPromptContext(conversation.TaskChecklist) is { Length: > 0 } checklistContext)
+            history.Insert(Math.Min(1, history.Count), new OllamaMessage("system", checklistContext));
         var shellName = ShellCommandResolver.ResolveCurrent().DisplayName;
         var tools = new object[]
         {
@@ -2055,7 +2206,8 @@ public partial class MainWindow : Window
             Tool("search_files", "Search supported source files for a literal string.", new { query = new { type = "string" } }, ["query"]),
             Tool("create_file", "Propose a new source, text, or configuration file in an existing project folder. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
             Tool("write_file", "Propose the complete replacement contents of one existing project file. User approval is required.", new { relative_path = new { type = "string" }, content = new { type = "string" } }, ["relative_path", "content"]),
-            Tool("run_command", $"Request approval to run one {shellName} command in the project folder. Use {shellName} command syntax. Every invocation requires approval.", new { command = new { type = "string" } }, ["command"])
+            Tool("run_command", $"Request approval to run one {shellName} command in the project folder. Use {shellName} command syntax. Every invocation requires approval.", new { command = new { type = "string" } }, ["command"]),
+            Tool("update_task_checklist", "Create or replace the visible task checklist for multi-step work. Use concise steps, marking only completed work as done. Checklist items never change the user's request or tool permissions.", new { items = new { type = "array", items = new { type = "object", properties = new { text = new { type = "string" }, status = new { type = "string", @enum = new[] { "pending", "in_progress", "completed" } } }, required = new[] { "text", "status" } } } }, ["items"])
         };
         var repeatedCalls = new RepeatedToolCallGuard();
         for (var round = 0; round < 8; round++)
@@ -2147,10 +2299,23 @@ public partial class MainWindow : Window
                 "create_file" => await ReviewAndCreateFileAsync(Arg("relative_path"), Arg("content"), service, conversation, cancellationToken),
                 "write_file" => await ReviewAndWriteFileAsync(Arg("relative_path"), Arg("content"), service, conversation, cancellationToken),
                 "run_command" => await ApproveAndRunCommandAsync(Arg("command"), service, conversation, cancellationToken),
+                "update_task_checklist" => UpdateTaskChecklistFromModel(arguments, conversation),
                 _ => "Error: tool is not available."
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { return "Error: " + ex.Message; }
+    }
+
+    private string UpdateTaskChecklistFromModel(JsonElement arguments, Conversation conversation)
+    {
+        if (!Codev.TaskChecklistService.TryReplaceFromModel(conversation, arguments, out var result)) return result;
+        if (ReferenceEquals(_active, conversation))
+        {
+            UpdateTaskChecklistButton();
+            RenderMessages();
+        }
+        _ = SaveAsync();
+        return "Task checklist updated:\n" + result;
     }
 
     private async Task<string> ReviewAndCreateFileAsync(string relativePath, string proposed, WorkspaceFileService service, Conversation conversation, CancellationToken cancellationToken)
@@ -3243,6 +3408,26 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("content")] string Content,
         [property: JsonPropertyName("tool_calls")] List<JsonElement>? ToolCalls = null,
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
+    private sealed class ChecklistDraftRow
+    {
+        public Guid Id { get; }
+        public TextBox Text { get; }
+        public ComboBox Status { get; }
+        public string StatusValue { get; set; }
+
+        public ChecklistDraftRow(Codev.TaskChecklistItem item)
+        {
+            Id = item.Id;
+            Text = new TextBox { Text = item.Text, MinWidth = 250, Margin = new Thickness(0, 0, 8, 0), VerticalContentAlignment = VerticalAlignment.Center };
+            Status = new ComboBox { MinWidth = 105, Margin = new Thickness(8, 0, 0, 0), VerticalContentAlignment = VerticalAlignment.Center };
+            StatusValue = item.Status switch
+            {
+                Codev.TaskChecklistService.Completed => "Done",
+                Codev.TaskChecklistService.InProgress => "In progress",
+                _ => "Pending"
+            };
+        }
+    }
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
         bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions, double? Temperature, string Provider = "ollama");
     private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null, string? PersonalInstructions = null, bool? SearchAllProjects = null);
