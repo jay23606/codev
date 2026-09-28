@@ -82,6 +82,66 @@ public sealed class SerialAsyncQueueTests
     }
 
     [Fact]
+    public async Task Processing_can_pause_between_items_and_resume_without_reordering()
+    {
+        var queue = new SerialAsyncQueue<int>();
+        queue.Enqueue(1);
+        queue.Enqueue(2);
+        queue.Enqueue(3);
+        var processed = new List<int>();
+        var allowNext = true;
+
+        await queue.ProcessPendingAsync(item =>
+        {
+            processed.Add(item);
+            allowNext = false;
+            return Task.CompletedTask;
+        }, (_, _) => Task.CompletedTask, () => allowNext);
+
+        Assert.Equal([1], processed);
+        Assert.Equal(2, queue.Count);
+
+        allowNext = true;
+        await queue.ProcessPendingAsync(item =>
+        {
+            processed.Add(item);
+            return Task.CompletedTask;
+        }, (_, _) => Task.CompletedTask, () => allowNext);
+
+        Assert.Equal([1, 2, 3], processed);
+        Assert.Equal(0, queue.Count);
+    }
+
+    [Fact]
+    public async Task Resuming_while_the_previous_processor_is_finishing_does_not_lose_work()
+    {
+        var queue = new SerialAsyncQueue<int>();
+        queue.Enqueue(1);
+        queue.Enqueue(2);
+        var processed = new List<int>();
+        var continueProcessing = true;
+        var finishedFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var previousProcessor = queue.ProcessPendingAsync(async item =>
+        {
+            processed.Add(item);
+            continueProcessing = false;
+            finishedFirst.SetResult();
+            await releaseFirst.Task;
+        }, (_, _) => Task.CompletedTask, () => continueProcessing);
+
+        await finishedFirst.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        continueProcessing = true;
+        await queue.ProcessPendingAsync(item => { processed.Add(item); return Task.CompletedTask; }, (_, _) => Task.CompletedTask);
+        releaseFirst.SetResult();
+        await previousProcessor.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal([1, 2], processed);
+        Assert.Equal(0, queue.Count);
+    }
+
+    [Fact]
     public void Runtime_queue_state_is_not_written_to_the_conversation_store()
     {
         var conversation = new Conversation { PendingRequestCount = 4, LastPromptContext = 32_768 };

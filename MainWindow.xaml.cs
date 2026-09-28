@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _requestCancellation;
     private Conversation? _activeRequestConversation;
     private bool _isClosing;
+    private bool _queuePaused;
     private bool _activeRequestIsCodeTask;
     private bool _loadingModel;
     private bool _updatingContext;
@@ -991,18 +992,21 @@ public partial class MainWindow : Window
             return;
         }
         _requestQueue.Enqueue(turn);
+        UpdateQueueControl();
         await ProcessQueuedTurnsAsync();
     }
 
     private async Task ProcessQueuedTurnsAsync()
     {
-        if (_isClosing) return;
+        UpdateQueueControl();
+        if (_isClosing || _queuePaused) { UpdateActiveRequestStatus(); return; }
         try
         {
             await _requestQueue.ProcessPendingAsync(async turn =>
             {
                 turn.Conversation.PendingRequestCount = Math.Max(0, turn.Conversation.PendingRequestCount - 1);
                 RefreshConversationLists();
+                UpdateQueueControl();
                 await ExecuteQueuedTurnAsync(turn);
             }, async (turn, error) =>
             {
@@ -1010,13 +1014,35 @@ public partial class MainWindow : Window
                     turn.Conversation.Messages[turn.AssistantIndex] = new ChatMessage("assistant", $"Could not complete the queued request.\n\n{error.Message}");
                 turn.Conversation.UpdatedAt = DateTimeOffset.Now;
                 await SaveAsync();
-            });
+            }, () => !_queuePaused && !_isClosing);
         }
         finally
         {
+            if (_requestQueue.Count == 0) _queuePaused = false;
             UpdateSendControl();
             UpdateActiveRequestStatus();
+            UpdateQueueControl();
         }
+    }
+
+    private void ToggleQueuePause_Click(object sender, RoutedEventArgs e)
+    {
+        if (_requestQueue.Count == 0 || _isClosing) return;
+        _queuePaused = !_queuePaused;
+        UpdateQueueControl();
+        UpdateActiveRequestStatus();
+        if (!_queuePaused) _ = ProcessQueuedTurnsAsync();
+    }
+
+    private void UpdateQueueControl()
+    {
+        if (_requestQueue.Count == 0) _queuePaused = false;
+        QueueControlButton.Visibility = _requestQueue.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        QueueControlButton.Content = _queuePaused ? "▶ Resume queue" : "Ⅱ Pause queue";
+        QueueControlButton.ToolTip = _queuePaused
+            ? "Resume queued local model requests"
+            : "Let the current Ollama response finish, then pause queued requests";
+        QueueControlButton.IsEnabled = !_isClosing;
     }
 
     private async Task ExecuteQueuedTurnAsync(QueuedTurn turn)
@@ -1359,9 +1385,15 @@ public partial class MainWindow : Window
 
     private void UpdateActiveRequestStatus()
     {
-        if (_active is null) { AgentStatusLabel.Text = "Your conversations and model requests stay on this device."; return; }
+        if (_active is null)
+        {
+            AgentStatusLabel.Text = _queuePaused ? $"Queue paused · {_requestQueue.Count} request(s) waiting" : "Your conversations and model requests stay on this device.";
+            return;
+        }
         if (_requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active))
-            AgentStatusLabel.Text = _activeRequestIsCodeTask ? "Code task · Running locally…" : "Generating locally…";
+            AgentStatusLabel.Text = (_activeRequestIsCodeTask ? "Code task · Running locally…" : "Generating locally…") + (_queuePaused && _requestQueue.Count > 0 ? " · queue paused" : "");
+        else if (_queuePaused && _requestQueue.Count > 0)
+            AgentStatusLabel.Text = $"Queue paused · {_requestQueue.Count} request(s) waiting";
         else if (_active.PendingRequestCount > 0)
             AgentStatusLabel.Text = $"Queued · {_active.PendingRequestCount} request(s) waiting for Ollama";
         else AgentStatusLabel.Text = "Your conversations and model requests stay on this device.";
@@ -1545,6 +1577,7 @@ public partial class MainWindow : Window
         conversation.UpdatedAt = DateTimeOffset.Now;
         if (ReferenceEquals(_active, conversation)) RenderMessages();
         RefreshConversationLists();
+        UpdateQueueControl();
         UpdateActiveRequestStatus();
         await SaveAsync();
     }

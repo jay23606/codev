@@ -44,7 +44,7 @@ public sealed class SerialAsyncQueue<T>
         }
     }
 
-    public async Task ProcessPendingAsync(Func<T, Task> processAsync, Func<T, Exception, Task> onErrorAsync)
+    public async Task ProcessPendingAsync(Func<T, Task> processAsync, Func<T, Exception, Task> onErrorAsync, Func<bool>? shouldContinue = null)
     {
         var processor = new object();
         lock (_gate)
@@ -61,7 +61,7 @@ public sealed class SerialAsyncQueue<T>
                 T item;
                 lock (_gate)
                 {
-                    if (_items.Count == 0)
+                    if (_items.Count == 0 || shouldContinue?.Invoke() == false)
                     {
                         _processor = null;
                         break;

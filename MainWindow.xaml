@@ -135,7 +135,10 @@
                             </Grid>
                         </Grid>
                     </Border>
-                    <TextBlock x:Name="AgentStatusLabel" Text="Your conversations and model requests stay on this device." FontSize="10" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,8,0,0">
+                        <TextBlock x:Name="AgentStatusLabel" Text="Your conversations and model requests stay on this device." FontSize="10" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/>
+                        <Button x:Name="QueueControlButton" Content="Ⅱ Pause queue" Style="{StaticResource SoftButton}" Padding="8,4" FontSize="10" Margin="8,0,0,0" Visibility="Collapsed" Click="ToggleQueuePause_Click" ToolTip="Let the current Ollama response finish, then pause queued requests"/>
+                    </StackPanel>
                   </StackPanel>
                 </Grid>
             </Border>
