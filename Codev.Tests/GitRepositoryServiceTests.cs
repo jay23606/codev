@@ -85,6 +85,20 @@ public sealed class GitRepositoryServiceTests
             reviewedDiff = await service.GetStagedReviewAsync();
             await service.CommitAsync("Save reviewed changes", reviewedDiff);
             Assert.False((await service.GetStatusAsync()).HasChanges);
+
+            var commit = await RunGitAsync(root, "rev-parse", "HEAD");
+            var commitReview = await service.GetCommitReviewAsync(commit.Trim());
+            Assert.StartsWith("commit ", commitReview.Branch, StringComparison.Ordinal);
+            Assert.Contains("new content", commitReview.Diff, StringComparison.Ordinal);
+            Assert.Equal(2, commitReview.Files.Count);
+            var boundedCommit = await service.GetCommitReviewAsync(commit.Trim(), maxCharacters: 160);
+            Assert.True(boundedCommit.Truncated);
+            Assert.True(boundedCommit.Diff.Length <= 160);
+            var oneFileCommit = await service.GetCommitReviewAsync(commit.Trim(), maxFiles: 1);
+            Assert.Single(oneFileCommit.Files);
+            var omittedFile = Assert.Single(commitReview.Files.Except(oneFileCommit.Files));
+            Assert.DoesNotContain(omittedFile, oneFileCommit.Diff, StringComparison.Ordinal);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.GetCommitReviewAsync("HEAD~1;whoami"));
         }
         finally
         {
@@ -109,7 +123,7 @@ public sealed class GitRepositoryServiceTests
         }
     }
 
-    private static async Task RunGitAsync(string root, params string[] arguments)
+    private static async Task<string> RunGitAsync(string root, params string[] arguments)
     {
         using var process = new Process
         {
@@ -130,5 +144,6 @@ public sealed class GitRepositoryServiceTests
         var error = await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {output} {error}");
+        return output;
     }
 }

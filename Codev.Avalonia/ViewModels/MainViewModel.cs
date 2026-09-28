@@ -436,7 +436,7 @@ public sealed class MainViewModel : ViewModelBase
         new Codev.OllamaModelParameterClient(_http, _ollamaEndpoint)
             .GetDeclaredDefaultsAsync(model, cancellationToken);
 
-    public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default, bool securityFocused = false)
+    public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default, bool securityFocused = false, string? commit = null)
     {
         if (ActiveConversation is not { } conversation || conversation.ProjectPath is not { Length: > 0 } projectPath || !IsProjectTrusted)
         {
@@ -489,9 +489,12 @@ public sealed class MainViewModel : ViewModelBase
         IsGenerating = true;
         try
         {
-            await SetConnectionStatusAsync($"{(securityFocused ? "/security-review" : "/review")} · reading local Git changes…");
-            var snapshot = await new Codev.GitRepositoryService(projectPath)
-                .GetWorkingTreeReviewAsync(timeout.Token);
+            var commandName = securityFocused ? "/security-review" : "/review";
+            await SetConnectionStatusAsync($"{commandName} · reading local Git changes…");
+            var repository = new Codev.GitRepositoryService(projectPath);
+            var snapshot = string.IsNullOrWhiteSpace(commit)
+                ? await repository.GetWorkingTreeReviewAsync(timeout.Token)
+                : await repository.GetCommitReviewAsync(commit, timeout.Token);
             if (!_projectFolderTrust.IsTrusted(projectPath))
             {
                 ReportContextActionStatus("Project trust was revoked while preparing the review. No diff was sent to the model.");
@@ -499,7 +502,9 @@ public sealed class MainViewModel : ViewModelBase
             }
             if (snapshot.Files.Count == 0)
             {
-                ReportContextActionStatus($"{(securityFocused ? "/security-review" : "/review")} found no uncommitted Git changes.");
+                ReportContextActionStatus(string.IsNullOrWhiteSpace(commit)
+                    ? $"{commandName} found no uncommitted Git changes."
+                    : "That commit has no file changes to review.");
                 return null;
             }
 

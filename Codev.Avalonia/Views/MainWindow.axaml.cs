@@ -1260,6 +1260,16 @@ public partial class MainWindow : Window
                 if (await viewModel.ReviewUncommittedChangesAsync(securityFocused: command.Action == Codev.SlashCommandAction.SecurityReviewWorkingTree) is { } review)
                     await ShowReadOnlyReviewAsync(review, this);
                 break;
+            case Codev.SlashCommandAction.ReviewCommit:
+            case Codev.SlashCommandAction.SecurityReviewCommit:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (await ShowCommitHashDialogAsync(this) is { Length: > 0 } commitHash &&
+                    await viewModel.ReviewUncommittedChangesAsync(
+                        securityFocused: command.Action == Codev.SlashCommandAction.SecurityReviewCommit,
+                        commit: commitHash) is { } commitReview)
+                    await ShowReadOnlyReviewAsync(commitReview, this);
+                break;
             case Codev.SlashCommandAction.UserPrompt:
                 if (command.ArgumentNames is { Count: > 0 } argumentNames &&
                     Codev.SlashCommandCatalog.TryGetCommandToken(ComposerTextBox.Text, ComposerTextBox.CaretIndex, out var token, out var hasArguments) &&
@@ -2372,6 +2382,30 @@ public partial class MainWindow : Window
         var dialog = new Window { Title = "Uncommitted changes review", Width = 760, Height = 620, MinWidth = 560, MinHeight = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
         close.Click += (_, _) => dialog.Close();
         await dialog.ShowDialog(owner);
+    }
+
+    private async Task<string?> ShowCommitHashDialogAsync(Window owner)
+    {
+        var hash = new TextBox { Watermark = "Commit hash (7–40 hexadecimal characters)", MinWidth = 360 };
+        var cancel = new Button { Content = "Cancel", Classes = { "soft" }, IsCancel = true };
+        var review = new Button { Content = "Review", Classes = { "soft" }, IsDefault = true };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { cancel, review } };
+        var dialog = new Window
+        {
+            Title = "Review a commit", Width = 480, SizeToContent = SizeToContent.Height, CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = owner.FindResource("AppBackgroundBrush") as global::Avalonia.Media.IBrush,
+            Foreground = owner.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush,
+            Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
+            {
+                new TextBlock { Text = "Enter a commit hash from this repository. The bounded diff stays local and is reviewed by the selected local model, if available.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                hash, buttons
+            }}
+        };
+        cancel.Click += (_, _) => dialog.Close(null);
+        review.Click += (_, _) => dialog.Close(hash.Text?.Trim());
+        dialog.Opened += (_, _) => hash.Focus();
+        return await dialog.ShowDialog<string?>(owner);
     }
 
     private async void AddContextFiles_Click(object? sender, RoutedEventArgs e)

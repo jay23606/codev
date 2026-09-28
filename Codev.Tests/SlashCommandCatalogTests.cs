@@ -50,6 +50,10 @@ public sealed class SlashCommandCatalogTests
         Assert.Equal(SlashCommandAction.ReviewWorkingTree, review.Action);
         var securityReview = Assert.Single(SlashCommandCatalog.All, command => command.Name == "/security-review");
         Assert.Equal(SlashCommandAction.SecurityReviewWorkingTree, securityReview.Action);
+        Assert.Equal(SlashCommandAction.ReviewCommit,
+            Assert.Single(SlashCommandCatalog.All, command => command.Name == "/review-commit").Action);
+        Assert.Equal(SlashCommandAction.SecurityReviewCommit,
+            Assert.Single(SlashCommandCatalog.All, command => command.Name == "/security-review-commit").Action);
         Assert.Contains("local model", review.Description, StringComparison.OrdinalIgnoreCase);
     }
 }
