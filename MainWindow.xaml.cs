@@ -1755,7 +1755,9 @@ public partial class MainWindow : Window
         {
             completionFailed = true;
             shouldNotifyCompletion = true;
-            conversation.Messages[assistantIndex] = new ChatMessage("assistant", $"Could not complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running and that this model is installed.");
+            var partial = conversation.Messages[assistantIndex].Content;
+            var detail = OllamaErrorDescription.Describe(ex);
+            conversation.Messages[assistantIndex] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? detail : $"{partial}\n\n[Generation stopped: {detail}]");
         }
         finally
         {

@@ -255,7 +255,10 @@ public sealed class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException)
         {
-            conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", $"Could not reach Ollama or complete the request.\n\n{ex.Message}\n\nCheck that Ollama is running at http://127.0.0.1:11434 and that the selected model is installed.");
+            var partial = conversation.Messages[assistantIndex].Content;
+            var detail = Codev.OllamaErrorDescription.Describe(ex);
+            var failure = string.IsNullOrWhiteSpace(partial) ? detail : $"{partial}\n\n[Generation stopped: {detail}]";
+            conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", failure);
         }
         finally
         {

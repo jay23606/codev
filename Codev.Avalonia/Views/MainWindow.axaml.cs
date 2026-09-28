@@ -9,6 +9,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         Closed += async (_, _) =>
         {
             if (DataContext is ViewModels.MainViewModel viewModel) await viewModel.SavePendingDraftAsync();
@@ -25,8 +26,9 @@ public partial class MainWindow : Window
     {
         if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
         e.Handled = true;
-        if (DataContext is ViewModels.MainViewModel viewModel && !viewModel.IsGenerating && viewModel.SendCommand.CanExecute(null))
-            viewModel.SendCommand.Execute(null);
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.IsGenerating) return;
+        viewModel.Draft = ComposerTextBox.Text ?? "";
+        if (viewModel.SendCommand.CanExecute(null)) viewModel.SendCommand.Execute(null);
     }
 
     private async void ModelPicker_DropDownOpened(object? sender, EventArgs e)
