@@ -2,7 +2,7 @@
 
 [![Windows CI](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml/badge.svg?branch=main)](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml)
 
-Codev is a standalone Windows desktop coding workspace for local language models. It connects directly to Ollama on `127.0.0.1` by default; a different server can be configured explicitly in Settings, with a warning before using a non-local endpoint. No VS Code dependency is required.
+Codev is a standalone desktop coding workspace for local language models. The full-featured app runs on Windows today; a cross-platform Avalonia version for Windows, macOS and Linux is in progress and shares its core logic (see [Run](#run) and [Repository layout](#repository-layout)). It connects directly to Ollama on `127.0.0.1` by default; a different server can be configured explicitly in Settings, with a warning before using a non-local endpoint. No VS Code dependency is required.
 
 ## First preview
 
@@ -34,20 +34,29 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Browse project text files, filter the list, preview them read-only, and add a selected file directly to chat context
 - Drop supported project source/text files onto the composer to add them to local context; files outside the active project, secret files, excluded files, and binary/unsupported types are ignored
 - Explicit Code task mode with project-scoped list/read/search tools and approval-gated file creation/replacement; changes create local recovery checkpoints and can be reviewed, restored, or undone/redone through Files
-- Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json` and is written atomically; unreadable history is preserved before Codev switches to a separate recovery file
+- Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json` on Windows (other systems use the per-user local application data folder, under `Codev`) and is written atomically; unreadable history is preserved before Codev switches to a separate recovery file
 - Create a local JSON backup of all conversations and import one additively; imports receive new conversation IDs and do not replace current history
 
 Code task mode can create or edit supported source, text, and configuration files after showing a review and receiving approval. The Files button shows changes and lets you review or restore checkpoints, including undo/redo of file creation. Code task mode can also request an approved shell command: PowerShell on Windows, or `$SHELL` (falling back to Bash) on macOS and Linux. Set `CODEV_SHELL` to override the executable. Every command requires approval, shows elapsed progress, runs with your account permissions in the project folder, has a three-minute timeout, and is not sandboxed. Use the active-turn Stop control to terminate it. Ordinary chat remains read-only.
 
 ## Run
 
-Requirements: Windows 10/11, .NET 9 Desktop Runtime, and Ollama running at `http://127.0.0.1:11434` (the default endpoint).
+Codev has two front ends over one shared, cross-platform core:
+
+| Front end | Platforms | Status |
+|---|---|---|
+| WPF app (`Codev.csproj`) | Windows 10/11 | The full feature set described above |
+| Avalonia prototype (`Codev.Avalonia`) | Windows, macOS and Linux (CI builds it on all three) | Prototype; not yet a replacement for the WPF app |
+
+Both need the .NET 9 SDK to build from source, and Ollama running at `http://127.0.0.1:11434` (the default endpoint). A framework-dependent published WPF build needs the .NET 9 Desktop Runtime; the self-contained publish below needs neither.
+
+WPF app, Windows only:
 
 ```powershell
 dotnet run --project .\Codev.csproj
 ```
 
-The Avalonia renderer prototype is separate and is not yet a replacement for the full WPF app:
+The Avalonia prototype is separate and is not yet a replacement for the full WPF app. It keeps its own conversation files (`avalonia-*.json`), so it does not share history with the WPF app yet. A manual test list for it is in [docs/avalonia-smoke-checklist.md](docs/avalonia-smoke-checklist.md).
 
 ```powershell
 dotnet run --project .\Codev.Avalonia\Codev.Avalonia.csproj
@@ -61,6 +70,27 @@ Build a self-contained Windows app:
 dotnet publish .\Codev.csproj -c Release -r win-x64 --self-contained true
 ```
 
+## Tests
+
+```bash
+dotnet test Codev.Tests/Codev.Tests.csproj                    # portable tests: any operating system
+dotnet test Codev.Windows.Tests/Codev.Windows.Tests.csproj    # WPF renderer and PowerShell tests: Windows only
+```
+
+GitHub Actions builds `Codev.Core` and the Avalonia prototype and runs the portable tests on Windows, Linux and macOS for every push and pull request. The Windows-only tests, and a self-contained Windows publish, run on Windows.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `Codev.Core/` | Shared logic with no UI dependency: conversations and persistence, Ollama endpoint checks and request options, Git integration, diffs, project context, the command runner and its shell selection |
+| `Codev.Tests/` | Portable tests for the core (plain .NET; runs on every OS) |
+| `Codev.csproj`, `MainWindow.xaml`, `MarkdownRenderer.cs` | The WPF app (Windows) |
+| `Codev.Windows.Tests/` | Tests that need Windows: WPF rendering and PowerShell command execution |
+| `Codev.Avalonia/` | The cross-platform Avalonia UI prototype |
+| `docs/` | Manual test checklists |
+| `DESIGN.md` | The interaction model, roadmap and feature backlog |
+
 ## Local models
 
 Codev discovers installed models from Ollama at startup and refreshes the picker when it opens. The three models from the original setup receive friendly labels; other installed Ollama tags, including Qwen3.8-27B, are listed automatically:
@@ -73,7 +103,7 @@ Legacy Ollama tags for the same weights are recognized and shown under the same 
 
 ## Privacy
 
-Prompts and project excerpts are sent to the configured Ollama endpoint; localhost is the default, and Codev confirms before switching to a non-local server. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first and refuses to overwrite files that changed after review. Symbolic links and junctions are excluded. Approved shell commands are not sandboxed and can access resources available to your Windows account.
+Prompts and project excerpts are sent to the configured Ollama endpoint; localhost is the default, and Codev confirms before switching to a non-local server. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first and refuses to overwrite files that changed after review. Symbolic links and junctions are excluded. Approved shell commands are not sandboxed and can access resources available to your user account.
 
 ## Design
 
