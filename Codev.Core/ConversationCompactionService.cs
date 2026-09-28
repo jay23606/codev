@@ -20,6 +20,9 @@ public static class ConversationCompactionService
     public static bool ShouldOfferCompaction(int promptTokens, int contextLimit) =>
         promptTokens > 0 && contextLimit > 0 && (long)promptTokens * 100 >= (long)contextLimit * ContextOfferThresholdPercent;
 
+    public static bool ShouldWarnUnknownContext(string provider, int promptTokens, int contextLimit) =>
+        string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase) && promptTokens > 0 && contextLimit <= 0;
+
     public static int FindBoundary(IReadOnlyList<ChatMessage> messages, int alreadyCompactedThrough = 0)
     {
         ArgumentNullException.ThrowIfNull(messages);

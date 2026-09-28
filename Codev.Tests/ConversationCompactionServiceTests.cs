@@ -78,6 +78,14 @@ public sealed class ConversationCompactionServiceTests
     public void Context_limit_offer_requires_known_limit_and_at_least_eighty_percent(int promptTokens, int contextLimit, bool expected) =>
         Assert.Equal(expected, ConversationCompactionService.ShouldOfferCompaction(promptTokens, contextLimit));
 
+    [Theory]
+    [InlineData("ollama", 1200, 0, true)]
+    [InlineData("ollama", 0, 0, false)]
+    [InlineData("ollama", 1200, 32768, false)]
+    [InlineData("openai", 1200, 0, false)]
+    public void Unknown_context_warning_is_limited_to_used_ollama_model_defaults(string provider, int promptTokens, int contextLimit, bool expected) =>
+        Assert.Equal(expected, ConversationCompactionService.ShouldWarnUnknownContext(provider, promptTokens, contextLimit));
+
     [Fact]
     public void Apply_rejects_pending_requests_invalid_cutoffs_and_oversized_summaries()
     {

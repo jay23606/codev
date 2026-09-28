@@ -160,6 +160,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(ShouldOfferCompaction));
+            OnPropertyChanged(nameof(ShouldWarnUnknownContext));
         };
         LoadConversations();
         if (_conversations.Count == 0)
@@ -190,6 +191,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(HasCompactionSummary));
                 OnPropertyChanged(nameof(CompactionStatusLabel));
                 OnPropertyChanged(nameof(ShouldOfferCompaction));
+                OnPropertyChanged(nameof(ShouldWarnUnknownContext));
                 OnPropertyChanged(nameof(ProjectLabel));
                 OnPropertyChanged(nameof(ProjectCommandPermissionMode));
                 OnPropertyChanged(nameof(ProjectCommandPermissionRules));
@@ -252,6 +254,12 @@ public sealed class MainViewModel : ViewModelBase
         conversation.LastPromptContext > 0 && conversation.LastPromptContext == conversation.NumCtx &&
         Codev.ConversationCompactionService.FindBoundary(conversation.Messages, conversation.CompactionThroughMessageCount) > 0 &&
         Codev.ConversationCompactionService.ShouldOfferCompaction(conversation.LastPromptTokens, conversation.LastPromptContext);
+    public bool ShouldWarnUnknownContext => ActiveConversation is { } conversation && !IsGenerating &&
+        conversation.PendingRequestCount == 0 && !_queueProcessorRunning && _requestQueue.Count == 0 &&
+        _lastPromptMessageCounts.TryGetValue(conversation.Id, out var messageCount) && messageCount == conversation.Messages.Count &&
+        conversation.NumCtx <= 0 && conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
+        Codev.ConversationCompactionService.ShouldWarnUnknownContext(conversation.LastPromptProvider, conversation.LastPromptTokens, conversation.LastPromptContext);
+    public string UnknownContextWarningLabel => "Ollama is using the model's default context size, so Codev cannot tell how close this conversation is to its limit. Set a context size for usage-based compaction prompts, or compact manually from More.";
     public string CompactionOfferLabel => ActiveConversation is { LastPromptContext: > 0 } conversation
         ? $"This request used {Math.Round(100d * conversation.LastPromptTokens / conversation.LastPromptContext)}% of its selected context. Compact older turns before continuing?"
         : "This request used most of the selected context. Compact older turns before continuing?";
@@ -393,6 +401,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(SendButtonLabel));
                 OnPropertyChanged(nameof(QueueStatusLabel));
                 OnPropertyChanged(nameof(ShouldOfferCompaction));
+                OnPropertyChanged(nameof(ShouldWarnUnknownContext));
                 OnPropertyChanged(nameof(CanReviewFileChanges));
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
@@ -978,6 +987,7 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("Wait for the current Ollama unload operation before changing models.");
             OnPropertyChanged(nameof(SelectedModel));
             OnPropertyChanged(nameof(ShouldOfferCompaction));
+            OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             return;
         }
         if (IsCodeTask && choice.Provider != "ollama")
@@ -985,6 +995,7 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("Turn Code task mode off before switching its provider or model.");
             OnPropertyChanged(nameof(SelectedModel));
             OnPropertyChanged(nameof(ShouldOfferCompaction));
+            OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             return;
         }
         if (string.Equals(Provider, choice.Provider, StringComparison.OrdinalIgnoreCase) &&
@@ -1002,6 +1013,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
             OnPropertyChanged(nameof(ShouldOfferCompaction));
+            OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             OnPropertyChanged(nameof(CanToggleCodeTaskMode));
             NotifyCodeTaskAvailabilityProperties();
             ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -1019,6 +1031,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
             OnPropertyChanged(nameof(ShouldOfferCompaction));
+            OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             OnPropertyChanged(nameof(CanToggleCodeTaskMode));
             NotifyCodeTaskAvailabilityProperties();
             ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -1048,6 +1061,7 @@ public sealed class MainViewModel : ViewModelBase
                 ActiveConversation.NumCtx = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(ShouldOfferCompaction));
+                OnPropertyChanged(nameof(ShouldWarnUnknownContext));
                 Persist();
             }
         }
@@ -2376,6 +2390,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(LastPromptContextLabel));
                 OnPropertyChanged(nameof(ShouldOfferCompaction));
+                OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             }
         });
     }
@@ -3190,6 +3205,8 @@ public sealed class MainViewModel : ViewModelBase
             {
                 conversation.PendingDiffComments ??= [];
                 _conversations.Add(conversation);
+                if (conversation.LastPromptTokens > 0 && conversation.Messages.LastOrDefault()?.IsAssistant == true)
+                    _lastPromptMessageCounts[conversation.Id] = conversation.Messages.Count;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }

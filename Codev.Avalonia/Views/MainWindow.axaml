@@ -350,6 +350,7 @@
                             </Expander>
                             <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Spacing="3">
                                 <TextBlock Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
+                                <TextBlock Text="{Binding UnknownContextWarningLabel}" Foreground="#D6A66D" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding ShouldWarnUnknownContext}" />
                                 <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShouldOfferCompaction}">
                                     <TextBlock Text="{Binding CompactionOfferLabel}" Foreground="#D6A66D" FontSize="9" TextWrapping="Wrap" VerticalAlignment="Center" />
                                     <Button Content="Compact now" Classes="soft" Padding="6,2" FontSize="9" Click="CompactConversation_Click" ToolTip.Tip="Review a summary of older turns before using it in future prompts" />
