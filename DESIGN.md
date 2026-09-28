@@ -96,7 +96,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - [x] Markdown headings, emphasis, lists, quotes, inline code, safe clickable HTTP(S) links, and fenced code blocks with Copy; syntax highlighting and tables remain.
 - [x] Read-only Plan mode, stop generation while keeping partial response, visible agent-tool status, retry/edit-resend, and branch from an earlier message. Resume and richer plans remain.
 - [x] Core shortcuts: Ctrl+N new conversation, Ctrl+F search, F2 rename, Esc stop. Adjustable chat/composer text size is available in Settings. Accessible focus order and broader shortcut customization remain.
-- [x] Conversation rename, archive, restore, and explicit permanent delete from the archive view; Markdown export is available. Import and local backup controls remain.
+- [x] Conversation rename, archive, restore, explicit permanent delete, Markdown export, and additive JSON conversation backup/import. JSON backups omit rollback checkpoint file paths and do not contain project files.
 - Project and conversation settings for Ollama endpoint, model parameters/context, and included context sources.
 
 ### 6. Extensibility and automation

@@ -21,6 +21,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Browse project text files, filter the list, preview them read-only, and add a selected file directly to chat context
 - Explicit Code task mode with project-scoped list/read/search tools and approval-gated replacement of existing files; writes create a local recovery checkpoint
 - Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json`
+- Create a local JSON backup of all conversations and import one additively; imports receive new conversation IDs and do not replace current history
 
 Code task mode can create or edit supported source, text, and configuration files after showing a review and receiving approval. The Files button shows changes and lets you review or restore checkpoints, including undo/redo of file creation. Code task mode can also request a PowerShell command; every command requires approval, runs with your Windows account permissions in the project folder, has a three-minute timeout, and is not sandboxed. Ordinary chat remains read-only.
 

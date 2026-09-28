@@ -1034,6 +1034,97 @@ public partial class MainWindow : Window
         if (!_queuePaused) _ = ProcessQueuedTurnsAsync();
     }
 
+    private async void ConversationBackup_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Window
+        {
+            Title = "Conversation backup", Width = 430, Height = 210,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.NoResize
+        };
+        var layout = new StackPanel { Margin = new Thickness(20) };
+        layout.Children.Add(new TextBlock
+        {
+            Text = "Save conversation history to a local JSON file, or add chats from an existing Codev backup. Project folder paths may be included, but project files and rollback checkpoint contents are not. Imported chats get new IDs and do not replace your current history.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 16)
+        });
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var export = new Button { Content = "Create backup…", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0) };
+        var import = new Button { Content = "Import backup…", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        export.Click += (_, _) => { dialog.Tag = "export"; dialog.DialogResult = true; dialog.Close(); };
+        import.Click += (_, _) => { dialog.Tag = "import"; dialog.DialogResult = true; dialog.Close(); };
+        buttons.Children.Add(cancel); buttons.Children.Add(export); buttons.Children.Add(import);
+        layout.Children.Add(buttons);
+        dialog.Content = layout;
+        if (dialog.ShowDialog() != true) return;
+        if (dialog.Tag as string == "export") await ExportConversationBackupAsync();
+        else await ImportConversationBackupAsync();
+    }
+
+    private async Task ExportConversationBackupAsync()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Create Codev conversation backup", FileName = $"codev-backup-{DateTime.Now:yyyy-MM-dd}.codev.json",
+            DefaultExt = ".codev.json", AddExtension = false,
+            Filter = "Codev conversation backup (*.codev.json)|*.codev.json|JSON file (*.json)|*.json",
+            OverwritePrompt = true
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        await SaveAsync();
+        try
+        {
+            var backup = ConversationBackupService.Export(_conversations, JsonOptions);
+            await File.WriteAllTextAsync(dialog.FileName, backup, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            AgentStatusLabel.Text = $"Backup saved · {_conversations.Count} conversation(s)";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not create the conversation backup.\n\n{ex.Message}", "Backup failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task ImportConversationBackupAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import Codev conversation backup", CheckFileExists = true,
+            Filter = "Codev conversation backup (*.codev.json;*.json)|*.codev.json;*.json|All files|*.*"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            if (new FileInfo(dialog.FileName).Length > 100_000_000)
+                throw new InvalidDataException("The selected backup is larger than the 100 MB import limit.");
+            var json = await File.ReadAllTextAsync(dialog.FileName);
+            var imported = ConversationBackupService.Import(json, JsonOptions);
+            foreach (var conversation in imported.OrderBy(c => c.UpdatedAt))
+            {
+                conversation.IsArchived = false;
+                conversation.PendingRequestCount = 0;
+                if (!string.IsNullOrWhiteSpace(conversation.ProjectPath))
+                {
+                    if (Directory.Exists(conversation.ProjectPath)) EnsureProject(conversation.ProjectPath);
+                    else conversation.ProjectPath = null;
+                }
+                _conversations.Insert(0, conversation);
+            }
+            _showArchived = false;
+            _activeProject = null;
+            ArchiveViewButton.Content = "◷  Show archived";
+            RefreshConversationLists();
+            if (imported.Count > 0) SelectConversation(imported.OrderByDescending(c => c.UpdatedAt).First());
+            await SaveAsync();
+            MessageBox.Show(this, $"Imported {imported.Count} conversation(s). Existing history was left unchanged.", "Backup imported", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not import this conversation backup. Your existing conversations were left unchanged.\n\n{ex.Message}", "Import failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void UpdateQueueControl()
     {
         if (_requestQueue.Count == 0) _queuePaused = false;
@@ -1419,6 +1510,11 @@ public partial class MainWindow : Window
             card.Children.Add(new TextBlock { Text = change.RelativePath, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush("MainTextBrush") });
             card.Children.Add(new TextBlock { Text = $"{change.Kind} · {change.ChangedAt.LocalDateTime:g}", FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 3, 0, 0) });
             item.Content = card;
+            if (string.IsNullOrWhiteSpace(change.CheckpointPath))
+            {
+                item.IsEnabled = false;
+                item.ToolTip = "The conversation backup records this change but does not include its local rollback checkpoint.";
+            }
             item.Click += async (_, _) => { dialog.Close(); await ReviewAndRestoreChangeAsync(conversation, change); };
             list.Children.Add(item);
         }
