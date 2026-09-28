@@ -231,6 +231,15 @@ public partial class MainWindow : Window
                 FontSize = 11,
                 Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
             });
+        var proposalWarnings = Codev.InstructionFollowingContentDetector.Detect(after);
+        if (proposalWarnings.Count > 0)
+            content.Children.Add(new TextBlock
+            {
+                Text = "POTENTIAL INSTRUCTION FOLLOWING: proposed content resembles " + string.Join(", ", proposalWarnings) + ". This heuristic can flag normal code or documentation; review the exact change against your request.",
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+            });
         var panes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*") };
         var oldPane = new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 6, 0) };
         var newPane = new StackPanel { Spacing = 5, Margin = new Thickness(6, 0, 0, 0) };
@@ -308,6 +317,7 @@ public partial class MainWindow : Window
         IReadOnlyList<string>? contextSources, string? matchingUntrustedSource)
     {
         var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
+        var proposalWarnings = Codev.InstructionFollowingContentDetector.Detect(command);
         layout.Children.Add(new TextBlock
         {
             Text = $"Project files and command output may contain instructions aimed at the model, and the proposed command may reflect them. Review this exact command against your request. It runs through {shellName} with your account permissions and can access files and services available to your account; Codev cannot sandbox it to the project folder.",
@@ -317,6 +327,14 @@ public partial class MainWindow : Window
             layout.Children.Add(new TextBlock
             {
                 Text = $"POTENTIAL INSTRUCTION FOLLOWING: this exact command appears in untrusted output from {matchingUntrustedSource}. Text appearing in a project file does not make a command safe or relevant to your request.",
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+            });
+        if (proposalWarnings.Count > 0)
+            layout.Children.Add(new TextBlock
+            {
+                Text = "POTENTIAL INSTRUCTION FOLLOWING: command text resembles " + string.Join(", ", proposalWarnings) + ". This heuristic can flag ordinary commands; decide whether it matches your request before approving.",
                 TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
                 FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
                 Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush

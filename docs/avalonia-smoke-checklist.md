@@ -147,3 +147,8 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - In an Ollama Code task, ask for a multi-step change and verify the model creates a visible checklist; confirm checklist items are re-sent on the next task request.
 - Open **Checklist**, edit text and status, add/remove steps, and move steps up/down; verify persistence after restart and that an existing checklist remains visible in Plan mode.
 - Try invalid or over-limit items and verify they are rejected without losing the previous checklist; confirm the checklist control is hidden for ordinary chats with no checklist.
+
+## Untrusted proposal warning
+
+- In Code task, use a disposable source or documentation file that contains common prompt-injection language, then request an unrelated harmless edit; verify the approval dialog shows a potential-instruction warning but does not block or auto-approve the proposal.
+- Run a harmless command whose quoted text contains a flagged phrase and verify the same advisory appears; confirm the warning does not display secret values and normal code with none of the patterns receives no warning.
