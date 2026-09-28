@@ -8,6 +8,6 @@ Use a disposable conversation. These checks call external APIs and may incur cha
 - [ ] Verify missing and invalid keys show useful errors without displaying the key. Attempt a failed reconnect while connected and confirm the working key remains active.
 - [ ] Select a hosted model and send a disposable prompt. Verify the header identifies the hosted provider, hosted chat is read-only, project context/temperature controls are disabled, and project files/instructions are omitted.
 - [ ] Switch the same conversation back to an Ollama model and verify the header returns to local status and local project-context behavior works as before.
-- [ ] Queue a hosted request, close Codev before it starts, reopen, and resume it. Verify Codev asks you to reconnect because the API key was intentionally not persisted; reconnect and retry.
+- [ ] Connect with a manually entered key, close and reopen Codev, and verify a blank key field uses the stored key. Replace the key and verify the new one works; use **Remove saved key** and verify the credential is deleted. **Disable this session** should leave it saved.
 - [ ] Inspect settings, conversation history, and a conversation backup; verify no API key was written. Close and relaunch, verify hosted conversations retain their provider/model selection with a reconnect-key placeholder, and verify Ollama remains available offline.
-- [ ] Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, leave the key field blank, and verify the selected environment key can connect.
+- [ ] Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, leave the key field blank, and verify the selected environment key takes precedence over a saved key and is not copied to the vault.

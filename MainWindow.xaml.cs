@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _hostedApiKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<ModelOption>> _hostedModels = new(StringComparer.Ordinal);
     private static readonly CloudModelApiClient CloudClient = new(Http);
+    private static readonly ICloudApiKeyVault HostedApiKeyVault = new CloudApiKeyVault();
     private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
     private readonly Dictionary<Window, DispatcherTimer> _completionToasts = [];
     private readonly DispatcherTimer _conversationSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -414,22 +415,44 @@ public partial class MainWindow : Window
     {
         var dialog = new Window
         {
-            Title = "Connect hosted models", Width = 500, Height = 430,
+            Title = "Connect hosted models", Width = 640, Height = 500,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
             Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
             ResizeMode = ResizeMode.NoResize
         };
         var layout = new StackPanel { Margin = new Thickness(22) };
         layout.Children.Add(new TextBlock { Text = "Use an OpenAI API key or an Anthropic API key to discover models available to your account.", TextWrapping = TextWrapping.Wrap, FontSize = 13, Margin = new Thickness(0, 0, 0, 12) });
-        layout.Children.Add(new TextBlock { Text = "API access and charges are separate from ChatGPT and Claude subscriptions. Hosted replies send the current conversation history and new prompts to the provider and may incur API charges. Codev does not attach project files or local project instructions. Keys are kept in memory for this session only.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), FontSize = 11, Margin = new Thickness(0, 0, 0, 12) });
+        layout.Children.Add(new TextBlock { Text = "API access and charges are separate from ChatGPT and Claude subscriptions. Hosted replies send the current conversation history and new prompts to the provider and may incur API charges. Codev does not attach project files or local project instructions. Typed keys are saved in the OS credential store after model discovery succeeds.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), FontSize = 11, Margin = new Thickness(0, 0, 0, 12) });
         var provider = new ComboBox { ItemsSource = new[] { new ProviderOption(CloudModelProviders.OpenAI, "OpenAI API"), new ProviderOption(CloudModelProviders.Anthropic, "Anthropic API (Claude)") }, DisplayMemberPath = "Name", SelectedValuePath = "Id", SelectedIndex = 0, Margin = new Thickness(0, 0, 0, 10), Padding = new Thickness(8, 7, 8, 7) };
         layout.Children.Add(provider);
-        layout.Children.Add(new TextBlock { Text = "API key (or set OPENAI_API_KEY / ANTHROPIC_API_KEY)", FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 5) });
+        layout.Children.Add(new TextBlock { Text = "API key · paste a key to replace the saved one, or leave blank", FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 5) });
         var key = new PasswordBox { Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 10) };
         layout.Children.Add(key);
+        layout.Children.Add(new TextBlock { Text = "Blank uses the provider environment variable first, then the saved key. Keys stay in Windows Credential Manager, macOS Keychain, or Linux Secret Service; they are never written to Codev settings, chats, or backups.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), FontSize = 11, Margin = new Thickness(0, 0, 0, 10) });
         var consent = new CheckBox { Content = "I understand this conversation is sent to the provider and API usage may be billed.", IsChecked = false, Margin = new Thickness(0, 2, 0, 16) };
         layout.Children.Add(consent);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        string? providerToRemove = null;
+        var forget = new Button { Content = "Remove saved key", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 8, 0) };
+        forget.Click += async (_, _) =>
+        {
+            if (provider.SelectedValue is not string selectedProvider) return;
+            if (MessageBox.Show(dialog, $"Remove the saved {provider.SelectedValue} API key from the OS credential store? A configured environment variable will remain available.", "Remove saved API key", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            try
+            {
+                var removed = await HostedApiKeyVault.RemoveAsync(selectedProvider);
+                providerToRemove = selectedProvider;
+                AgentStatusLabel.Text = removed
+                    ? $"Removed saved {selectedProvider} key and disconnected it for this session"
+                    : $"No saved {selectedProvider} key was found";
+                dialog.DialogResult = false;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(dialog, $"Could not remove the saved key from the OS credential store ({ex.GetType().Name}).", "Credential store error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        };
+        buttons.Children.Add(forget);
         buttons.Children.Add(new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true });
         var connect = new Button { Content = "Connect and load models", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
         connect.Click += (_, args) =>
@@ -438,15 +461,47 @@ public partial class MainWindow : Window
             dialog.DialogResult = true;
         };
         buttons.Children.Add(connect); layout.Children.Add(buttons); dialog.Content = layout;
-        if (dialog.ShowDialog() != true || provider.SelectedValue is not string providerId) return;
+        var connectedRequested = dialog.ShowDialog() == true;
+        if (providerToRemove is not null)
+        {
+            _hostedApiKeys.Remove(providerToRemove);
+            _hostedModels.Remove(providerToRemove);
+            if (_active is not null && _active.Provider == providerToRemove)
+            {
+                _active.Provider = "ollama";
+                _active.Model = _models.FirstOrDefault()?.Name ?? "";
+                _active.IsCodeTask = false;
+                UpdateProviderUi(_active);
+                await SaveAsync();
+            }
+            await LoadModelsAsync();
+            return;
+        }
+        if (!connectedRequested || provider.SelectedValue is not string providerId) return;
         var envName = providerId == CloudModelProviders.OpenAI ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-        var apiKey = string.IsNullOrWhiteSpace(key.Password) ? Environment.GetEnvironmentVariable(envName) : key.Password;
-        if (string.IsNullOrWhiteSpace(apiKey)) { MessageBox.Show(this, $"Enter a key or set {envName}.", "API key required", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        var enteredKey = string.IsNullOrWhiteSpace(key.Password) ? null : key.Password.Trim();
+        var apiKey = enteredKey ?? Environment.GetEnvironmentVariable(envName)?.Trim();
+        try
+        {
+            if (string.IsNullOrWhiteSpace(apiKey)) apiKey = await HostedApiKeyVault.GetAsync(providerId);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not access the OS credential store ({ex.GetType().Name}). Paste a key to use it for this session.", "Credential store unavailable", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (string.IsNullOrWhiteSpace(enteredKey) && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(envName))) return;
+        }
+        if (string.IsNullOrWhiteSpace(apiKey)) { MessageBox.Show(this, $"Enter a key, set {envName}, or save a key in the OS credential store.", "API key required", MessageBoxButton.OK, MessageBoxImage.Information); return; }
         AgentStatusLabel.Text = $"Connecting to {(providerId == CloudModelProviders.OpenAI ? "OpenAI" : "Anthropic")}…";
         try
         {
             var discovered = await CloudClient.ListModelsAsync(providerId, apiKey);
             if (discovered.Count == 0) { MessageBox.Show(this, "The key was accepted, but no chat-capable models were available to this account.", "No models found", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+            var saveWarning = "";
+            if (enteredKey is not null)
+            {
+                try { await HostedApiKeyVault.SaveAsync(providerId, enteredKey); }
+                catch (Exception ex) { saveWarning = $" · could not save to the OS credential store ({ex.GetType().Name})"; }
+            }
             _hostedApiKeys[providerId] = apiKey;
             _hostedModels[providerId] = discovered.Select(model => new ModelOption(model.Id, $"{(providerId == CloudModelProviders.OpenAI ? "OpenAI" : "Claude")} · {model.DisplayName}", providerId)).ToList();
             await LoadModelsAsync();
@@ -457,7 +512,7 @@ public partial class MainWindow : Window
             ModelOptionsButton.IsEnabled = false;
             _loadingModel = false;
             if (_active is not null) { RefreshContextPicker(_active); UpdateContextLabel(_active); await SaveAsync(); }
-            AgentStatusLabel.Text = $"Connected · {discovered.Count} hosted models available for this session";
+            AgentStatusLabel.Text = $"Connected · {discovered.Count} hosted models available{saveWarning}";
         }
         catch (Exception ex)
         {

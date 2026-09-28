@@ -285,7 +285,7 @@ public partial class MainWindow : Window
         var dialog = new Window
         {
             Title = "Settings",
-            Width = 500,
+            Width = 660,
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
@@ -344,7 +344,7 @@ public partial class MainWindow : Window
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         var provider = new ComboBox { ItemsSource = new[] { "OpenAI", "Anthropic" }, SelectedIndex = 0, MinWidth = 180 };
-        var apiKey = new TextBox { MinWidth = 360, PasswordChar = '•', Watermark = "Paste API key (or leave blank to use the environment variable)" };
+        var apiKey = new TextBox { MinWidth = 360, PasswordChar = '•', Watermark = "Paste a key to replace the saved one (or leave blank)" };
         var acknowledgement = new CheckBox
         {
             Content = "I understand that prompts and conversation history go to this provider under its data policies, and API use may incur separate charges. Project files stay local unless I separately opt in below.",
@@ -359,19 +359,20 @@ public partial class MainWindow : Window
         };
         var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
         var connect = new Button { Content = "Connect and load models", MinWidth = 170 };
-        var disable = new Button { Content = "Disable hosted requests", MinWidth = 170 };
+        var forget = new Button { Content = "Remove saved key", MinWidth = 130 };
+        var disable = new Button { Content = "Disable this session", MinWidth = 140 };
         var cancel = new Button { Content = "Close", MinWidth = 80 };
         var buttons = new StackPanel
         {
             Orientation = global::Avalonia.Layout.Orientation.Horizontal,
             HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right,
             Spacing = 8,
-            Children = { disable, cancel, connect }
+            Children = { forget, disable, cancel, connect }
         };
         var dialog = new Window
         {
             Title = "Connect hosted models",
-            Width = 500,
+            Width = 660,
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
@@ -383,13 +384,13 @@ public partial class MainWindow : Window
                 {
                     new TextBlock { Text = "Choose a provider" },
                     provider,
-                    new TextBlock { Text = "API key · used only in this Codev session" },
+                    new TextBlock { Text = "API key · saved in the OS credential store after a successful connection" },
                     apiKey,
                     new TextBlock
                     {
-                        Text = "Set OPENAI_API_KEY or ANTHROPIC_API_KEY to avoid pasting a key each launch. Codev does not write keys to conversation history or settings files.",
+                        Text = "Leave the field blank to use the provider's environment variable first, then its saved key. Typed keys are saved after model discovery succeeds using Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are never written to Codev settings, chats, or backups.",
                         TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-                        MaxWidth = 440
+                        MaxWidth = 600
                     },
                     acknowledgement,
                     includeProjectContext,
@@ -410,6 +411,13 @@ public partial class MainWindow : Window
             }
         };
         disable.Click += (_, _) => { viewModel.DisableCloudProviders(); dialog.Close(); };
+        forget.Click += async (_, _) =>
+        {
+            var providerId = provider.SelectedItem?.ToString() == "Anthropic" ? Codev.CloudModelProviders.Anthropic : Codev.CloudModelProviders.OpenAI;
+            await viewModel.RemoveStoredCloudApiKeyAsync(providerId);
+            apiKey.Text = "";
+            status.Text = viewModel.ConnectionStatus;
+        };
         cancel.Click += (_, _) => dialog.Close();
         await dialog.ShowDialog(this);
     }
@@ -666,6 +674,21 @@ public partial class MainWindow : Window
                 await ShowSkillFoldersAsync(viewModel);
                 break;
             case Codev.SlashCommandAction.InitProject:
+                if (!viewModel.IsCodeTask && !viewModel.IsGenerating && viewModel.CanEnterCodeTaskMode)
+                {
+                    if (viewModel.IsPlanMode && viewModel.TogglePlanModeCommand.CanExecute(null))
+                        viewModel.TogglePlanModeCommand.Execute(null);
+                    if (viewModel.ToggleCodeTaskCommand.CanExecute(null))
+                    {
+                        viewModel.ToggleCodeTaskCommand.Execute(null);
+                        viewModel.ReportContextActionStatus("Code task mode selected. Review the /init prompt, then send it to inspect the trusted project; any AGENTS.md draft will require your approval.");
+                    }
+                }
+                else if (!viewModel.IsCodeTask)
+                {
+                    viewModel.ReportContextActionStatus("/init can still draft guidance in Chat mode. To let the model inspect project files and propose AGENTS.md, use a trusted project with a local Ollama model.");
+                }
+                goto case Codev.SlashCommandAction.ReviewProject;
             case Codev.SlashCommandAction.ReviewProject:
                 viewModel.Draft = command.Prompt ?? "";
                 ComposerTextBox.Text = viewModel.Draft;

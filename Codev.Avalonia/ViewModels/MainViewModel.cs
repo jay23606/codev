@@ -55,6 +55,7 @@ public sealed class MainViewModel : ViewModelBase
     private long _persistenceRevision;
     private long _activeConversationRevision;
     private readonly HttpClient _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly Codev.ICloudApiKeyVault _cloudApiKeyVault = new Codev.CloudApiKeyVault();
     private Uri _ollamaEndpoint = Codev.OllamaEndpoint.Default;
     private readonly Dictionary<string, string> _cloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, Codev.PromptContextSnapshot> _lastPromptContexts = [];
@@ -2211,12 +2212,6 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (!CloudModelProviders.IsCloud(provider)) return false;
         var environmentName = provider == CloudModelProviders.OpenAI ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-        var key = string.IsNullOrWhiteSpace(apiKey) ? Environment.GetEnvironmentVariable(environmentName) : apiKey;
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            ReportContextActionStatus($"Enter a {provider} API key or set {environmentName} in the environment.");
-            return false;
-        }
         if (!allowCloudRequests)
         {
             _cloudRequestsEnabled = false;
@@ -2225,11 +2220,29 @@ public sealed class MainViewModel : ViewModelBase
             return false;
         }
 
-        ConnectionStatus = $"Connecting to {provider} · loading available models…";
+        var enteredKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
+        var key = enteredKey ?? Environment.GetEnvironmentVariable(environmentName)?.Trim();
         try
         {
+            if (string.IsNullOrWhiteSpace(key)) key = await _cloudApiKeyVault.GetAsync(provider);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                ReportContextActionStatus($"Enter a {provider} API key, set {environmentName}, or save a key in the OS credential store.");
+                return false;
+            }
+
+            ConnectionStatus = $"Connecting to {provider} · loading available models…";
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var choices = await new Codev.CloudModelApiClient(_http).ListModelsAsync(provider, key.Trim(), timeout.Token);
+            var keySaveWarning = "";
+            if (enteredKey is not null)
+            {
+                try { await _cloudApiKeyVault.SaveAsync(provider, enteredKey); }
+                catch (Exception ex) when (IsCredentialStoreFailure(ex))
+                {
+                    keySaveWarning = " · connected for this session, but the OS could not save the key";
+                }
+            }
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 _cloudApiKeys[provider] = key.Trim();
@@ -2243,30 +2256,88 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(HasModels));
                 OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
                 OnPropertyChanged(nameof(SelectedModel));
-                ConnectionStatus = $"Connected to {provider} · {choices.Count} model(s) available";
+                ConnectionStatus = $"Connected to {provider} · {choices.Count} model(s) available{keySaveWarning}";
             });
             return true;
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException or InvalidOperationException)
+        catch (Exception ex) when (IsCredentialStoreFailure(ex) || ex is HttpRequestException or JsonException or OperationCanceledException or InvalidOperationException)
         {
-            await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = $"Could not connect to {provider}: {ex.Message}");
+            var message = IsCredentialStoreFailure(ex)
+                ? $"Could not access the OS credential store. Paste the key to use it for this session. ({ex.GetType().Name})"
+                : $"Could not connect to {provider}: {ex.Message}";
+            await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = message);
+            return false;
+        }
+    }
+
+    public async Task<bool> RemoveStoredCloudApiKeyAsync(string provider)
+    {
+        if (!CloudModelProviders.IsCloud(provider)) return false;
+        try
+        {
+            var removed = await _cloudApiKeyVault.RemoveAsync(provider);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _cloudApiKeys.Remove(provider);
+                if (ActiveConversation is { } active && active.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase))
+                {
+                    active.Provider = "ollama";
+                    active.Model = Models.FirstOrDefault(choice => choice.Provider == "ollama")?.Name ?? "";
+                    active.IsCodeTask = false;
+                    active.IsPlanMode = false;
+                    _provider = "ollama";
+                    _model = active.Model;
+                    OnPropertyChanged(nameof(Model));
+                    OnPropertyChanged(nameof(Provider));
+                    OnPropertyChanged(nameof(IsLocalModel));
+                    OnPropertyChanged(nameof(IsHostedModel));
+                    OnPropertyChanged(nameof(ProviderStatusLabel));
+                    OnPropertyChanged(nameof(IsCodeTask));
+                    OnPropertyChanged(nameof(IsPlanMode));
+                    OnPropertyChanged(nameof(CanEnterCodeTaskMode));
+                    _ = WarmModelAsync(active.Model);
+                }
+                if (_cloudApiKeys.Count == 0) _cloudRequestsEnabled = false;
+                foreach (var choice in Models.Where(choice => choice.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase)).ToArray())
+                    Models.Remove(choice);
+                _cloudRequestsEnabled = _cloudApiKeys.Count > 0;
+                OnPropertyChanged(nameof(CloudRequestsEnabled));
+                OnPropertyChanged(nameof(HasModels));
+                OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
+                OnPropertyChanged(nameof(SelectedModel));
+                ConnectionStatus = removed
+                    ? $"Removed the saved {provider} key and disconnected it for this session. An environment variable may still provide a key."
+                    : $"No saved {provider} key was found. An environment variable may still provide a key.";
+            });
+            return removed;
+        }
+        catch (Exception ex) when (IsCredentialStoreFailure(ex))
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = $"Could not remove the saved {provider} key from the OS credential store ({ex.GetType().Name}).");
             return false;
         }
     }
 
     public void DisableCloudProviders()
     {
-        _cloudRequestsEnabled = false;
-        _cloudApiKeys.Clear();
-        foreach (var choice in Models.Where(model => model.Provider != "ollama").ToArray()) Models.Remove(choice);
-        if (Provider != "ollama" && ActiveConversation is { } conversation)
-            Models.Add(new ModelChoice(conversation.Model, $"{Provider} · {conversation.Model} (connect key)", Provider));
-        OnPropertyChanged(nameof(CloudRequestsEnabled));
-        OnPropertyChanged(nameof(HasModels));
-        OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
-        OnPropertyChanged(nameof(SelectedModel));
-        ConnectionStatus = "Hosted requests disabled · local chats remain available";
+        Dispatcher.UIThread.Post(() =>
+        {
+            _cloudRequestsEnabled = false;
+            _cloudApiKeys.Clear();
+            foreach (var choice in Models.Where(model => model.Provider != "ollama").ToArray()) Models.Remove(choice);
+            if (Provider != "ollama" && ActiveConversation is { } conversation)
+                Models.Add(new ModelChoice(conversation.Model, $"{Provider} · {conversation.Model} (connect key)", Provider));
+            OnPropertyChanged(nameof(CloudRequestsEnabled));
+            OnPropertyChanged(nameof(HasModels));
+            OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
+            OnPropertyChanged(nameof(SelectedModel));
+            ConnectionStatus = "Hosted requests disabled · local chats remain available";
+        });
     }
+
+    private static bool IsCredentialStoreFailure(Exception ex) => ex is IOException or UnauthorizedAccessException or
+        DllNotFoundException or EntryPointNotFoundException or TypeInitializationException or PlatformNotSupportedException or
+        System.Security.SecurityException;
 
     private void RebuildLists()
     {

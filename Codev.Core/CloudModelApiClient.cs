@@ -16,7 +16,7 @@ public static class CloudModelProviders
 public sealed record CloudModel(string Provider, string Id, string DisplayName);
 public sealed record CloudChatMessage(string Role, string Content);
 
-/// <summary>Small REST client for hosted model discovery and text streaming. API keys are supplied per request and never persisted.</summary>
+/// <summary>Small REST client for hosted model discovery and text streaming. API keys are supplied per request; persistence is handled by the OS credential vault.</summary>
 public sealed class CloudModelApiClient(HttpClient http)
 {
     private static readonly Uri OpenAiBase = new("https://api.openai.com/v1/");
