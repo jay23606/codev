@@ -56,6 +56,22 @@ public sealed class ProjectContextReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Detailed_read_separates_project_guidance_from_source_excerpts_without_changing_combined_context()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), "Follow the project conventions.");
+        await File.WriteAllTextAsync(Path.Combine(_root, "app.cs"), "class App { }");
+
+        var detailed = await ProjectContextReader.ReadDetailedAsync(_root, ["app.cs"], includeProjectInstructions: true);
+        var combined = await ProjectContextReader.ReadAsync(_root, ["app.cs"], includeProjectInstructions: true);
+
+        Assert.Contains("Follow the project conventions.", detailed.Instructions);
+        Assert.DoesNotContain("class App", detailed.Instructions);
+        Assert.Contains("class App", detailed.SourceExcerpts);
+        Assert.DoesNotContain("Follow the project conventions.", detailed.SourceExcerpts);
+        Assert.Equal(combined, detailed.Content);
+    }
+
+    [Fact]
     public async Task Untrusted_project_files_are_not_loaded_as_hidden_instructions_and_exclusions_apply()
     {
         Directory.CreateDirectory(Path.Combine(_root, "src"));

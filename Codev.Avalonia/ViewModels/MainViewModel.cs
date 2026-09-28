@@ -1545,6 +1545,7 @@ public sealed class MainViewModel : ViewModelBase
             var hasSelectedProjectFiles = savedTurn.ContextFiles is { Count: > 0 };
             var projectStillTrusted = !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath);
             var projectContext = "";
+            Codev.ProjectContextReadResult? projectContextBreakdown = null;
             var repoMap = "";
             if (Codev.ProjectContextPolicy.ShouldInclude(savedTurn.ProjectPath, savedTurn.Provider,
                     savedTurn.IncludeProjectContext, hasSelectedProjectFiles, projectStillTrusted) &&
@@ -1554,12 +1555,13 @@ public sealed class MainViewModel : ViewModelBase
                 var relevantRuleNames = projectStillTrusted
                     ? await SelectModelRelevantProjectRulesAsync(savedTurn, currentTask, token.Token)
                     : [];
-                projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
+                projectContextBreakdown = await Codev.ProjectContextReader.ReadDetailedAsync(savedTurn.ProjectPath,
                     savedTurn.ContextFiles, savedTurn.ContextExclusions, includeProjectInstructions: projectStillTrusted,
                     cancellationToken: token.Token,
                     manualRuleNames: Codev.ProjectPathInstructionRuleParser.FindManualMentions(
                         currentTask),
                     relevantRuleNames: relevantRuleNames);
+                projectContext = projectContextBreakdown.Content;
                 if (savedTurn.IncludeRepoMap)
                 {
                     repoMap = await Codev.RepoMapBuilder.BuildAsync(savedTurn.ProjectPath,
@@ -1576,7 +1578,10 @@ public sealed class MainViewModel : ViewModelBase
                     new("System instruction", systemPrompt),
                     new("Conversation history", string.Join("\n\n", conversationHistory.Select(message => $"[{message.Role}]\n{message.Content}")))
                 };
-                if (projectContext.Length > 0) sections.Add(new("Project instructions and source excerpts", projectContext));
+                if (projectContextBreakdown is { Instructions.Length: > 0 } detailedContext)
+                    sections.Add(new("Project instructions (AGENTS.md and selected rules)", detailedContext.Instructions));
+                if (projectContextBreakdown is { SourceExcerpts.Length: > 0 } sourceContext)
+                    sections.Add(new("Selected project source excerpts", sourceContext.SourceExcerpts));
                 if (repoMap.Length > 0) sections.Add(new("Repository map", repoMap));
                 await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create(savedTurn.Provider, savedTurn.Model,
                     savedTurn.Provider == "ollama" ? savedTurn.NumCtx : 0, sections, normalizedHistory));

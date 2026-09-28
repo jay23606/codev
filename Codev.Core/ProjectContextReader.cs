@@ -15,6 +15,17 @@ public static class ProjectContextReader
         CancellationToken cancellationToken = default,
         IReadOnlyList<string>? manualRuleNames = null,
         IReadOnlyList<string>? relevantRuleNames = null)
+        => (await ReadDetailedAsync(projectPath, selectedFiles, contextExclusions, includeProjectInstructions,
+            cancellationToken, manualRuleNames, relevantRuleNames).ConfigureAwait(false)).Content;
+
+    public static async Task<ProjectContextReadResult> ReadDetailedAsync(
+        string projectPath,
+        IReadOnlyList<string>? selectedFiles = null,
+        IReadOnlyList<string>? contextExclusions = null,
+        bool includeProjectInstructions = false,
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? manualRuleNames = null,
+        IReadOnlyList<string>? relevantRuleNames = null)
     {
         var service = new WorkspaceFileService(projectPath, contextExclusions);
         var files = selectedFiles is { Count: > 0 } ? selectedFiles : service.ListContextFiles(maxEntries: 300);
@@ -47,6 +58,7 @@ public static class ProjectContextReader
             : "";
         var output = new StringBuilder();
         if (projectInstructions.Length > 0) output.AppendLine(projectInstructions).AppendLine();
+        var sourceContextStart = output.Length;
         output.AppendLine("Selected project files (limited read-only excerpts):");
         const int footerReserve = 120;
         var count = 0;
@@ -74,8 +86,12 @@ public static class ProjectContextReader
 
         if (count == 0) output.AppendLine("No supported text source files were found. Ask the user to paste relevant code if needed.");
         else output.Append("\n[Context is limited to ").Append(count).AppendLine(" source files. Ask for specific files if you need more detail.]");
-        return output.Length <= WorkspaceFileService.MaxContextCharacters
+        var combinedContent = output.Length <= WorkspaceFileService.MaxContextCharacters
             ? output.ToString()
             : output.ToString(0, WorkspaceFileService.MaxContextCharacters);
+        var sourceExcerpts = combinedContent.Length > sourceContextStart ? combinedContent[sourceContextStart..] : "";
+        return new ProjectContextReadResult(combinedContent, projectInstructions, sourceExcerpts);
     }
 }
+
+public sealed record ProjectContextReadResult(string Content, string Instructions, string SourceExcerpts);
