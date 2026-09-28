@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     private bool _codeTaskMode;
     private bool _planMode;
     private bool _showArchived;
+    private bool _searchAllProjects;
     private Guid? _codeTaskConversationId;
     private bool _isDarkTheme = true;
     private bool _completionNotificationsEnabled = true;
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
         AddContextButton.ContextMenu = contextMenu;
         _conversationSearchDebounce.Tick += (_, _) => { _conversationSearchDebounce.Stop(); RefreshConversationLists(); };
         LoadThemePreference();
+        SearchAllProjectsCheck.IsChecked = _searchAllProjects;
         ApplyTheme();
         ApplyChatTextSize();
         LoadProjects();
@@ -96,6 +98,7 @@ public partial class MainWindow : Window
                 _promptTemplates = PromptTemplateCatalog.Normalize(settings?.PromptTemplates);
                 if (OllamaEndpoint.TryParse(settings?.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
                 _personalInstructions = PersonalAgentInstructions.Normalize(settings?.PersonalInstructions);
+                _searchAllProjects = settings?.SearchAllProjects ?? false;
             }
         }
         catch { _isDarkTheme = true; }
@@ -106,7 +109,7 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
-            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled, _promptTemplates, _ollamaEndpoint.ToString(), _personalInstructions), JsonOptions));
+            File.WriteAllText(ThemePath, JsonSerializer.Serialize(new UiSettings(_isDarkTheme ? "dark" : "light", _chatFontSize, _completionNotificationsEnabled, _promptTemplates, _ollamaEndpoint.ToString(), _personalInstructions, _searchAllProjects), JsonOptions));
         }
         catch { }
     }
@@ -2322,6 +2325,8 @@ public partial class MainWindow : Window
 
     private void SearchScope_Changed(object sender, RoutedEventArgs e)
     {
+        _searchAllProjects = SearchAllProjectsCheck.IsChecked == true;
+        SaveThemePreference();
         if (IsInitialized) RefreshConversationLists();
     }
 
@@ -2784,7 +2789,7 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
         bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions, double? Temperature);
-    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null, string? PersonalInstructions = null);
+    private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null, string? PersonalInstructions = null, bool? SearchAllProjects = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ModelOption(string Name, string DisplayName);
