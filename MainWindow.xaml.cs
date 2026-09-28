@@ -2148,7 +2148,17 @@ public partial class MainWindow : Window
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         var control = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
-        if (e.Key == Key.Escape && _requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active))
+        if (e.Key == Key.Escape && SearchPanel.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocusWithin)
+        {
+            if (!string.IsNullOrWhiteSpace(SearchBox.Text)) SearchBox.Clear();
+            else
+            {
+                SearchPanel.Visibility = Visibility.Collapsed;
+                PromptBox.Focus();
+            }
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active))
         {
             _requestCancellation.Cancel();
             AgentStatusLabel.Text = "Stopping…";
@@ -2188,7 +2198,7 @@ public partial class MainWindow : Window
     }
 
     private void ShowKeyboardShortcuts() => MessageBox.Show(this,
-        "Ctrl+N  New conversation\nCtrl+F  Search conversations\nCtrl+L  Focus composer\nCtrl+,  Settings\nF2  Rename current conversation\nEsc  Stop the active request\nEnter  Send from the composer\nCtrl+Enter  Insert a line break\nF1  Show keyboard shortcuts\n\nRight-click a message for Copy, branch, edit/resend, regenerate, or continue actions.",
+        "Ctrl+N  New conversation\nCtrl+F  Search conversations\nCtrl+L  Focus composer\nCtrl+,  Settings\nF2  Rename current conversation\nEsc  Clear/close focused search, or stop the active request\nEnter  Send from the composer\nCtrl+Enter  Insert a line break\nF1  Show keyboard shortcuts\n\nRight-click a message for Copy, branch, edit/resend, regenerate, or continue actions.",
         "Keyboard shortcuts", MessageBoxButton.OK, MessageBoxImage.Information);
 
     private void Pin_Click(object sender, RoutedEventArgs e)
