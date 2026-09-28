@@ -167,6 +167,7 @@ public partial class MainWindow : Window
                 item.PendingTurns ??= [];
                 item.FileChanges ??= [];
                 item.ContextFiles ??= [];
+                item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
                 item.Messages = item.Messages.Where(message => message is not null).ToList();
                 for (var index = 0; index < item.Messages.Count; index++)
                     if (item.Messages[index].Role == "assistant" && string.IsNullOrWhiteSpace(item.Messages[index].Content))
@@ -186,7 +187,8 @@ public partial class MainWindow : Window
             conversation.Messages[saved.AssistantIndex] = new ChatMessage("assistant", "Queued request is ready to resume.");
             conversation.PendingRequestCount++;
             _requestQueue.Enqueue(new QueuedTurn(conversation, saved.AssistantIndex, saved.Model, saved.NumCtx,
-                saved.IsCodeTask, saved.IsPlanMode, saved.ProjectPath, [.. saved.ContextFiles ?? []], [.. saved.ContextExclusions ?? []]));
+                saved.IsCodeTask, saved.IsPlanMode, saved.ProjectPath, [.. saved.ContextFiles ?? []], [.. saved.ContextExclusions ?? []],
+                ConversationSamplingSettings.Normalize(saved.Temperature)));
         }
         if (_requestQueue.Count > 0)
         {
@@ -336,6 +338,7 @@ public partial class MainWindow : Window
         if (_activeProject is not null) _activeProject.LastOpenedAt = DateTimeOffset.Now;
         ConversationTitle.Text = string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
         PinButton.Content = conversation.IsPinned ? "★  Pinned" : "☆  Pin";
+        ModelOptionsButton.Content = conversation.Temperature is double temperature ? $"T{temperature:0.#}" : "⚙";
         _loadingModel = true;
         ModelPicker.SelectedValue = FindModelOption(conversation.Model)?.Name;
         if (ModelPicker.SelectedValue is null && _models.Count > 0) ModelPicker.SelectedIndex = 0;
@@ -1374,10 +1377,11 @@ public partial class MainWindow : Window
         conversation.PendingRequestCount++;
         List<string> exclusions = conversation.ProjectPath is null ? [] : [.. EnsureProject(conversation.ProjectPath).ContextExclusions];
         var turn = new QueuedTurn(conversation, assistantIndex, conversation.Model, conversation.NumCtx,
-            isCodeTask, isPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles], exclusions);
+            isCodeTask, isPlanMode, conversation.ProjectPath, [.. conversation.ContextFiles], exclusions,
+            ConversationSamplingSettings.Normalize(conversation.Temperature));
         conversation.PendingTurns ??= [];
         var persistedTurn = new PersistedQueuedTurn(turn.AssistantIndex, turn.Model, turn.NumCtx, turn.IsCodeTask, turn.IsPlanMode,
-            turn.ProjectPath, [.. turn.ContextFiles], [.. turn.ContextExclusions], DateTimeOffset.Now);
+            turn.ProjectPath, [.. turn.ContextFiles], [.. turn.ContextExclusions], DateTimeOffset.Now, turn.Temperature);
         conversation.PendingTurns.Add(persistedTurn);
         conversation.Messages[assistantIndex] = new ChatMessage("assistant", "Queued locally · waiting for the model");
         PromptBox.Clear();
@@ -1613,10 +1617,10 @@ public partial class MainWindow : Window
             if (turn.IsCodeTask)
             {
                 var service = new WorkspaceFileService(turn.ProjectPath!);
-                await RunAgentTurnAsync(conversation, assistantIndex, history, service, turn.Model, turn.NumCtx, cancellation.Token);
+                await RunAgentTurnAsync(conversation, assistantIndex, history, service, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
             }
             else
-                await RunChatTurnAsync(conversation, assistantIndex, history, turn.Model, turn.NumCtx, cancellation.Token);
+                await RunChatTurnAsync(conversation, assistantIndex, history, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
                 conversation.Messages[assistantIndex] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
             shouldNotifyCompletion = true;
@@ -1716,9 +1720,9 @@ public partial class MainWindow : Window
         else _completionToasts.Remove(toast);
     }
 
-    private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, CancellationToken cancellationToken)
+    private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, double? temperature, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(BuildChatPayload(model, numCtx, history, stream: true)) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(BuildChatPayload(model, numCtx, temperature, history, stream: true)) };
         using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -1745,7 +1749,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RunAgentTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, WorkspaceFileService service, string model, int numCtx, CancellationToken cancellationToken)
+    private async Task RunAgentTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, WorkspaceFileService service, string model, int numCtx, double? temperature, CancellationToken cancellationToken)
     {
         var tools = new object[]
         {
@@ -1761,7 +1765,7 @@ public partial class MainWindow : Window
             cancellationToken.ThrowIfCancellationRequested();
             using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"))
             {
-                Content = JsonContent.Create(BuildChatPayload(model, numCtx, history, stream: false, tools))
+                Content = JsonContent.Create(BuildChatPayload(model, numCtx, temperature, history, stream: false, tools))
             };
             using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -1805,7 +1809,7 @@ public partial class MainWindow : Window
         throw new InvalidOperationException("The agent reached the eight-step tool limit. Send a follow-up to continue.");
     }
 
-    private static Dictionary<string, object> BuildChatPayload(string model, int numCtx, List<OllamaMessage> messages, bool stream, object[]? tools = null)
+    private static Dictionary<string, object> BuildChatPayload(string model, int numCtx, double? temperature, List<OllamaMessage> messages, bool stream, object[]? tools = null)
     {
         var payload = new Dictionary<string, object>
         {
@@ -1814,7 +1818,7 @@ public partial class MainWindow : Window
             ["stream"] = stream
         };
         if (tools is not null) payload["tools"] = tools;
-        if (numCtx > 0) payload["options"] = new OllamaOptions(numCtx);
+        if (OllamaRequestOptions.Build(numCtx, temperature) is { } options) payload["options"] = options;
         return payload;
     }
 
@@ -2548,6 +2552,56 @@ public partial class MainWindow : Window
         dialog.ShowDialog();
     }
 
+    private void ModelOptions_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active is null) return;
+        var conversation = _active;
+        var dialog = new Window
+        {
+            Title = $"Model options · {conversation.Title}", Width = 500, Height = 300,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.NoResize
+        };
+        var layout = new Grid { Margin = new Thickness(20) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var help = new TextBlock
+        {
+            Text = "Temperature controls response variation for this conversation. Lower values are more consistent; higher values allow more variation. Model default leaves the Ollama setting unchanged.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 16)
+        };
+        layout.Children.Add(help);
+        var useDefault = new CheckBox { Content = "Use model default", IsChecked = conversation.Temperature is null, Foreground = ThemeBrush("MainTextBrush"), Margin = new Thickness(0, 0, 0, 10) };
+        Grid.SetRow(useDefault, 1); layout.Children.Add(useDefault);
+        var temperature = conversation.Temperature ?? 0.7;
+        var valueLabel = new TextBlock { Text = $"Temperature · {temperature:0.0}", Foreground = ThemeBrush("MainTextBrush"), FontWeight = FontWeights.SemiBold };
+        var slider = new Slider { Minimum = ConversationSamplingSettings.MinTemperature, Maximum = ConversationSamplingSettings.MaxTemperature, Value = temperature, TickFrequency = 0.1, IsSnapToTickEnabled = true, Margin = new Thickness(0, 10, 0, 0), IsEnabled = useDefault.IsChecked != true };
+        slider.ValueChanged += (_, _) => valueLabel.Text = $"Temperature · {slider.Value:0.0}";
+        useDefault.Checked += (_, _) => slider.IsEnabled = false;
+        useDefault.Unchecked += (_, _) => slider.IsEnabled = true;
+        var controls = new StackPanel();
+        controls.Children.Add(valueLabel); controls.Children.Add(slider);
+        Grid.SetRow(controls, 2); layout.Children.Add(controls);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var save = new Button { Content = "Save options", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        save.Click += async (_, _) =>
+        {
+            conversation.Temperature = useDefault.IsChecked == true ? null : ConversationSamplingSettings.Normalize(slider.Value);
+            if (ReferenceEquals(_active, conversation)) ModelOptionsButton.Content = conversation.Temperature is double selected ? $"T{selected:0.#}" : "⚙";
+            await SaveAsync();
+            dialog.DialogResult = true;
+            dialog.Close();
+        };
+        buttons.Children.Add(cancel); buttons.Children.Add(save);
+        Grid.SetRow(buttons, 3); layout.Children.Add(buttons);
+        dialog.Content = layout;
+        dialog.ShowDialog();
+    }
+
     private PromptTemplate? EditPromptTemplate(PromptTemplate? original)
     {
         var editor = new Window
@@ -2651,9 +2705,8 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("content")] string Content,
         [property: JsonPropertyName("tool_calls")] List<JsonElement>? ToolCalls = null,
         [property: JsonPropertyName("tool_name")] string? ToolName = null);
-    private sealed record OllamaOptions([property: JsonPropertyName("num_ctx")] int NumCtx);
     private sealed record QueuedTurn(Conversation Conversation, int AssistantIndex, string Model, int NumCtx,
-        bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions);
+        bool IsCodeTask, bool IsPlanMode, string? ProjectPath, List<string> ContextFiles, List<string> ContextExclusions, double? Temperature);
     private sealed record UiSettings(string Theme, double? ChatFontSize = null, bool? CompletionNotifications = null, List<PromptTemplate>? PromptTemplates = null, string? OllamaEndpoint = null);
     private sealed class TagsResponse { [JsonPropertyName("models")] public List<TagModel>? Models { get; set; } }
     private sealed class TagModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
@@ -2662,7 +2715,7 @@ public partial class MainWindow : Window
 }
 
 public sealed record PersistedQueuedTurn(int AssistantIndex, string Model, int NumCtx, bool IsCodeTask, bool IsPlanMode,
-    string? ProjectPath, List<string>? ContextFiles, List<string>? ContextExclusions, DateTimeOffset EnqueuedAt);
+    string? ProjectPath, List<string>? ContextFiles, List<string>? ContextExclusions, DateTimeOffset EnqueuedAt, double? Temperature = null);
 
 public sealed class Conversation
 {
@@ -2670,6 +2723,7 @@ public sealed class Conversation
     public string Title { get; set; } = "";
     public string Model { get; set; } = "devstral-small-2-64k";
     public int NumCtx { get; set; }
+    public double? Temperature { get; set; }
     public int LastPromptTokens { get; set; }
     public int LastPromptContext { get; set; }
     public string LastPromptModel { get; set; } = "";

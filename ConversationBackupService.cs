@@ -14,6 +14,7 @@ public static class ConversationBackupService
             Title = conversation.Title,
             Model = conversation.Model,
             NumCtx = conversation.NumCtx,
+            Temperature = conversation.Temperature,
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptContext = conversation.LastPromptContext,
             LastPromptModel = conversation.LastPromptModel,
@@ -55,6 +56,7 @@ public static class ConversationBackupService
             item.Title = Limit(item.Title, 300, "Imported conversation");
             item.Model = Limit(item.Model, 200, "devstral-small-2-64k");
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
+            item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
             item.PendingRequestCount = 0;
             item.PendingTurns = [];
             item.ContextFiles ??= [];

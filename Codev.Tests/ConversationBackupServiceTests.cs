@@ -15,6 +15,7 @@ public sealed class ConversationBackupServiceTests
             Id = Guid.NewGuid(),
             Title = "Debug session",
             Model = "devstral-small-2-64k",
+            Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
             PendingRequestCount = 3,
             Messages = [new("user", "Why does this fail?"), new("assistant", "I will trace the cause.")]
@@ -26,6 +27,7 @@ public sealed class ConversationBackupServiceTests
         Assert.NotEqual(source.Id, imported.Id);
         Assert.Equal(source.Title, imported.Title);
         Assert.Equal(source.Model, imported.Model);
+        Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
         Assert.Equal(0, imported.PendingRequestCount);

@@ -102,6 +102,7 @@
                         <TextBlock Text="CTX" FontSize="9" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="12,0,7,0"/>
                         <ComboBox x:Name="ContextPicker" Width="118" SelectionChanged="ContextPicker_SelectionChanged" DisplayMemberPath="DisplayName" SelectedValuePath="Value" ToolTip="Per-conversation context size sent to Ollama; choices are capped to the selected model's configured limit"/>
                         <TextBlock x:Name="ContextUsageLabel" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                        <Button x:Name="ModelOptionsButton" Content="⚙" Width="42" Style="{StaticResource SoftButton}" Margin="8,0,0,0" Click="ModelOptions_Click" ToolTip="Set per-conversation temperature or use the model default"/>
                         <Button x:Name="ChangesButton" Content="Files" Style="{StaticResource SoftButton}" Margin="10,0,0,0" Click="ReviewChanges_Click" IsEnabled="False" ToolTip="Review or restore files changed by this conversation"/>
                         <Button x:Name="ExportConversationButton" Content="⇩" Style="{StaticResource SoftButton}" Margin="6,0,0,0" Click="ExportConversation_Click" IsEnabled="False" ToolTip="Save this conversation as a Markdown file" AutomationProperties.Name="Export conversation"/>
                         <Button x:Name="PinButton" Content="☆  Pin" Style="{StaticResource SoftButton}" Margin="10,0,0,0" Click="Pin_Click"/>

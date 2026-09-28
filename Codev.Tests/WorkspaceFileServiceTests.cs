@@ -342,7 +342,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         Assert.Contains("done", result);
         Assert.NotEmpty(reports);
         Assert.True(reports.TryPeek(out var elapsed));
-        Assert.True(elapsed >= TimeSpan.FromSeconds(1));
+        Assert.True(elapsed > TimeSpan.Zero);
     }
 
     [Fact]

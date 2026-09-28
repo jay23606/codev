@@ -14,6 +14,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with quick choices for the three models in the original setup
 - Per-conversation Ollama context selection, limited to each model's configured maximum
+- Per-conversation temperature control (0–2), with Ollama's model default preserved unless you set a value
 - Last request token count compared with the selected context size, reported by Ollama
 - Streaming responses from Ollama
 - Hardware-aware serial request queue with pause/resume controls; unsent turns survive app restart and wait for an explicit **Resume saved queue** action
@@ -58,7 +59,7 @@ Legacy Ollama tags for the same weights are recognized and shown under the same 
 
 ## Privacy
 
-Prompts and project excerpts are sent only to the configured local Ollama endpoint. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first and refuses to overwrite files that changed after review. Symbolic links and junctions are excluded. Approved shell commands are not sandboxed and can access resources available to your Windows account.
+Prompts and project excerpts are sent to the configured Ollama endpoint; localhost is the default, and Codev confirms before switching to a non-local server. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first and refuses to overwrite files that changed after review. Symbolic links and junctions are excluded. Approved shell commands are not sandboxed and can access resources available to your Windows account.
 
 ## Design
 
