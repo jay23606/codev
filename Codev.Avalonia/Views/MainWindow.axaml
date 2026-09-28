@@ -50,7 +50,7 @@
         </Style>
     </Window.Styles>
 
-    <Grid ColumnDefinitions="258,*">
+    <Grid ColumnDefinitions="242,*">
         <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="14,17,12,12">
             <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto">
                 <Grid ColumnDefinitions="30,*" Margin="5,0,3,20">
@@ -102,8 +102,14 @@
                 <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
                     <Button Classes="nav" Content="☁  Connect hosted models…" Click="ConfigureCloudProvider_Click" ToolTip.Tip="Connect OpenAI or Anthropic using an API key; cloud requests require an explicit acknowledgement" />
                     <Button Classes="nav" Content="⚙  Settings…" Click="Settings_Click" ToolTip.Tip="Configure the Ollama server endpoint" />
-                    <Button Classes="nav" Content="⇩  Export all chats…" Click="ExportBackup_Click" ToolTip.Tip="Save all conversations as a portable local JSON backup" />
-                    <Button Classes="nav" Content="⇧  Import chats…" Click="ImportBackup_Click" ToolTip.Tip="Add conversations from a Codev JSON backup without replacing existing history" />
+                    <Button Classes="nav" Content="⇧⇩  Chat backups…" ToolTip.Tip="Import or export conversation backups">
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <MenuItem Header="Export all chats…" Click="ExportBackup_Click" />
+                                <MenuItem Header="Import chats…" Click="ImportBackup_Click" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
                     <Button Classes="nav" Content="{Binding ThemeLabel}" Command="{Binding ToggleThemeCommand}" />
                 </StackPanel>
                 <Border Grid.Row="5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="4,13,4,3">
@@ -111,9 +117,15 @@
                         <TextBlock Text="PROJECT" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding ProjectLabel}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
-                        <Button Classes="soft" Content="Git status &amp; changes…" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding HasProject}" Click="GitStatus_Click" ToolTip.Tip="Review local branch and project changes; Codev never pushes commits." />
-                        <Button Classes="soft" Content="{Binding FileChangesLabel}" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding CanReviewFileChanges}" Click="ReviewFileChanges_Click" ToolTip.Tip="Review or restore files changed by this conversation." />
-                        <Button Classes="soft" Content="{Binding ProjectTrustLabel}" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />
+                        <Button Classes="soft" Content="Project actions…" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding HasProject}">
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuItem Header="Git status and changes…" Click="GitStatus_Click" />
+                                    <MenuItem Header="{Binding FileChangesLabel}" IsEnabled="{Binding CanReviewFileChanges}" Click="ReviewFileChanges_Click" />
+                                    <MenuItem Header="{Binding ProjectTrustLabel}" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
                         <TextBlock Text="{Binding ConnectionStatus}" Foreground="#89B895" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
@@ -122,21 +134,21 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,Auto,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
                         <TextBlock Text="{Binding CompactionStatusLabel}" IsVisible="{Binding HasCompactionSummary}" Foreground="#89B895" FontSize="9" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <ComboBox x:Name="ModelPicker" Grid.Column="1" Width="250" IsVisible="{Binding HasModels}" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel, Mode=TwoWay}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
+                    <ComboBox x:Name="ModelPicker" Grid.Column="1" Width="225" IsVisible="{Binding HasModels}" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel, Mode=TwoWay}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ModelChoice">
                                 <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <TextBlock Grid.Column="1" Width="250" IsVisible="{Binding IsModelPickerPlaceholderVisible}" Text="{Binding ModelPickerPlaceholder}" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="The model picker appears after Ollama's installed models are loaded." />
-                    <ComboBox Grid.Column="2" Width="112" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" IsEnabled="{Binding IsLocalModel}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context for local Ollama models; hosted providers control their context windows.">
+                    <TextBlock Grid.Column="1" Width="225" IsVisible="{Binding IsModelPickerPlaceholderVisible}" Text="{Binding ModelPickerPlaceholder}" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="The model picker appears after Ollama's installed models are loaded." />
+                    <ComboBox Grid.Column="2" Width="96" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" IsEnabled="{Binding IsLocalModel}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context for local Ollama models; hosted providers control their context windows.">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ContextSizeChoice">
                                 <TextBlock Text="{Binding DisplayName}" />
@@ -145,23 +157,31 @@
                     </ComboBox>
                     <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="Ctrl+Shift+M cycles Chat, Plan, and Code task. Plan mode cannot edit files or run commands." />
                     <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="Ctrl+Shift+M cycles Chat, Plan, and Code task. Code task requires a trusted project and local Ollama; file changes and every shell command still need approval." />
-                    <Button Grid.Column="5" Classes="soft" Content="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
-                    <Button Grid.Column="6" Classes="soft" Content="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
-                    <Button Grid.Column="7" Classes="soft" Content="⇩ Export" Click="ExportConversation_Click" ToolTip.Tip="Save this conversation as a Markdown file" />
-                    <ComboBox Grid.Column="8" Width="120" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions.">
+                    <ComboBox Grid.Column="5" Width="105" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions.">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:OutputStyleChoice">
                                 <TextBlock Text="{Binding DisplayName}" />
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <StackPanel Grid.Column="9" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <ToggleButton Classes="soft" Content="Think" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsVisible="{Binding IsLocalModel}" ToolTip.Tip="Ask a thinking-capable Ollama model to return its separate thinking trace. The trace stays collapsed below the reply. Unsupported models use their default behavior." />
-                        <Button Classes="soft" Content="{Binding AdvancedModelSettingsLabel}" Click="AdvancedModelSettings_Click" IsEnabled="{Binding IsLocalModel}" ToolTip.Tip="Override Ollama sampling parameters and maximum generated tokens for this conversation. Blank fields use the model defaults." />
-                    </StackPanel>
-                    <Button Grid.Column="10" Classes="soft" Content="Memory" Click="LoadedModels_Click" ToolTip.Tip="See models currently loaded by Ollama and their reported memory use; unload a model when the queue is idle." />
-                    <Button Grid.Column="11" Classes="soft" Content="Compact" Click="CompactConversation_Click" ToolTip.Tip="Summarize older turns for future prompts, review the summary, and keep the full transcript." />
-                    <Button Grid.Column="12" Classes="soft" Content="Full history" IsVisible="{Binding HasCompactionSummary}" Click="RestoreFullHistory_Click" ToolTip.Tip="Remove the summary and use the complete transcript in future prompts again." />
+                    <Button Grid.Column="6" Classes="soft" Content="More" ToolTip.Tip="Conversation and model actions">
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <MenuItem Header="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
+                                <MenuItem Header="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
+                                <MenuItem Header="Export conversation as Markdown…" Click="ExportConversation_Click" />
+                                <Separator />
+                                <MenuItem Header="Advanced model settings…" Click="AdvancedModelSettings_Click" IsEnabled="{Binding IsLocalModel}" />
+                                <MenuItem Header="Thinking mode" ToggleType="CheckBox" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsEnabled="{Binding IsLocalModel}" />
+                                <MenuItem Header="Loaded models and memory…" Click="LoadedModels_Click" />
+                                <MenuItem Header="Prompt templates…" Click="PromptTemplates_Click" />
+                                <MenuItem Header="{Binding LastPromptContextLabel}" IsEnabled="{Binding HasLastPromptContext}" Click="PromptContext_Click" />
+                                <Separator />
+                                <MenuItem Header="Compact conversation…" Click="CompactConversation_Click" />
+                                <MenuItem Header="Restore full history" IsVisible="{Binding HasCompactionSummary}" Click="RestoreFullHistory_Click" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
                 </Grid>
             </Border>
             <Border Grid.Row="1" IsVisible="{Binding ShouldShowTaskChecklist}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="28,8">
@@ -225,8 +245,8 @@
                 </ItemsControl>
             </ScrollViewer>
             <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,14,22,18">
-                        <Grid ColumnDefinitions="*,790,*">
-                    <StackPanel Grid.Column="1" Spacing="7">
+                <Grid>
+                    <StackPanel MaxWidth="790" HorizontalAlignment="Center" Spacing="7">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
@@ -275,13 +295,20 @@
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="5">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Button Classes="soft" Content="Open project" Padding="8,4" FontSize="10" Click="AttachProject_Click" ToolTip.Tip="Attach a local folder as read-only context for this conversation" />
-                                <Button Classes="soft" Content="Browse files" Padding="8,4" FontSize="10" IsEnabled="{Binding HasProject}" Click="BrowseProjectFiles_Click" ToolTip.Tip="Filter and preview supported project text files, then add one to chat context" />
-                                <Button Classes="soft" Content="＋ Add files" Padding="8,4" FontSize="10" IsEnabled="{Binding HasProject}" Click="AddContextFiles_Click" ToolTip.Tip="Select supported source and text files from the attached project" />
-                                <Button Classes="soft" Content="Clear selection" Padding="8,4" FontSize="10" IsVisible="{Binding HasSelectedContextFiles}" Command="{Binding ClearContextFilesCommand}" />
-                                <TextBlock Text="{Binding ContextLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
-                                <CheckBox Content="Include repo map" IsChecked="{Binding IncludeRepoMap, Mode=TwoWay}" IsEnabled="{Binding CanIncludeRepoMap}" FontSize="10" VerticalAlignment="Center" ToolTip.Tip="Attach a compact, bounded project file and symbol outline. Uses the same trust, selection, and hosted-context rules as project files." />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Classes="soft" Content="＋ Context" Padding="8,4" FontSize="10" ToolTip.Tip="Attach a project or choose files to include with this conversation">
+                                    <Button.Flyout>
+                                        <MenuFlyout>
+                                            <MenuItem Header="Open project folder…" Click="AttachProject_Click" />
+                                            <MenuItem Header="Browse project files…" IsEnabled="{Binding HasProject}" Click="BrowseProjectFiles_Click" />
+                                            <MenuItem Header="Add files to context…" IsEnabled="{Binding HasProject}" Click="AddContextFiles_Click" />
+                                            <Separator />
+                                            <MenuItem Header="Include repository map" ToggleType="CheckBox" IsChecked="{Binding IncludeRepoMap, Mode=TwoWay}" IsEnabled="{Binding CanIncludeRepoMap}" />
+                                            <MenuItem Header="Clear selected files" IsVisible="{Binding HasSelectedContextFiles}" Command="{Binding ClearContextFilesCommand}" />
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                                <TextBlock Text="{Binding ContextLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                             <ItemsControl Grid.Row="1" Grid.ColumnSpan="2" ItemsSource="{Binding SelectedContextFiles}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -294,11 +321,12 @@
                                     </Border>
                                 </DataTemplate></ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="2">
-                                <TextBlock Text="{Binding ContextEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding RepoMapEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
-                                <Button Content="{Binding LastPromptContextLabel}" Classes="soft" Padding="6,2" FontSize="9" HorizontalAlignment="Left" IsEnabled="{Binding HasLastPromptContext}" Click="PromptContext_Click" ToolTip.Tip="Inspect normalized messages, the exact request JSON body, and approximate token breakdown from the latest Chat, Plan, or Code task request" />
-                            </StackPanel>
+                            <Expander Grid.Row="2" Grid.ColumnSpan="2" Header="Context details" IsVisible="{Binding HasProject}" IsExpanded="False">
+                                <StackPanel Spacing="2" Margin="8,2,0,4">
+                                    <TextBlock Text="{Binding ContextEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding RepoMapEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Expander>
                             <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Spacing="3">
                                 <TextBlock Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
                                 <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShouldOfferCompaction}">
@@ -308,16 +336,14 @@
                             </StackPanel>
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="{Binding ProviderStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding QueueStatusLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                                <Button Content="Prompt templates" Classes="soft" Click="PromptTemplates_Click" Padding="7,3" FontSize="10" ToolTip.Tip="Create and manage reusable prompts saved on this device" />
                                 <Button IsVisible="{Binding IsQueuePaused}" Content="Resume saved queue" Command="{Binding ResumeQueueCommand}" Classes="soft" Padding="7,3" FontSize="10" />
                                 <Button IsVisible="{Binding HasQueuedTurns}" Content="Cancel queued" Command="{Binding CancelQueuedCommand}" Classes="soft" Padding="7,3" FontSize="10" />
-                                <TextBlock Text="Enter to send · Shift+Enter for new line · / commands · @ files/rules" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                         </Grid>
                     </StackPanel>
