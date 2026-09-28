@@ -53,8 +53,10 @@ public partial class MainWindow : Window
     private List<PromptTemplate> _promptTemplates = [];
     private Uri _ollamaEndpoint = OllamaEndpoint.Default;
     private string _personalInstructions = "";
+    private string _historyStorePath = StorePath;
 
     private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
+    private static string RecoveryStorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.recovered.json");
     private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
     private static string ProjectsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "projects.json");
 
@@ -189,24 +191,63 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (!File.Exists(StorePath)) return;
-            var saved = JsonSerializer.Deserialize<List<Conversation>>(File.ReadAllText(StorePath), JsonOptions);
-            if (saved is null) return;
-            foreach (var item in saved.Where(item => item is not null))
-            {
-                item.Messages ??= [];
-                item.PendingTurns ??= [];
-                item.FileChanges ??= [];
-                item.ContextFiles = item.ContextFiles?.Take(WorkspaceFileService.MaxContextFiles).ToList() ?? [];
-                item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
-                item.Messages = item.Messages.Where(message => message is not null).ToList();
-                for (var index = 0; index < item.Messages.Count; index++)
-                    if (item.Messages[index].Role == "assistant" && string.IsNullOrWhiteSpace(item.Messages[index].Content))
-                        item.Messages[index] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
-                _conversations.Add(item);
-            }
+            LoadConversationsFrom(_historyStorePath);
         }
-        catch (Exception ex) { ConnectionLabel.Text = $"History could not be loaded: {ex.Message}"; }
+        catch (Exception ex)
+        {
+            _conversations.Clear();
+            var unreadablePath = _historyStorePath;
+            string? preservedPath = null;
+            string? backupErrorMessage = null;
+            try { preservedPath = ConversationStoreRecovery.PreserveUnreadableStore(unreadablePath); }
+            catch (Exception backupError) { backupErrorMessage = backupError.Message; }
+
+            _historyStorePath = RecoveryStorePath;
+            if (File.Exists(_historyStorePath))
+            {
+                try
+                {
+                    LoadConversationsFrom(_historyStorePath);
+                    ConnectionLabel.Text = "The main history file could not be read. Codev loaded the separate recovery history.";
+                    ConnectionLabel.ToolTip = $"Load error: {ex.Message}\nUnreadable file: {unreadablePath}" + (preservedPath is null ? $"\nBackup error: {backupErrorMessage}" : $"\nPreserved copy: {preservedPath}");
+                    return;
+                }
+                catch (Exception recoveryError)
+                {
+                    _conversations.Clear();
+                    if (preservedPath is null)
+                    {
+                        try { preservedPath = ConversationStoreRecovery.PreserveUnreadableStore(_historyStorePath); }
+                        catch (Exception backupError) { backupErrorMessage = backupError.Message; }
+                    }
+                    ex = new InvalidDataException($"History failed to load: {ex.Message}; recovery history failed to load: {recoveryError.Message}");
+                }
+            }
+
+            ConnectionLabel.Text = "History could not be read. Codev will use a separate recovery file and leave the unreadable file untouched.";
+            ConnectionLabel.ToolTip = $"Load error: {ex.Message}\nUnreadable file: {unreadablePath}\nRecovery file: {_historyStorePath}" +
+                (preservedPath is null ? $"\nBackup error: {backupErrorMessage}" : $"\nPreserved copy: {preservedPath}");
+        }
+    }
+
+    private void LoadConversationsFrom(string path)
+    {
+        if (!File.Exists(path)) return;
+        var saved = JsonSerializer.Deserialize<List<Conversation>>(File.ReadAllText(path), JsonOptions);
+        if (saved is null) throw new InvalidDataException("The history file does not contain a conversation list.");
+        foreach (var item in saved.Where(item => item is not null))
+        {
+            item.Messages ??= [];
+            item.PendingTurns ??= [];
+            item.FileChanges ??= [];
+            item.ContextFiles = item.ContextFiles?.Take(WorkspaceFileService.MaxContextFiles).ToList() ?? [];
+            item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
+            item.Messages = item.Messages.Where(message => message is not null).ToList();
+            for (var index = 0; index < item.Messages.Count; index++)
+                if (item.Messages[index].Role == "assistant" && string.IsNullOrWhiteSpace(item.Messages[index].Content))
+                    item.Messages[index] = new ChatMessage("assistant", "This request did not finish before Codev closed.");
+            _conversations.Add(item);
+        }
     }
 
     private void RestoreQueuedTurns()
@@ -281,7 +322,7 @@ public partial class MainWindow : Window
             gateHeld = true;
             var snapshot = ConversationPersistence.CreateSnapshot(_conversations);
             var json = await Task.Run(() => JsonSerializer.Serialize(snapshot, JsonOptions));
-            await AtomicTextFile.WriteAsync(StorePath, json);
+            await AtomicTextFile.WriteAsync(_historyStorePath, json);
             return true;
         }
         catch (Exception ex) { ConnectionLabel.Text = $"Could not save history: {ex.Message}"; return false; }

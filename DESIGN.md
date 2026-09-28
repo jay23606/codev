@@ -25,7 +25,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Ollama model discovery and per-conversation model choice | Done for the three configured coding models |
 | Ollama endpoint, per-conversation context size, and temperature | Configurable HTTP(S) endpoint defaults to localhost, warns before a changed non-local server; context choices run through the model's max and temperature is optional (0–2), preserving Ollama's model default when unset |
 | Context use visibility | Last request's prompt/history token count from Ollama and selected context limit; bounded source-context estimate shown before sending |
-| Streaming chat and independent persistent conversations | Done |
+| Streaming chat and independent persistent conversations | History and drafts use detached snapshots and flushed atomic writes; unreadable stores are preserved and recovery uses a separate file |
 | Unsent composer drafts | Each conversation retains its own draft across chat switches and restarts; drafts are debounced into local history and included in portable backups |
 | Find in the active conversation | Search message text, inspect matching excerpts, and jump directly to a result with Ctrl+Shift+F |
 | Pinning and conversation search | Title and message text search, matching excerpts, project/archive scope, and debounced input are implemented |
