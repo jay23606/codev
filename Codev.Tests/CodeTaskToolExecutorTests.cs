@@ -141,7 +141,7 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
             _ => Task.FromResult(false), _ => Task.FromResult(false),
             permissionApproval: proposal => Task.FromResult(proposal.IsVerification
                 ? CommandApprovalOutcome.Rejected
-                : CommandApprovalOutcome.ApprovedReadOnly));
+                : OperatingSystem.IsWindows() ? CommandApprovalOutcome.ApprovedReadOnly : CommandApprovalOutcome.Approved));
         var command = OperatingSystem.IsWindows() ? "Get-Content README.md" : "cat README.md";
 
         var result = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command }));
