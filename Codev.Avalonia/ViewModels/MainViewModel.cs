@@ -57,6 +57,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly HttpClient _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
     private Uri _ollamaEndpoint = Codev.OllamaEndpoint.Default;
     private readonly Dictionary<string, string> _cloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, Codev.PromptContextSnapshot> _lastPromptContexts = [];
     private CancellationTokenSource? _generationCancellation;
     private bool _isGenerating;
     private bool _isUnloadingModel;
@@ -156,6 +157,8 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(MessageCountLabel));
                 OnPropertyChanged(nameof(ProjectLabel));
                 OnPropertyChanged(nameof(ContextLabel));
+                OnPropertyChanged(nameof(HasLastPromptContext));
+                OnPropertyChanged(nameof(LastPromptContextLabel));
                 OnPropertyChanged(nameof(FileChangesCount));
                 OnPropertyChanged(nameof(FileChangesLabel));
                 OnPropertyChanged(nameof(CanReviewFileChanges));
@@ -212,8 +215,15 @@ public sealed class MainViewModel : ViewModelBase
         ? IsProjectTrusted ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included" : $"{SelectedContextFiles.Count} file(s) explicitly selected · folder untrusted"
         : IsProjectTrusted ? "Trusted project · bounded source files included automatically" : "Untrusted project · automatic context is off";
     public string ContextEstimateLabel => _contextEstimateLabel;
+    public bool HasLastPromptContext => !IsCodeTask && ActiveConversation is { } conversation && _lastPromptContexts.ContainsKey(conversation.Id);
+    public string LastPromptContextLabel => ActiveConversation is { } conversation && _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot)
+        ? snapshot.ActualPromptTokens is { } actual ? $"Last request · {actual:N0} input tokens" : $"Last request · ≈{snapshot.EstimatedPromptTokens:N0} estimated tokens"
+        : "View request context";
     public bool CanIncludeRepoMap => HasProject && (SelectedContextFiles.Count > 0 || IsProjectTrusted) && (!IsHostedModel || IncludeProjectContextForHosted);
     public string RepoMapEstimateLabel => IncludeRepoMap && CanIncludeRepoMap ? "Repo map: up to ≈2,000 tokens." : "";
+
+    public string? GetLastPromptContextDetails() => ActiveConversation is { } conversation && !IsCodeTask &&
+        _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot) ? snapshot.ToDisplayText() : null;
     public string ContextActionStatus { get; private set; } = "";
     public bool HasContextActionStatus => !string.IsNullOrWhiteSpace(ContextActionStatus);
     public string ConnectionStatus { get => _connectionStatus; private set => SetProperty(ref _connectionStatus, value); }
@@ -362,6 +372,8 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(IsCodeTask));
         OnPropertyChanged(nameof(CodeTaskLabel));
+        OnPropertyChanged(nameof(HasLastPromptContext));
+        OnPropertyChanged(nameof(LastPromptContextLabel));
         OnPropertyChanged(nameof(CanEnterCodeTaskMode));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         OnPropertyChanged(nameof(ProviderStatusLabel));
@@ -1293,9 +1305,7 @@ public sealed class MainViewModel : ViewModelBase
             if (root.TryGetProperty("error", out var apiError)) throw new InvalidOperationException(apiError.GetString() ?? apiError.ToString());
             if (root.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
             {
-                conversation.LastPromptTokens = promptTokens;
-                conversation.LastPromptContext = turn.NumCtx;
-                conversation.LastPromptModel = turn.Model;
+                await RecordPromptTokenUsageAsync(conversation, turn.Model, turn.NumCtx, promptTokens);
             }
             var message = root.GetProperty("message");
             if (message.TryGetProperty("thinking", out var thinkingChunk) && thinkingChunk.GetString() is { Length: > 0 } thinkingText)
@@ -1353,6 +1363,51 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     private async Task SetConnectionStatusAsync(string status) => await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = status);
+
+    private async Task SetLastPromptContextAsync(Codev.Conversation conversation, Codev.PromptContextSnapshot snapshot)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _lastPromptContexts[conversation.Id] = snapshot;
+            while (_lastPromptContexts.Count > 8)
+            {
+                var oldest = _lastPromptContexts.Keys.FirstOrDefault(id => id != conversation.Id);
+                if (oldest == Guid.Empty) break;
+                _lastPromptContexts.Remove(oldest);
+            }
+            if (ReferenceEquals(ActiveConversation, conversation))
+            {
+                OnPropertyChanged(nameof(HasLastPromptContext));
+                OnPropertyChanged(nameof(LastPromptContextLabel));
+            }
+        });
+    }
+
+    private async Task ClearLastPromptContextAsync(Codev.Conversation conversation)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _lastPromptContexts.Remove(conversation.Id);
+            if (ReferenceEquals(ActiveConversation, conversation))
+            {
+                OnPropertyChanged(nameof(HasLastPromptContext));
+                OnPropertyChanged(nameof(LastPromptContextLabel));
+            }
+        });
+    }
+
+    private async Task RecordPromptTokenUsageAsync(Codev.Conversation conversation, string model, int contextLimit, int promptTokens)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            conversation.LastPromptTokens = promptTokens;
+            conversation.LastPromptContext = contextLimit;
+            conversation.LastPromptModel = model;
+            if (_lastPromptContexts.TryGetValue(conversation.Id, out var snapshot))
+                _lastPromptContexts[conversation.Id] = snapshot with { ActualPromptTokens = promptTokens };
+            if (ReferenceEquals(ActiveConversation, conversation)) OnPropertyChanged(nameof(LastPromptContextLabel));
+        });
+    }
 
     private async Task SetAssistantTranscriptAsync(Codev.Conversation conversation, int assistantIndex, string content)
     {
@@ -1481,13 +1536,16 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (savedTurn.IsCodeTask && (savedTurn.Provider != "ollama" || !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint)))
                 throw new InvalidOperationException("Code task turns can only run through a loopback Ollama endpoint. Switch to local Ollama before resuming this task.");
+            if (savedTurn.IsCodeTask) await ClearLastPromptContextAsync(conversation);
             var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama", savedTurn.OutputStyle);
-            var priorMessages = conversation.Messages.Take(assistantIndex)
+            var conversationHistory = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
-                .Prepend(new Codev.ChatMessage("system", systemPrompt))
                 .ToList();
+            var priorMessages = conversationHistory.Prepend(new Codev.ChatMessage("system", systemPrompt)).ToList();
             var hasSelectedProjectFiles = savedTurn.ContextFiles is { Count: > 0 };
             var projectStillTrusted = !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath);
+            var projectContext = "";
+            var repoMap = "";
             if (Codev.ProjectContextPolicy.ShouldInclude(savedTurn.ProjectPath, savedTurn.Provider,
                     savedTurn.IncludeProjectContext, hasSelectedProjectFiles, projectStillTrusted) &&
                 Directory.Exists(savedTurn.ProjectPath))
@@ -1496,21 +1554,33 @@ public sealed class MainViewModel : ViewModelBase
                 var relevantRuleNames = projectStillTrusted
                     ? await SelectModelRelevantProjectRulesAsync(savedTurn, currentTask, token.Token)
                     : [];
-                var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
+                projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
                     savedTurn.ContextFiles, savedTurn.ContextExclusions, includeProjectInstructions: projectStillTrusted,
                     cancellationToken: token.Token,
                     manualRuleNames: Codev.ProjectPathInstructionRuleParser.FindManualMentions(
                         currentTask),
                     relevantRuleNames: relevantRuleNames);
-                priorMessages.Add(new Codev.ChatMessage("system", projectContext));
                 if (savedTurn.IncludeRepoMap)
                 {
-                    var repoMap = await Codev.RepoMapBuilder.BuildAsync(savedTurn.ProjectPath,
+                    repoMap = await Codev.RepoMapBuilder.BuildAsync(savedTurn.ProjectPath,
                         savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
-                    priorMessages.Add(new Codev.ChatMessage("system", repoMap));
                 }
+                if (projectContext.Length > 0) priorMessages.Add(new Codev.ChatMessage("system", projectContext));
+                if (repoMap.Length > 0) priorMessages.Add(new Codev.ChatMessage("system", repoMap));
             }
             var normalizedHistory = Codev.OllamaConversationHistory.Normalize(priorMessages);
+            if (!savedTurn.IsCodeTask)
+            {
+                var sections = new List<Codev.PromptContextSection>
+                {
+                    new("System instruction", systemPrompt),
+                    new("Conversation history", string.Join("\n\n", conversationHistory.Select(message => $"[{message.Role}]\n{message.Content}")))
+                };
+                if (projectContext.Length > 0) sections.Add(new("Project instructions and source excerpts", projectContext));
+                if (repoMap.Length > 0) sections.Add(new("Repository map", repoMap));
+                await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create(savedTurn.Provider, savedTurn.Model,
+                    savedTurn.Provider == "ollama" ? savedTurn.NumCtx : 0, sections, normalizedHistory));
+            }
             var output = new System.Text.StringBuilder();
             var thinking = new System.Text.StringBuilder();
             Codev.OllamaGenerationStats? generationStats = null;
@@ -1547,6 +1617,8 @@ public sealed class MainViewModel : ViewModelBase
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     using var json = System.Text.Json.JsonDocument.Parse(line);
                     if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
+                    if (json.RootElement.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
+                        await RecordPromptTokenUsageAsync(conversation, savedTurn.Model, savedTurn.NumCtx, promptTokens);
                     if (json.RootElement.TryGetProperty("message", out var message))
                     {
                         if (message.TryGetProperty("thinking", out var thinkingChunk) && thinkingChunk.GetString() is { Length: > 0 } thinkingDelta)

@@ -257,6 +257,7 @@
                             <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="2">
                                 <TextBlock Text="{Binding ContextEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding RepoMapEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
+                                <Button Content="{Binding LastPromptContextLabel}" Classes="soft" Padding="6,2" FontSize="9" HorizontalAlignment="Left" IsEnabled="{Binding HasLastPromptContext}" Click="PromptContext_Click" ToolTip.Tip="Inspect normalized messages and approximate token breakdown from the most recent Chat or Plan request" />
                             </StackPanel>
                             <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
                         </Grid>

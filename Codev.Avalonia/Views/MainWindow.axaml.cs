@@ -77,6 +77,41 @@ public partial class MainWindow : Window
             _followOutput = true;
     }
 
+    private async void PromptContext_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.GetLastPromptContextDetails() is not { } details) return;
+        var text = new TextBox
+        {
+            Text = details,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Stretch,
+            HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Stretch,
+            FontFamily = new global::Avalonia.Media.FontFamily("Consolas")
+        };
+        var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, MinWidth = 84 };
+        var dialog = new Window
+        {
+            Title = "Last request context",
+            Width = 780,
+            Height = 620,
+            MinWidth = 520,
+            MinHeight = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new Grid
+            {
+                RowDefinitions = new RowDefinitions("*,Auto"),
+                Margin = new Thickness(16),
+                RowSpacing = 10,
+                Children = { text, close }
+            }
+        };
+        Grid.SetRow(close, 1);
+        close.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(this);
+    }
+
     private void ConfigureAgentInteractions()
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
