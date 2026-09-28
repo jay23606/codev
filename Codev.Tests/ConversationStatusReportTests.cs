@@ -1,0 +1,54 @@
+using Codev;
+
+namespace Codev.Tests;
+
+public sealed class ConversationStatusReportTests
+{
+    [Fact]
+    public void Local_status_reports_model_context_project_mode_and_queue_without_network_details()
+    {
+        var conversation = new Conversation
+        {
+            Model = "qwen3-coder:30b",
+            NumCtx = 65536,
+            Temperature = 0.2,
+            IsPlanMode = true,
+            ProjectPath = @"C:\work\app",
+            ContextFiles = ["src/app.cs"]
+        };
+
+        var report = ConversationStatusReport.Build(conversation, false, 2, false, false);
+
+        Assert.Contains("Model: Ollama (local) · qwen3-coder:30b", report);
+        Assert.Contains("Context window: 65,536 tokens", report);
+        Assert.Contains("Temperature: 0.2", report);
+        Assert.Contains("Mode: Plan", report);
+        Assert.Contains(@"Project: C:\work\app", report);
+        Assert.Contains("Project context: 1 selected file(s)", report);
+        Assert.Contains("Queue: 2 queued turn(s)", report);
+        Assert.Contains("Hosted requests: not in use", report);
+        Assert.DoesNotContain("api-key", report, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(CloudModelProviders.OpenAI, "OpenAI API")]
+    [InlineData(CloudModelProviders.Anthropic, "Anthropic API")]
+    public void Hosted_status_reports_provider_consent_and_project_context_scope(string provider, string displayName)
+    {
+        var conversation = new Conversation
+        {
+            Provider = provider,
+            Model = "hosted-model",
+            ProjectPath = @"C:\work\private",
+            IncludeProjectContextForHosted = false
+        };
+
+        var report = ConversationStatusReport.Build(conversation, true, 0, false, true);
+
+        Assert.Contains($"Model: {displayName} · hosted-model", report);
+        Assert.Contains("Context window: managed by provider", report);
+        Assert.Contains("Project context: excluded from hosted requests", report);
+        Assert.Contains("Queue: response in progress", report);
+        Assert.Contains("Hosted requests: enabled for this session", report);
+    }
+}

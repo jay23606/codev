@@ -590,12 +590,17 @@ public sealed class MainViewModel : ViewModelBase
     private async Task SendDraftAsync()
     {
         if (ActiveConversation is not { } conversation || string.IsNullOrWhiteSpace(Draft)) return;
+        var text = Draft.Trim();
+        if (text.Equals("/status", StringComparison.OrdinalIgnoreCase))
+        {
+            AddStatusReport(conversation);
+            return;
+        }
         if (conversation.Provider != "ollama" && (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(conversation.Provider)))
         {
             ReportContextActionStatus("Connect the selected provider and acknowledge that prompts and selected project context will be sent off-device before sending.");
             return;
         }
-        var text = Draft.Trim();
         if (conversation.Title == "New conversation") conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
         else if (conversation.Messages.Count == 0) conversation.Title = text.Length > 48 ? text[..48].TrimEnd() + "…" : text;
         var userMessage = new Codev.ChatMessage("user", text);
@@ -627,6 +632,24 @@ public sealed class MainViewModel : ViewModelBase
         RebuildLists();
         if (!_queuePaused) _ = ProcessQueuedTurnsAsync();
         await Task.CompletedTask;
+    }
+
+    private void AddStatusReport(Codev.Conversation conversation)
+    {
+        var userMessage = new Codev.ChatMessage("user", Draft.Trim());
+        var assistantMessage = new Codev.ChatMessage("assistant", Codev.ConversationStatusReport.Build(
+            conversation, ReferenceEquals(_generationConversation, conversation) && IsGenerating,
+            conversation.PendingRequestCount, _queuePaused, _cloudRequestsEnabled));
+        conversation.Messages.Add(userMessage);
+        conversation.Messages.Add(assistantMessage);
+        conversation.Draft = "";
+        conversation.UpdatedAt = DateTimeOffset.Now;
+        Draft = "";
+        Messages.Add(userMessage);
+        Messages.Add(assistantMessage);
+        OnPropertyChanged(nameof(MessageCountLabel));
+        Persist();
+        RebuildLists();
     }
 
     private async Task ProcessQueuedTurnsAsync()
