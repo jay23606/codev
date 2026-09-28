@@ -28,4 +28,16 @@ public sealed class OllamaConversationHistoryTests
 
         Assert.Equal([new ChatMessage("user", "Question")], result);
     }
+
+    [Fact]
+    public void Keeps_model_thinking_out_of_follow_up_conversation_history()
+    {
+        var result = OllamaConversationHistory.Normalize([
+            new ChatMessage("user", "Question"),
+            new ChatMessage("assistant", "Answer") { Thinking = "Separate model thinking trace" },
+            new ChatMessage("user", "Follow-up")]);
+
+        Assert.Equal([new ChatMessage("user", "Question"), new ChatMessage("assistant", "Answer"), new ChatMessage("user", "Follow-up")], result);
+        Assert.DoesNotContain(result, message => message.Content.Contains("Separate model thinking trace", StringComparison.Ordinal));
+    }
 }

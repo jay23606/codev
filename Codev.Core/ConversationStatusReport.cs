@@ -45,6 +45,7 @@ public static class ConversationStatusReport
             $"Model: {provider} · {conversation.Model}",
             $"Context window: {context}",
             $"Temperature: {temperature}",
+            $"Thinking: {(CloudModelProviders.IsCloud(conversation.Provider) ? "unavailable for hosted providers" : conversation.ThinkEnabled ? "requested" : "off")}",
             $"Mode: {(conversation.IsCodeTask ? "Code task" : conversation.IsPlanMode ? "Plan" : "Chat")}",
             $"Project: {project}",
             $"Folder trust: {folderTrust}",

@@ -17,6 +17,7 @@ public static class ConversationBackupService
             Provider = conversation.Provider,
             IsPlanMode = conversation.IsPlanMode,
             IsCodeTask = conversation.IsCodeTask,
+            ThinkEnabled = conversation.ThinkEnabled,
             OutputStyle = conversation.OutputStyle,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,

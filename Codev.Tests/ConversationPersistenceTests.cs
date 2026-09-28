@@ -13,7 +13,7 @@ public sealed class ConversationPersistenceTests
     public void Snapshot_detaches_mutable_lists_and_preserves_queued_turn_data()
     {
         var turn = new PersistedQueuedTurn(1, "model-a", 8192, false, false, null,
-            ["src/a.cs"], ["private"], DateTimeOffset.UnixEpoch, OutputStyle: ConversationOutputStyles.CodeOnly);
+            ["src/a.cs"], ["private"], DateTimeOffset.UnixEpoch, OutputStyle: ConversationOutputStyles.CodeOnly, ThinkEnabled: true);
         var source = new Conversation
         {
             Title = "Snapshot",
@@ -22,6 +22,7 @@ public sealed class ConversationPersistenceTests
             Provider = CloudModelProviders.Anthropic,
             IsPlanMode = false,
             IsCodeTask = true,
+            ThinkEnabled = true,
             OutputStyle = ConversationOutputStyles.Explanatory,
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
@@ -46,6 +47,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(CloudModelProviders.Anthropic, snapshot.Provider);
         Assert.False(snapshot.IsPlanMode);
         Assert.True(snapshot.IsCodeTask);
+        Assert.True(snapshot.ThinkEnabled);
         Assert.Equal(ConversationOutputStyles.Explanatory, snapshot.OutputStyle);
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.True(snapshot.IncludeRepoMap);
@@ -58,5 +60,6 @@ public sealed class ConversationPersistenceTests
         Assert.Equal("src/a.cs", Assert.Single(snapshot.PendingTurns[0].ContextFiles!));
         Assert.Equal("private", Assert.Single(snapshot.PendingTurns[0].ContextExclusions!));
         Assert.Equal(ConversationOutputStyles.CodeOnly, snapshot.PendingTurns[0].OutputStyle);
+        Assert.True(snapshot.PendingTurns[0].ThinkEnabled);
     }
 }

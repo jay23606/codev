@@ -2,16 +2,17 @@
 
 ## Product direction
 
-Codev is a standalone coding workspace for local models. Today it ships as a Windows desktop app; macOS and Linux are planned through an Avalonia UI port (see roadmap section 7). It takes inspiration from the clear conversation experience of Claude Desktop and the project/thread, coding-agent, and review workflows of Codex, while keeping inference on the user's Ollama installation. It does not depend on VS Code.
+Codev is a standalone coding workspace for local models, with optional hosted API providers for people who want to use them. Today it ships as a Windows desktop app; macOS and Linux are planned through an Avalonia UI port (see roadmap section 7). It takes inspiration from the clear conversation experience of Claude Desktop and the project/thread, coding-agent, and review workflows of Codex, while keeping Ollama as the local default. It does not depend on VS Code.
 
 The goal is to make project work feel organized and reviewable: each task has its own conversation and working state; the agent can inspect a chosen project, propose changes, run approved checks, and show exactly what happened; the user remains in control of file changes, commands, network access, and concurrent work.
 
-This roadmap describes Codev's intended product scope. It does **not** claim feature parity with Claude or Codex, and features from their separate subscription/cloud services are out of scope unless they can be provided locally or through an explicitly configured integration.
+This roadmap describes Codev's intended product scope. It does **not** claim feature parity with Claude or Codex. Hosted model APIs are optional, explicitly configured integrations; they are separate products from ChatGPT or Claude subscriptions and may incur separate usage charges.
 
 ## Current design
 
 - **Left rail:** Codev identity, new conversation, search, pinned conversations, recents, settings, and local model status.
 - **Top bar:** active conversation title, local privacy hint, model selector, and pin control.
+- **Provider choice:** Ollama is the default local provider; OpenAI and Anthropic API models are optional, clearly marked hosted choices with separate data-sharing consent.
 - **Conversation canvas:** focused welcome state, task suggestions, right-aligned user bubbles, and left-aligned assistant messages without role labels.
 - **Composer:** multiline prompt, project-folder context control, and send action.
 - **Visual language:** warm terracotta action color, rounded quiet controls, spacious conversation column, and low-noise navigation. Dark mode is the default; light mode is also available and remembered locally.
@@ -56,6 +57,8 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | Ollama loaded-model memory view | Avalonia reads the server's running-model list, shows reported model size and VRAM allocation, and offers a confirmed unload while no response or queued request is active |
 | Ollama generation stats | Avalonia displays first-token latency, generated tokens per second, output token count, and server-reported model load time beneath completed local replies |
 | Avalonia project resume and conversation fork | Attaching a folder with prior chats offers resume recent, attach to current, or start fresh; the sidebar can fork a saved chat with separate copies of Codev-managed rollback checkpoints |
+| Ollama thinking display | A per-conversation Think toggle requests or suppresses the optional Ollama thinking field; returned thinking is kept separate from the reply, collapsed by default, and excluded from follow-up prompts |
+| Avalonia hosted providers | OpenAI and Anthropic API keys can be supplied for the current session or through environment variables; available text models are discovered and replies stream. Connecting requires explicit cloud/data and billing acknowledgement; sending attached project context requires a separate opt-in. Keys are not written to settings, chat history, or backups. Code task tools remain local-Ollama only. Manual Windows interaction checks remain on the smoke checklist. |
 
 So far, we have finished the **foundation milestone**, including the dark/light theme addition. The larger design is still ahead.
 
@@ -164,7 +167,26 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 
 ### 8. Feature backlog
 
-This section is the single backlog for features drawn from studying Claude Code and the Claude apps, OpenAI Codex, OpenCode, Aider, Cline, Gemini CLI, Zed, Cursor, Roo Code, Goose and local chat apps such as Msty (checked 2026-09-27; see Sources). Only features that work with a local Ollama model, or can be done locally, are included. Sizes are rough guesses: **S** is a few files, **M** is a feature with its own UI and tests, **L** is a multi-part project.
+This section is the single backlog for features drawn from studying Claude Code and the Claude apps, OpenAI Codex, OpenCode, Aider, Cline, Gemini CLI, Zed, Cursor, Roo Code, Goose and local chat apps such as Msty (checked 2026-09-27; see Sources). Local Ollama remains the default; hosted API features are identified separately and must always be opt-in. Sizes are rough guesses: **S** is a few files, **M** is a feature with its own UI and tests, **L** is a multi-part project.
+
+### 8a. Optional hosted model providers
+
+Ollama continues to work without an account, API key, or network connection. Users who want stronger hosted models can connect directly to the official OpenAI API or Anthropic API, choose from models their key can access, and use those models for chat. These API credentials and charges are separate from ChatGPT Plus/Pro and Claude subscriptions; a subscription login is not an API key.
+
+The Avalonia prototype already implements model discovery and streamed text chat for both providers. This rollout makes the experience reliable, understandable, and safe before treating it as a supported feature:
+
+| # | Step | Status | Done when |
+|---|---|---|---|
+| P1 | Provider and privacy UX | Implemented in Avalonia; manual smoke pending | Ollama is visibly local/default; hosted models are labeled by provider; connecting names the provider, data sent, and possible API billing; project context has a separate opt-in; switching back to Ollama is immediate |
+| P2 | API credential handling | Session-only and environment variables implemented; persistent OS credential vault is future work | Keys never enter conversation/settings/backup files or logs; users may paste a key for the current session, use `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, or later opt into Windows Credential Manager / macOS Keychain / Linux Secret Service storage |
+| P3 | Reliable provider clients | Basic official OpenAI Responses API and Anthropic Messages API model discovery and streaming implemented; expanded tests pending | Cover pagination, empty model lists, authentication errors, rate limits, timeouts, cancellation, interrupted SSE streams, API error bodies, and provider/model compatibility with deterministic tests |
+| P4 | Hosted model experience | Basic text chat implemented; capability differences remain | Show provider-specific model names and request state; make context/output limits clear when known; explain that API use is billed separately from consumer subscriptions; do not infer local tokens/sec or Ollama memory stats for cloud replies |
+| P5 | Hosted coding-agent support | Not implemented; Code task is intentionally local-only | Add hosted tool calling only behind the same per-file review, checkpoint, command approval, trust, and cancellation controls used by local Code task; never silently send project files, and keep project-context consent distinct from general chat consent |
+| P6 | Hosted-provider manual QA and release | Pending | Verify connect, model selection, chat, errors, disconnect, environment keys, project-context consent, persistence boundaries, and return to offline Ollama using the Avalonia smoke checklist; publish clear supported-provider notes |
+
+**Credential recommendation.** Keep the present session-only default for now: it prevents a copied settings file or chat backup from exposing an API key. If users ask for “remember this key,” implement it through the operating system's credential store, never by writing plaintext to Codev settings. Environment variables remain the convenient non-persistent alternative.
+
+**Capability boundary.** Hosted models are initially chat and read-only planning providers. The current project editing and command agent loop uses Ollama tool calls and is deliberately blocked for hosted models. Supporting OpenAI/Anthropic tool APIs later requires provider-specific tool schemas and tests, while preserving Codev's existing approval and checkpoint flow. Neither provider's API key grants access to the matching consumer subscription.
 
 **Rules for every item below**
 
@@ -227,7 +249,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | B3 | Diff edits alongside whole-file edits | M | none | Done |
 | B4 | Step limit and loop detection | S | none | Core |
 | B5 | Test and lint loop | M | B1 | Done |
-| B6 | Show model reasoning | S | none | Later |
+| B6 | Show model reasoning | S | none | Done |
 | B7 | Sandbox research | L | X3, per OS | Speculative |
 | B8 | Loaded-model awareness | S | none | Done |
 | B9 | Folder trust | M | none; must land before D2, D3, D4 and D6 read project files | Core |
@@ -240,7 +262,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 - **B3 Diff edits (implemented for Avalonia Code task).** The agent can propose a strict, single-file unified-hunk patch or a whole-file replacement. Patches are applied in memory with exact line/context checks and no fuzzy matching; malformed, mismatched, or file-header patches fail before review and leave the workspace unchanged. Valid patches show the original, proposed patch, and complete resulting file in one review, then use the same approval, checkpoint, and hash concurrency check as replacement edits. [Aider supports several edit formats](https://aider.chat/docs/) for the same token-efficiency motivation.
 - **B4 Step limit and loop detection (implemented for both the WPF and Avalonia Code task runners).** Codev caps a task at eight tool rounds and now pauses for a user decision when the same tool name and canonicalized arguments repeat three consecutive times. Choosing Yes permits that call once and restarts the detector; No stops the task with an explanation. Tests cover reordered JSON properties, changed calls, and the continue-once reset. OpenCode's `doom_loop` permission fires when the same tool call repeats 3 times with identical input and defaults to *ask* ([permissions docs](https://opencode.ai/docs/permissions/)).
 - **B5 Test and lint loop (implemented in Avalonia Code task).** The model can propose a test or lint command through a distinct `verify_command` tool. Codev shows a verification-specific approval dialog for every run, reports the exit code and bounded output in the transcript, and only identifies exit code 0 as a pass. Failure output returns to the model; up to two reviewed repair cycles are allowed, after which file edits and commands are blocked for that task. Verification is optional, not silently selected or run.
-- **B6 Show model reasoning.** For Ollama models with a thinking mode, show the reasoning as a collapsible block and let the user turn thinking off per conversation.
+- **B6 Show model thinking (implemented in Avalonia).** The per-conversation Think control sends Ollama's boolean `think` setting, captured with queued turns and backups. Returned `message.thinking` deltas are saved separately from the assistant answer and displayed in a collapsed, selectable Markdown section. Thinking text is omitted from subsequent prompts; hosted providers do not show it. Models that do not support a boolean thinking control follow Ollama's documented model default.
 - **B7 Sandbox research.** Codex separates *what a process may physically do* (read-only, workspace-write, full access) from *when it must ask*; Codev has only the second. Real sandboxing needs a different mechanism on each OS, and [Codex's own Windows sandbox write-up](https://openai.com/index/building-codex-windows-sandbox/) shows it is hard to get right. This item is research first: write down what each OS offers, prototype, and only then add a mode. No mode is described as safe until tested. The simplest cross-platform candidate to prototype first is running commands in a Docker or Podman container with the project mounted, which is what Gemini CLI offers as its sandbox option. It needs a container runtime installed, so make it optional and detect it.
 - **B8 Loaded-model awareness (implemented in Avalonia).** A Memory view reads Ollama's live `/api/ps` result, showing loaded model names, server-reported size, VRAM allocation, context length when supplied, and expiry time. The user can confirm unloading an installed model through the documented `keep_alive: 0` API action. Unload is refused during generation or while requests are queued, and sending is briefly held during the unload. These API values are labeled as server stats, not a complete system RAM measurement.
 - **B9 Folder trust (implemented for Avalonia chat; project integrations remain future work).** Folder trust is stored in a separate readable local JSON file, can be revoked, and appears in `/status`. The first attachment dialog offers the current folder, its parent and descendants, or keeping it untrusted. Untrusted folders still allow chat, browsing, and explicitly selected files; automatic bounded project excerpts require trust. Hosted context still requires its separate opt-in. Avalonia chat does not currently load project instructions, skills, commands, hooks, or MCP settings; if any are added, trust must gate them before they are read or executed. A corrupt trust file stays untouched and leaves projects untrusted. The broader security behavior is informed by Gemini CLI's [trusted folders](https://geminicli.com/docs/cli/trusted-folders/) and Claude Code's [security model](https://code.claude.com/docs/en/security).
@@ -352,7 +374,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 | Tier | Items |
 |---|---|
 | Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1, E2 |
-| Later | A3, A4, A5, A8, A10, A12, B2, B6, B10, B11, B12, C2, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
+| Later | A3, A4, A5, A8, A10, A12, B2, B10, B11, B12, C2, C6, D2, D3, D4, D6, E3, E4, E6, E7, E11, and X6 and X7 |
 | Speculative | A9, A11, B7, C7, D5, D7, D8, D9, D10, E5, E8, E9 |
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.

@@ -22,6 +22,7 @@ public sealed class ConversationStatusReportTests
         Assert.Contains("Model: Ollama (local) · qwen3-coder:30b", report);
         Assert.Contains("Context window: 65,536 tokens", report);
         Assert.Contains("Temperature: 0.2", report);
+        Assert.Contains("Thinking: off", report);
         Assert.Contains("Mode: Plan", report);
         Assert.Contains("Project: app", report);
         Assert.DoesNotContain(@"C:\work\app", report, StringComparison.OrdinalIgnoreCase);
@@ -51,6 +52,7 @@ public sealed class ConversationStatusReportTests
 
         Assert.Contains($"Model: {displayName} · hosted-model", report);
         Assert.Contains("Context window: managed by provider", report);
+        Assert.Contains("Thinking: unavailable for hosted providers", report);
         Assert.Contains("Project context: excluded from hosted requests", report);
         Assert.Contains("Repository map: unavailable under the current context policy", report);
         Assert.Contains("Queue: response in progress", report);

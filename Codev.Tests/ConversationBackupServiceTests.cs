@@ -19,13 +19,14 @@ public sealed class ConversationBackupServiceTests
             Provider = "ollama",
             IsPlanMode = false,
             IsCodeTask = true,
+            ThinkEnabled = true,
             OutputStyle = ConversationOutputStyles.Concise,
             IncludeRepoMap = true,
             Temperature = 0.25,
             ProjectPath = @"C:\work\sample",
             PendingDiffComments = [new("src/app.cs", "+ change", "Check the error path.")],
             PendingRequestCount = 3,
-            Messages = [new("user", "Why does this fail?"), new("assistant", "I will trace the cause.")]
+            Messages = [new("user", "Why does this fail?"), new ChatMessage("assistant", "I will trace the cause.") { Thinking = "I will inspect the failing path." }]
         };
 
         var backup = ConversationBackupService.Export([source], Options);
@@ -38,11 +39,13 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal("ollama", imported.Provider);
         Assert.False(imported.IsPlanMode);
         Assert.True(imported.IsCodeTask);
+        Assert.True(imported.ThinkEnabled);
         Assert.Equal(ConversationOutputStyles.Concise, imported.OutputStyle);
         Assert.True(imported.IncludeRepoMap);
         Assert.Equal(source.Temperature, imported.Temperature);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
+        Assert.Equal("I will inspect the failing path.", imported.Messages[1].Thinking);
         Assert.Equal(source.PendingDiffComments, imported.PendingDiffComments);
         Assert.Equal(0, imported.PendingRequestCount);
     }

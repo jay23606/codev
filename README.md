@@ -71,6 +71,8 @@ Fork an idle Avalonia conversation from its sidebar context menu to continue in 
 
 When you attach a folder that already has conversations, Codev offers to resume the most recent one for that project, attach the folder to the current chat, or start a new conversation.
 
+For local Ollama models, the **Think** control requests a separate model thinking trace when supported. It appears collapsed beneath the answer, is saved with the message, and is excluded from later prompts. Each queued turn retains the conversation’s Think setting.
+
 The Avalonia Git review dialog also lets you attach an unsent comment to selected diff lines. Comments persist with the conversation, appear above the composer, can be removed before sending, and are included with the diff excerpt in the sent prompt. They are preserved in conversation backups; broad hunk staging/revert and worktree merge/recovery remain roadmap items.
 
 For compact project orientation, enable **Include repo map** beside the project context controls. Codev adds a bounded outline of safe project files and common declarations (up to 160 files and 8,000 characters), scoped to the trusted folder or explicitly selected files. It follows hosted-context consent, persists per conversation and queued turn, and shows an approximate maximum token cost before sending.

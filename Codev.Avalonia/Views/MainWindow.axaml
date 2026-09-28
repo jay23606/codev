@@ -122,7 +122,7 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,*,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
@@ -154,7 +154,8 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Grid.Column="9" Classes="soft" Content="Memory" Click="LoadedModels_Click" ToolTip.Tip="See models currently loaded by Ollama and their reported memory use; unload a model when the queue is idle." />
+                    <ToggleButton Grid.Column="9" Classes="soft" Content="Think" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsVisible="{Binding IsLocalModel}" ToolTip.Tip="Ask a thinking-capable Ollama model to return its separate thinking trace. The trace stays collapsed below the reply. Unsupported models use their default behavior." />
+                    <Button Grid.Column="10" Classes="soft" Content="Memory" Click="LoadedModels_Click" ToolTip.Tip="See models currently loaded by Ollama and their reported memory use; unload a model when the queue is idle." />
                 </Grid>
             </Border>
             <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
@@ -171,6 +172,11 @@
                                         ToolTip.Tip="Restore conversation to before this prompt; project files stay unchanged" />
                             </StackPanel>
                             <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="1050" Margin="24,0,24,0" Spacing="8">
+                                <Expander Header="Model thinking" IsExpanded="False" IsVisible="{Binding HasThinking}" ToolTip.Tip="Thinking returned separately by the local Ollama model. It is saved with this reply but excluded from future prompts.">
+                                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                                        <md:MarkdownScrollViewer Markdown="{Binding Thinking}" SelectionEnabled="True" />
+                                    </Border>
+                                </Expander>
                                 <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
                                 <TextBlock Text="{Binding GenerationStatsLabel}" IsVisible="{Binding HasGenerationStats}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" Margin="2,0,0,0" ToolTip.Tip="Generation stats reported by Ollama; first-token time is measured by Codev." />
                             </StackPanel>

@@ -1,6 +1,6 @@
 # Avalonia UI smoke checklist
 
-Use this checklist for the Avalonia desktop app while it is the active UI-port target. The Windows WPF app has a separate feature set and must not be used as evidence that an Avalonia interaction works. Use a disposable conversation and local Ollama only. Do not send project data to a non-local endpoint.
+Use this checklist for the Avalonia desktop app while it is the active UI-port target. The Windows WPF app has a separate feature set and must not be used as evidence that an Avalonia interaction works. Use a disposable conversation and local Ollama for local checks. Hosted-provider checks require valid API credentials and may incur provider charges; use a disposable chat and never include project data unless separately opted in.
 
 ## Windows smoke run
 
@@ -19,7 +19,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [x] In a new disposable conversation, send a short prompt; verify streaming, right-aligned user bubble, left-aligned assistant response without role labels or Copy buttons, and selectable Markdown.
 - [ ] Send `/status`; verify the report describes the current provider/model, context, mode, project and queue without invoking the model or disclosing an API key.
 - [ ] Open Settings; verify the Ollama endpoint is restored after restart and an older theme-only settings file is preserved through migration. Change to another local endpoint and verify model discovery/chat use it. Change to a non-local endpoint and verify Codev explains where prompts and selected project context will go and requires confirmation; reject once and confirm the setting stays unchanged. Confirm redirects are not followed, and the endpoint cannot be changed while generation or queued work is active.
-- [ ] With valid OpenAI and Anthropic API credentials available, connect each provider, verify model discovery and a streamed reply, then verify disabling hosted requests blocks further hosted turns while local Ollama remains available; confirm keys never appear in settings, chat history, backups, or /status, and project files remain excluded until separately opted in.
+- [ ] With valid OpenAI and Anthropic API credentials available, confirm Codev identifies each as hosted and explains that API access/billing is separate from consumer subscriptions; connect each provider and verify model discovery and a streamed reply. Check missing/invalid credentials, disable hosted requests and confirm they are blocked while local Ollama remains available; confirm keys never appear in settings, chat history, backups, logs, or `/status`, and project files remain excluded until separately opted in.
 - [ ] In a trusted disposable project, enable Code task mode with a local Ollama model; verify read/list/search tools work, hosted-model selection is blocked, new-file and replacement proposals require review, rejecting leaves files unchanged, approving a replacement creates a checkpoint, and each shell command requires approval with a visible timeout/output result. Revoke trust during a queued Code task and verify it refuses to resume tools.
 - [ ] After an approved file change, open Files history, select the entry, review the complete current and checkpoint versions, and cancel once to verify the file is unchanged. Approve restore and verify the file returns to the checkpoint and a new undo entry appears; change the file during review in a second run and verify the restore refuses to overwrite it. Verify Files is unavailable during active or queued turns and for imported change records without local checkpoints.
 - [ ] In a disposable Git repository, open Git status, inspect staged/unstaged/untracked file diffs, select diff lines and ask Codev about them; verify they are appended to the composer without being sent. Stage and unstage a selection, verify branch changes are disabled while dirty and confirmed when clean, review a staged diff, and create a local commit; confirm Codev does not push and detects staged changes made after review.
@@ -104,3 +104,11 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 - Attempt to fork a conversation with active generation or queued turns; verify it is refused without altering the source or creating a new chat.
 - Simulate a missing or invalid checkpoint; verify fork reports the error and removes any partial checkpoint copies.
 - Attach a folder with multiple prior conversations; confirm the prompt chooses the most recently updated non-archived chat and offers Resume recent, Attach here, New conversation, and Cancel. Verify each choice does the corresponding action without copying or overwriting messages.
+
+## Ollama thinking display
+
+- With an Ollama model that supports thinking, enable Think, send a prompt, and verify streamed thinking appears separately from the final response in a collapsed section.
+- Disable Think and verify the API request asks Ollama to suppress thinking; verify a model that ignores the boolean follows its documented default without breaking the answer.
+- Queue a prompt while a response is running, change the conversation Think setting, and confirm the queued turn uses the captured setting.
+- Restart and reopen the chat; confirm both the setting and returned thinking text persist, and confirm thinking text is not included in follow-up request history.
+- Switch to a hosted provider and confirm the Think control is hidden and `/status` identifies thinking as unavailable for hosted providers.

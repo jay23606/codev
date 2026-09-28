@@ -35,6 +35,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _model = "qwen3-coder:30b";
     private string _provider = "ollama";
     private string _outputStyle = Codev.ConversationOutputStyles.Balanced;
+    private bool _thinkEnabled;
     private bool _cloudRequestsEnabled;
     private int _contextSize;
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
@@ -164,6 +165,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IncludeProjectContextForHosted));
                 OnPropertyChanged(nameof(IncludeRepoMap));
                 OnPropertyChanged(nameof(OutputStyle));
+                OnPropertyChanged(nameof(ThinkEnabled));
                 OnPropertyChanged(nameof(CanIncludeRepoMap));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
@@ -293,6 +295,19 @@ public sealed class MainViewModel : ViewModelBase
             if (string.Equals(OutputStyle, normalized, StringComparison.Ordinal)) return;
             if (ActiveConversation is null) _outputStyle = normalized;
             else ActiveConversation.OutputStyle = normalized;
+            OnPropertyChanged();
+            Persist();
+        }
+    }
+
+    public bool ThinkEnabled
+    {
+        get => ActiveConversation?.ThinkEnabled ?? _thinkEnabled;
+        set
+        {
+            if (ThinkEnabled == value) return;
+            if (ActiveConversation is { } conversation) conversation.ThinkEnabled = value;
+            else _thinkEnabled = value;
             OnPropertyChanged();
             Persist();
         }
@@ -456,6 +471,7 @@ public sealed class MainViewModel : ViewModelBase
             Provider = Provider,
             IsPlanMode = IsPlanMode,
             OutputStyle = OutputStyle,
+            ThinkEnabled = ThinkEnabled,
             IncludeRepoMap = IncludeRepoMap,
             NumCtx = ContextSize,
             UpdatedAt = DateTimeOffset.Now
@@ -584,6 +600,7 @@ public sealed class MainViewModel : ViewModelBase
         Draft = conversation.Draft;
         OnPropertyChanged(nameof(IncludeRepoMap));
         OnPropertyChanged(nameof(OutputStyle));
+        OnPropertyChanged(nameof(ThinkEnabled));
         OnPropertyChanged(nameof(CanIncludeRepoMap));
         OnPropertyChanged(nameof(RepoMapEstimateLabel));
         Reset(PendingDiffComments, conversation.PendingDiffComments ?? []);
@@ -987,7 +1004,7 @@ public sealed class MainViewModel : ViewModelBase
             conversation.ProjectPath, hasExplicitProjectFiles, projectTrusted);
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
             conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
-            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle);
+            conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle, conversation.ThinkEnabled);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -1058,7 +1075,18 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (delta.Length == 0) return;
         output.Append(delta);
-        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", output.ToString());
+        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = output.ToString() };
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+        });
+    }
+
+    private async Task AppendAssistantThinkingAsync(Codev.Conversation conversation, int assistantIndex, System.Text.StringBuilder output, string delta)
+    {
+        if (delta.Length == 0) return;
+        output.Append(delta);
+        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Thinking = output.ToString() };
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
@@ -1067,7 +1095,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task RunCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
         List<OllamaChatMessage> history, Codev.WorkspaceFileService files, Codev.PersistedQueuedTurn turn,
-        CancellationToken cancellationToken)
+        System.Text.StringBuilder thinking, CancellationToken cancellationToken)
     {
         var shell = Codev.ShellCommandResolver.ResolveCurrent();
         object[] tools =
@@ -1098,6 +1126,7 @@ public sealed class MainViewModel : ViewModelBase
                 ["model"] = turn.Model,
                 ["messages"] = history,
                 ["tools"] = tools,
+                ["think"] = turn.ThinkEnabled,
                 ["stream"] = false
             };
             var options = new Dictionary<string, object>();
@@ -1120,6 +1149,11 @@ public sealed class MainViewModel : ViewModelBase
                 conversation.LastPromptModel = turn.Model;
             }
             var message = root.GetProperty("message");
+            if (message.TryGetProperty("thinking", out var thinkingChunk) && thinkingChunk.GetString() is { Length: > 0 } thinkingText)
+            {
+                if (thinking.Length > 0) thinking.AppendLine().AppendLine();
+                await AppendAssistantThinkingAsync(conversation, assistantIndex, thinking, thinkingText);
+            }
             var text = message.TryGetProperty("content", out var content) ? content.GetString() ?? "" : "";
             var calls = message.TryGetProperty("tool_calls", out var callArray) && callArray.ValueKind == JsonValueKind.Array
                 ? callArray.EnumerateArray().Select(call => call.Clone()).ToArray() : [];
@@ -1173,7 +1207,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task SetAssistantTranscriptAsync(Codev.Conversation conversation, int assistantIndex, string content)
     {
-        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", content);
+        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = content };
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
@@ -1230,6 +1264,7 @@ public sealed class MainViewModel : ViewModelBase
             }
             var normalizedHistory = Codev.OllamaConversationHistory.Normalize(priorMessages);
             var output = new System.Text.StringBuilder();
+            var thinking = new System.Text.StringBuilder();
             Codev.OllamaGenerationStats? generationStats = null;
             if (savedTurn.Provider == "ollama")
             {
@@ -1239,11 +1274,11 @@ public sealed class MainViewModel : ViewModelBase
                     if (string.IsNullOrWhiteSpace(savedTurn.ProjectPath) || !_projectFolderTrust.IsTrusted(savedTurn.ProjectPath) || !Directory.Exists(savedTurn.ProjectPath))
                         throw new InvalidOperationException("The project folder is no longer trusted. Re-trust it before resuming this Code task.");
                     await RunCodeTaskTurnAsync(conversation, assistantIndex, history,
-                        new Codev.WorkspaceFileService(savedTurn.ProjectPath, savedTurn.ContextExclusions), savedTurn, token.Token);
+                        new Codev.WorkspaceFileService(savedTurn.ProjectPath, savedTurn.ContextExclusions), savedTurn, thinking, token.Token);
                 }
                 else
                 {
-                var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["stream"] = true };
+                var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["think"] = savedTurn.ThinkEnabled, ["stream"] = true };
                 var options = new Dictionary<string, object>();
                 if (savedTurn.NumCtx > 0) options["num_ctx"] = savedTurn.NumCtx;
                 if (savedTurn.Temperature is { } temperature) options["temperature"] = temperature;
@@ -1264,11 +1299,16 @@ public sealed class MainViewModel : ViewModelBase
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     using var json = System.Text.Json.JsonDocument.Parse(line);
                     if (json.RootElement.TryGetProperty("error", out var error)) throw new InvalidOperationException(error.GetString());
-                    if (json.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var chunk))
+                    if (json.RootElement.TryGetProperty("message", out var message))
                     {
-                        var delta = chunk.GetString() ?? "";
-                        if (delta.Length > 0 && firstTokenTime is null) firstTokenTime = requestTimer.Elapsed;
-                        await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
+                        if (message.TryGetProperty("thinking", out var thinkingChunk) && thinkingChunk.GetString() is { Length: > 0 } thinkingDelta)
+                            await AppendAssistantThinkingAsync(conversation, assistantIndex, thinking, thinkingDelta);
+                        if (message.TryGetProperty("content", out var chunk))
+                        {
+                            var delta = chunk.GetString() ?? "";
+                            if (delta.Length > 0 && firstTokenTime is null) firstTokenTime = requestTimer.Elapsed;
+                            await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
+                        }
                     }
                     generationStats = Codev.OllamaGenerationStats.FromFinalChunk(json.RootElement, firstTokenTime) ?? generationStats;
                 }
@@ -1292,14 +1332,14 @@ public sealed class MainViewModel : ViewModelBase
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             var partial = conversation.Messages[assistantIndex].Content;
-            conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]");
+            conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]" };
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException)
         {
             var partial = conversation.Messages[assistantIndex].Content;
             var detail = Codev.OllamaErrorDescription.Describe(ex);
             var failure = string.IsNullOrWhiteSpace(partial) ? detail : $"{partial}\n\n[Generation stopped: {detail}]";
-            conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", failure);
+            conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = failure };
         }
         finally
         {
