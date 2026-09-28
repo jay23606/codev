@@ -1817,7 +1817,9 @@ public partial class MainWindow : Window
                 system += "\n\n" + ProjectKnowledgeContext.Build(project.Knowledge);
             if (project is not null)
             {
-                var agentGuidance = await ProjectAgentInstructions.LoadAsync(new WorkspaceFileService(project.Path, project.ContextExclusions), cancellation.Token);
+                var agentGuidance = await ProjectAgentInstructions.LoadAsync(
+                    new WorkspaceFileService(project.Path, project.ContextExclusions), turn.ContextFiles,
+                    cancellationToken: cancellation.Token);
                 if (!string.IsNullOrWhiteSpace(agentGuidance)) system += "\n\n" + agentGuidance;
             }
             if (!hosted && !string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)

@@ -1396,7 +1396,8 @@ public sealed class MainViewModel : ViewModelBase
                 Directory.Exists(savedTurn.ProjectPath))
             {
                 var projectContext = await Codev.ProjectContextReader.ReadAsync(savedTurn.ProjectPath,
-                    savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
+                    savedTurn.ContextFiles, savedTurn.ContextExclusions, includeProjectInstructions: projectStillTrusted,
+                    cancellationToken: token.Token);
                 priorMessages.Add(new Codev.ChatMessage("system", projectContext));
                 if (savedTurn.IncludeRepoMap)
                 {

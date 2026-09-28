@@ -15,7 +15,8 @@ public static class ProjectContextEstimateLabel
         try
         {
             var estimatedTokens = new WorkspaceFileService(projectPath!).EstimateContextTokens(selectedFiles);
-            return Format(true, hostedProvider, includeProjectContextForHosted, estimatedTokens);
+            var label = Format(true, hostedProvider, includeProjectContextForHosted, estimatedTokens);
+            return projectFolderTrusted ? label + " Applicable AGENTS.md guidance may add to this estimate." : label;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {

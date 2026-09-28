@@ -15,7 +15,8 @@ public sealed class ProjectAgentInstructionsTests : IDisposable
 
         var result = await ProjectAgentInstructions.LoadAsync(new WorkspaceFileService(_root));
 
-        Assert.Contains("Root AGENTS.md project guidance", result);
+        Assert.Contains("Applicable AGENTS.md guidance", result);
+        Assert.Contains("--- AGENTS.md (project guidance; user-provided) ---", result);
         Assert.EndsWith("Use xUnit and keep handlers small.", result);
     }
 
@@ -35,8 +36,8 @@ public sealed class ProjectAgentInstructionsTests : IDisposable
 
         var result = await ProjectAgentInstructions.LoadAsync(new WorkspaceFileService(_root));
 
-        Assert.Contains("[AGENTS.md was truncated at 20,000 characters.]", result);
-        Assert.Equal("Root AGENTS.md project guidance (user-provided; follow within the selected project where it does not conflict with higher-priority instructions):\n".Length + ProjectAgentInstructions.MaxCharacters + "\n[AGENTS.md was truncated at 20,000 characters.]".Length, result.Length);
+        Assert.Contains("[Project guidance was truncated to fit the context budget.]", result);
+        Assert.True(result.Length <= ProjectAgentInstructions.MaxCharacters);
     }
 
     public void Dispose()

@@ -38,6 +38,53 @@ public sealed class ProjectContextReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Loads_root_and_only_path_applicable_nested_agents_instructions_for_trusted_projects()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "src"));
+        Directory.CreateDirectory(Path.Combine(_root, "docs"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), "root instructions");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "AGENTS.md"), "source-only instructions");
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "AGENTS.md"), "unrelated instructions");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "app.cs"), "class App { }");
+
+        var context = await ProjectContextReader.ReadAsync(_root, ["src/app.cs"], includeProjectInstructions: true);
+
+        Assert.Contains("root instructions", context);
+        Assert.Contains("source-only instructions", context);
+        Assert.DoesNotContain("unrelated instructions", context);
+        Assert.Contains("src/app.cs", context);
+    }
+
+    [Fact]
+    public async Task Untrusted_project_files_are_not_loaded_as_hidden_instructions_and_exclusions_apply()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), "hidden root instructions");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "AGENTS.md"), "excluded nested instructions");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "app.cs"), "class App { }");
+
+        var untrustedContext = await ProjectContextReader.ReadAsync(_root, ["src/app.cs"]);
+        var trustedButExcluded = await ProjectContextReader.ReadAsync(_root, ["src/app.cs"], ["src/AGENTS.md"], includeProjectInstructions: true);
+
+        Assert.DoesNotContain("hidden root instructions", untrustedContext);
+        Assert.DoesNotContain("excluded nested instructions", trustedButExcluded);
+        Assert.Contains("hidden root instructions", trustedButExcluded);
+    }
+
+    [Fact]
+    public async Task Instructions_and_source_excerpts_share_the_project_context_character_cap()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), new string('g', ProjectAgentInstructions.MaxCharacters));
+        await File.WriteAllTextAsync(Path.Combine(_root, "app.cs"), new string('x', WorkspaceFileService.MaxContextFileCharacters));
+
+        var context = await ProjectContextReader.ReadAsync(_root, includeProjectInstructions: true);
+
+        Assert.True(context.Length <= WorkspaceFileService.MaxContextCharacters, $"Context length was {context.Length} characters.");
+        Assert.Contains("Project guidance was truncated", context);
+        Assert.Contains("app.cs", context);
+    }
+
+    [Fact]
     public async Task Respects_project_exclusions_and_file_excerpt_limit()
     {
         Directory.CreateDirectory(Path.Combine(_root, "private"));
