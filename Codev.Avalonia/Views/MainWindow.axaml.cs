@@ -309,7 +309,7 @@ public partial class MainWindow : Window
         var apiKey = new TextBox { MinWidth = 360, PasswordChar = '•', Watermark = "Paste API key (or leave blank to use the environment variable)" };
         var acknowledgement = new CheckBox
         {
-            Content = "I understand that prompts, conversation history, and selected project context will be sent to the provider and API usage may incur separate charges.",
+            Content = "I understand that prompts and conversation history go to this provider under its data policies, and API use may incur separate charges. Project files stay local unless I separately opt in below.",
             IsChecked = viewModel.CloudRequestsEnabled,
             MaxWidth = 390
         };
@@ -363,10 +363,13 @@ public partial class MainWindow : Window
         connect.Click += async (_, _) =>
         {
             var providerId = provider.SelectedItem?.ToString() == "Anthropic" ? Codev.CloudModelProviders.Anthropic : Codev.CloudModelProviders.OpenAI;
-            viewModel.IncludeProjectContextForHosted = includeProjectContext.IsChecked == true;
             var connected = await viewModel.ConnectCloudProviderAsync(providerId, apiKey.Text, acknowledgement.IsChecked == true);
             status.Text = viewModel.ConnectionStatus;
-            if (connected) dialog.Close();
+            if (connected)
+            {
+                viewModel.IncludeProjectContextForHosted = includeProjectContext.IsChecked == true;
+                dialog.Close();
+            }
         };
         disable.Click += (_, _) => { viewModel.DisableCloudProviders(); dialog.Close(); };
         cancel.Click += (_, _) => dialog.Close();

@@ -28,20 +28,39 @@ public sealed class CloudModelApiClient(HttpClient http)
         Validate(provider, apiKey);
         if (provider == CloudModelProviders.OpenAI)
         {
-            using var request = CreateRequest(HttpMethod.Get, new Uri(OpenAiBase, "models"), provider, apiKey);
-            using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-            using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return [];
-            return data.EnumerateArray()
-                .Select(item => item.TryGetProperty("id", out var id) ? id.GetString() : null)
-                .Where(IsOpenAiTextModel)
-                .Select(id => new CloudModel(provider, id!, id!))
+            var openAiModels = new List<CloudModel>();
+            var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+            string? after = null;
+            do
+            {
+                var url = after is null
+                    ? new Uri(OpenAiBase, "models")
+                    : new UriBuilder(new Uri(OpenAiBase, "models")) { Query = $"after={Uri.EscapeDataString(after)}" }.Uri;
+                using var request = CreateRequest(HttpMethod.Get, url, provider, apiKey);
+                using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+                using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken).ConfigureAwait(false);
+                var root = document.RootElement;
+                if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in data.EnumerateArray())
+                    {
+                        var id = item.TryGetProperty("id", out var idValue) ? idValue.GetString() : null;
+                        if (IsOpenAiTextModel(id)) openAiModels.Add(new CloudModel(provider, id!, id!));
+                    }
+                }
+                var hasMore = root.TryGetProperty("has_more", out var hasMoreValue) && hasMoreValue.ValueKind == JsonValueKind.True;
+                var next = root.TryGetProperty("last_id", out var lastId) && lastId.ValueKind == JsonValueKind.String ? lastId.GetString() : null;
+                if (!hasMore || string.IsNullOrWhiteSpace(next) || !seenCursors.Add(next)) break;
+                after = next;
+            } while (true);
+            return openAiModels.DistinctBy(model => model.Id, StringComparer.OrdinalIgnoreCase)
                 .OrderBy(model => model.Id, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
 
         var models = new List<CloudModel>();
+        var seenAnthropicCursors = new HashSet<string>(StringComparer.Ordinal);
         string? afterId = null;
         do
         {
@@ -61,9 +80,11 @@ public sealed class CloudModelApiClient(HttpClient http)
                     models.Add(new CloudModel(provider, id, displayName));
                 }
             }
-            afterId = root.TryGetProperty("has_more", out var more) && more.GetBoolean() && root.TryGetProperty("last_id", out var last) ? last.GetString() : null;
+            var hasMore = root.TryGetProperty("has_more", out var more) && more.ValueKind == JsonValueKind.True;
+            var next = root.TryGetProperty("last_id", out var last) && last.ValueKind == JsonValueKind.String ? last.GetString() : null;
+            afterId = hasMore && !string.IsNullOrWhiteSpace(next) && seenAnthropicCursors.Add(next) ? next : null;
         } while (afterId is not null);
-        return models;
+        return models.DistinctBy(model => model.Id, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public async IAsyncEnumerable<string> StreamChatAsync(
@@ -87,37 +108,60 @@ public sealed class CloudModelApiClient(HttpClient http)
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var reader = new StreamReader(stream);
+        var eventName = "";
+        var eventData = new StringBuilder();
+        var completed = false;
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
-            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
-            var data = line[5..].Trim();
-            if (data.Length == 0 || data == "[DONE]") continue;
-            using var document = JsonDocument.Parse(data);
-            var root = document.RootElement;
-            if (provider == CloudModelProviders.OpenAI)
+            if (string.IsNullOrWhiteSpace(line))
             {
-                var type = GetString(root, "type");
-                if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta)
-                    yield return delta;
-                else if (type is "error" or "response.failed" || type == "response.incomplete")
+                if (eventData.Length == 0) { eventName = ""; continue; }
+                var data = eventData.ToString();
+                eventData.Clear();
+                if (data == "[DONE]") { completed = true; eventName = ""; continue; }
+                using var document = JsonDocument.Parse(data);
+                var root = document.RootElement;
+                var type = GetString(root, "type") ?? eventName;
+                if (type is "error" or "response.failed")
                     throw new InvalidOperationException(ReadApiError(root));
+                if (provider == CloudModelProviders.OpenAI)
+                {
+                    if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta)
+                        yield return delta;
+                    else if (type == "response.incomplete")
+                        throw new InvalidOperationException(ReadIncompleteResponse(root));
+                    else if (type == "response.completed") completed = true;
+                }
+                else
+                {
+                    if (type == "content_block_delta" && root.TryGetProperty("delta", out var block) && GetString(block, "type") == "text_delta" && GetString(block, "text") is { Length: > 0 } text)
+                        yield return text;
+                    else if (type == "message_delta" && root.TryGetProperty("delta", out var messageDelta) && GetString(messageDelta, "stop_reason") == "max_tokens")
+                        throw new InvalidOperationException("Anthropic stopped at the output token limit; the reply may be incomplete.");
+                    else if (type == "message_stop") completed = true;
+                }
+                eventName = "";
+                continue;
             }
-            else
+
+            if (line.StartsWith(':')) continue;
+            if (line.StartsWith("event:", StringComparison.Ordinal)) eventName = line[6..].TrimStart();
+            else if (line.StartsWith("data:", StringComparison.Ordinal))
             {
-                var type = GetString(root, "type");
-                if (type == "content_block_delta" && root.TryGetProperty("delta", out var block) && GetString(block, "type") == "text_delta" && GetString(block, "text") is { Length: > 0 } text)
-                    yield return text;
-                else if (type == "error")
-                    throw new InvalidOperationException(ReadApiError(root));
+                if (eventData.Length > 0) eventData.Append('\n');
+                eventData.Append(line[5..].TrimStart());
             }
         }
+        if (!completed)
+            throw new IOException($"The {ProviderDisplayName(provider)} stream ended before the provider reported a completed response.");
     }
 
     private static object BuildOpenAiPayload(string model, IReadOnlyList<CloudChatMessage> messages) => new
     {
         model,
         input = messages.Select(message => new { role = NormalizeRole(message.Role), content = message.Content }).ToArray(),
-        stream = true
+        stream = true,
+        store = false
     };
 
     private static object BuildAnthropicPayload(string model, IReadOnlyList<CloudChatMessage> messages)
@@ -125,7 +169,9 @@ public sealed class CloudModelApiClient(HttpClient http)
         var system = string.Join("\n\n", messages.Where(message => message.Role is "system" or "developer").Select(message => message.Content).Where(content => !string.IsNullOrWhiteSpace(content)));
         var chatMessages = messages.Where(message => message.Role is "user" or "assistant")
             .Select(message => new { role = message.Role, content = message.Content }).ToArray();
-        return new { model, max_tokens = 4096, system, messages = chatMessages, stream = true };
+        return string.IsNullOrWhiteSpace(system)
+            ? new { model, max_tokens = 4096, messages = chatMessages, stream = true }
+            : new { model, max_tokens = 4096, system, messages = chatMessages, stream = true };
     }
 
     private static string NormalizeRole(string role) => role == "developer" ? "system" : role;
@@ -168,6 +214,15 @@ public sealed class CloudModelApiClient(HttpClient http)
             return responseDetail;
         return "The provider returned an error without details.";
     }
+
+    private static string ReadIncompleteResponse(JsonElement root)
+    {
+        if (root.TryGetProperty("response", out var response) && response.TryGetProperty("incomplete_details", out var details) && GetString(details, "reason") is { Length: > 0 } reason)
+            return $"The OpenAI response is incomplete ({reason}).";
+        return "The OpenAI response is incomplete.";
+    }
+
+    private static string ProviderDisplayName(string provider) => provider == CloudModelProviders.OpenAI ? "OpenAI" : "Anthropic";
 
     private static string? GetString(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

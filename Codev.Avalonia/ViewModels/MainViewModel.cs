@@ -1657,9 +1657,6 @@ public sealed class MainViewModel : ViewModelBase
             return false;
         }
 
-        _cloudRequestsEnabled = true;
-        _cloudApiKeys[provider] = key.Trim();
-        OnPropertyChanged(nameof(CloudRequestsEnabled));
         ConnectionStatus = $"Connecting to {provider} · loading available models…";
         try
         {
@@ -1667,6 +1664,9 @@ public sealed class MainViewModel : ViewModelBase
             var choices = await new Codev.CloudModelApiClient(_http).ListModelsAsync(provider, key.Trim(), timeout.Token);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                _cloudApiKeys[provider] = key.Trim();
+                _cloudRequestsEnabled = true;
+                OnPropertyChanged(nameof(CloudRequestsEnabled));
                 foreach (var old in Models.Where(choice => choice.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase)).ToArray()) Models.Remove(old);
                 foreach (var model in choices.OrderBy(choice => choice.DisplayName, StringComparer.OrdinalIgnoreCase))
                     Models.Add(new ModelChoice(model.Id, $"{provider} · {model.DisplayName}", provider));
