@@ -16,7 +16,7 @@ Codev is a standalone Windows desktop coding workspace for local language models
 - Keyboard shortcuts include quick new chat, search, composer focus, Settings, rename, and stop; press F1 for the in-app reference
 - Save reusable local prompt templates and insert them into the composer for editing before sending
 - Dark and light themes, with dark as the default and the choice remembered locally
-- Per-conversation Ollama model selection, with quick choices for the three models in the original setup
+- Per-conversation Ollama model selection, with friendly quick choices for the original three and automatic discovery of other installed models
 - Per-conversation Ollama context selection, limited to each model's configured maximum
 - Per-conversation temperature control (0–2), with Ollama's model default preserved unless you set a value
 - Last request token count compared with the selected context size, reported by Ollama
@@ -53,7 +53,7 @@ The Avalonia renderer prototype is separate and is not yet a replacement for the
 dotnet run --project .\Codev.Avalonia\Codev.Avalonia.csproj
 ```
 
-It currently provides a Claude/Codex-inspired dark shell, locally persisted conversations, chat search, pin/archive, draft saving, installed-model discovery, streaming chat through local Ollama with a Stop control, message copy, and a persistent dark/light theme toggle. Project tools, reviewed edits, Git, export, backups, settings, and the remaining WPF workflows are still on the porting roadmap.
+It currently provides a Claude/Codex-inspired dark shell, locally persisted conversations, chat search, pin/archive, draft saving, installed-model discovery (including newly installed models when the picker opens), streaming chat through local Ollama with a Stop control, Enter-to-send with Shift+Enter for new lines, message copy, and a persistent dark/light theme toggle. Project tools, reviewed edits, Git, export, backups, settings, and the remaining WPF workflows are still on the porting roadmap.
 
 Build a self-contained Windows app:
 
@@ -63,7 +63,7 @@ dotnet publish .\Codev.csproj -c Release -r win-x64 --self-contained true
 
 ## Local models
 
-Codev discovers installed models from Ollama and shows the supported coding models below when installed. Duplicate tags and source repository names for the same weights are hidden from the picker:
+Codev discovers installed models from Ollama at startup and refreshes the picker when it opens. The three models from the original setup receive friendly labels; other installed Ollama tags, including Qwen3.8-27B, are listed automatically:
 
 - `devstral-small-2-64k`
 - `qwen3-coder-next-q2-24k`

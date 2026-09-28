@@ -103,7 +103,7 @@
                     <StackPanel VerticalAlignment="Center"><TextBlock x:Name="ConversationTitle" Text="New conversation" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource MainTextBrush}"/><TextBlock Text="Private · running on your machine" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" Margin="0,2,0,0"/></StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="MODEL" FontSize="9" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
-                        <ComboBox x:Name="ModelPicker" Width="245" SelectionChanged="ModelPicker_SelectionChanged" DisplayMemberPath="DisplayName" SelectedValuePath="Name"/>
+                        <ComboBox x:Name="ModelPicker" Width="245" SelectionChanged="ModelPicker_SelectionChanged" DropDownOpened="ModelPicker_DropDownOpened" DisplayMemberPath="DisplayName" SelectedValuePath="Name"/>
                         <TextBlock Text="CTX" FontSize="9" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="12,0,7,0"/>
                         <ComboBox x:Name="ContextPicker" Width="118" SelectionChanged="ContextPicker_SelectionChanged" DisplayMemberPath="DisplayName" SelectedValuePath="Value" ToolTip="Per-conversation context size sent to Ollama; choices are capped to the selected model's configured limit"/>
                         <TextBlock x:Name="ContextUsageLabel" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="7,0,0,0"/>

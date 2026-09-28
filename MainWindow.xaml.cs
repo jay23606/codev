@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private bool _hasRestoredQueue;
     private bool _activeRequestIsCodeTask;
     private bool _loadingModel;
+    private bool _loadingModels;
     private bool _updatingContext;
     private bool _codeTaskMode;
     private bool _planMode;
@@ -344,6 +345,8 @@ public partial class MainWindow : Window
 
     private async Task LoadModelsAsync()
     {
+        if (_loadingModels) return;
+        _loadingModels = true;
         try
         {
             var response = await Http.GetFromJsonAsync<TagsResponse>(OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/tags"));
@@ -356,6 +359,14 @@ public partial class MainWindow : Window
                 "qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l",
                 "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L");
             AddKnownModel(installed, "qwen3-coder:30b", "Qwen3-Coder 30B · Q4 · 64K", "qwen3-coder:30b");
+            var knownNames = new[]
+            {
+                "devstral-small-2-64k", "devstral-small-2:q4_k_m", "hf.co/bartowski/mistralai_Devstral-Small-2-24B-Instruct-2512-GGUF:Q4_K_M",
+                "qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l", "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L",
+                "qwen3-coder:30b"
+            }.Select(RemoveLatestTag).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var model in installed.Where(model => !knownNames.Contains(RemoveLatestTag(model.Name))).OrderBy(model => model.Name, StringComparer.OrdinalIgnoreCase))
+                _models.Add(new ModelOption(model.Name, OllamaModelDisplayName.Format(model.Name)));
 
             _loadingModel = true;
             ModelPicker.ItemsSource = _models;
@@ -366,7 +377,7 @@ public partial class MainWindow : Window
             }
             _loadingModel = false;
             RefreshContextPicker(_active);
-            ConnectionLabel.Text = _models.Count == 0 ? "No supported models found" : $"Ollama · {_models.Count} coding models · {_ollamaEndpoint.Host}";
+            ConnectionLabel.Text = _models.Count == 0 ? "No local models found" : $"Ollama · {_models.Count} local models · {_ollamaEndpoint.Host}";
             RefreshConversationLists();
         }
         catch
@@ -379,7 +390,10 @@ public partial class MainWindow : Window
             ConnectionLabel.Text = "Ollama is not reachable";
             RefreshConversationLists();
         }
+        finally { _loadingModels = false; }
     }
+
+    private async void ModelPicker_DropDownOpened(object sender, EventArgs e) => await LoadModelsAsync();
 
     private void AddKnownModel(List<TagModel> installed, string preferredName, string displayName, params string[] aliases)
     {

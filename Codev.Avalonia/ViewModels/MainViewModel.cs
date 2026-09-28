@@ -38,6 +38,7 @@ public sealed class MainViewModel : ViewModelBase
     private bool _isDarkTheme = true;
     private CancellationTokenSource? _modelLoadCancellation;
     private long _modelSelectionRevision;
+    private bool _isLoadingModels;
 
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
@@ -303,6 +304,8 @@ public sealed class MainViewModel : ViewModelBase
 
     public async Task LoadModelsAsync()
     {
+        if (_isLoadingModels) return;
+        _isLoadingModels = true;
         try
         {
             var response = await _http.GetFromJsonAsync<OllamaTags>(Codev.OllamaEndpoint.ApiUri(Codev.OllamaEndpoint.Default, "api/tags"));
@@ -315,15 +318,19 @@ public sealed class MainViewModel : ViewModelBase
             };
             var choices = known.Select(item => (item.Display, Name: installed.FirstOrDefault(name => item.Aliases.Any(alias => RemoveLatestTag(alias).Equals(RemoveLatestTag(name), StringComparison.OrdinalIgnoreCase)))))
                 .Where(item => item.Name is not null).Select(item => new ModelChoice(item.Name!, item.Display)).ToArray();
+            var knownNames = known.SelectMany(item => item.Aliases).Select(RemoveLatestTag).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var allChoices = choices.Concat(installed.Where(name => !knownNames.Contains(RemoveLatestTag(name)))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .Select(name => new ModelChoice(name, Codev.OllamaModelDisplayName.Format(name)))).ToArray();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 Models.Clear();
-                foreach (var model in choices) Models.Add(model);
+                foreach (var model in allChoices) Models.Add(model);
                 if (Models.Count > 0 && Models.All(m => !m.Name.Equals(Model, StringComparison.OrdinalIgnoreCase))) Model = Models[0].Name;
-                if (Models.Count == 0) ConnectionStatus = "Ollama connected · no supported models installed";
+                if (Models.Count == 0) ConnectionStatus = "Ollama connected · no local models installed";
                 else
                 {
-                    ConnectionStatus = $"Ollama connected · {Models.Count} local coding model(s)";
+                    ConnectionStatus = $"Ollama connected · {Models.Count} local model(s)";
                     _ = WarmModelAsync(Model);
                 }
             });
@@ -332,7 +339,10 @@ public sealed class MainViewModel : ViewModelBase
         {
             await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = "Ollama is not reachable at 127.0.0.1:11434");
         }
+        finally { _isLoadingModels = false; }
     }
+
+    public Task RefreshModelsAsync() => LoadModelsAsync();
 
     private void RebuildLists()
     {

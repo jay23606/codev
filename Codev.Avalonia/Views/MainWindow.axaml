@@ -101,7 +101,7 @@
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
                     </StackPanel>
-                    <ComboBox Grid.Column="1" Width="250" ItemsSource="{Binding Models}" SelectedValue="{Binding Model, Mode=TwoWay}" SelectedValueBinding="{Binding Name}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}">
+                    <ComboBox Grid.Column="1" Width="250" ItemsSource="{Binding Models}" SelectedValue="{Binding Model, Mode=TwoWay}" SelectedValueBinding="{Binding Name}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ModelChoice">
                                 <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
@@ -131,7 +131,7 @@
                         <Grid ColumnDefinitions="*,790,*">
                     <StackPanel Grid.Column="1" Spacing="7">
                         <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" />
+                            <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev…" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" KeyDown="Composer_KeyDown" />
                             <Button Grid.Column="1" Content="{Binding SendButtonLabel}" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
                         </Grid>
                         <Grid ColumnDefinitions="*,Auto">
@@ -140,7 +140,7 @@
                                 <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                                 <TextBlock Text="Project tools and agent modes are on the porting roadmap" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
-                            <TextBlock Grid.Column="1" Text="Local storage" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Text="Enter to send · Shift+Enter for new line" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                         </Grid>
                     </StackPanel>
                 </Grid>
