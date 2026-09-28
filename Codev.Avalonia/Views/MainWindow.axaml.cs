@@ -117,6 +117,7 @@ public partial class MainWindow : Window
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         viewModel.ReviewFileChangeAsync = ReviewAgentFileChangeAsync;
         viewModel.ConfirmConversationRewindAsync = ConfirmConversationRewindAsync;
+        viewModel.ShowCompactionProposalAsync = ShowCompactionProposalAsync;
         viewModel.ApproveProjectCommandAsync = ApproveAgentCommandAsync;
         viewModel.ConfirmRepeatedToolCallAsync = ConfirmRepeatedToolCallAsync;
     }
@@ -701,6 +702,12 @@ public partial class MainWindow : Window
     {
         var proposal = await viewModel.CreateCompactionProposalAsync();
         if (proposal is null) return;
+        await ShowCompactionProposalAsync(proposal);
+    }
+
+    private async Task ShowCompactionProposalAsync(Codev.ConversationCompactionProposal proposal)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
         var summary = new TextBox
         {
             Text = proposal.Summary,

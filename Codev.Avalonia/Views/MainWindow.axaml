@@ -169,10 +169,16 @@
                                 <Border HorizontalAlignment="Right" Padding="16,10" CornerRadius="15" Background="{DynamicResource UserBubbleBrush}">
                                     <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
                                 </Border>
-                                <Button Content="Rewind" Classes="soft" HorizontalAlignment="Right" Padding="7,3" FontSize="10"
-                                        Command="{Binding $parent[Window].DataContext.RewindConversationCommand}"
-                                        CommandParameter="{Binding MessageIndex}"
-                                        ToolTip.Tip="Restore conversation to before this prompt; project files stay unchanged" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+                                    <Button Content="Summarize up to here" Classes="soft" Padding="7,3" FontSize="10"
+                                            Command="{Binding $parent[Window].DataContext.SummarizeConversationUpToCommand}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip.Tip="Summarize complete exchanges before this prompt; keep this prompt and later messages verbatim" />
+                                    <Button Content="Rewind" Classes="soft" Padding="7,3" FontSize="10"
+                                            Command="{Binding $parent[Window].DataContext.RewindConversationCommand}"
+                                            CommandParameter="{Binding MessageIndex}"
+                                            ToolTip.Tip="Restore conversation to before this prompt; project files stay unchanged" />
+                                </StackPanel>
                             </StackPanel>
                             <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Left" MaxWidth="1050" Margin="24,0,24,0" Spacing="8">
                                 <Expander Header="Model thinking" IsExpanded="False" IsVisible="{Binding HasThinking}" ToolTip.Tip="Thinking returned separately by the local Ollama model. It is saved with this reply but excluded from future prompts.">
@@ -182,6 +188,10 @@
                                 </Expander>
                                 <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" />
                                 <TextBlock Text="{Binding GenerationStatsLabel}" IsVisible="{Binding HasGenerationStats}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" Margin="2,0,0,0" ToolTip.Tip="Generation stats reported by Ollama; first-token time is measured by Codev." />
+                                <Button Content="Summarize up to here" Classes="soft" HorizontalAlignment="Left" Padding="7,3" FontSize="10"
+                                        Command="{Binding $parent[Window].DataContext.SummarizeConversationUpToCommand}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip.Tip="Summarize complete exchanges through this reply; keep later messages verbatim" />
                             </StackPanel>
                         </Grid>
                     </DataTemplate></ItemsControl.ItemTemplate>

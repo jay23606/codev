@@ -56,6 +56,20 @@ public sealed class ConversationCompactionServiceTests
     }
 
     [Fact]
+    public void Selected_message_boundary_can_compact_a_prefix_shorter_than_the_default_four_turn_tail()
+    {
+        var conversation = new Conversation { Messages = CreateTurns(6) };
+
+        var input = ConversationCompactionService.BuildSummaryMessages(conversation, throughMessageCount: 2);
+
+        Assert.Contains("Question 1", input[1].Content);
+        Assert.Contains("Answer 1", input[1].Content);
+        Assert.DoesNotContain("Question 2", input[1].Content);
+        var compacted = new Conversation { Messages = conversation.Messages, CompactionSummary = "Summary", CompactionThroughMessageCount = 2 };
+        Assert.Equal(11, ConversationCompactionService.BuildPromptHistory(compacted, conversation.Messages).Count);
+    }
+
+    [Fact]
     public void Apply_rejects_pending_requests_invalid_cutoffs_and_oversized_summaries()
     {
         var conversation = new Conversation { Messages = CreateTurns(6) };

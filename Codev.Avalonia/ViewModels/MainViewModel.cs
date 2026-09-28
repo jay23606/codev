@@ -98,6 +98,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ToggleThemeCommand { get; }
     public ICommand TogglePlanModeCommand { get; }
     public ICommand ToggleCodeTaskCommand { get; }
+    public ICommand SummarizeConversationUpToCommand { get; }
     public ICommand RemoveContextFileCommand { get; }
     public ICommand ClearContextFilesCommand { get; }
     public ICommand RemoveDiffCommentCommand { get; }
@@ -116,6 +117,10 @@ public sealed class MainViewModel : ViewModelBase
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
         TogglePlanModeCommand = new RelayCommand(_ => TogglePlanMode(), _ => ActiveConversation is not null && !IsGenerating);
         ToggleCodeTaskCommand = new RelayCommand(_ => ToggleCodeTaskMode(), _ => CanToggleCodeTaskMode);
+        SummarizeConversationUpToCommand = new RelayCommand(value =>
+        {
+            if (value is Codev.ChatMessage message) _ = SummarizeConversationUpToAsync(message);
+        }, value => value is Codev.ChatMessage message && CanSummarizeConversationUpTo(message));
         RemoveContextFileCommand = new RelayCommand(value => { if (value is string path) RemoveContextFile(path); });
         ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
         RemoveDiffCommentCommand = new RelayCommand(value => { if (value is Codev.GitDiffComment comment) RemovePendingDiffComment(comment); });
@@ -130,6 +135,7 @@ public sealed class MainViewModel : ViewModelBase
         ResumeQueueCommand = new RelayCommand(_ => ResumeQueue(), _ => HasQueuedTurns && _queuePaused);
         CancelQueuedCommand = new RelayCommand(_ => CancelQueuedTurns(), _ => ActiveConversation?.PendingRequestCount > 0);
         _draftSaveTimer.Tick += (_, _) => { _draftSaveTimer.Stop(); Persist(); };
+        Messages.CollectionChanged += (_, _) => ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         LoadConversations();
         if (_conversations.Count == 0)
         {
@@ -153,6 +159,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(ConversationTitle));
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(PinLabel));
                 OnPropertyChanged(nameof(MessageCountLabel));
                 OnPropertyChanged(nameof(HasCompactionSummary));
@@ -257,6 +264,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool CanToggleCodeTaskMode => !IsGenerating && (IsCodeTask || (CanEnterCodeTaskMode && !IsPlanMode));
     public Func<string, string, string, bool, string?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
+    public Func<Codev.ConversationCompactionProposal, Task>? ShowCompactionProposalAsync { get; set; }
     public Func<string, string, string, bool, Task<bool>>? ApproveProjectCommandAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
@@ -281,6 +289,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(CanReviewFileChanges));
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)StopGenerationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -1153,6 +1162,7 @@ public sealed class MainViewModel : ViewModelBase
         ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
         var turn = new QueuedChatTurn(conversation, queuedTurn);
         _requestQueue.Enqueue(turn);
+        ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued locally · waiting for the current response");
         if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
         OnPropertyChanged(nameof(QueueStatusLabel));
@@ -1220,7 +1230,7 @@ public sealed class MainViewModel : ViewModelBase
         return true;
     }
 
-    public async Task<Codev.ConversationCompactionProposal?> CreateCompactionProposalAsync(CancellationToken cancellationToken = default)
+    public async Task<Codev.ConversationCompactionProposal?> CreateCompactionProposalAsync(CancellationToken cancellationToken = default, int? throughMessageCount = null)
     {
         var conversation = ActiveConversation;
         if (!Codev.ConversationCompactionService.CanCompact(conversation, IsGenerating) || _queueProcessorRunning || _requestQueue.Count > 0)
@@ -1228,10 +1238,10 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("Wait until all conversations finish their queued turns before compacting history.");
             return null;
         }
-        var boundary = Codev.ConversationCompactionService.FindBoundary(conversation!.Messages, conversation.CompactionThroughMessageCount);
-        if (boundary == 0)
+        var boundary = throughMessageCount ?? Codev.ConversationCompactionService.FindBoundary(conversation!.Messages, conversation.CompactionThroughMessageCount);
+        if (boundary <= conversation!.CompactionThroughMessageCount || !Codev.ConversationCompactionService.IsValidBoundary(conversation.Messages, boundary))
         {
-            ReportContextActionStatus("There are not enough complete turns to compact while keeping the four most recent exchanges.");
+            ReportContextActionStatus("Choose a user prompt after at least one complete earlier exchange to summarize up to.");
             return null;
         }
 
@@ -1294,6 +1304,23 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+    private static int SummaryBoundaryFor(Codev.ChatMessage message) => message.IsAssistant ? message.MessageIndex + 1 : message.MessageIndex;
+
+    private bool CanSummarizeConversationUpTo(Codev.ChatMessage message)
+    {
+        var conversation = ActiveConversation;
+        var boundary = SummaryBoundaryFor(message);
+        return Codev.ConversationCompactionService.CanCompact(conversation, IsGenerating) && !_queueProcessorRunning && _requestQueue.Count == 0 &&
+            conversation is not null && (message.IsUser || message.IsAssistant) && boundary > conversation.CompactionThroughMessageCount &&
+            Codev.ConversationCompactionService.IsValidBoundary(conversation.Messages, boundary);
+    }
+
+    private async Task SummarizeConversationUpToAsync(Codev.ChatMessage message)
+    {
+        var proposal = await CreateCompactionProposalAsync(throughMessageCount: SummaryBoundaryFor(message));
+        if (proposal is not null) await (ShowCompactionProposalAsync?.Invoke(proposal) ?? Task.CompletedTask);
+    }
+
     public bool ApplyCompactionProposal(Codev.ConversationCompactionProposal proposal, string editedSummary)
     {
         if (!string.Equals(editedSummary, proposal.Summary, StringComparison.Ordinal)) proposal = proposal with { Summary = editedSummary };
@@ -1329,6 +1356,7 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (_queueProcessorRunning || _queuePaused || _requestQueue.Count == 0) return;
         _queueProcessorRunning = true;
+        ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         try
         {
             while (!_queuePaused && _requestQueue.TryDequeue(out var turn))
@@ -1339,6 +1367,7 @@ public sealed class MainViewModel : ViewModelBase
         finally
         {
             _queueProcessorRunning = false;
+            ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(QueueStatusLabel));
             OnPropertyChanged(nameof(HasQueuedTurns));
             ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
@@ -1859,6 +1888,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasQueuedTurns));
         OnPropertyChanged(nameof(CanReviewFileChanges));
         ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
         Persist();
     }
@@ -1867,6 +1897,7 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (_requestQueue.Count == 0) return;
         _queuePaused = false;
+        ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsQueuePaused));
         OnPropertyChanged(nameof(QueueStatusLabel));
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
@@ -1894,6 +1925,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasQueuedTurns));
         OnPropertyChanged(nameof(CanReviewFileChanges));
         ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsQueuePaused));
         OnPropertyChanged(nameof(QueueStatusLabel));
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
