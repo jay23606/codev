@@ -32,8 +32,8 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 | File explorer and preview | Project context menu opens a safe text-file browser with filtering, read-only preview, and Add to chat context |
 | Project list, project-specific instructions, and reusable knowledge | Project switcher, pinning, saved instructions, and bounded reusable project knowledge included in local model context |
 | Agent reads/searches files on request and edits files | Code task mode supports bounded list/read/search and reviewed create/replace operations on supported text files |
-| Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file list, rollback, and unified text diffs implemented |
-| Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, and process-tree termination; no sandbox |
+| Diff review, approve/reject, checkpoints, and undo | Whole-file before/after review, automatic checkpoints, per-conversation changed-file history grouped by path, scoped rollback/review, and unified text diffs; created files can be undone with a reviewed delete and redone from a checkpoint |
+| Terminal commands, tests, and build output | Approval-gated PowerShell in project folder with 3-minute timeout, bounded output, elapsed progress, active-turn stop, and process-tree termination; no sandbox |
 | Plan/progress view and stop/resume/retry controls | Read-only Plan mode, stop with partial output retained, tool status, retry/edit-resend, branch-from-message, and between-turn queue pause/resume implemented; request resume and richer plans remain |
 | Conversation request scheduling | Serial Ollama queue with per-conversation running/queued indicators and pause/resume; true parallel agents and isolated worktrees remain pending |
 | Git status, branch, staging, and review workflow | Local status, branch creation/switching, per-file staged/unstaged diff review, staging, unstaging, selected-diff questions, and reviewed local commits implemented; worktree merge/recovery remains |
@@ -68,7 +68,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - Separate **Chat**, read-only **Plan**, and **Code task** modes; plan-first workflows for larger tasks.
 - [x] Explicit Code task mode with bounded agent tools for listing, reading, searching, and proposing new or updated supported text files.
 - [x] Review proposed whole-file replacements side by side; approve or reject before applying.
-- [x] Local checkpoints before edits and deletes; per-conversation changed-file list and restore, including undo/redo of file creation or deletion. Whole-file unified diff and side-by-side review are available; richer history browsing remains.
+- [x] Local checkpoints before edits and deletes; per-conversation changed-file history grouped by path and restore, including undo/redo of file creation or deletion. The review names the exact file replacement or delete before approval. Whole-file unified diff and side-by-side review are available; richer history browsing remains.
 - [x] Agent can request a PowerShell command in the selected project; show the exact command and current-user access warning, require per-call approval, enforce a 3-minute timeout, capture bounded output, show elapsed progress, and stop through the active-turn control. Final verification summary remains.
 - Commands are not sandboxed and may access anything available to the Windows account. Every call prompts; do not silently claim an edit, test, or command succeeded.
 

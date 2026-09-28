@@ -1904,7 +1904,7 @@ public partial class MainWindow : Window
         return dialog.ShowDialog() == true;
     }
 
-    private bool ShowFileReview(string relativePath, string before, string after, bool isNewFile = false)
+    private bool ShowFileReview(string relativePath, string before, string after, bool isNewFile = false, string? reviewNote = null, string? approveLabel = null)
     {
         var dialog = new Window { Title = $"{(isNewFile ? "Review new file" : "Review change")} · {relativePath}", Width = 940, Height = 660, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize };
         var layout = new Grid { Margin = new Thickness(16) };
@@ -1919,7 +1919,7 @@ public partial class MainWindow : Window
         DockPanel.SetDock(viewButtons, Dock.Right);
         viewButtons.Children.Add(sideBySideButton); viewButtons.Children.Add(unifiedButton);
         header.Children.Add(viewButtons);
-        var note = new TextBlock { Text = isNewFile ? "No file exists at this path. Approving creates it in the selected project folder." : "Review the proposed state. Approving applies it after saving a local checkpoint.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), VerticalAlignment = VerticalAlignment.Center };
+        var note = new TextBlock { Text = reviewNote ?? (isNewFile ? "No file exists at this path. Approving creates it in the selected project folder." : "Review the proposed state. Approving applies it after saving a local checkpoint."), TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), VerticalAlignment = VerticalAlignment.Center };
         header.Children.Add(note);
         Grid.SetColumnSpan(header, 2); layout.Children.Add(header);
         TextBox ReviewBox(string value) => new() { Text = value, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(8) };
@@ -1965,7 +1965,7 @@ public partial class MainWindow : Window
         Grid.SetRow(diffBox, 1); Grid.SetColumnSpan(diffBox, 2); layout.Children.Add(diffBox);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         var reject = new Button { Content = "Keep unchanged", Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
-        var approve = new Button { Content = isNewFile ? "Approve & create" : "Approve & apply", Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        var approve = new Button { Content = approveLabel ?? (isNewFile ? "Approve & create" : "Approve & apply"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
         approve.Click += (_, _) => { dialog.DialogResult = true; dialog.Close(); };
         buttons.Children.Add(reject); buttons.Children.Add(approve); Grid.SetRow(buttons, 2); Grid.SetColumnSpan(buttons, 2); layout.Children.Add(buttons);
         dialog.Content = layout;
@@ -2024,23 +2024,28 @@ public partial class MainWindow : Window
         if (_active is not { FileChanges.Count: > 0 } conversation) return;
         var dialog = new Window { Title = "Changed files", Width = 540, Height = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize };
         var layout = new DockPanel { Margin = new Thickness(18) };
-        var intro = new TextBlock { Text = "Changes approved in this conversation. Select an entry to compare the current file with its saved checkpoint and optionally restore it.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12) };
+        var entries = conversation.FileChanges.OrderByDescending(c => c.ChangedAt).ToArray();
+        var intro = new TextBlock { Text = $"{entries.Length} change record(s) across {entries.Select(change => change.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()} file(s). Newest first; restore reviews show the exact replacement or deletion before approval.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12) };
         DockPanel.SetDock(intro, Dock.Top); layout.Children.Add(intro);
         var list = new StackPanel();
-        foreach (var change in conversation.FileChanges.OrderByDescending(c => c.ChangedAt).ToArray())
+        foreach (var group in entries.GroupBy(change => change.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
-            var item = new Button { Style = (Style)FindResource("SidebarButton"), Padding = new Thickness(12, 10, 12, 10), Margin = new Thickness(0, 2, 0, 2), HorizontalContentAlignment = HorizontalAlignment.Stretch };
-            var card = new StackPanel();
-            card.Children.Add(new TextBlock { Text = change.RelativePath, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush("MainTextBrush") });
-            card.Children.Add(new TextBlock { Text = $"{change.Kind} · {change.ChangedAt.LocalDateTime:g}", FontSize = 11, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 3, 0, 0) });
-            item.Content = card;
-            if (string.IsNullOrWhiteSpace(change.CheckpointPath))
+            var groupCard = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            groupCard.Children.Add(new TextBlock { Text = group.Key, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush("MainTextBrush"), Margin = new Thickness(10, 8, 8, 3) });
+            foreach (var change in group)
             {
-                item.IsEnabled = false;
-                item.ToolTip = "The conversation backup records this change but does not include its local rollback checkpoint.";
+                var item = new Button { Style = (Style)FindResource("SidebarButton"), Padding = new Thickness(12, 8, 10, 8), Margin = new Thickness(0, 1, 0, 1), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                var canRestore = !change.PreviousFileExisted || !string.IsNullOrWhiteSpace(change.CheckpointPath);
+                item.Content = new TextBlock { Text = $"{change.Kind} · {change.ChangedAt.LocalDateTime:g}", FontSize = 11, Foreground = ThemeBrush("MutedTextBrush") };
+                if (!canRestore)
+                {
+                    item.IsEnabled = false;
+                    item.ToolTip = "This history entry came from a conversation backup, which does not include its local rollback checkpoint.";
+                }
+                item.Click += async (_, _) => { dialog.Close(); await ReviewAndRestoreChangeAsync(conversation, change); };
+                groupCard.Children.Add(item);
             }
-            item.Click += async (_, _) => { dialog.Close(); await ReviewAndRestoreChangeAsync(conversation, change); };
-            list.Children.Add(item);
+            list.Children.Add(new Border { BorderBrush = ThemeBrush("MainBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(6), Child = groupCard });
         }
         layout.Children.Add(new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         dialog.Content = layout;
@@ -2058,7 +2063,16 @@ public partial class MainWindow : Window
             var previous = change.PreviousFileExisted
                 ? await service.ReadCheckpointAsync(change.RelativePath, conversation.Id, change.CheckpointPath ?? "")
                 : "[This restore will delete the file]";
-            if (!ShowFileReview(change.RelativePath, current?.Content ?? "[The file does not currently exist]", previous)) return;
+            if (!change.PreviousFileExisted && !currentExists)
+            {
+                MessageBox.Show(this, $"{change.RelativePath} is already absent. No file changes were made.", "Already restored", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var restoreNote = change.PreviousFileExisted
+                ? "Restore scope: replace this one project file with the reviewed checkpoint. Codev will first save the current version as a new rollback checkpoint."
+                : "Restore scope: delete this one project file. No other project files will be changed.";
+            if (!ShowFileReview(change.RelativePath, current?.Content ?? "[The file does not currently exist]", previous,
+                    reviewNote: restoreNote, approveLabel: change.PreviousFileExisted ? "Approve & restore file" : "Approve & delete file")) return;
             var rollback = await service.RestoreFileStateAsync(change.RelativePath, conversation.Id, change.PreviousFileExisted, change.CheckpointPath, current?.Sha256);
             conversation.FileChanges.Remove(change);
             conversation.FileChanges.Add(new FileChangeRecord(change.RelativePath, rollback, DateTimeOffset.Now, "Restore", currentExists));
