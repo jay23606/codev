@@ -96,6 +96,24 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Chat_content_search_returns_line_matches_and_respects_context_exclusions()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "generated"));
+        File.WriteAllText(Path.Combine(_root, "app.cs"), "class App\n// startup marker");
+        File.WriteAllText(Path.Combine(_root, "generated", "client.cs"), "// startup marker from generated code");
+        var service = new WorkspaceFileService(_root, ["generated"]);
+
+        var chatMatches = await service.SearchContextFilesAsync("startup marker");
+        var agentMatches = await service.SearchFilesAsync("startup marker");
+
+        var match = Assert.Single(chatMatches);
+        Assert.Equal("app.cs", match.RelativePath);
+        Assert.Equal(2, match.LineNumber);
+        Assert.Equal("// startup marker", match.LineText);
+        Assert.Contains(agentMatches, result => result.StartsWith("generated\\client.cs:1:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Reads_files_and_creates_a_recoverable_checkpoint_before_replacement()
     {
         var relative = "Program.cs";

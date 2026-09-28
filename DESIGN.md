@@ -60,7 +60,7 @@ So far, we have finished the **foundation milestone**, including the dark/light 
 - [x] Project file browser with filtering, safe read-only previews, and direct add-to-context; richer tree navigation and file diffs remain.
 - [x] Approximate source-context token count versus the selected model context limit, with tooltip distinguishing it from Ollama's actual prompt count.
 - [x] Per-project context exclusions for relative folders/files and filename patterns; these do not limit Code task file access.
-- Relevant-file search so large repositories fit smaller local context windows.
+- [x] Literal content search across chat-context-visible project files, with matching lines and selective add-to-context.
 - Attach text files, images, and PDFs when the selected local model supports them; clearly show unsupported inputs.
 
 ### 2. Coding agent and review loop — in progress

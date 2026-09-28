@@ -198,8 +198,21 @@ public sealed class WorkspaceFileService
     public async Task<IReadOnlyList<string>> SearchFilesAsync(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
-        var matches = new List<string>();
-        foreach (var relative in ListFiles(maxEntries: 500))
+        var matches = await SearchFilesCoreAsync(query, ListFiles(maxEntries: 500), cancellationToken);
+        return matches.Select(match => match.ToString()).ToArray();
+    }
+
+    public Task<IReadOnlyList<FileSearchMatch>> SearchContextFilesAsync(string query, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
+        return SearchFilesCoreAsync(query, ListContextFiles(maxEntries: 500), cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<FileSearchMatch>> SearchFilesCoreAsync(string query, IReadOnlyList<string> files, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
+        var matches = new List<FileSearchMatch>();
+        foreach (var relative in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!SourceExtensions.Contains(Path.GetExtension(relative))) continue;
@@ -210,11 +223,14 @@ public sealed class WorkspaceFileService
                 if (new FileInfo(full).Length > 500_000) continue;
                 lines = await File.ReadAllLinesAsync(full, cancellationToken);
             }
+            catch (OperationCanceledException) { throw; }
             catch { continue; }
             for (var i = 0; i < lines.Length; i++)
             {
                 if (!lines[i].Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
-                matches.Add($"{relative}:{i + 1}: {lines[i].Trim()}");
+                var line = lines[i].Trim();
+                if (line.Length > 320) line = line[..320] + "…";
+                matches.Add(new FileSearchMatch(relative, i + 1, line));
                 if (matches.Count >= 50) return matches;
             }
         }
@@ -420,3 +436,8 @@ public sealed class WorkspaceFileService
 }
 
 public sealed record FileSnapshot(string Content, string Sha256);
+
+public sealed record FileSearchMatch(string RelativePath, int LineNumber, string LineText)
+{
+    public override string ToString() => $"{RelativePath}:{LineNumber}: {LineText}";
+}

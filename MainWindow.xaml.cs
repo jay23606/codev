@@ -442,11 +442,14 @@ public partial class MainWindow : Window
             instructionsItem.Click += async (_, _) => await EditProjectInstructionsAsync(project);
             var exclusionsItem = new MenuItem { Header = "Context exclusions…" };
             exclusionsItem.Click += async (_, _) => await EditProjectContextExclusionsAsync(project);
+            var searchContentsItem = new MenuItem { Header = "Search project contents…" };
+            searchContentsItem.Click += (_, _) => SearchProjectContents(project);
             var browseItem = new MenuItem { Header = "Browse project files…" };
             browseItem.Click += (_, _) => BrowseProjectFiles(project);
             menu.Items.Add(pinItem);
             menu.Items.Add(instructionsItem);
             menu.Items.Add(exclusionsItem);
+            menu.Items.Add(searchContentsItem);
             menu.Items.Add(browseItem);
             menu.Items.Add(openItem);
             button.ContextMenu = menu;
@@ -647,6 +650,100 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, $"Could not browse this project folder.\n\n{ex.Message}", "Project files", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private void SearchProjectContents(WorkspaceProject project)
+    {
+        if (!Directory.Exists(project.Path))
+        {
+            MessageBox.Show(this, "The selected project folder no longer exists.", "Project folder missing", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        var service = new WorkspaceFileService(project.Path, project.ContextExclusions);
+        var dialog = new Window
+        {
+            Title = $"Search project contents · {project.Name}", Width = 940, Height = 640,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"),
+            ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(16) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var header = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+        header.Children.Add(new TextBlock { Text = "Find a literal string in chat-context-eligible source files. Search skips configured exclusions and returns up to 50 matching lines.", TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 9) });
+        var searchRow = new Grid();
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition());
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var query = new TextBox { MinHeight = 34, VerticalContentAlignment = VerticalAlignment.Center, Padding = new Thickness(9, 5, 9, 5), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), ToolTip = "Literal text or code symbol" };
+        var find = new Button { Content = "Find", Style = (Style)FindResource("SoftButton"), Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(14, 6, 14, 6) };
+        Grid.SetColumn(find, 1); searchRow.Children.Add(query); searchRow.Children.Add(find); header.Children.Add(searchRow);
+        var status = new TextBlock { Text = "Enter a term to search this project.", FontSize = 10, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 7, 0, 0) };
+        header.Children.Add(status);
+        Grid.SetColumnSpan(header, 2); layout.Children.Add(header);
+
+        var matches = new ListBox { SelectionMode = SelectionMode.Extended, Background = ThemeBrush("MainSurfaceAltBrush"), Foreground = ThemeBrush("MainTextBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(4), ToolTip = "Select one or more matching lines, then add their files to chat context" };
+        Grid.SetRow(matches, 1); layout.Children.Add(matches);
+        var preview = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(12, 0, 0, 0), Padding = new Thickness(10), Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"), BorderBrush = ThemeBrush("MainBorderBrush"), BorderThickness = new Thickness(1), FontFamily = new FontFamily("Consolas"), FontSize = 12 };
+        Grid.SetColumn(preview, 1); Grid.SetRow(preview, 1); layout.Children.Add(preview);
+        var addFiles = new Button { Content = "Add selected files", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 0), IsEnabled = false };
+        matches.SelectionChanged += (_, _) =>
+        {
+            var selected = matches.SelectedItems.OfType<FileSearchMatch>().ToArray();
+            preview.Text = selected.Length == 0 ? "Select a search result to inspect the match." : string.Join(Environment.NewLine + Environment.NewLine, selected.Take(8).Select(match => $"{match.RelativePath}:{match.LineNumber}{Environment.NewLine}{match.LineText}"));
+            addFiles.IsEnabled = selected.Length > 0;
+            var fileCount = selected.Select(match => match.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            addFiles.Content = fileCount > 0 ? $"Add {fileCount} file(s) to chat context" : "Add selected files";
+        };
+
+        var searching = false;
+        async Task RunSearchAsync()
+        {
+            var term = query.Text.Trim();
+            if (string.IsNullOrWhiteSpace(term) || searching) return;
+            searching = true;
+            find.IsEnabled = false;
+            status.Text = "Searching project files…";
+            try
+            {
+                var found = await service.SearchContextFilesAsync(term, cancellation.Token);
+                matches.ItemsSource = found;
+                status.Text = found.Count == 0 ? "No matches found." : $"{found.Count} matching line(s) in {found.Select(match => match.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()} file(s).";
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { status.Text = "Search failed: " + ex.Message; }
+            finally { searching = false; find.IsEnabled = true; }
+        }
+        find.Click += async (_, _) => await RunSearchAsync();
+        query.KeyDown += async (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; await RunSearchAsync(); } };
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        addFiles.Click += async (_, _) =>
+        {
+            if (_active is null || !SameWorkspace(_active.ProjectPath, project.Path))
+            {
+                MessageBox.Show(dialog, "Open a conversation in this project before adding context files.", "Project conversation required", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var paths = matches.SelectedItems.OfType<FileSearchMatch>().Select(match => match.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            foreach (var path in paths)
+                if (!_active.ContextFiles.Contains(path, StringComparer.OrdinalIgnoreCase)) _active.ContextFiles.Add(path);
+            UpdateContextLabel(_active);
+            await SaveAsync();
+            status.Text = $"Added {paths.Length} selected file(s) to chat context.";
+        };
+        var close = new Button { Content = "Close", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(13, 7, 13, 7), IsCancel = true };
+        buttons.Children.Add(addFiles); buttons.Children.Add(close);
+        Grid.SetRow(buttons, 2); Grid.SetColumnSpan(buttons, 2); layout.Children.Add(buttons);
+        dialog.Content = layout;
+        dialog.Closed += (_, _) => cancellation.Cancel();
+        dialog.ShowDialog();
     }
 
     private void FillConversationList(ItemsControl list, IEnumerable<Conversation> conversations)
