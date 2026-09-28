@@ -122,6 +122,21 @@ public sealed class ProjectContextReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Always_rules_load_for_trusted_context_without_matching_files_and_are_not_duplicated_as_sources()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, ".codev", "rules"));
+        await File.WriteAllTextAsync(Path.Combine(_root, ".codev", "rules", "baseline.md"),
+            "---\ndescription: Baseline guidance\nactivation: always\n---\nKeep generated files untouched.");
+        await File.WriteAllTextAsync(Path.Combine(_root, "readme.md"), "A project overview.");
+
+        var context = await ProjectContextReader.ReadAsync(_root, includeProjectInstructions: true);
+
+        Assert.Contains("Keep generated files untouched.", context);
+        var sourceSection = context[context.IndexOf("Selected project files", StringComparison.Ordinal)..];
+        Assert.DoesNotContain(".codev/rules/baseline.md", sourceSection);
+    }
+
+    [Fact]
     public async Task Instructions_and_source_excerpts_share_the_project_context_character_cap()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "AGENTS.md"), new string('g', ProjectAgentInstructions.MaxCharacters));

@@ -61,7 +61,7 @@ public static class ProjectAgentInstructions
             }
         }
 
-        if (includePathRules && (applicableFiles is { Count: > 0 } || manualRuleNames is { Count: > 0 }))
+        if (includePathRules)
             entries.AddRange(await LoadApplicablePathRulesAsync(service, applicableFiles ?? [], manualRuleNames ?? [], cancellationToken).ConfigureAwait(false));
 
         foreach (var (relativePath, content) in entries)
@@ -107,7 +107,8 @@ public static class ProjectAgentInstructions
                     var contents = await ProjectPathInstructionRuleParser.ReadDefinitionAsync(service, relative, cancellationToken).ConfigureAwait(false);
                     if (contents is null || !ProjectPathInstructionRuleParser.TryParse(relative, contents, out var rule) || rule is null) continue;
                     var name = Path.GetFileNameWithoutExtension(relative);
-                    var applies = manualRuleNames.Contains(name, StringComparer.OrdinalIgnoreCase);
+                    var applies = rule.Activation == ProjectPathRuleActivation.Always ||
+                                  manualRuleNames.Contains(name, StringComparer.OrdinalIgnoreCase);
                     foreach (var file in applicableFiles)
                     {
                         cancellationToken.ThrowIfCancellationRequested();

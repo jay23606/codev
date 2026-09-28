@@ -67,4 +67,16 @@ public sealed class ProjectPathInstructionRuleTests
         Assert.False(ProjectPathInstructionRuleParser.TryParse("rule.md",
             "---\ndescription: Rule\n---\nUse this rule.", out _));
     }
+
+    [Fact]
+    public void Parses_always_activation_without_globs_and_rejects_unknown_activation()
+    {
+        Assert.True(ProjectPathInstructionRuleParser.TryParse("baseline.md",
+            "---\ndescription: Baseline\nactivation: always\n---\nKeep output brief.", out var rule));
+        Assert.Equal(ProjectPathRuleActivation.Always, rule!.Activation);
+        Assert.Empty(rule.Globs);
+
+        Assert.False(ProjectPathInstructionRuleParser.TryParse("rule.md",
+            "---\ndescription: Rule\nactivation: relevant\nglobs: **/*.cs\n---\nUse the rule.", out _));
+    }
 }

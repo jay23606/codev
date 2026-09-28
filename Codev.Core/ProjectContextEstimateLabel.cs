@@ -16,7 +16,7 @@ public static class ProjectContextEstimateLabel
         {
             var estimatedTokens = new WorkspaceFileService(projectPath!).EstimateContextTokens(selectedFiles);
             var label = Format(true, hostedProvider, includeProjectContextForHosted, estimatedTokens);
-            return projectFolderTrusted ? label + " Trusted project guidance and matching path rules may add to this estimate." : label;
+            return projectFolderTrusted ? label + " Trusted project guidance and rules may add to this estimate." : label;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {

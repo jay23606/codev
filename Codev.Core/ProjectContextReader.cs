@@ -22,7 +22,9 @@ public static class ProjectContextReader
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (sourceFiles.Count >= WorkspaceFileService.MaxContextFiles) break;
-            if (includeProjectInstructions && Path.GetFileName(relativePath).Equals(ProjectAgentInstructions.RelativePath, StringComparison.OrdinalIgnoreCase)) continue;
+            if (includeProjectInstructions &&
+                (Path.GetFileName(relativePath).Equals(ProjectAgentInstructions.RelativePath, StringComparison.OrdinalIgnoreCase) ||
+                 relativePath.Replace('\\', '/').StartsWith(".codev/rules/", StringComparison.OrdinalIgnoreCase))) continue;
             if (service.IsContextExcluded(relativePath)) continue;
             try
             {

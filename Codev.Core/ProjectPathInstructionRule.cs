@@ -3,7 +3,10 @@ using System.Text;
 
 namespace Codev;
 
-public sealed record ProjectPathInstructionRule(string RelativePath, string Description, IReadOnlyList<string> Globs, string Instructions);
+public enum ProjectPathRuleActivation { MatchingFiles, Always }
+
+public sealed record ProjectPathInstructionRule(string RelativePath, string Description, IReadOnlyList<string> Globs,
+    string Instructions, ProjectPathRuleActivation Activation = ProjectPathRuleActivation.MatchingFiles);
 
 /// <summary>Parses and matches explicitly path-scoped Markdown guidance from a trusted project.</summary>
 public static class ProjectPathInstructionRuleParser
@@ -24,6 +27,7 @@ public static class ProjectPathInstructionRuleParser
 
         string? description = null;
         string? globsText = null;
+        var activation = ProjectPathRuleActivation.MatchingFiles;
         foreach (var line in lines.Skip(1).Take(end - 1))
         {
             var entry = line.Trim();
@@ -34,16 +38,23 @@ public static class ProjectPathInstructionRuleParser
             var value = entry[(colon + 1)..].Trim().Trim('"', '\'');
             if (key.Equals("description", StringComparison.OrdinalIgnoreCase)) description = value;
             else if (key.Equals("globs", StringComparison.OrdinalIgnoreCase)) globsText = value;
+            else if (key.Equals("activation", StringComparison.OrdinalIgnoreCase))
+            {
+                if (value.Equals("always", StringComparison.OrdinalIgnoreCase)) activation = ProjectPathRuleActivation.Always;
+                else if (value.Equals("files", StringComparison.OrdinalIgnoreCase)) activation = ProjectPathRuleActivation.MatchingFiles;
+                else return false;
+            }
             else return false;
         }
 
         var globs = (globsText ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         var body = string.Join('\n', lines.Skip(end + 1)).Trim();
-        if (string.IsNullOrWhiteSpace(description) || description.Length > 180 || globs.Length == 0 || globs.Length > 16 ||
+        if (string.IsNullOrWhiteSpace(description) || description.Length > 180 ||
+            (activation == ProjectPathRuleActivation.MatchingFiles && globs.Length == 0) || globs.Length > 16 ||
             globs.Any(glob => !IsValidGlob(glob)) || string.IsNullOrWhiteSpace(body) || body.Length > 12_000)
             return false;
 
-        rule = new ProjectPathInstructionRule(relativePath, description, globs, body);
+        rule = new ProjectPathInstructionRule(relativePath, description, globs, body, activation);
         return true;
     }
 
