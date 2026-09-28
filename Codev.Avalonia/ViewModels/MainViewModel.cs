@@ -574,26 +574,9 @@ public sealed class MainViewModel : ViewModelBase
     private void RefreshContextEstimate()
     {
         var conversation = ActiveConversation;
-        var projectAvailable = conversation?.ProjectPath is { Length: > 0 } path && Directory.Exists(path);
-        var hostedProvider = conversation is not null && Codev.CloudModelProviders.IsCloud(conversation.Provider);
-        var includeHostedContext = conversation?.IncludeProjectContextForHosted == true;
-        var estimatedTokens = 0;
-        if (projectAvailable && (!hostedProvider || includeHostedContext))
-        {
-            try
-            {
-                estimatedTokens = new Codev.WorkspaceFileService(conversation!.ProjectPath!)
-                    .EstimateContextTokens(conversation.ContextFiles);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
-            {
-                _contextEstimateLabel = "Project context estimate unavailable.";
-                OnPropertyChanged(nameof(ContextEstimateLabel));
-                return;
-            }
-        }
-        _contextEstimateLabel = Codev.ProjectContextEstimateLabel.Format(projectAvailable, hostedProvider,
-            includeHostedContext, estimatedTokens);
+        _contextEstimateLabel = Codev.ProjectContextEstimateLabel.ForProject(conversation?.ProjectPath,
+            conversation?.Provider ?? "ollama", conversation?.IncludeProjectContextForHosted == true,
+            conversation?.ContextFiles);
         OnPropertyChanged(nameof(ContextEstimateLabel));
     }
 
