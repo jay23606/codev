@@ -497,8 +497,27 @@ public partial class MainWindow : Window
         _fileMentionSearch?.Dispose();
         _fileMentionSearch = null;
         var text = ComposerTextBox.Text ?? "";
-        if (DataContext is not ViewModels.MainViewModel viewModel ||
-            !Codev.ProjectFileMentionParser.TryGet(text, ComposerTextBox.CaretIndex, out var mention))
+        if (DataContext is not ViewModels.MainViewModel viewModel)
+        {
+            SlashCommandPopup.IsOpen = false;
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+            return;
+        }
+
+        var commands = Codev.SlashCommandCatalog.Suggest(text, ComposerTextBox.CaretIndex);
+        if (commands.Count > 0)
+        {
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+            SlashCommandListBox.ItemsSource = commands;
+            SlashCommandListBox.SelectedIndex = -1;
+            SlashCommandPopup.IsOpen = true;
+            return;
+        }
+        SlashCommandPopup.IsOpen = false;
+
+        if (!Codev.ProjectFileMentionParser.TryGet(text, ComposerTextBox.CaretIndex, out var mention))
         {
             FileMentionPopup.IsOpen = false;
             _activeFileMention = null;
@@ -518,6 +537,76 @@ public partial class MainWindow : Window
             FileMentionPopup.IsOpen = suggestions.Count > 0;
         }
         catch (OperationCanceledException) { }
+    }
+
+    private void SlashCommandSuggestion_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: Codev.SlashCommandDefinition command }) _ = ApplySlashCommandAsync(command);
+    }
+
+    private async Task ApplySlashCommandAsync(Codev.SlashCommandDefinition command)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel ||
+            !Codev.SlashCommandCatalog.Suggest(ComposerTextBox.Text, ComposerTextBox.CaretIndex).Contains(command))
+            return;
+
+        SlashCommandPopup.IsOpen = false;
+        FileMentionPopup.IsOpen = false;
+        _activeFileMention = null;
+        switch (command.Action)
+        {
+            case Codev.SlashCommandAction.ClearConversation:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (!viewModel.CanClearConversation)
+                {
+                    viewModel.ReportContextActionStatus("Wait for this conversation to finish and clear its queued requests before clearing its history.");
+                    return;
+                }
+                if (await ConfirmGitActionAsync(this, "Clear conversation?", "This removes this conversation's saved messages, draft, and unsent diff comments. Project selection, model settings, and file-change history will remain."))
+                    viewModel.ClearActiveConversationHistory();
+                break;
+            case Codev.SlashCommandAction.TogglePlan:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (viewModel.TogglePlanModeCommand.CanExecute(null)) viewModel.TogglePlanModeCommand.Execute(null);
+                else viewModel.ReportContextActionStatus("Wait for the current response to finish before changing conversation mode.");
+                break;
+            case Codev.SlashCommandAction.ToggleCodeTask:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (viewModel.ToggleCodeTaskCommand.CanExecute(null)) viewModel.ToggleCodeTaskCommand.Execute(null);
+                else viewModel.ReportContextActionStatus("Code task needs a trusted project, loopback Ollama, and no active response. Check the project trust and selected model first.");
+                break;
+            case Codev.SlashCommandAction.ShowStatus:
+                if (viewModel.PendingDiffComments.Count > 0)
+                {
+                    viewModel.ReportContextActionStatus("Send or remove the pending diff comments before running /status.");
+                    return;
+                }
+                viewModel.Draft = "/status";
+                ComposerTextBox.Text = "/status";
+                if (viewModel.SendCommand.CanExecute(null)) viewModel.SendCommand.Execute(null);
+                break;
+            case Codev.SlashCommandAction.SelectModel:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (ModelPicker.IsVisible) { ModelPicker.Focus(); ModelPicker.IsDropDownOpen = true; }
+                else viewModel.ReportContextActionStatus("Model choices are still loading or unavailable.");
+                break;
+            case Codev.SlashCommandAction.ExportConversation:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                ExportConversation_Click(this, new RoutedEventArgs());
+                break;
+            case Codev.SlashCommandAction.InitProject:
+            case Codev.SlashCommandAction.ReviewProject:
+                viewModel.Draft = command.Prompt ?? "";
+                ComposerTextBox.Text = viewModel.Draft;
+                ComposerTextBox.CaretIndex = ComposerTextBox.Text?.Length ?? 0;
+                ComposerTextBox.Focus();
+                break;
+        }
     }
 
     private void FileMentionSuggestion_Click(object? sender, RoutedEventArgs e)
@@ -547,6 +636,27 @@ public partial class MainWindow : Window
 
     private void Composer_KeyDown(object? sender, KeyEventArgs e)
     {
+        if (SlashCommandPopup.IsOpen && e.Key is Key.Down or Key.Up)
+        {
+            var count = SlashCommandListBox.ItemCount;
+            if (count > 0) SlashCommandListBox.SelectedIndex = Math.Clamp(SlashCommandListBox.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, count - 1);
+            e.Handled = true;
+            return;
+        }
+        if (SlashCommandPopup.IsOpen && (e.Key is Key.Enter or Key.Tab))
+        {
+            var selected = SlashCommandListBox.SelectedItem as Codev.SlashCommandDefinition ??
+                (e.Key == Key.Enter ? SlashCommandListBox.Items?.OfType<Codev.SlashCommandDefinition>().FirstOrDefault() : null);
+            if (selected is not null) _ = ApplySlashCommandAsync(selected);
+            e.Handled = selected is not null;
+            return;
+        }
+        if (SlashCommandPopup.IsOpen && e.Key == Key.Escape)
+        {
+            SlashCommandPopup.IsOpen = false;
+            e.Handled = true;
+            return;
+        }
         if (FileMentionPopup.IsOpen && e.Key is Key.Down or Key.Up)
         {
             var count = FileMentionListBox.ItemCount;

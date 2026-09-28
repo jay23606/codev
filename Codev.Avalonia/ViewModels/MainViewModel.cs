@@ -232,6 +232,8 @@ public sealed class MainViewModel : ViewModelBase
             ? Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "No local models installed" : "No models available from server"
             : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
+    public bool CanClearConversation => Codev.ConversationHistoryClearService.CanClear(ActiveConversation,
+        ActiveConversation is { } conversation && ReferenceEquals(_generationConversation, conversation));
     public string QueueStatusLabel => HasQueuedTurns
         ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · resume when ready" : $"{_requestQueue.Count} request(s) queued"
         : "";
@@ -1063,6 +1065,32 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(MessageCountLabel));
         Persist();
         RebuildLists();
+    }
+
+    public bool ClearActiveConversationHistory()
+    {
+        if (ActiveConversation is not { } conversation) return false;
+        if (!Codev.ConversationHistoryClearService.Clear(conversation,
+                ReferenceEquals(_generationConversation, conversation)))
+        {
+            ReportContextActionStatus("Wait for this conversation to finish and clear its queued requests before clearing its history.");
+            return false;
+        }
+
+        conversation.PendingDiffComments.Clear();
+        PendingDiffComments.Clear();
+        Messages.Clear();
+        Draft = "";
+        OnPropertyChanged(nameof(ConversationTitle));
+        OnPropertyChanged(nameof(MessageCountLabel));
+        OnPropertyChanged(nameof(HasPendingDiffComments));
+        OnPropertyChanged(nameof(SendButtonLabel));
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
+        Persist();
+        RebuildLists();
+        ReportContextActionStatus("Conversation messages cleared. Project selection and file-change history were kept.");
+        return true;
     }
 
     private async Task ProcessQueuedTurnsAsync()

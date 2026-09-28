@@ -127,7 +127,7 @@
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
                     </StackPanel>
-                    <ComboBox Grid.Column="1" Width="250" IsVisible="{Binding HasModels}" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel, Mode=TwoWay}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
+                    <ComboBox x:Name="ModelPicker" Grid.Column="1" Width="250" IsVisible="{Binding HasModels}" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel, Mode=TwoWay}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ModelChoice">
                                 <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
@@ -201,6 +201,22 @@
                                     </ListBox>
                                 </Border>
                             </Popup>
+                            <Popup x:Name="SlashCommandPopup" PlacementTarget="{Binding #ComposerTextBox}" Placement="Top" IsLightDismissEnabled="True">
+                                <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4" Width="480">
+                                    <ListBox x:Name="SlashCommandListBox" MaxHeight="260">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="core:SlashCommandDefinition">
+                                                <Button HorizontalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" Padding="7,6" Click="SlashCommandSuggestion_Click">
+                                                    <StackPanel Spacing="2">
+                                                        <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+                            </Popup>
                         </Grid>
                         <ItemsControl ItemsSource="{Binding PendingDiffComments}" IsVisible="{Binding HasPendingDiffComments}">
                             <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -250,7 +266,7 @@
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                                 <Button IsVisible="{Binding IsQueuePaused}" Content="Resume saved queue" Command="{Binding ResumeQueueCommand}" Classes="soft" Padding="7,3" FontSize="10" />
                                 <Button IsVisible="{Binding HasQueuedTurns}" Content="Cancel queued" Command="{Binding CancelQueuedCommand}" Classes="soft" Padding="7,3" FontSize="10" />
-                                <TextBlock Text="Enter to send · Shift+Enter for new line · @ files" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
+                                <TextBlock Text="Enter to send · Shift+Enter for new line · / commands · @ files" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" />
                             </StackPanel>
                         </Grid>
                     </StackPanel>
