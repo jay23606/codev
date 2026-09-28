@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local coding model comparison</title>
+<style>
+:root { --bg:#fbfaf8; --fg:#1f1d1a; --muted:#6b665e; --line:#e2ded6; --card:#ffffff; --accent:#c4552d; --s:58%; --l:80%; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#ece8e1; --muted:#9a948a; --line:#332f2a; --card:#1e1c19; --accent:#e07a52; --l:32%; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+main { max-width:1080px; margin:0 auto; padding:32px 16px 64px; }
+h1 { margin:0 0 4px; font-size:1.7rem; } h2 { margin:36px 0 10px; font-size:1.2rem; }
+p, li { max-width:75ch; } .muted { color:var(--muted); } .banner { background:#fff3cd; color:#5c4400; padding:8px 12px; border-radius:8px; margin:12px 0; }
+.wrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--card); }
+table { border-collapse:collapse; width:100%; min-width:760px; }
+th, td { padding:9px 12px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+th { font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; }
+th:first-child, td.model { text-align:left; } tr:last-child td { border-bottom:0; }
+td.model { font-weight:600; white-space:normal; } td.model small { display:block; font-weight:400; color:var(--muted); font-size:.78rem; }
+td.score { background:hsl(var(--h) var(--s) var(--l)); font-weight:600; } td.score small { display:block; font-weight:400; font-size:.72rem; opacity:.8; }
+@media (prefers-color-scheme: dark) { td.score { color:#fff; } }
+.na { color:var(--muted); font-weight:400; } .pill { display:inline-block; background:var(--accent); color:#fff; border-radius:99px; padding:0 8px; font-size:.7rem; font-weight:600; vertical-align:middle; }
+.verdict { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:4px 16px 8px; margin:16px 0; }
+ul { padding-left:1.2em; }
+</style>
+</head>
+<body>
+<main>
+<h1>Local coding model comparison</h1>
+<p class="muted">Complete run · generated 2026-09-28 · run on an AMD Ryzen AI 9 HX 370 laptop, 62&nbsp;GB RAM, no discrete GPU (Ollama ran on the CPU) · ollama version is 0.34.4</p>
+
+<div class="verdict"><h2 style="margin-top:12px">Bottom line</h2>
+<p><b>For everyday local coding on this machine, use Qwen3.6-35B-A3B with thinking off.</b> It had the best average on the hard tasks (85%, averaged over three runs), a routine score of 97%, and the fastest generation (about 26 tokens per second). It finished the three hard tasks in about 6.5 minutes.</p>
+<ul>
+<li><b>Best for a hard problem you can wait on: Qwen3.8-27B with thinking on.</b> It was the only setup that fully solved the hard agent task (29 of 29 hidden tests), but that one task took about 10.6 minutes, and it is the slowest model here (6 to 9 tokens per second).</li>
+<li><b>Qwen3.8-27B with thinking off</b> was the only model with a perfect routine score (100%, one run), but it is about three times slower than Qwen3.6 and did not beat it on the hard tasks (79%, one run).</li>
+<li><b>The two Qwen3-Coder models were the weakest on the hard tasks</b> (62% and 67%). <code>qwen3-coder:30b</code> is about as fast as Qwen3.6 but less capable, so there is little reason to keep it for these tasks.</li>
+<li><b>Thinking mode did not pay off on this hardware</b> except for that one agent task. It made runs about 3 to 8 times longer. On the filter task both Qwen models (and Qwen3.6 on the expression evaluator too) used their whole 8,000-token budget thinking, so their answers were cut off and scored lower than with thinking off.</li>
+</ul>
+<h3>Other findings</h3>
+<ul>
+<li><b>Tool calling was reliable for every model:</b> across 23 agent runs there were no invalid tool calls, no loops and no failed edits.</li>
+<li><b>Passing the visible tests is not proof.</b> Every model that fixed only some of the bugs still reported that everything was fixed, because the tests it could see passed. On the hard agent task, only the one perfect run (Qwen3.8 with thinking) was right when it said so.</li>
+<li><b>Results vary from run to run.</b> Qwen3.6 scored between 51% and 84% on the filter task across three runs, and <code>qwen3-coder:30b</code> scored 50% and 100% on the same refactor task at different settings. Treat gaps of a few points, and anything based on a single run, as uncertain.</li>
+</ul>
+<p class="muted">Confidence: the ranking of the two Qwen3-Coder models below Qwen3.6 is fairly solid (three runs each). The comparison between Qwen3.6 and Qwen3.8 is not: Qwen3.8 has one run per task, so its hard score of 79% versus Qwen3.6's 85% is within the noise.</p>
+</div>
+
+<h2>Overall</h2>
+<p class="muted">Each score is the share of hidden checks a model passed, averaged over tasks with equal weight (and over repeat runs where there are any). <b>Routine</b> is six everyday tasks; <b>Hard</b> is three harder ones. Speeds are medians; times are the wall time of the first run. Rows are ordered by hard score.</p>
+<div class="wrap"><table>
+<thead><tr><th>Model</th><th>Routine score</th><th>Hard score</th><th>Perfect tasks (of 9)</th><th>Generate tok/s</th><th>Read prompt tok/s</th><th>Time, 6 routine</th><th>Time, 3 hard</th><th>Cold load</th></tr></thead>
+<tbody><tr><td class="model">qwen3.6:35b-a3b<small>23 GB · 35.5B Q4_K_M · MoE, ~3B active</small></td><td class="score" style="--h:116">97%</td><td class="score" style="--h:102">85%</td><td>5/9</td><td>25.9</td><td>132</td><td>3.1 min</td><td>6.4 min</td><td>19 s</td></tr>
+<tr><td class="model">qwen3.8:27b<small>18 GB · 27.3B Q4_K_M · Dense</small></td><td class="score" style="--h:120">100%</td><td class="score" style="--h:94">79%</td><td>7/9</td><td>8.6</td><td>23</td><td>6.7 min</td><td>11.4 min</td><td>18 s</td></tr>
+<tr><td class="model">qwen3.8:27b <span class="pill">thinking on</span><small>18 GB · 27.3B Q4_K_M · Dense</small></td><td class="na">not run</td><td class="score" style="--h:93">78%</td><td>2/9</td><td>6.4</td><td>25</td><td><span class="na">not run</span></td><td>39.7 min</td><td>17 s</td></tr>
+<tr><td class="model">qwen3.6:35b-a3b <span class="pill">thinking on</span><small>23 GB · 35.5B Q4_K_M · MoE, ~3B active</small></td><td class="score" style="--h:109">91%</td><td class="score" style="--h:86">72%</td><td>6/9</td><td>21.0</td><td>116</td><td>23.9 min</td><td>18.5 min</td><td>13 s</td></tr>
+<tr><td class="model">qwen3-coder-next:q2_k_l<small>28 GB · 79.7B Q2_K · MoE, ~3B active</small></td><td class="score" style="--h:117">97%</td><td class="score" style="--h:80">67%</td><td>5/9</td><td>17.6</td><td>100</td><td>3.7 min</td><td>4.7 min</td><td>32 s</td></tr>
+<tr><td class="model">qwen3-coder:30b<small>19 GB · 30.5B Q4_K_M · MoE, ~3B active</small></td><td class="score" style="--h:116">96%</td><td class="score" style="--h:75">62%</td><td>5/9</td><td>21.4</td><td>144</td><td>3.1 min</td><td>6.7 min</td><td>18 s</td></tr></tbody></table></div>
+
+<h2>Score by task</h2>
+<div class="wrap"><table>
+<thead><tr><th>Model</th><th>Merge intervals</th><th>LRU cache</th><th>Expression evaluator</th><th>Fix 3 bugs</th><th>Multi-file change</th><th>Agent loop</th><th>Filter compiler</th><th>Refactor</th><th>Hard agent</th></tr></thead>
+<tbody><tr><td class="model">qwen3.6:35b-a3b</td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:103">86%<small>3 runs: 0.79–0.95</small></td><td class="score" style="--h:114">95%<small>3 runs: 0.85–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:85">71%<small>3 runs: 0.51–0.84</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:99">83%<small>3 runs: 0.83–0.83</small></td></tr>
+<tr><td class="model">qwen3.8:27b</td><td class="score" style="--h:120">100%<small>9/9</small></td><td class="score" style="--h:120">100%<small>7/7</small></td><td class="score" style="--h:120">100%<small>19/19</small></td><td class="score" style="--h:120">100%<small>13/13</small></td><td class="score" style="--h:120">100%<small>10/10</small></td><td class="score" style="--h:120">100%</td><td class="score" style="--h:63">53%<small>27/51</small></td><td class="score" style="--h:120">100%<small>22/22</small></td><td class="score" style="--h:99">83%</td></tr>
+<tr><td class="model">qwen3.8:27b <span class="pill">thinking on</span></td><td class="na">not run</td><td class="na">not run</td><td class="na">not run</td><td class="na">not run</td><td class="na">not run</td><td class="na">not run</td><td class="score" style="--h:40">33%<small>17/51</small></td><td class="score" style="--h:120">100%<small>22/22</small></td><td class="score" style="--h:120">100%</td></tr>
+<tr><td class="model">qwen3.6:35b-a3b <span class="pill">thinking on</span></td><td class="score" style="--h:120">100%<small>9/9</small></td><td class="score" style="--h:120">100%<small>7/7</small></td><td class="score" style="--h:57">47%<small>9/19</small></td><td class="score" style="--h:120">100%<small>13/13</small></td><td class="score" style="--h:120">100%<small>10/10</small></td><td class="score" style="--h:120">100%</td><td class="score" style="--h:40">33%<small>17/51</small></td><td class="score" style="--h:120">100%<small>22/22</small></td><td class="score" style="--h:99">83%</td></tr>
+<tr><td class="model">qwen3-coder-next:q2_k_l</td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:109">91%<small>3 runs: 0.84–0.95</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:112">93%<small>3 runs: 0.80–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:50">42%<small>3 runs: 0.33–0.51</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:70">59%<small>3 runs: 0.59–0.59</small></td></tr>
+<tr><td class="model">qwen3-coder:30b</td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:95">79%<small>3 runs: 0.74–0.84</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:120">100%<small>3 runs: 1.00–1.00</small></td><td class="score" style="--h:48">40%<small>3 runs: 0.35–0.43</small></td><td class="score" style="--h:100">83%<small>3 runs: 0.50–1.00</small></td><td class="score" style="--h:76">63%<small>3 runs: 0.59–0.66</small></td></tr></tbody></table></div>
+
+<p class="muted">For scale: a model that changes nothing on the hard agent task scores 52%; an answer that always returns false scores about 25% on the filter task; a refactor that returns an empty object scores about 5%.</p>
+
+<h2>Speed</h2>
+<div class="wrap"><table>
+<thead><tr><th>Model</th><th>Generate tok/s</th><th>Read prompt tok/s</th><th>Cold load</th><th>Typical thinking length</th></tr></thead>
+<tbody><tr><td class="model">qwen3.6:35b-a3b</td><td>25.9</td><td>132</td><td>19 s</td><td><span class="na">—</span></td></tr>
+<tr><td class="model">qwen3.8:27b</td><td>8.6</td><td>23</td><td>18 s</td><td><span class="na">—</span></td></tr>
+<tr><td class="model">qwen3.8:27b <span class="pill">thinking on</span></td><td>6.4</td><td>25</td><td>17 s</td><td>4389 tokens (approx.)</td></tr>
+<tr><td class="model">qwen3.6:35b-a3b <span class="pill">thinking on</span></td><td>21.0</td><td>116</td><td>13 s</td><td>5383 tokens (approx.)</td></tr>
+<tr><td class="model">qwen3-coder-next:q2_k_l</td><td>17.6</td><td>100</td><td>32 s</td><td><span class="na">—</span></td></tr>
+<tr><td class="model">qwen3-coder:30b</td><td>21.4</td><td>144</td><td>18 s</td><td><span class="na">—</span></td></tr></tbody></table></div>
+
+<h2>Agent loop details</h2>
+<div class="wrap"><table>
+<thead><tr><th>Model</th><th>Task</th><th>Hidden tests passed</th><th>Avg steps</th><th>Invalid tool calls</th><th>Failed edits</th><th>Loops</th><th>How it ended</th><th>Median time</th></tr></thead>
+<tbody><tr><td class="model">qwen3.6:35b-a3b</td><td>Agent loop</td><td>7/7, 7/7, 7/7</td><td>6.3</td><td>0</td><td>0</td><td>0</td><td>final-message, final-message, final-message</td><td>44 s</td></tr>
+<tr><td class="model">qwen3.6:35b-a3b</td><td>Hard agent</td><td>24/29, 24/29, 24/29</td><td>11.7</td><td>0</td><td>0</td><td>0</td><td>final-message, final-message, final-message</td><td>2.7 min</td></tr>
+<tr><td class="model">qwen3.8:27b</td><td>Agent loop</td><td>7/7</td><td>5.0</td><td>0</td><td>0</td><td>0</td><td>final-message</td><td>2.0 min</td></tr>
+<tr><td class="model">qwen3.8:27b</td><td>Hard agent</td><td>24/29</td><td>6.0</td><td>0</td><td>0</td><td>0</td><td>final-message</td><td>5.1 min</td></tr>
+<tr><td class="model">qwen3.8:27b <span class="pill">thinking on</span></td><td>Hard agent</td><td>29/29</td><td>7.0</td><td>0</td><td>0</td><td>0</td><td>final-message</td><td>10.6 min</td></tr>
+<tr><td class="model">qwen3.6:35b-a3b <span class="pill">thinking on</span></td><td>Agent loop</td><td>7/7</td><td>6.0</td><td>0</td><td>0</td><td>0</td><td>final-message</td><td>2.4 min</td></tr>
+<tr><td class="model">qwen3.6:35b-a3b <span class="pill">thinking on</span></td><td>Hard agent</td><td>24/29</td><td>7.0</td><td>0</td><td>0</td><td>0</td><td>final-message</td><td>5.1 min</td></tr>
+<tr><td class="model">qwen3-coder-next:q2_k_l</td><td>Agent loop</td><td>7/7, 7/7, 7/7</td><td>4.3</td><td>0</td><td>0</td><td>0</td><td>final-message, final-message, final-message</td><td>41 s</td></tr>
+<tr><td class="model">qwen3-coder-next:q2_k_l</td><td>Hard agent</td><td>17/29, 17/29, 17/29</td><td>13.7</td><td>0</td><td>0</td><td>0</td><td>final-message, final-message, final-message</td><td>1.5 min</td></tr>
+<tr><td class="model">qwen3-coder:30b</td><td>Agent loop</td><td>7/7, 7/7, 7/7</td><td>8.7</td><td>0</td><td>0</td><td>0</td><td>final-message, final-message, final-message</td><td>42 s</td></tr>
+<tr><td class="model">qwen3-coder:30b</td><td>Hard agent</td><td>19/29, 17/29, 19/29</td><td>15.3</td><td>0</td><td>0</td><td>0</td><td>final-message, final-message, final-message</td><td>3.0 min</td></tr></tbody></table></div>
+
+
+
+<h2>What was tested</h2>
+<ul><li><b>Merge intervals</b> — Algorithm: merge overlapping and touching intervals (9 hidden checks)</li><li><b>LRU cache</b> — Algorithm: O(1) LRU cache class (7 hidden checks)</li><li><b>Expression evaluator</b> — Algorithm: arithmetic parser with precedence, unary minus, errors, no eval (19 hidden checks)</li><li><b>Fix 3 bugs</b> — Debugging: three planted bugs among five working functions (13 checks)</li><li><b>Multi-file change</b> — Rename a field across 3 files and add validation (10 checks)</li><li><b>Agent loop</b> — Tool-using agent fixes a failing project; scored on 7 hidden tests</li><li><b>Filter compiler</b> — Hard algorithm: a search-filter parser with precedence, quoting, dotted paths and 16 invalid-input cases (51 hidden checks)</li><li><b>Refactor</b> — Hard: refactor an 80-line pricing function into helpers without changing behaviour; compared with the original on 12 edge cases and 200 random orders (22 checks)</li><li><b>Hard agent</b> — Hard: agent fixes a four-module billing library with 7 bugs, only 2 of which show up as failing tests; scored on 29 hidden tests (unchanged code scores 52%)</li></ul>
+<p>Every answer was scored automatically against hidden checks; the checks were first verified against a known-correct solution (100%) and a deliberately wrong one (low). Each model was cold-loaded, with a 16K-token context. Runs used temperature 0 (repeat runs used 0.3), thinking off unless marked, and a token cap per answer.</p>
+
+<h2>Limits</h2>
+<ul>
+<li>Six small JavaScript tasks are a narrow sample. They show whether a model handles routine coding and tool use, not how it performs on large or unfamiliar codebases, other languages, or long contexts.</li>
+<li>Most models got one run; only the fast models got repeats, so small score differences (a few points) can be luck.</li>
+<li>Speeds are for this machine, on the CPU, and will differ elsewhere. A GPU or different memory bandwidth changes the ranking of dense versus mixture-of-experts models a lot.</li>
+<li>Thinking-mode runs used a fixed token cap; a model cut off while thinking may be scored lower than its true ability.</li>
+</ul>
+</main>
+</body>
+</html>

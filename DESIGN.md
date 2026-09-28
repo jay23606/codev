@@ -397,6 +397,26 @@ Many items assume a model can do something reliably: call tools with valid argum
 
 **Done when:** the table is filled for at least the models named in the README, each affected backlog item is annotated with the measured outcome, and any item that fails on those models is demoted in V1.
 
+**First results (2026-09-28).** Measured on an AMD Ryzen AI 9 HX 370 laptop with 62 GB of RAM and no usable GPU (Ollama ran on the CPU), using Ollama 0.34.4. Nine JavaScript tasks, each checked automatically against hidden tests: six routine and three hard (a search-filter parser, a behaviour-preserving refactor, and an agent fixing a four-module library with seven bugs, two of them visible as failing tests). Models: qwen3.6:35b-a3b, qwen3.8:27b, qwen3-coder-next (Q2) and qwen3-coder:30b, with thinking on and off for the first two. Full tables and the verdict are in [comparison.html](comparison.html). The test harness is not in this repository yet, so these numbers cannot be reproduced from the repository alone.
+
+| Question | Result |
+|---|---|
+| Does native tool calling work, and how often are arguments invalid? | Yes. Across 23 agent runs on four models there were 0 invalid tool calls, 0 loops and 0 failed edits (B2, B4). |
+| Does a patch or a whole-file rewrite apply correctly more often? | Not measured. The agents had both a whole-file write and an exact-text replace tool, and how often each was used was not analyzed (B3). |
+| How often does the model repeat itself? | Never in these runs. The runs were short and the tools simple, so keep the loop guard as cheap insurance (B4). |
+| Does a task survive compaction? | Not measured (A2, B11). |
+| Do a repo map or retrieved files help? | Not measured (A8, A9). |
+| Speed on typical hardware | About 26 tokens per second for Qwen3.6-35B-A3B, 17 to 21 for the Qwen3-Coder models, and 6 to 9 for the dense Qwen3.8-27B. Reading the prompt ran at 100 to 144 tokens per second for the mixture-of-experts models against 23 for the dense one (A1, B8, E10). |
+| Does thinking mode help? | Rarely. It made runs about 3 to 8 times longer. Both Qwen models used up an 8,000-token budget on the hard filter task (and Qwen3.6 on a medium one), so their answers were cut off. It helped once: Qwen3.8 solved the hard agent task completely with thinking on (29 of 29 tests, against 24 of 29 with it off) (B6). |
+
+Findings that change the backlog:
+
+- **Default thinking off (B6).** Offer it as a per-conversation toggle, show the token budget, and say plainly when thinking ran out before an answer was written.
+- **One run is not enough.** The same model varied by up to 33 points between runs of one task (Qwen3.6 on the filter task: 51% to 84%). B12's "test before upgrade" must use several runs before it recommends a switch.
+- **Passing the visible tests is not proof.** Every model that fixed only some of the bugs reported that everything was fixed, because the tests it could see passed. A completion message should say which checks were run and that passing them does not prove correctness (the "visible work" principle, and B5).
+- **Prompt reading is where dense models lose on a CPU.** The mixture-of-experts models read prompts 4 to 6 times faster, which makes adding a lot of context (A8, A9) cheap for them and expensive for dense models.
+- **Small samples.** Qwen3.8 has one run per task and the thinking-on runs have one each, so a gap of a few points between Qwen3.6 and Qwen3.8 is not established.
+
 #### V4. Test what exists
 
 **Outcome:** the current features are checked on every supported platform, and real friction feeds back into the backlog.

@@ -101,6 +101,8 @@ Codev discovers installed models from Ollama at startup and refreshes the picker
 
 Legacy Ollama tags for the same weights are recognized and shown under the same friendly model name.
 
+For a measured comparison of these and other models on this project's kind of tasks (accuracy, speed and agent behaviour, run on one CPU-only laptop), see [comparison.html](comparison.html).
+
 ## Privacy
 
 Prompts and project excerpts are sent to the configured Ollama endpoint; localhost is the default, and Codev confirms before switching to a non-local server. Chat mode reads a bounded set of common source/config files (up to 24 files and roughly 32,000 characters total), excluding build output, dependency folders, `.git`, and common secret files. Code task mode can read and search files within the selected workspace and apply a replacement only after user approval; it saves a checkpoint first and refuses to overwrite files that changed after review. Symbolic links and junctions are excluded. Approved shell commands are not sandboxed and can access resources available to your user account.
