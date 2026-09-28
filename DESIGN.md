@@ -170,20 +170,20 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 #### A. Context and memory
 
-| ID | Feature | Size | Depends on |
-|---|---|---|---|
-| A1 | Context breakdown | S | none |
-| A2 | Compaction and summarize | M | C3 (shares its UI) |
-| A3 | Instruction activation modes (path-scoped) | S | none |
-| A4 | Suggested memory notes | M | none |
-| A5 | `/init` to draft `AGENTS.md` | S | D1 |
-| A6 | `/status` | S | D1 |
-| A7 | `@`-mention files in the composer | S | none |
-| A8 | Repo map | M | none |
-| A9 | Embeddings search | M | A8 helpful, not required |
-| A10 | Small helper model for chores | S | none |
-| A11 | Conversation recall | S | none |
-| A12 | Multi-folder projects | M | none |
+| ID | Feature | Size | Depends on | Tier |
+|---|---|---|---|---|
+| A1 | Context breakdown | S | none | Core |
+| A2 | Compaction and summarize | M | C3 (shares its UI) | Core |
+| A3 | Instruction activation modes (path-scoped) | S | none | Later |
+| A4 | Suggested memory notes | M | none | Later |
+| A5 | `/init` to draft `AGENTS.md` | S | D1 | Later |
+| A6 | `/status` | S | D1 | Core |
+| A7 | `@`-mention files in the composer | S | none | Core |
+| A8 | Repo map | M | none | Later |
+| A9 | Embeddings search | M | A8 helpful, not required | Speculative |
+| A10 | Small helper model for chores | S | none | Later |
+| A11 | Conversation recall | S | none | Speculative |
+| A12 | Multi-folder projects | M | none | Later |
 
 - **A1 Context breakdown.** Replace the single token count with a breakdown of what fills the window: system prompt, personal instructions, project instructions, knowledge notes, `AGENTS.md`, selected files, history. Highest-value part: show it *before* sending. Add a *show the final prompt* view that displays exactly what will be sent to the model once all instructions are combined; Gemini CLI's `/memory show` does this for its instruction files.
 - **A2 Compaction and summarize.** When a conversation nears the model's context limit, offer to summarize older turns in place, and offer "summarize from here" / "summarize up to here" on any message. The original messages stay in the saved conversation and exports, files on disk are untouched, and the summary is shown and editable. Never compact silently. Modeled on Claude Code's [checkpointing and `/compact`](https://code.claude.com/docs/en/checkpointing).
@@ -200,19 +200,19 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 #### B. Agent quality and safety
 
-| ID | Feature | Size | Depends on |
-|---|---|---|---|
-| B1 | Permission modes and allowlist | M | none |
-| B2 | Structured tool calls | M | none |
-| B3 | Diff edits alongside whole-file edits | M | none |
-| B4 | Step limit and loop detection | S | none |
-| B5 | Test and lint loop | M | B1 |
-| B6 | Show model reasoning | S | none |
-| B7 | Sandbox research | L | X3, per OS |
-| B8 | Loaded-model awareness | S | none |
-| B9 | Folder trust | M | none; must land before D2, D3, D4 and D6 read project files |
-| B10 | Untrusted content handling | S–M | B1 |
-| B11 | Task checklist | S–M | none |
+| ID | Feature | Size | Depends on | Tier |
+|---|---|---|---|---|
+| B1 | Permission modes and allowlist | M | none | Core |
+| B2 | Structured tool calls | M | none | Later |
+| B3 | Diff edits alongside whole-file edits | M | none | Later |
+| B4 | Step limit and loop detection | S | none | Core |
+| B5 | Test and lint loop | M | B1 | Later |
+| B6 | Show model reasoning | S | none | Later |
+| B7 | Sandbox research | L | X3, per OS | Speculative |
+| B8 | Loaded-model awareness | S | none | Later |
+| B9 | Folder trust | M | none; must land before D2, D3, D4 and D6 read project files | Core |
+| B10 | Untrusted content handling | S–M | B1 | Later |
+| B11 | Task checklist | S–M | none | Later |
 
 - **B1 Permission modes and allowlist.** Modes for the command tool: *ask every time* (today's behavior and the default), *auto-approve read-only commands*, and a per-project *allowlist* of exact commands. File writes are never auto-approved. Rules, from Claude Code's [permission system](https://code.claude.com/docs/en/permissions): evaluate deny first, then ask, then allow, so a deny always wins; judge compound commands (`a && b`, pipes) piece by piece; treat output redirects (`>`, `tee`) as file writes and check their targets; resolve symlinks before judging a path; treat `.git` and Codev's own data folder as protected. Because rules on command text can be bypassed (for example through `sh -c`), the UI must keep saying commands are not sandboxed until B7 exists. Refuse the combination "never ask" plus "full access" if B7 ever adds full access.
 - **B2 Structured tool calls.** Use Ollama's native tool calling and [JSON-schema structured outputs](https://docs.ollama.com/capabilities/structured-outputs) where the model supports them, so plans, tool arguments and summaries are validated before use. Keep the current text parsing as the fallback for models that lack support, and record which path was used in the tool status.
@@ -228,15 +228,15 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 #### C. Review, Git and recovery
 
-| ID | Feature | Size | Depends on |
-|---|---|---|---|
-| C1 | Richer review pane | M | none |
-| C2 | `/review` pass | M | D1 |
-| C3 | Rewind | M | none |
-| C4 | Resume by project, fork a conversation | S | none |
-| C5 | Queue a follow-up while running | S | none |
-| C6 | Edit any earlier message | S–M | C3 |
-| C7 | Whole-tree snapshot before commands | M–L (prototype first) | C3 |
+| ID | Feature | Size | Depends on | Tier |
+|---|---|---|---|---|
+| C1 | Richer review pane | M | none | Core |
+| C2 | `/review` pass | M | D1 | Later |
+| C3 | Rewind | M | none | Core |
+| C4 | Resume by project, fork a conversation | S | none | Later |
+| C5 | Queue a follow-up while running | S | none | Core |
+| C6 | Edit any earlier message | S–M | C3 | Later |
+| C7 | Whole-tree snapshot before commands | M–L (prototype first) | C3 | Speculative |
 
 - **C1 Richer review pane.** Per [Codex's review pane](https://learn.chatgpt.com/docs/code-review?surface=app): stage, unstage and revert at three levels (whole diff, per file, **per hunk**; Codev is per file today); choose the scope to review (uncommitted changes, **the assistant's last turn**, a branch against a base, one commit); and attach a comment to a diff line. Comments are listed in the composer before sending and cleared once addressed, and they travel with the message as guidance. This is the concrete design for the "persistent comments on diff hunks" item in section 4.
 - **C2 `/review`.** A separate, read-only model pass over uncommitted changes, a commit or a branch, returning findings by priority before the user commits. Uses a review-specific prompt and never edits files. Label it a second opinion; quality depends on the model.
@@ -248,18 +248,18 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 #### D. Extensibility and automation
 
-| ID | Feature | Size | Depends on |
-|---|---|---|---|
-| D1 | Slash commands and file-based commands | S | none |
-| D2 | Skills | M | D1 |
-| D3 | Agent definition files | M | B4 |
-| D4 | Hooks (formatter first) | M | B1 |
-| D5 | Subagents with child sessions | L | D3, section 3 worktrees |
-| D6 | MCP client | L | B1 |
-| D7 | Plugins | L | D2, D3, D4, D6 |
-| D8 | Automations and review inbox | L | section 3 worktrees, C1 |
-| D9 | Opt-in web search and fetch | M | B1 |
-| D10 | Code intelligence (language servers) | L | none |
+| ID | Feature | Size | Depends on | Tier |
+|---|---|---|---|---|
+| D1 | Slash commands and file-based commands | S | none | Core |
+| D2 | Skills | M | D1 | Later |
+| D3 | Agent definition files | M | B4 | Later |
+| D4 | Hooks (formatter first) | M | B1 | Later |
+| D5 | Subagents with child sessions | L | D3, section 3 worktrees | Speculative |
+| D6 | MCP client | L | B1 | Later |
+| D7 | Plugins | L | D2, D3, D4, D6 | Speculative |
+| D8 | Automations and review inbox | L | section 3 worktrees, C1 | Speculative |
+| D9 | Opt-in web search and fetch | M | B1 | Speculative |
+| D10 | Code intelligence (language servers) | L | none | Speculative |
 
 - **D1 Slash commands and file-based commands.** Typing `/` in the composer opens a menu: built-ins (`/plan`, `/code`, `/clear`, `/model`, `/compact`, `/export`, `/status`, `/init`, `/review`) plus user commands. User commands are markdown files, per user or per project (project ones shareable through Git), with named argument placeholders, in the spirit of OpenCode's custom commands. The existing saved prompt templates become the same thing. A command file may also name an agent (D3) and limit its tools, which gives a saved, parameterized task that can be run from the menu, headlessly (E7) or on a schedule (D8); Goose calls these recipes (its recipe format was not reviewed).
 - **D2 Skills.** Folders of markdown instructions, optionally with scripts, loaded on demand, at user and project scope; this is the shape of the pending "executable skill workflows" item. Design, from Claude Code's [extension guide](https://code.claude.com/docs/en/features-overview): only each skill's name and short description sit in context until it is used, so many skills stay cheap; a skill can be marked user-invoke-only (`/name`) so the model never triggers one with side effects itself; the same name at project and user scope resolves by a fixed priority; scripts run through the approval-gated command tool.
@@ -274,19 +274,19 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 #### E. Everyday use and input/output
 
-| ID | Feature | Size | Depends on |
-|---|---|---|---|
-| E1 | Output styles | S | none |
-| E2 | One-key Plan/Code toggle | S | none |
-| E3 | Themes and key bindings | S–M | none |
-| E4 | Self-contained HTML export | S | none |
-| E5 | Preview for HTML/SVG code blocks | M | none |
-| E6 | Local voice | M | X-steps for OS-specific parts |
-| E7 | Headless mode | M | X2 |
-| E8 | Local server for multiple front ends | L | X2, decision |
-| E9 | Compare models side by side | M | B8 helpful |
-| E10 | Generation stats | S | none |
-| E11 | Follow the agent | S–M | none |
+| ID | Feature | Size | Depends on | Tier |
+|---|---|---|---|---|
+| E1 | Output styles | S | none | Later |
+| E2 | One-key Plan/Code toggle | S | none | Core |
+| E3 | Themes and key bindings | S–M | none | Later |
+| E4 | Self-contained HTML export | S | none | Later |
+| E5 | Preview for HTML/SVG code blocks | M | none | Speculative |
+| E6 | Local voice | M | X-steps for OS-specific parts | Later |
+| E7 | Headless mode | M | X2 | Later |
+| E8 | Local server for multiple front ends | L | X2, decision | Speculative |
+| E9 | Compare models side by side | M | B8 helpful | Speculative |
+| E10 | Generation stats | S | none | Later |
+| E11 | Follow the agent | S–M | none | Later |
 
 - **E1 Output styles.** Saved system-prompt presets (concise, explanatory, code-only) chosen per conversation. A style controls *how* the model answers; project instructions control *what it should know*.
 - **E2 Plan/Code toggle.** A single shortcut and a clear on-screen indicator for the current mode, since accidental edits are the risk.
@@ -332,7 +332,7 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 
 Why these are Speculative: A9, A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive.
 
-**Done when:** the tier column exists in every table, and any Speculative item that V3 or V4 supports has been promoted with a note saying why.
+**Status:** the tier column now exists in every section 8 table, copied from the proposal above; if the two ever disagree, the proposal table is the source and the columns must be updated to match. **Done when:** any Speculative item that V3 or V4 supports has been promoted with a note saying why.
 
 #### V2. Close the open questions
 
