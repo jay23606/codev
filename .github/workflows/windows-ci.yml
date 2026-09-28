@@ -28,6 +28,9 @@ jobs:
       - name: Build application
         run: dotnet build Codev.csproj --configuration Release --no-restore
 
+      - name: Publish self-contained Windows app
+        run: dotnet publish Codev.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\ci-publish
+
       - name: Run tests
         run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-tests.trx"
 
