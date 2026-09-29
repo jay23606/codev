@@ -3,6 +3,12 @@ namespace Codev;
 /// <summary>Describes failed or empty model responses without confusing hosted APIs with local Ollama.</summary>
 public static class ModelRequestErrorDescription
 {
+    public static bool IsHandledRequestFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return exception is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException or TimeoutException;
+    }
+
     public static string Describe(string provider, Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);

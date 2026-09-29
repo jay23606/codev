@@ -4,6 +4,16 @@ namespace Codev.Tests;
 
 public sealed class ModelRequestErrorDescriptionTests
 {
+    [Fact]
+    public void Handles_openai_request_timeouts_as_visible_model_failures()
+    {
+        var exception = new TimeoutException("OpenAI Code task request timed out after 5 minutes.");
+
+        Assert.True(ModelRequestErrorDescription.IsHandledRequestFailure(exception));
+        Assert.Equal("OpenAI API request failed. OpenAI Code task request timed out after 5 minutes.",
+            ModelRequestErrorDescription.Describe(CloudModelProviders.OpenAI, exception));
+    }
+
     [Theory]
     [InlineData(CloudModelProviders.OpenAI, "OpenAI API request failed.")]
     [InlineData(CloudModelProviders.Anthropic, "Anthropic API request failed.")]

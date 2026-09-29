@@ -2748,7 +2748,7 @@ public sealed class MainViewModel : ViewModelBase
             var partial = conversation.Messages[assistantIndex].Content;
             conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]" };
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException)
+        catch (Exception ex) when (Codev.ModelRequestErrorDescription.IsHandledRequestFailure(ex))
         {
             var partial = conversation.Messages[assistantIndex].Content;
             var detail = Codev.ModelRequestErrorDescription.Describe(savedTurn.Provider, ex);
