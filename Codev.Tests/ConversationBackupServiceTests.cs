@@ -15,10 +15,10 @@ public sealed class ConversationBackupServiceTests
             Id = Guid.NewGuid(),
             Title = "Debug session",
             Draft = "an unsent prompt draft",
-            Model = "qwen3-coder:30b",
-            Provider = "ollama",
+            Model = "gpt-5.6",
+            Provider = CloudModelProviders.OpenAI,
             IsPlanMode = false,
-            IsCodeTask = true,
+            IsCodeTask = false,
             ThinkEnabled = true,
             OutputStyle = ConversationOutputStyles.Concise,
             IncludeRepoMap = true,
@@ -30,6 +30,7 @@ public sealed class ConversationBackupServiceTests
             NumPredict = 4096,
             OpenAiReasoningEffort = "high",
             OpenAiVerbosity = "low",
+            OpenAiReasoningMode = "pro",
             LastPromptTokens = 321,
             LastPromptOutputTokens = 123,
             CompactionSummary = "Earlier decisions and user goal.",
@@ -47,9 +48,9 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(source.Title, imported.Title);
         Assert.Equal(source.Draft, imported.Draft);
         Assert.Equal(source.Model, imported.Model);
-        Assert.Equal("ollama", imported.Provider);
+        Assert.Equal(CloudModelProviders.OpenAI, imported.Provider);
         Assert.False(imported.IsPlanMode);
-        Assert.True(imported.IsCodeTask);
+        Assert.False(imported.IsCodeTask);
         Assert.True(imported.ThinkEnabled);
         Assert.Equal(ConversationOutputStyles.Concise, imported.OutputStyle);
         Assert.True(imported.IncludeRepoMap);
@@ -63,6 +64,7 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(source.NumPredict, imported.NumPredict);
         Assert.Equal("high", imported.OpenAiReasoningEffort);
         Assert.Equal("low", imported.OpenAiVerbosity);
+        Assert.Equal("pro", imported.OpenAiReasoningMode);
         Assert.Equal(321, imported.LastPromptTokens);
         Assert.Equal(123, imported.LastPromptOutputTokens);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);

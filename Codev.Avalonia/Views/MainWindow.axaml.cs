@@ -657,20 +657,24 @@ public partial class MainWindow : Window
             var effort = OpenAiSetting(conversation.OpenAiReasoningEffort,
                 Codev.OpenAiGenerationSettings.ReasoningEffortOptions(conversation.Model));
             var verbosity = OpenAiSetting(conversation.OpenAiVerbosity, ["low", "medium", "high"]);
+            var modes = Codev.OpenAiGenerationSettings.ReasoningModeOptions(conversation.Model);
+            var mode = OpenAiSetting(conversation.OpenAiReasoningMode, modes);
             var content = new StackPanel { Spacing = 12, Margin = new Thickness(20), Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#191919" : "#F5F4F1")) };
             content.Children.Add(new TextBlock { Text = "These optional controls apply to supported GPT-5+ and o-series OpenAI models. Model default leaves the corresponding API field out of the request.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = secondary, MaxWidth = 420 });
             AddOpenAiSetting(content, "Reasoning effort", effort, "Low is faster and uses fewer reasoning tokens; high can help with harder coding tasks.", primary, secondary);
             AddOpenAiSetting(content, "Response verbosity", verbosity, "Low produces more concise answers; high gives more explanation.", primary, secondary);
+            if (modes.Count > 0)
+                AddOpenAiSetting(content, "Reasoning mode", mode, "Pro performs additional model work and uses more time and tokens on difficult tasks.", primary, secondary);
             var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
-            var openAiDialog = new Window { Title = "OpenAI generation settings", Width = 480, Height = 360, MinHeight = 320, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = content.Background, Foreground = primary };
+            var openAiDialog = new Window { Title = "OpenAI generation settings", Width = 480, Height = modes.Count > 0 ? 460 : 360, MinHeight = 320, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = content.Background, Foreground = primary };
             var resetOpenAi = new Button { Content = "Use model defaults", Classes = { "soft" } };
-            resetOpenAi.Click += (_, _) => { viewModel.SetOpenAiGenerationSettings(null, null); openAiDialog.Close(); };
+            resetOpenAi.Click += (_, _) => { viewModel.SetOpenAiGenerationSettings(null, null, null); openAiDialog.Close(); };
             actions.Children.Add(resetOpenAi);
             actions.Children.Add(new Button { Content = "Cancel", IsCancel = true });
             var saveOpenAi = new Button { Content = "Save", IsDefault = true };
             saveOpenAi.Click += (_, _) =>
             {
-                viewModel.SetOpenAiGenerationSettings(SelectedOpenAiSetting(effort), SelectedOpenAiSetting(verbosity));
+                viewModel.SetOpenAiGenerationSettings(SelectedOpenAiSetting(effort), SelectedOpenAiSetting(verbosity), SelectedOpenAiSetting(mode));
                 openAiDialog.Close();
             };
             actions.Children.Add(saveOpenAi);

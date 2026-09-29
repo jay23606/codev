@@ -30,6 +30,7 @@ public static class ConversationBackupService
             NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(conversation.NumPredict),
             OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(conversation.OpenAiReasoningEffort),
             OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(conversation.OpenAiVerbosity),
+            OpenAiReasoningMode = OpenAiGenerationSettings.NormalizeReasoningMode(conversation.OpenAiReasoningMode, conversation.Model),
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptOutputTokens = conversation.LastPromptOutputTokens,
             LastPromptContext = conversation.LastPromptContext,
@@ -101,6 +102,7 @@ public static class ConversationBackupService
             item.NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(item.NumPredict);
             item.OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(item.OpenAiReasoningEffort);
             item.OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(item.OpenAiVerbosity);
+            item.OpenAiReasoningMode = OpenAiGenerationSettings.NormalizeReasoningMode(item.OpenAiReasoningMode, item.Model);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;
             item.PendingTurns = [];

@@ -72,7 +72,8 @@ public sealed class CloudModelApiClient(HttpClient http)
 
     public async Task<OpenAiToolResponse> CreateOpenAiToolResponseAsync(string apiKey, string model,
         object input, IReadOnlyList<object> tools, CancellationToken cancellationToken = default,
-        Func<string, Task>? onRequestPayload = null, string? reasoningEffort = null, string? verbosity = null)
+        Func<string, Task>? onRequestPayload = null, string? reasoningEffort = null, string? verbosity = null,
+        string? reasoningMode = null)
     {
         Validate(CloudModelProviders.OpenAI, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose an OpenAI model first.", nameof(model));
@@ -87,7 +88,7 @@ public sealed class CloudModelApiClient(HttpClient http)
             ["store"] = false,
             ["max_output_tokens"] = OpenAiCodeTaskLimits.MaxOutputTokensPerRequest
         };
-        OpenAiGenerationSettings.AddToPayload(payload, model, reasoningEffort, verbosity);
+        OpenAiGenerationSettings.AddToPayload(payload, model, reasoningEffort, verbosity, reasoningMode);
         var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
         using var request = CreateRequest(HttpMethod.Post, new Uri(OpenAiBase, "responses"), CloudModelProviders.OpenAI, apiKey);
         request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
@@ -113,7 +114,7 @@ public sealed class CloudModelApiClient(HttpClient http)
     public async Task<OpenAiToolResponse> StreamOpenAiToolResponseAsync(string apiKey, string model,
         object input, IReadOnlyList<object> tools, Func<string, Task>? onTextDelta = null,
         CancellationToken cancellationToken = default, Func<string, Task>? onRequestPayload = null,
-        string? reasoningEffort = null, string? verbosity = null)
+        string? reasoningEffort = null, string? verbosity = null, string? reasoningMode = null)
     {
         Validate(CloudModelProviders.OpenAI, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose an OpenAI model first.", nameof(model));
@@ -128,7 +129,7 @@ public sealed class CloudModelApiClient(HttpClient http)
             ["store"] = false,
             ["max_output_tokens"] = OpenAiCodeTaskLimits.MaxOutputTokensPerRequest
         };
-        OpenAiGenerationSettings.AddToPayload(payload, model, reasoningEffort, verbosity);
+        OpenAiGenerationSettings.AddToPayload(payload, model, reasoningEffort, verbosity, reasoningMode);
         var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
         using var request = CreateRequest(HttpMethod.Post, new Uri(OpenAiBase, "responses"), CloudModelProviders.OpenAI, apiKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
@@ -278,7 +279,8 @@ public sealed class CloudModelApiClient(HttpClient http)
         Func<string, Task>? onRequestPayload = null,
         Func<int, Task>? onOutputTokenCount = null,
         string? reasoningEffort = null,
-        string? verbosity = null)
+        string? verbosity = null,
+        string? reasoningMode = null)
     {
         Validate(provider, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose a hosted model first.", nameof(model));
@@ -287,7 +289,7 @@ public sealed class CloudModelApiClient(HttpClient http)
 
         var endpoint = provider == CloudModelProviders.OpenAI ? new Uri(OpenAiBase, "responses") : new Uri(AnthropicBase, "messages");
         var payload = provider == CloudModelProviders.OpenAI
-            ? BuildOpenAiPayload(model, messages, maxOutputTokens, reasoningEffort, verbosity)
+            ? BuildOpenAiPayload(model, messages, maxOutputTokens, reasoningEffort, verbosity, reasoningMode)
             : BuildAnthropicPayload(model, messages, maxOutputTokens);
         var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
         using var request = CreateRequest(HttpMethod.Post, endpoint, provider, apiKey);
@@ -406,7 +408,7 @@ public sealed class CloudModelApiClient(HttpClient http)
     }
 
     private static object BuildOpenAiPayload(string model, IReadOnlyList<CloudChatMessage> messages, int? maxOutputTokens,
-        string? reasoningEffort, string? verbosity)
+        string? reasoningEffort, string? verbosity, string? reasoningMode)
     {
         var payload = new Dictionary<string, object>
         {
@@ -416,7 +418,7 @@ public sealed class CloudModelApiClient(HttpClient http)
             ["store"] = false
         };
         if (maxOutputTokens is { } max) payload["max_output_tokens"] = max;
-        OpenAiGenerationSettings.AddToPayload(payload, model, reasoningEffort, verbosity);
+        OpenAiGenerationSettings.AddToPayload(payload, model, reasoningEffort, verbosity, reasoningMode);
         return payload;
     }
 

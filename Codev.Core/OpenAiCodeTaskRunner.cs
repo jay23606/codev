@@ -22,7 +22,8 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
         Func<string, Task>? onTranscript = null,
         CancellationToken cancellationToken = default,
         string? reasoningEffort = null,
-        string? verbosity = null)
+        string? verbosity = null,
+        string? reasoningMode = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
         ArgumentNullException.ThrowIfNull(initialInput);
@@ -52,7 +53,7 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
                         return Task.CompletedTask;
                     lastPublished = Stopwatch.GetTimestamp();
                     return onTranscript(transcript.ToString() + streamedText);
-                }, cancellationToken, onRequestPayload, reasoningEffort, verbosity);
+                }, cancellationToken, onRequestPayload, reasoningEffort, verbosity, reasoningMode);
             }
             catch
             {

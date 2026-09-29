@@ -5,7 +5,8 @@ namespace Codev;
 public sealed record PersistedQueuedTurn(int AssistantIndex, string Model, int NumCtx, bool IsCodeTask, bool IsPlanMode,
     string? ProjectPath, List<string>? ContextFiles, List<string>? ContextExclusions, DateTimeOffset EnqueuedAt, double? Temperature = null, string Provider = "ollama", bool IncludeProjectContext = false, bool IncludeRepoMap = false, string OutputStyle = ConversationOutputStyles.Balanced, bool ThinkEnabled = false,
     double? TopP = null, int? TopK = null, double? PresencePenalty = null, double? RepeatPenalty = null, int? NumPredict = null,
-    bool ProjectFolderTrusted = false, string? OpenAiReasoningEffort = null, string? OpenAiVerbosity = null);
+    bool ProjectFolderTrusted = false, string? OpenAiReasoningEffort = null, string? OpenAiVerbosity = null,
+    string? OpenAiReasoningMode = null);
 
 public sealed class Conversation
 {
@@ -31,6 +32,7 @@ public sealed class Conversation
     public int? NumPredict { get; set; }
     public string? OpenAiReasoningEffort { get; set; }
     public string? OpenAiVerbosity { get; set; }
+    public string? OpenAiReasoningMode { get; set; }
     public int LastPromptTokens { get; set; }
     public int? LastPromptOutputTokens { get; set; }
     public int LastPromptContext { get; set; }

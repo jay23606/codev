@@ -12,16 +12,16 @@ public sealed class ConversationPersistenceTests
     [Fact]
     public void Snapshot_detaches_mutable_lists_and_preserves_queued_turn_data()
     {
-        var turn = new PersistedQueuedTurn(1, "model-a", 8192, false, false, null,
+        var turn = new PersistedQueuedTurn(1, "gpt-5.6", 8192, false, false, null,
             ["src/a.cs"], ["private"], DateTimeOffset.UnixEpoch, OutputStyle: ConversationOutputStyles.CodeOnly, ThinkEnabled: true,
             TopP: 0.8, TopK: 40, PresencePenalty: 0.2, RepeatPenalty: 1.1, NumPredict: 4096);
-        turn = turn with { OpenAiReasoningEffort = "high", OpenAiVerbosity = "low" };
+        turn = turn with { OpenAiReasoningEffort = "high", OpenAiVerbosity = "low", OpenAiReasoningMode = "pro" };
         var source = new Conversation
         {
             Title = "Snapshot",
             Draft = "unsent prompt",
-            Model = "claude-sonnet-test",
-            Provider = CloudModelProviders.Anthropic,
+            Model = "gpt-5.6",
+            Provider = CloudModelProviders.OpenAI,
             IsPlanMode = false,
             IsCodeTask = true,
             ThinkEnabled = true,
@@ -33,6 +33,7 @@ public sealed class ConversationPersistenceTests
             NumPredict = 4096,
             OpenAiReasoningEffort = "HIGH",
             OpenAiVerbosity = "low",
+            OpenAiReasoningMode = "pro",
             OutputStyle = ConversationOutputStyles.Explanatory,
             AllowHostedCodeTask = true,
             IncludeProjectContextForHosted = true,
@@ -40,8 +41,8 @@ public sealed class ConversationPersistenceTests
             LastPromptTokens = 321,
             LastPromptOutputTokens = 123,
             LastPromptContext = 4096,
-            LastPromptModel = "claude-sonnet-test",
-            LastPromptProvider = CloudModelProviders.Anthropic,
+            LastPromptModel = "gpt-5.6",
+            LastPromptProvider = CloudModelProviders.OpenAI,
             CompactionSummary = "Accepted older context.",
             CompactionFromMessageCount = 2,
             CompactionThroughMessageCount = 4,
@@ -61,10 +62,10 @@ public sealed class ConversationPersistenceTests
         source.Messages[0] = new("user", "after");
         source.ContextFiles[0] = "src/b.cs";
         source.PendingDiffComments[0] = new("src/b.cs", "changed", "changed");
-        source.PendingTurns[0] = turn with { Model = "model-b" };
+        source.PendingTurns[0] = turn with { Model = "gpt-5.5" };
 
         Assert.Equal("Snapshot", snapshot.Title);
-        Assert.Equal(CloudModelProviders.Anthropic, snapshot.Provider);
+        Assert.Equal(CloudModelProviders.OpenAI, snapshot.Provider);
         Assert.False(snapshot.IsPlanMode);
         Assert.True(snapshot.IsCodeTask);
         Assert.True(snapshot.ThinkEnabled);
@@ -76,13 +77,14 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(4096, snapshot.NumPredict);
         Assert.Equal("high", snapshot.OpenAiReasoningEffort);
         Assert.Equal("low", snapshot.OpenAiVerbosity);
+        Assert.Equal("pro", snapshot.OpenAiReasoningMode);
         Assert.Equal(ConversationOutputStyles.Explanatory, snapshot.OutputStyle);
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.True(snapshot.AllowHostedCodeTask);
         Assert.True(snapshot.IncludeRepoMap);
         Assert.Equal(321, snapshot.LastPromptTokens);
         Assert.Equal(123, snapshot.LastPromptOutputTokens);
-        Assert.Equal(CloudModelProviders.Anthropic, snapshot.LastPromptProvider);
+        Assert.Equal(CloudModelProviders.OpenAI, snapshot.LastPromptProvider);
         Assert.Equal("Accepted older context.", snapshot.CompactionSummary);
         Assert.Equal(2, snapshot.CompactionFromMessageCount);
         Assert.Equal(4, snapshot.CompactionThroughMessageCount);
@@ -92,7 +94,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(source.Messages[1].HostedUsage, snapshot.Messages[1].HostedUsage);
         Assert.Equal("src/a.cs", Assert.Single(snapshot.ContextFiles));
         Assert.Equal(new GitDiffComment("src/a.cs", "+ updated", "Check null handling."), Assert.Single(snapshot.PendingDiffComments));
-        Assert.Equal("model-a", Assert.Single(snapshot.PendingTurns).Model);
+        Assert.Equal("gpt-5.6", Assert.Single(snapshot.PendingTurns).Model);
         Assert.Equal("src/a.cs", Assert.Single(snapshot.PendingTurns[0].ContextFiles!));
         Assert.Equal("private", Assert.Single(snapshot.PendingTurns[0].ContextExclusions!));
         Assert.Equal(ConversationOutputStyles.CodeOnly, snapshot.PendingTurns[0].OutputStyle);
@@ -104,5 +106,6 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(4096, snapshot.PendingTurns[0].NumPredict);
         Assert.Equal("high", snapshot.PendingTurns[0].OpenAiReasoningEffort);
         Assert.Equal("low", snapshot.PendingTurns[0].OpenAiVerbosity);
+        Assert.Equal("pro", snapshot.PendingTurns[0].OpenAiReasoningMode);
     }
 }

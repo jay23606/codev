@@ -47,7 +47,39 @@ public sealed class OpenAiGenerationSettingsTests
         OpenAiGenerationSettings.AddToPayload(proPayload, "gpt-5-pro", "low", "low");
         Assert.DoesNotContain("reasoning", proPayload.Keys);
         Assert.Contains("text", proPayload.Keys);
+        Assert.Equal(["minimal", "low", "medium", "high"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-5"));
         Assert.Equal(["none", "low", "medium", "high"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-5.1"));
         Assert.Equal(["none", "low", "medium", "high", "xhigh"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-5.1-codex-max"));
+        Assert.Equal(["none", "low", "medium", "high", "xhigh", "max"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-5.6"));
+        Assert.Equal(["low", "medium", "high", "xhigh", "max"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-6-astra"));
+        Assert.Equal(["none", "low", "medium", "high", "xhigh", "max"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-6-sol"));
+        Assert.Equal(["pro"], OpenAiGenerationSettings.ReasoningModeOptions("gpt-5.6"));
+        Assert.Equal(["pro"], OpenAiGenerationSettings.ReasoningModeOptions("gpt-5.2-pro"));
+        Assert.Empty(OpenAiGenerationSettings.ReasoningModeOptions("gpt-5.5"));
+    }
+
+    [Fact]
+    public void Adds_documented_effort_and_pro_mode_in_one_reasoning_object()
+    {
+        var payload = new Dictionary<string, object>();
+
+        OpenAiGenerationSettings.AddToPayload(payload, "gpt-5.6", "max", "low", "pro");
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(payload));
+        var reasoning = document.RootElement.GetProperty("reasoning");
+        Assert.Equal("max", reasoning.GetProperty("effort").GetString());
+        Assert.Equal("pro", reasoning.GetProperty("mode").GetString());
+    }
+
+    [Fact]
+    public void Omits_unsupported_reasoning_mode_and_effort_for_astra()
+    {
+        var payload = new Dictionary<string, object>();
+
+        OpenAiGenerationSettings.AddToPayload(payload, "gpt-6-astra", "none", null, "pro");
+
+        Assert.DoesNotContain("reasoning", payload.Keys);
+        Assert.Null(OpenAiGenerationSettings.NormalizeEffort("minimal", "gpt-6-astra"));
+        Assert.Null(OpenAiGenerationSettings.NormalizeReasoningMode("pro", "gpt-5.5"));
     }
 }

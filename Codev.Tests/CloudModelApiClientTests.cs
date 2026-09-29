@@ -164,9 +164,10 @@ public sealed class CloudModelApiClientTests
                 ],"usage":{"input_tokens":321,"output_tokens":87}}
                 """);
         }));
-        var requestBody = await new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("secret-api-key", "gpt-example",
+        var requestBody = await new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("secret-api-key", "gpt-5.6",
             new[] { new { role = "user", content = "inspect this workspace" } },
-            [new { type = "function", name = "list_files", description = "List files", parameters = new { type = "object" }, strict = false }]);
+            [new { type = "function", name = "list_files", description = "List files", parameters = new { type = "object" }, strict = false }],
+            reasoningEffort: "max", verbosity: "low", reasoningMode: "pro");
 
         Assert.Equal("Bearer", observed!.Headers.Authorization!.Scheme);
         Assert.Equal("secret-api-key", observed.Headers.Authorization.Parameter);
@@ -177,6 +178,9 @@ public sealed class CloudModelApiClientTests
         Assert.DoesNotContain("secret-api-key", body);
         using var requestJson = JsonDocument.Parse(body!);
         Assert.Equal(OpenAiCodeTaskLimits.MaxOutputTokensPerRequest, requestJson.RootElement.GetProperty("max_output_tokens").GetInt32());
+        Assert.Equal("max", requestJson.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        Assert.Equal("pro", requestJson.RootElement.GetProperty("reasoning").GetProperty("mode").GetString());
+        Assert.Equal("low", requestJson.RootElement.GetProperty("text").GetProperty("verbosity").GetString());
         Assert.Equal(321, requestBody.InputTokens);
         Assert.Equal(87, requestBody.OutputTokens);
         Assert.Single(requestBody.FunctionCalls);

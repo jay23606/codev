@@ -87,6 +87,8 @@ public static class ConversationStatusReport
             $"Thinking: {(CloudModelProviders.IsCloud(conversation.Provider) ? "unavailable for hosted providers" : conversation.ThinkEnabled ? "requested" : "off")}",
             $"Sampling overrides: {(conversation.Provider == "ollama" ? sampling : "unavailable for hosted providers")}",
             $"OpenAI reasoning effort: {(conversation.Provider == CloudModelProviders.OpenAI && OpenAiGenerationSettings.SupportsReasoningControls(conversation.Model) ? OpenAiGenerationSettings.NormalizeEffort(conversation.OpenAiReasoningEffort, conversation.Model) ?? "model default" : "unavailable for this model")}",
+            $"OpenAI reasoning mode: {(conversation.Provider == CloudModelProviders.OpenAI && OpenAiGenerationSettings.SupportsReasoningControls(conversation.Model) ? OpenAiGenerationSettings.NormalizeReasoningMode(conversation.OpenAiReasoningMode, conversation.Model) ?? "standard / model default" : "unavailable for this model")}",
+            $"OpenAI pro mode: {(conversation.Provider == CloudModelProviders.OpenAI && OpenAiGenerationSettings.SupportsProMode(conversation.Model) ? OpenAiGenerationSettings.NormalizeReasoningMode(conversation.OpenAiReasoningMode, conversation.Model) ?? "off" : "unavailable for this model")}",
             $"OpenAI response verbosity: {(conversation.Provider == CloudModelProviders.OpenAI && OpenAiGenerationSettings.SupportsReasoningControls(conversation.Model) ? OpenAiGenerationSettings.NormalizeVerbosity(conversation.OpenAiVerbosity) ?? "model default" : "unavailable for this model")}",
             $"Mode: {(conversation.IsCodeTask ? "Code task" : conversation.IsPlanMode ? "Plan" : "Chat")}",
             $"OpenAI Code task consent: {hostedCodeTaskConsent}",

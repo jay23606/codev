@@ -489,7 +489,7 @@ public sealed class MainViewModel : ViewModelBase
     public string AdvancedModelSettingsLabel => ActiveConversation is { } conversation &&
         (conversation.Temperature.HasValue || conversation.TopP.HasValue || conversation.TopK.HasValue ||
          conversation.PresencePenalty.HasValue || conversation.RepeatPenalty.HasValue || conversation.NumPredict.HasValue ||
-         conversation.OpenAiReasoningEffort is not null || conversation.OpenAiVerbosity is not null)
+         conversation.OpenAiReasoningEffort is not null || conversation.OpenAiVerbosity is not null || conversation.OpenAiReasoningMode is not null)
         ? "Advanced ·" : "Advanced";
 
     public void SetSamplingSettings(double? temperature, double? topP, int? topK,
@@ -506,11 +506,12 @@ public sealed class MainViewModel : ViewModelBase
         Persist();
     }
 
-    public void SetOpenAiGenerationSettings(string? reasoningEffort, string? verbosity)
+    public void SetOpenAiGenerationSettings(string? reasoningEffort, string? verbosity, string? reasoningMode = null)
     {
         if (ActiveConversation is not { } conversation) return;
         conversation.OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(reasoningEffort, conversation.Model);
         conversation.OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(verbosity);
+        conversation.OpenAiReasoningMode = Codev.OpenAiGenerationSettings.NormalizeReasoningMode(reasoningMode, conversation.Model);
         OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
         Persist();
     }
@@ -1909,7 +1910,8 @@ public sealed class MainViewModel : ViewModelBase
             conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
             conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle, conversation.ThinkEnabled,
             conversation.TopP, conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, conversation.NumPredict,
-            OpenAiReasoningEffort: conversation.OpenAiReasoningEffort, OpenAiVerbosity: conversation.OpenAiVerbosity);
+            OpenAiReasoningEffort: conversation.OpenAiReasoningEffort, OpenAiVerbosity: conversation.OpenAiVerbosity,
+            OpenAiReasoningMode: conversation.OpenAiReasoningMode);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -2037,7 +2039,8 @@ public sealed class MainViewModel : ViewModelBase
                 var messages = sourceMessages.Select(message => new Codev.CloudChatMessage(message.Role, message.Content)).ToArray();
                 await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
                     conversation.Provider, key, conversation.Model, messages, timeout.Token, maxOutputTokens: 1500,
-                    reasoningEffort: conversation.OpenAiReasoningEffort, verbosity: conversation.OpenAiVerbosity))
+                    reasoningEffort: conversation.OpenAiReasoningEffort, verbosity: conversation.OpenAiVerbosity,
+                    reasoningMode: conversation.OpenAiReasoningMode))
                 {
                     summary.Append(delta);
                     if (summary.Length > Codev.ConversationCompactionService.MaxSummaryCharacters)
@@ -2398,7 +2401,8 @@ public sealed class MainViewModel : ViewModelBase
             });
         },
         cancellationToken: cancellationToken,
-        reasoningEffort: turn.OpenAiReasoningEffort, verbosity: turn.OpenAiVerbosity);
+        reasoningEffort: turn.OpenAiReasoningEffort, verbosity: turn.OpenAiVerbosity,
+        reasoningMode: turn.OpenAiReasoningMode);
         var finalTranscript = result.Transcript;
         if (conversation.TaskChecklist.Count > 0)
             finalTranscript += Environment.NewLine + Environment.NewLine + "**Task checklist**" + Environment.NewLine + Environment.NewLine + Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist);
@@ -2548,7 +2552,8 @@ public sealed class MainViewModel : ViewModelBase
                 };
                 await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
                                    turn.Provider, key, turn.Model, messages, cancellationToken, maxOutputTokens: 256,
-                                   reasoningEffort: turn.OpenAiReasoningEffort, verbosity: turn.OpenAiVerbosity))
+                                   reasoningEffort: turn.OpenAiReasoningEffort, verbosity: turn.OpenAiVerbosity,
+                                   reasoningMode: turn.OpenAiReasoningMode))
                 {
                     if (result.Length + delta.Length > Codev.ProjectPathRuleRelevanceSelection.MaxResponseCharacters) return [];
                     result.Append(delta);
@@ -2753,7 +2758,8 @@ public sealed class MainViewModel : ViewModelBase
                                    onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
                                    onOutputTokenCount: outputTokens => RecordPromptOutputTokenUsageAsync(
                                        conversation, savedTurn.Provider, savedTurn.Model, outputTokens),
-                                   reasoningEffort: savedTurn.OpenAiReasoningEffort, verbosity: savedTurn.OpenAiVerbosity))
+                                   reasoningEffort: savedTurn.OpenAiReasoningEffort, verbosity: savedTurn.OpenAiVerbosity,
+                                   reasoningMode: savedTurn.OpenAiReasoningMode))
                 {
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
                 }
@@ -3316,10 +3322,12 @@ public sealed class MainViewModel : ViewModelBase
                 conversation.PendingDiffComments ??= [];
                 conversation.OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(conversation.OpenAiReasoningEffort);
                 conversation.OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(conversation.OpenAiVerbosity);
+                conversation.OpenAiReasoningMode = Codev.OpenAiGenerationSettings.NormalizeReasoningMode(conversation.OpenAiReasoningMode, conversation.Model);
                 conversation.PendingTurns = conversation.PendingTurns?.Select(turn => turn with
                 {
                     OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(turn.OpenAiReasoningEffort),
-                    OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(turn.OpenAiVerbosity)
+                    OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(turn.OpenAiVerbosity),
+                    OpenAiReasoningMode = Codev.OpenAiGenerationSettings.NormalizeReasoningMode(turn.OpenAiReasoningMode, turn.Model)
                 }).ToList() ?? [];
                 _conversations.Add(conversation);
                 if (conversation.LastPromptTokens > 0 && conversation.Messages.LastOrDefault()?.IsAssistant == true)
