@@ -114,7 +114,6 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ToggleThemeCommand { get; }
     public ICommand TogglePlanModeCommand { get; }
     public ICommand ToggleCodeTaskCommand { get; }
-    public ICommand EnableHostedCodeTaskConsentCommand { get; }
     public ICommand SummarizeConversationUpToCommand { get; }
     public ICommand SummarizeConversationFromCommand { get; }
     public ICommand RemoveContextFileCommand { get; }
@@ -136,7 +135,6 @@ public sealed class MainViewModel : ViewModelBase
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
         TogglePlanModeCommand = new RelayCommand(_ => TogglePlanMode(), _ => ActiveConversation is not null && !IsGenerating);
         ToggleCodeTaskCommand = new RelayCommand(_ => ToggleCodeTaskMode(), _ => CanToggleCodeTaskMode);
-        EnableHostedCodeTaskConsentCommand = new RelayCommand(_ => EnableHostedCodeTaskConsent(), _ => CanEnableHostedCodeTaskConsent);
         SummarizeConversationUpToCommand = new RelayCommand(value =>
         {
             if (value is Codev.ChatMessage message) _ = SummarizeConversationUpToAsync(message);
@@ -349,9 +347,6 @@ public sealed class MainViewModel : ViewModelBase
             ? CanEnterCodeTaskMode ? "Ctrl+Shift+M switches Plan to Code task." : $"Ctrl+Shift+M switches Plan to Chat. {GetCodeTaskUnavailableReason()}"
             : $"Ctrl+Shift+M switches Chat to Plan. {GetCodeTaskUnavailableReason() ?? "Code task can also be selected."}";
     public bool CanEnterCodeTaskMode => GetCodeTaskUnavailableReason() is null;
-    public bool CanEnableHostedCodeTaskConsent => ActiveConversation is not null && !IsGenerating &&
-        IsOpenAIModel && _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) &&
-        !IncludeProjectContextForHosted && (!HasProject || IsProjectTrusted);
     public bool CanToggleCodeTaskMode => ActiveConversation is not null && !IsGenerating;
     public bool ShowCodeTaskUnavailableReason => !IsCodeTask && GetCodeTaskUnavailableReason() is { } reason &&
         reason is not "Start or select a conversation first." &&
@@ -364,7 +359,9 @@ public sealed class MainViewModel : ViewModelBase
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
             _ => "Commands ask every time."
         }} Change this under Project actions → Command permissions. File changes still require review."
-        : GetCodeTaskUnavailableReason() ?? "Enable Code task. Commands still follow the separate project command-approval policy.";
+        : IsOpenAIModel && _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) && !IncludeProjectContextForHosted
+            ? "Enable OpenAI Code task. Codev will ask before sending workspace files and tool results to OpenAI; if no folder is attached, it creates a private workspace for this conversation. Commands still follow project approval."
+            : GetCodeTaskUnavailableReason() ?? "Enable Code task. Commands still follow the separate project command-approval policy.";
 
     private void NotifyCodeTaskAvailabilityProperties()
     {
@@ -374,15 +371,6 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CodeTaskUnavailableReason));
         OnPropertyChanged(nameof(CodeTaskTooltip));
         OnPropertyChanged(nameof(ConversationModeCycleTooltip));
-        OnPropertyChanged(nameof(CanEnableHostedCodeTaskConsent));
-        ((RelayCommand)EnableHostedCodeTaskConsentCommand).NotifyCanExecuteChanged();
-    }
-
-    private void EnableHostedCodeTaskConsent()
-    {
-        if (!CanEnableHostedCodeTaskConsent) return;
-        IncludeProjectContextForHosted = true;
-        ToggleCodeTaskMode();
     }
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
@@ -390,6 +378,7 @@ public sealed class MainViewModel : ViewModelBase
     public Func<Codev.ConversationCompactionProposal, Task>? ShowCompactionProposalAsync { get; set; }
     public Func<Codev.CodeTaskCommandProposal, Task<Codev.ProjectCommandApprovalChoice>>? ApproveProjectCommandAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
+    public Func<Task<bool>>? ConfirmHostedCodeTaskConsentAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
         ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase)
             ? Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "No local models installed" : "No models available from server"
@@ -900,30 +889,45 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (ActiveConversation is not { } conversation || IsGenerating) return;
         if (conversation.IsCodeTask) SetConversationMode(ConversationMode.Chat);
+        else if (conversation.Provider == Codev.CloudModelProviders.OpenAI &&
+                 _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) &&
+                 !conversation.IncludeProjectContextForHosted)
+        {
+            if (HasProject && !IsProjectTrusted)
+            {
+                ReportContextActionStatus("Trust the attached project folder before enabling Code task.");
+                return;
+            }
+            if (ConfirmHostedCodeTaskConsentAsync is null || !await ConfirmHostedCodeTaskConsentAsync()) return;
+            IncludeProjectContextForHosted = true;
+            await EnableCodeTaskWithWorkspaceAsync(conversation);
+        }
         else if (GetCodeTaskUnavailableReason() is { } reason)
         {
             ReportContextActionStatus(reason);
             return;
         }
-        else
+        else await EnableCodeTaskWithWorkspaceAsync(conversation);
+    }
+
+    private async Task EnableCodeTaskWithWorkspaceAsync(Codev.Conversation conversation)
+    {
+        try
         {
-            try
+            if (string.IsNullOrWhiteSpace(conversation.ProjectPath))
             {
-                if (string.IsNullOrWhiteSpace(conversation.ProjectPath))
-                {
-                    var workspace = _conversationWorkspaces.GetOrCreateWorkspace(conversation.Id);
-                    await _projectFolderTrust.TrustAsync(workspace);
-                    SetProjectFolder(workspace);
-                    ContextActionStatus = $"Created a dedicated Codev workspace for this conversation: {Path.GetFileName(workspace)}";
-                    OnPropertyChanged(nameof(ContextActionStatus));
-                    OnPropertyChanged(nameof(HasContextActionStatus));
-                }
-                SetConversationMode(ConversationMode.CodeTask);
+                var workspace = _conversationWorkspaces.GetOrCreateWorkspace(conversation.Id);
+                await _projectFolderTrust.TrustAsync(workspace);
+                SetProjectFolder(workspace);
+                ContextActionStatus = $"Created a dedicated Codev workspace for this conversation: {Path.GetFileName(workspace)}";
+                OnPropertyChanged(nameof(ContextActionStatus));
+                OnPropertyChanged(nameof(HasContextActionStatus));
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-            {
-                ReportContextActionStatus($"Could not prepare a Code task workspace: {ex.Message}");
-            }
+            SetConversationMode(ConversationMode.CodeTask);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            ReportContextActionStatus($"Could not prepare a Code task workspace: {ex.Message}");
         }
     }
 
@@ -936,8 +940,6 @@ public sealed class MainViewModel : ViewModelBase
         if (Provider == Codev.CloudModelProviders.OpenAI)
         {
             if (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(Provider)) return "Connect OpenAI and approve hosted requests before enabling Code task.";
-            if (!IncludeProjectContextForHosted)
-                return "OpenAI Code task sends requested workspace files and tool results to OpenAI. Allow this for the conversation to enable Code task.";
             return null;
         }
         if (!IsLocalModel) return "Select an installed local Ollama model for Code task.";

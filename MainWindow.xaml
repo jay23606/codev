@@ -137,13 +137,30 @@
                   <StackPanel Grid.Column="1" HorizontalAlignment="Stretch">
                     <Border Background="{DynamicResource ComposerBrush}" BorderBrush="{DynamicResource ComposerBorderBrush}" BorderThickness="1" CornerRadius="13" Padding="15,12,12,8">
                         <Grid><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                            <TextBox x:Name="PromptBox" MinHeight="52" MaxHeight="180" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontSize="14" KeyDown="PromptBox_KeyDown" TextChanged="PromptBox_TextChanged" AllowDrop="True" PreviewDragOver="PromptBox_PreviewDragOver" PreviewDrop="PromptBox_PreviewDrop" ToolTip="Message Codev… · Type @ to attach a project file · Drop project files here to add them as context"/>
+                            <TextBox x:Name="PromptBox" MinHeight="52" MaxHeight="180" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontSize="14" KeyDown="PromptBox_KeyDown" TextChanged="PromptBox_TextChanged" AllowDrop="True" PreviewDragOver="PromptBox_PreviewDragOver" PreviewDrop="PromptBox_PreviewDrop" ToolTip="Message Codev… · Type / for commands, @ to attach a project file, or drop files here"/>
                             <Popup x:Name="FileMentionPopup" PlacementTarget="{Binding ElementName=PromptBox}" Placement="Top" AllowsTransparency="True" StaysOpen="True">
                                 <Border Background="{DynamicResource MainSurfaceBrush}" BorderBrush="{DynamicResource MainBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4" Width="480">
                                     <ListBox x:Name="FileMentionListBox" MaxHeight="220" Background="{DynamicResource MainSurfaceBrush}" Foreground="{DynamicResource MainTextBrush}" BorderThickness="0">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Button Content="{Binding}" HorizontalContentAlignment="Left" Background="Transparent" Foreground="{DynamicResource MainTextBrush}" BorderThickness="0" Padding="8,6" Click="FileMentionSuggestion_Click" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+                            </Popup>
+                            <Popup x:Name="SlashCommandPopup" PlacementTarget="{Binding ElementName=PromptBox}" Placement="Top" AllowsTransparency="True" StaysOpen="True">
+                                <Border Background="{DynamicResource MainSurfaceBrush}" BorderBrush="{DynamicResource MainBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4" Width="500">
+                                    <ListBox x:Name="SlashCommandListBox" MaxHeight="260" Background="{DynamicResource MainSurfaceBrush}" Foreground="{DynamicResource MainTextBrush}" BorderThickness="0">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Tag="{Binding}" HorizontalContentAlignment="Stretch" Background="Transparent" Foreground="{DynamicResource MainTextBrush}" BorderThickness="0" Padding="8,6" Click="SlashCommandSuggestion_Click">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="145"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding Name}" FontFamily="Consolas" VerticalAlignment="Center"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding Description}" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Button>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>

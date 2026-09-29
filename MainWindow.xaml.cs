@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private bool _updatingContext;
     private bool _applyingFileMention;
     private ProjectFileMention? _activeFileMention;
+    private IReadOnlyList<SlashCommandDefinition> _availableSlashCommands = [];
     private bool _codeTaskMode;
     private bool _planMode;
     private bool _showArchived;
@@ -1856,16 +1857,7 @@ public partial class MainWindow : Window
     {
         var text = PromptBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(text) || _active is null) return;
-        if (text.Equals("/status", StringComparison.OrdinalIgnoreCase))
-        {
-            if (ModelPicker.SelectedItem is ModelOption statusModel)
-            {
-                _active.Model = statusModel.Name;
-                _active.Provider = statusModel.Provider;
-            }
-            await AddLocalStatusReportAsync(_active, text);
-            return;
-        }
+        if (await ExecuteExactSlashCommandAsync(text)) return;
         var isCodeTask = _codeTaskMode && _codeTaskConversationId == _active.Id;
         if (isCodeTask && _active.Provider == CloudModelProviders.OpenAI && !_active.IncludeProjectContextForHosted)
         {
@@ -1967,6 +1959,7 @@ public partial class MainWindow : Window
         _draftSaveDebounce.Stop();
         DraftStatusLabel.Text = "";
         FileMentionPopup.IsOpen = false;
+        SlashCommandPopup.IsOpen = false;
         _activeFileMention = null;
         PromptBox.Clear();
         WelcomePanel.Visibility = Visibility.Collapsed;
@@ -1975,6 +1968,131 @@ public partial class MainWindow : Window
         UpdateSendControl();
         UpdateActiveRequestStatus();
         await SaveAsync();
+    }
+
+    private static bool IsWpfSlashCommandSupported(SlashCommandAction action) => action is
+        SlashCommandAction.ClearConversation or SlashCommandAction.CompactConversation or SlashCommandAction.ToggleCodeTask or
+        SlashCommandAction.ExportConversation or SlashCommandAction.InitProject or SlashCommandAction.SelectModel or
+        SlashCommandAction.TogglePlan or SlashCommandAction.ShowStatus or SlashCommandAction.UserPrompt;
+
+    private IReadOnlyList<SlashCommandDefinition> GetAvailableSlashCommands() =>
+        SlashCommandCatalog.All.Where(command => IsWpfSlashCommandSupported(command.Action))
+            .Concat(PromptTemplateCatalog.ToSlashCommands(_promptTemplates)).ToArray();
+
+    private void RefreshSlashCommandSuggestions()
+    {
+        if (_active is null || !SlashCommandCatalog.TryGetCommandToken(PromptBox.Text, PromptBox.CaretIndex,
+                out var token, out var hasArguments) || hasArguments)
+        {
+            SlashCommandPopup.IsOpen = false;
+            _availableSlashCommands = [];
+            return;
+        }
+
+        var commands = GetAvailableSlashCommands();
+        if (commands.Any(command => command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)))
+        {
+            SlashCommandPopup.IsOpen = false;
+            _availableSlashCommands = [];
+            return;
+        }
+
+        _availableSlashCommands = commands.Where(command => command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase)).ToArray();
+        SlashCommandListBox.ItemsSource = _availableSlashCommands;
+        SlashCommandListBox.SelectedIndex = _availableSlashCommands.Count == 0 ? -1 : 0;
+        SlashCommandPopup.IsOpen = _availableSlashCommands.Count > 0;
+        if (SlashCommandPopup.IsOpen)
+        {
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+        }
+    }
+
+    private async Task<bool> ExecuteExactSlashCommandAsync(string text)
+    {
+        var command = GetAvailableSlashCommands().FirstOrDefault(candidate => SlashCommandCatalog.IsExactCommand(text, candidate));
+        if (command is null) return false;
+
+        SlashCommandPopup.IsOpen = false;
+        FileMentionPopup.IsOpen = false;
+        _activeFileMention = null;
+        var conversation = _active;
+        try
+        {
+            switch (command.Action)
+            {
+                case SlashCommandAction.ShowStatus:
+                    if (ModelPicker.SelectedItem is ModelOption statusModel)
+                    {
+                        conversation!.Model = statusModel.Name;
+                        conversation.Provider = statusModel.Provider;
+                    }
+                    await AddLocalStatusReportAsync(conversation!, command.Name);
+                    break;
+                case SlashCommandAction.ClearConversation:
+                    PromptBox.Clear();
+                    if (!ConversationHistoryClearService.CanClear(conversation, ReferenceEquals(_activeRequestConversation, conversation)) || _requestQueue.Count > 0)
+                    {
+                        AgentStatusLabel.Text = "Wait for this conversation and its queued requests to finish before clearing history.";
+                        break;
+                    }
+                    if (MessageBox.Show(this,
+                        "This removes the conversation's messages, draft, and summary. Project selection, model settings, and file-change history remain.",
+                        "Clear conversation?", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes &&
+                        ConversationHistoryClearService.Clear(conversation!))
+                    {
+                        WelcomePanel.Visibility = Visibility.Visible;
+                        ConversationTitle.Text = conversation!.Title;
+                        RenderMessages();
+                        RefreshConversationLists();
+                        await SaveAsync();
+                    }
+                    break;
+                case SlashCommandAction.CompactConversation:
+                    PromptBox.Clear();
+                    await SummarizeConversationAsync(conversation!);
+                    break;
+                case SlashCommandAction.ToggleCodeTask:
+                    PromptBox.Clear();
+                    ToggleCodeTask_Click(this, new RoutedEventArgs());
+                    break;
+                case SlashCommandAction.TogglePlan:
+                    PromptBox.Clear();
+                    TogglePlanMode_Click(this, new RoutedEventArgs());
+                    break;
+                case SlashCommandAction.SelectModel:
+                    PromptBox.Clear();
+                    ModelPicker.Focus();
+                    ModelPicker.IsDropDownOpen = true;
+                    break;
+                case SlashCommandAction.ExportConversation:
+                    PromptBox.Clear();
+                    await ExportConversationAsync(conversation!);
+                    break;
+                case SlashCommandAction.InitProject:
+                case SlashCommandAction.UserPrompt:
+                    PromptBox.Text = command.Prompt ?? "";
+                    PromptBox.CaretIndex = PromptBox.Text.Length;
+                    AgentStatusLabel.Text = command.Action == SlashCommandAction.InitProject
+                        ? "Project guidance prompt inserted for review; send it when ready."
+                        : "Saved prompt inserted for review; edit it or send it when ready.";
+                    break;
+                default:
+                    return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            AgentStatusLabel.Text = $"Could not run {command.Name}: {ex.Message}";
+        }
+        if (command.Action != SlashCommandAction.SelectModel) PromptBox.Focus();
+        return true;
+    }
+
+    private void SlashCommandSuggestion_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: SlashCommandDefinition command } && _availableSlashCommands.Contains(command))
+            _ = ExecuteExactSlashCommandAsync(command.Name);
     }
 
     private Task ProcessQueuedTurnsAsync()
@@ -3259,6 +3377,27 @@ public partial class MainWindow : Window
 
     private void PromptBox_KeyDown(object sender, KeyEventArgs e)
     {
+        if (SlashCommandPopup.IsOpen && e.Key is Key.Down or Key.Up)
+        {
+            var count = SlashCommandListBox.Items.Count;
+            if (count > 0) SlashCommandListBox.SelectedIndex = Math.Clamp(SlashCommandListBox.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, count - 1);
+            e.Handled = true;
+            return;
+        }
+        if (SlashCommandPopup.IsOpen && e.Key is Key.Enter or Key.Tab)
+        {
+            var command = SlashCommandListBox.SelectedItem as SlashCommandDefinition ?? _availableSlashCommands.FirstOrDefault();
+            if (command is not null) _ = ExecuteExactSlashCommandAsync(command.Name);
+            e.Handled = command is not null;
+            return;
+        }
+        if (SlashCommandPopup.IsOpen && e.Key == Key.Escape)
+        {
+            SlashCommandPopup.IsOpen = false;
+            _availableSlashCommands = [];
+            e.Handled = true;
+            return;
+        }
         if (FileMentionPopup.IsOpen && e.Key is Key.Down or Key.Up)
         {
             var count = FileMentionListBox.Items.Count;
@@ -3623,7 +3762,8 @@ public partial class MainWindow : Window
     {
         if (_active is null || _isClosing) return;
         _active.Draft = PromptBox.Text;
-        if (!_applyingFileMention) RefreshFileMentionSuggestions();
+        RefreshSlashCommandSuggestions();
+        if (!_applyingFileMention && !SlashCommandPopup.IsOpen) RefreshFileMentionSuggestions();
         DraftStatusLabel.Text = string.IsNullOrEmpty(PromptBox.Text) ? "" : "Saving draft…";
         _draftSaveDebounce.Stop();
         _draftSaveDebounce.Start();

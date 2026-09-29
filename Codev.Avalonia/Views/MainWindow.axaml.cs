@@ -192,7 +192,11 @@ public partial class MainWindow : Window
         viewModel.ShowCompactionProposalAsync = ShowCompactionProposalAsync;
         viewModel.ApproveProjectCommandAsync = ApproveAgentCommandAsync;
         viewModel.ConfirmRepeatedToolCallAsync = ConfirmRepeatedToolCallAsync;
+        viewModel.ConfirmHostedCodeTaskConsentAsync = ConfirmHostedCodeTaskConsentAsync;
     }
+
+    private Task<bool> ConfirmHostedCodeTaskConsentAsync() => ConfirmGitActionAsync(this, "Allow OpenAI Code task?",
+        "For this conversation, Codev may send requested workspace files, project instructions, and tool or command results to the OpenAI API. OpenAI API usage may incur separate charges. If no folder is attached, Codev will create a private workspace for this conversation. File changes still require your review, and commands still follow project approval.");
 
     private async Task<bool> ConfirmConversationRewindAsync(int messageIndex)
     {
