@@ -427,6 +427,26 @@ public sealed class CloudModelApiClientTests
     }
 
     [Fact]
+    public async Task Includes_provider_retry_after_delay_for_rate_limited_requests()
+    {
+        using var http = new HttpClient(new StubHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("{\"error\":{\"message\":\"rate limit exceeded\"}}", Encoding.UTF8, "application/json")
+            };
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(12));
+            return response;
+        }));
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            new CloudModelApiClient(http).ListModelsAsync(CloudModelProviders.OpenAI, "key"));
+
+        Assert.Contains("rate limit exceeded", exception.Message);
+        Assert.Contains("Retry after about 12 seconds", exception.Message);
+    }
+
+    [Fact]
     public async Task Rejects_invalid_provider_or_missing_credentials()
     {
         using var http = new HttpClient(new StubHandler(_ => throw new InvalidOperationException("No request expected.")));

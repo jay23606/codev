@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 
 namespace Codev;
 
@@ -313,7 +314,19 @@ public sealed class CloudModelApiClient(HttpClient http)
             message = ReadApiError(document.RootElement);
         }
         catch (JsonException) { message = details; }
-        throw new HttpRequestException($"Hosted provider returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {message}", null, response.StatusCode);
+        throw new HttpRequestException($"Hosted provider returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {message}{FormatRetryAfter(response.Headers.RetryAfter)}", null, response.StatusCode);
+    }
+
+    private static string FormatRetryAfter(RetryConditionHeaderValue? retryAfter)
+    {
+        if (retryAfter?.Delta is { } delta)
+        {
+            var seconds = Math.Max(0, Math.Ceiling(delta.TotalSeconds));
+            return seconds == 0 ? " Retry immediately." : $" Retry after about {seconds:N0} seconds.";
+        }
+        return retryAfter?.Date is { } date
+            ? $" Retry after {date.UtcDateTime.ToString("R", CultureInfo.InvariantCulture)}."
+            : "";
     }
 
     private static string ReadApiError(JsonElement root)
