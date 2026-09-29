@@ -3123,8 +3123,8 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             ConnectionStatus = $"Connecting to {provider} · loading available models…";
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            var choices = await new Codev.CloudModelApiClient(_http).ListModelsAsync(provider, key.Trim(), timeout.Token);
+            var cloudClient = new Codev.CloudModelApiClient(_http) { RequestTimeout = TimeSpan.FromSeconds(30) };
+            var choices = await cloudClient.ListModelsAsync(provider, key.Trim());
             var keySaveWarning = "";
             if (enteredKey is not null)
             {
@@ -3152,7 +3152,9 @@ public sealed class MainViewModel : ViewModelBase
             });
             return true;
         }
-        catch (Exception ex) when (IsCredentialStoreFailure(ex) || ex is HttpRequestException or JsonException or OperationCanceledException or InvalidOperationException)
+        catch (Exception ex) when (IsCredentialStoreFailure(ex) ||
+                                   Codev.ModelRequestErrorDescription.IsHandledRequestFailure(ex) ||
+                                   ex is OperationCanceledException)
         {
             var message = IsCredentialStoreFailure(ex)
                 ? $"Could not access the OS credential store. Paste the key to use it for this session. ({ex.GetType().Name})"
