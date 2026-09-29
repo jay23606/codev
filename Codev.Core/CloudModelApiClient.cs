@@ -62,7 +62,7 @@ public sealed class OpenAiCodeTaskUsageAccumulator
 /// <summary>Small REST client for hosted model discovery and text streaming. API keys are supplied per request; persistence is handled by the OS credential vault.</summary>
 public sealed class CloudModelApiClient(HttpClient http)
 {
-    public TimeSpan OpenAiCodeTaskRequestTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     private static readonly Uri OpenAiBase = new("https://api.openai.com/v1/");
     private static readonly Uri AnthropicBase = new("https://api.anthropic.com/v1/");
@@ -74,6 +74,7 @@ public sealed class CloudModelApiClient(HttpClient http)
     {
         Validate(CloudModelProviders.OpenAI, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose an OpenAI model first.", nameof(model));
+        ValidateRequestTimeout();
         var payload = new Dictionary<string, object>
         {
             ["model"] = model,
@@ -88,10 +89,12 @@ public sealed class CloudModelApiClient(HttpClient http)
         using var request = CreateRequest(HttpMethod.Post, new Uri(OpenAiBase, "responses"), CloudModelProviders.OpenAI, apiKey);
         request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
         if (onRequestPayload is not null) await onRequestPayload(payloadJson).ConfigureAwait(false);
-        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+        using var requestTimeout = CreateRequestTimeout(cancellationToken);
+        using var response = await AwaitWithRequestTimeoutAsync(token => http.SendAsync(request, token),
+            requestTimeout, cancellationToken, "OpenAI Code task").ConfigureAwait(false);
+        await EnsureSuccessAsync(response, requestTimeout.Token).ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(requestTimeout.Token).ConfigureAwait(false),
+            cancellationToken: requestTimeout.Token).ConfigureAwait(false);
         var root = document.RootElement;
         if (GetString(root, "status") is { } status && status != "completed")
         {
@@ -110,8 +113,7 @@ public sealed class CloudModelApiClient(HttpClient http)
     {
         Validate(CloudModelProviders.OpenAI, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose an OpenAI model first.", nameof(model));
-        if (OpenAiCodeTaskRequestTimeout <= TimeSpan.Zero)
-            throw new InvalidOperationException("The OpenAI Code task request timeout must be greater than zero.");
+        ValidateRequestTimeout();
         var payload = new Dictionary<string, object>
         {
             ["model"] = model,
@@ -127,54 +129,48 @@ public sealed class CloudModelApiClient(HttpClient http)
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
         if (onRequestPayload is not null) await onRequestPayload(payloadJson).ConfigureAwait(false);
-        using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        requestTimeout.CancelAfter(OpenAiCodeTaskRequestTimeout);
-        try
+        using var requestTimeout = CreateRequestTimeout(cancellationToken);
+        using var response = await AwaitWithRequestTimeoutAsync(
+            token => http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token),
+            requestTimeout, cancellationToken, "OpenAI Code task").ConfigureAwait(false);
+        await AwaitWithRequestTimeoutAsync(token => EnsureSuccessAsync(response, token),
+            requestTimeout, cancellationToken, "OpenAI Code task").ConfigureAwait(false);
+        await using var stream = await AwaitWithRequestTimeoutAsync(
+            token => response.Content.ReadAsStreamAsync(token), requestTimeout, cancellationToken, "OpenAI Code task").ConfigureAwait(false);
+        using var reader = new StreamReader(stream);
+        var eventName = "";
+        var eventData = new StringBuilder();
+        OpenAiToolResponse? completedResponse = null;
+        while (await AwaitWithRequestTimeoutAsync(
+                   token => reader.ReadLineAsync(token).AsTask(), requestTimeout, cancellationToken, "OpenAI Code task").ConfigureAwait(false) is { } line)
         {
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token).ConfigureAwait(false);
-            await EnsureSuccessAsync(response, requestTimeout.Token).ConfigureAwait(false);
-            await using var stream = await response.Content.ReadAsStreamAsync(requestTimeout.Token).ConfigureAwait(false);
-            using var reader = new StreamReader(stream);
-            var eventName = "";
-            var eventData = new StringBuilder();
-            OpenAiToolResponse? completedResponse = null;
-            while (await reader.ReadLineAsync(requestTimeout.Token).ConfigureAwait(false) is { } line)
+            if (string.IsNullOrWhiteSpace(line))
             {
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    if (eventData.Length == 0) { eventName = ""; continue; }
-                    var data = eventData.ToString();
-                    eventData.Clear();
-                    if (data == "[DONE]") break;
-                    using var document = JsonDocument.Parse(data);
-                    var root = document.RootElement;
-                    var type = GetString(root, "type") ?? eventName;
-                    if (type is "error" or "response.failed") throw new InvalidOperationException(ReadApiError(root));
-                    if (type == "response.incomplete") throw new InvalidOperationException(ReadIncompleteResponse(root));
-                    if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta && onTextDelta is not null)
-                        await onTextDelta(delta).ConfigureAwait(false);
-                    if (type == "response.completed" && root.TryGetProperty("response", out var responseRoot))
-                        completedResponse = ParseOpenAiToolResponse(responseRoot);
-                    eventName = "";
-                    continue;
-                }
-                if (line.StartsWith(':')) continue;
-                if (line.StartsWith("event:", StringComparison.Ordinal)) eventName = line[6..].TrimStart();
-                else if (line.StartsWith("data:", StringComparison.Ordinal))
-                {
-                    if (eventData.Length > 0) eventData.Append('\n');
-                    eventData.Append(line[5..].TrimStart());
-                }
+                if (eventData.Length == 0) { eventName = ""; continue; }
+                var data = eventData.ToString();
+                eventData.Clear();
+                if (data == "[DONE]") break;
+                using var document = JsonDocument.Parse(data);
+                var root = document.RootElement;
+                var type = GetString(root, "type") ?? eventName;
+                if (type is "error" or "response.failed") throw new InvalidOperationException(ReadApiError(root));
+                if (type == "response.incomplete") throw new InvalidOperationException(ReadIncompleteResponse(root));
+                if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta && onTextDelta is not null)
+                    await onTextDelta(delta).ConfigureAwait(false);
+                if (type == "response.completed" && root.TryGetProperty("response", out var responseRoot))
+                    completedResponse = ParseOpenAiToolResponse(responseRoot);
+                eventName = "";
+                continue;
             }
-            return completedResponse ?? throw new IOException("The OpenAI stream ended before the provider reported a completed response.");
+            if (line.StartsWith(':')) continue;
+            if (line.StartsWith("event:", StringComparison.Ordinal)) eventName = line[6..].TrimStart();
+            else if (line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                if (eventData.Length > 0) eventData.Append('\n');
+                eventData.Append(line[5..].TrimStart());
+            }
         }
-        catch (OperationCanceledException ex) when (requestTimeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-        {
-            var timeoutLabel = OpenAiCodeTaskRequestTimeout >= TimeSpan.FromMinutes(1)
-                ? $"{OpenAiCodeTaskRequestTimeout.TotalMinutes:N0} minutes"
-                : $"{OpenAiCodeTaskRequestTimeout.TotalSeconds:N0} seconds";
-            throw new TimeoutException($"OpenAI Code task request timed out after {timeoutLabel}.", ex);
-        }
+        return completedResponse ?? throw new IOException("The OpenAI stream ended before the provider reported a completed response.");
     }
 
     private static OpenAiToolResponse ParseOpenAiToolResponse(JsonElement root)
@@ -198,6 +194,7 @@ public sealed class CloudModelApiClient(HttpClient http)
     public async Task<IReadOnlyList<CloudModel>> ListModelsAsync(string provider, string apiKey, CancellationToken cancellationToken = default)
     {
         Validate(provider, apiKey);
+        ValidateRequestTimeout();
         if (provider == CloudModelProviders.OpenAI)
         {
             var openAiModels = new List<CloudModel>();
@@ -209,9 +206,12 @@ public sealed class CloudModelApiClient(HttpClient http)
                     ? new Uri(OpenAiBase, "models")
                     : new UriBuilder(new Uri(OpenAiBase, "models")) { Query = $"after={Uri.EscapeDataString(after)}" }.Uri;
                 using var request = CreateRequest(HttpMethod.Get, url, provider, apiKey);
-                using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-                await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-                using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken).ConfigureAwait(false);
+                using var requestTimeout = CreateRequestTimeout(cancellationToken);
+                using var response = await AwaitWithRequestTimeoutAsync(token => http.SendAsync(request, token),
+                    requestTimeout, cancellationToken, "OpenAI model discovery").ConfigureAwait(false);
+                await EnsureSuccessAsync(response, requestTimeout.Token).ConfigureAwait(false);
+                using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(requestTimeout.Token),
+                    cancellationToken: requestTimeout.Token).ConfigureAwait(false);
                 var root = document.RootElement;
                 if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
                 {
@@ -238,9 +238,12 @@ public sealed class CloudModelApiClient(HttpClient http)
         {
             var url = new UriBuilder(new Uri(AnthropicBase, "models")) { Query = afterId is null ? "limit=1000" : $"limit=1000&after_id={Uri.EscapeDataString(afterId)}" }.Uri;
             using var request = CreateRequest(HttpMethod.Get, url, provider, apiKey);
-            using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-            using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken).ConfigureAwait(false);
+            using var requestTimeout = CreateRequestTimeout(cancellationToken);
+            using var response = await AwaitWithRequestTimeoutAsync(token => http.SendAsync(request, token),
+                requestTimeout, cancellationToken, "Anthropic model discovery").ConfigureAwait(false);
+            await EnsureSuccessAsync(response, requestTimeout.Token).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(requestTimeout.Token),
+                cancellationToken: requestTimeout.Token).ConfigureAwait(false);
             var root = document.RootElement;
             if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
             {
@@ -273,6 +276,7 @@ public sealed class CloudModelApiClient(HttpClient http)
         Validate(provider, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose a hosted model first.", nameof(model));
         if (maxOutputTokens is <= 0 or > 2048) throw new ArgumentOutOfRangeException(nameof(maxOutputTokens));
+        ValidateRequestTimeout();
 
         var endpoint = provider == CloudModelProviders.OpenAI ? new Uri(OpenAiBase, "responses") : new Uri(AnthropicBase, "messages");
         var payload = provider == CloudModelProviders.OpenAI
@@ -283,14 +287,22 @@ public sealed class CloudModelApiClient(HttpClient http)
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
         if (onRequestPayload is not null) await onRequestPayload(payloadJson).ConfigureAwait(false);
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var requestTimeout = CreateRequestTimeout(cancellationToken);
+        using var response = await AwaitWithRequestTimeoutAsync(
+            token => http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token),
+            requestTimeout, cancellationToken, $"{ProviderDisplayName(provider)} chat").ConfigureAwait(false);
+        await AwaitWithRequestTimeoutAsync(token => EnsureSuccessAsync(response, token),
+            requestTimeout, cancellationToken, $"{ProviderDisplayName(provider)} chat").ConfigureAwait(false);
+        await using var stream = await AwaitWithRequestTimeoutAsync(
+            token => response.Content.ReadAsStreamAsync(token), requestTimeout, cancellationToken,
+            $"{ProviderDisplayName(provider)} chat").ConfigureAwait(false);
         using var reader = new StreamReader(stream);
         var eventName = "";
         var eventData = new StringBuilder();
         var completed = false;
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        while (await AwaitWithRequestTimeoutAsync(
+                   token => reader.ReadLineAsync(token).AsTask(), requestTimeout, cancellationToken,
+                   $"{ProviderDisplayName(provider)} chat").ConfigureAwait(false) is { } line)
         {
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -337,6 +349,53 @@ public sealed class CloudModelApiClient(HttpClient http)
         }
         if (!completed)
             throw new IOException($"The {ProviderDisplayName(provider)} stream ended before the provider reported a completed response.");
+    }
+
+    private void ValidateRequestTimeout()
+    {
+        if (RequestTimeout <= TimeSpan.Zero)
+            throw new InvalidOperationException("The hosted request timeout must be greater than zero.");
+    }
+
+    private CancellationTokenSource CreateRequestTimeout(CancellationToken cancellationToken)
+    {
+        var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(RequestTimeout);
+        return timeout;
+    }
+
+    private async Task<T> AwaitWithRequestTimeoutAsync<T>(Func<CancellationToken, Task<T>> operation,
+        CancellationTokenSource requestTimeout, CancellationToken callerToken, string requestName)
+    {
+        try
+        {
+            return await operation(requestTimeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (!callerToken.IsCancellationRequested)
+        {
+            throw CreateRequestTimeoutException(requestName, exception);
+        }
+    }
+
+    private async Task AwaitWithRequestTimeoutAsync(Func<CancellationToken, Task> operation,
+        CancellationTokenSource requestTimeout, CancellationToken callerToken, string requestName)
+    {
+        try
+        {
+            await operation(requestTimeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (!callerToken.IsCancellationRequested)
+        {
+            throw CreateRequestTimeoutException(requestName, exception);
+        }
+    }
+
+    private TimeoutException CreateRequestTimeoutException(string requestName, OperationCanceledException innerException)
+    {
+        var timeoutLabel = RequestTimeout >= TimeSpan.FromMinutes(1)
+            ? $"{RequestTimeout.TotalMinutes:N0} minutes"
+            : $"{RequestTimeout.TotalSeconds:N0} seconds";
+        return new TimeoutException($"{requestName} request timed out after {timeoutLabel}.", innerException);
     }
 
     private static object BuildOpenAiPayload(string model, IReadOnlyList<CloudChatMessage> messages, int? maxOutputTokens)
