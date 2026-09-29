@@ -154,6 +154,33 @@ public sealed class OpenAiCodeTaskRunnerTests
         Assert.Contains("Partial plan", Assert.Single(transcriptUpdates));
     }
 
+    [Fact]
+    public async Task Publishes_openai_code_task_text_before_the_response_completes()
+    {
+        using var http = new HttpClient(new ResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new PartialThenBlockingStream(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Streaming now\"}\n\n"))
+        }));
+        using var cancellation = new CancellationTokenSource();
+        var firstTextVisible = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+        var run = runner.RunAsync("gpt-test", [new { role = "user", content = "inspect" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => Task.FromResult("unused"),
+            (_, _, _) => Task.FromResult(false),
+            onTranscript: text =>
+            {
+                firstTextVisible.TrySetResult(text);
+                return Task.CompletedTask;
+            }, cancellationToken: cancellation.Token);
+
+        var visibleText = await firstTextVisible.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains("Streaming now", visibleText);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
     private static HttpResponseMessage OpenAiSse(string response, string? textDelta = null)
     {
         var deltaEvent = textDelta is null ? "" : "data: " + JsonSerializer.Serialize(new { type = "response.output_text.delta", delta = textDelta }) + "\n\n";
@@ -170,6 +197,30 @@ public sealed class OpenAiCodeTaskRunnerTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(respond(request));
+        }
+    }
+
+    private sealed class PartialThenBlockingStream(string initialData) : Stream
+    {
+        private readonly byte[] _data = Encoding.UTF8.GetBytes(initialData);
+        private bool _sent;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_sent) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken);
+            _sent = true;
+            _data.AsMemory().CopyTo(buffer);
+            return _data.Length;
         }
     }
 }
