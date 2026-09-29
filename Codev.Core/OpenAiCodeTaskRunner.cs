@@ -105,8 +105,17 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
                 if (onTranscript is not null) await onTranscript(transcript.ToString());
             }
             OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, outputs);
+
+            if (step == OpenAiCodeTaskLimits.MaxModelStepsPerTurn - 1)
+            {
+                transcript.AppendLine().AppendLine()
+                    .Append($"OpenAI Code task reached its {OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-request limit. The completed tool results are shown above; send a follow-up to continue.");
+                if (onTranscript is not null) await onTranscript(transcript.ToString());
+                if (status is not null) await status("OpenAI Code task · request limit reached");
+                return new OpenAiCodeTaskRunResult(transcript.ToString(), turnUsage);
+            }
         }
 
-        throw new InvalidOperationException($"OpenAI Code task reached the {OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-step limit. Send a follow-up to continue.");
+        throw new InvalidOperationException("OpenAI Code task ended unexpectedly.");
     }
 }

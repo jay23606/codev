@@ -87,7 +87,7 @@ public sealed class OpenAiCodeTaskRunnerTests
     }
 
     [Fact]
-    public async Task Stops_after_the_shared_model_step_limit()
+    public async Task Stops_after_the_shared_model_step_limit_with_tool_results_and_clear_follow_up_guidance()
     {
         var requests = 0;
         using var http = new HttpClient(new ResponseHandler(_ =>
@@ -104,15 +104,20 @@ public sealed class OpenAiCodeTaskRunnerTests
         var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
         var toolExecutions = 0;
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync("gpt-test",
+        var transcriptUpdates = new List<string>();
+        var result = await runner.RunAsync("gpt-test",
             [new { role = "user", content = "read files" }], [],
             (_, _, _) => Task.FromResult("key"),
             (_, _, _) => { toolExecutions++; return Task.FromResult("contents"); },
-            (_, _, _) => Task.FromResult(false)));
+            (_, _, _) => Task.FromResult(false),
+            onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; });
 
         Assert.Equal(OpenAiCodeTaskLimits.MaxModelStepsPerTurn, requests);
         Assert.Equal(requests, toolExecutions);
-        Assert.Contains($"{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-step limit", exception.Message);
+        Assert.Contains($"{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-request limit", result.Transcript);
+        Assert.Contains("send a follow-up to continue", result.Transcript);
+        Assert.Contains("contents", result.Transcript);
+        Assert.Equal(result.Transcript, transcriptUpdates[^1]);
     }
 
     [Fact]
