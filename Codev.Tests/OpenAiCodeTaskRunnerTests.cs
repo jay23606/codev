@@ -27,6 +27,7 @@ public sealed class OpenAiCodeTaskRunnerTests
         var toolExecutions = 0;
         var reportedUsage = new List<OpenAiCodeTaskUsage?>();
         var transcriptUpdates = new List<string>();
+        var requestPayloadSnapshots = new List<string>();
 
         var result = await runner.RunAsync("gpt-test", [new { role = "user", content = "list files" }],
             [new { type = "function", name = "list_files" }],
@@ -40,11 +41,15 @@ public sealed class OpenAiCodeTaskRunnerTests
             },
             (_, _, _) => Task.FromResult(false),
             onResponse: (_, usage) => { reportedUsage.Add(usage); return Task.CompletedTask; },
+            onRequestPayload: body => { requestPayloadSnapshots.Add(body); return Task.CompletedTask; },
             onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; });
 
         Assert.Equal(2, requests.Count);
+        Assert.Equal(2, requestPayloadSnapshots.Count);
         Assert.True(requests[0].RootElement.GetProperty("stream").GetBoolean());
         Assert.False(requests[0].RootElement.GetProperty("store").GetBoolean());
+        Assert.Equal(requests[0].RootElement.GetRawText(), requestPayloadSnapshots[0]);
+        Assert.Equal(requests[1].RootElement.GetRawText(), requestPayloadSnapshots[1]);
         Assert.Equal(1, toolExecutions);
         var followUpInput = requests[1].RootElement.GetProperty("input").EnumerateArray().ToArray();
         Assert.Equal("function_call", followUpInput[1].GetProperty("type").GetString());
