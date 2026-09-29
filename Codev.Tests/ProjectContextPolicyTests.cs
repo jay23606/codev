@@ -12,10 +12,14 @@ public sealed class ProjectContextPolicyTests
     [InlineData("ollama", false, true, @"C:\work\repo", true, true)]
     [InlineData("ollama", false, false, @"C:\work\repo", true, false)]
     [InlineData("ollama", false, true, @"C:\work\repo", false, false)]
-    [InlineData("ollama", false, true, null, false, false)]
+    [InlineData("ollama", false, true, null, false, true)]
     public void Code_task_availability_depends_on_provider_support_and_local_trust(string provider,
         bool connected, bool loopback, string? projectPath, bool trusted, bool expected) =>
         Assert.Equal(expected, ProjectContextPolicy.CanRunCodeTask(provider, connected, loopback, projectPath, trusted));
+
+    [Fact]
+    public void Loopback_ollama_can_start_without_a_project_because_toggle_creates_private_workspace() =>
+        Assert.True(ProjectContextPolicy.CanRunCodeTask("ollama", false, true, null, false));
 
     [Theory]
     [InlineData(CloudModelProviders.OpenAI, true, false, false)]

@@ -2056,7 +2056,8 @@ public partial class MainWindow : Window
         CodeTaskButton.Content = _codeTaskMode ? "◆  Code task on" : "◇  Code task";
         CodeTaskButton.IsEnabled = _active is not null && ProjectContextPolicy.CanRunCodeTask(_active.Provider,
             _hostedApiKeys.ContainsKey(CloudModelProviders.OpenAI), OllamaEndpoint.IsLoopback(_ollamaEndpoint),
-            _active.ProjectPath, IsProjectTrusted(_active.ProjectPath));
+            _active.ProjectPath, IsProjectTrusted(_active.ProjectPath),
+            !string.IsNullOrWhiteSpace(_active.ProjectPath) && Directory.Exists(_active.ProjectPath));
         CodeTaskButton.Background = _codeTaskMode ? ThemeBrush("AgentModeOnBrush") : ThemeBrush("SecondaryButtonBrush");
         CodeTaskButton.ToolTip = _active?.Provider == CloudModelProviders.Anthropic
             ? "Anthropic hosted models support chat and Plan mode; Code task currently supports OpenAI and local Ollama."
