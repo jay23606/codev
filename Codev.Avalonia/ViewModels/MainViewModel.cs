@@ -2769,10 +2769,12 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (savedTurn.IsCodeTask)
             {
-                var displayName = Models.FirstOrDefault(choice => choice.Provider == "ollama" && choice.Name.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? savedTurn.Model;
+                var displayName = Models.FirstOrDefault(choice => choice.Provider.Equals(savedTurn.Provider, StringComparison.OrdinalIgnoreCase) &&
+                    choice.Name.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? savedTurn.Model;
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (Provider == "ollama" && Model.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))
+                    if (Provider.Equals(savedTurn.Provider, StringComparison.OrdinalIgnoreCase) &&
+                        Model.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))
                         ConnectionStatus = $"Ready · {displayName}";
                 });
             }
