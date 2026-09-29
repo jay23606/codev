@@ -2590,6 +2590,11 @@ public partial class MainWindow : Window
         var requestCompleted = false;
         try
         {
+            if (turn.IsCodeTask && !ProjectContextPolicy.CanSendCodeTask(turn.Provider,
+                    _hostedApiKeys.ContainsKey(CloudModelProviders.OpenAI), conversation.AllowHostedCodeTask,
+                    OllamaEndpoint.IsLoopback(_ollamaEndpoint), turn.ProjectPath ?? conversation.ProjectPath,
+                    IsProjectTrusted(turn.ProjectPath ?? conversation.ProjectPath)))
+                throw new InvalidOperationException("Code task stopped because this provider or its required data-sharing consent is unavailable. Enable Code task and confirm its data notice before sending.");
             if (turn.IsCodeTask && !IsProjectTrusted(turn.ProjectPath ?? conversation.ProjectPath))
                 throw new InvalidOperationException("Code task stopped because the workspace is no longer trusted. Trust the folder and enable Code task again.");
             var history = conversation.Messages.Take(assistantIndex).Select(m => new ChatMessage(m.Role, m.Content)).ToList();

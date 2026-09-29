@@ -17,6 +17,15 @@ public sealed class ProjectContextPolicyTests
         bool connected, bool loopback, string? projectPath, bool trusted, bool expected) =>
         Assert.Equal(expected, ProjectContextPolicy.CanRunCodeTask(provider, connected, loopback, projectPath, trusted));
 
+    [Theory]
+    [InlineData(CloudModelProviders.OpenAI, true, false, false)]
+    [InlineData(CloudModelProviders.OpenAI, true, true, true)]
+    [InlineData(CloudModelProviders.OpenAI, false, true, false)]
+    [InlineData("ollama", false, false, false)]
+    public void Hosted_code_task_send_requires_its_separate_acknowledgement(string provider,
+        bool connected, bool approved, bool expected) =>
+        Assert.Equal(expected, ProjectContextPolicy.CanSendCodeTask(provider, connected, approved, false, null, false));
+
     [Fact]
     public void Untrusted_folder_auto_context_is_omitted_from_the_queued_turn()
     {

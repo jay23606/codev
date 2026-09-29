@@ -10,6 +10,11 @@ public static class ProjectContextPolicy
         _ => false
     };
 
+    public static bool CanSendCodeTask(string provider, bool hostedProviderConnected, bool hostedCodeTaskApproved,
+        bool isLoopbackOllama, string? projectPath, bool projectFolderTrusted) =>
+        CanRunCodeTask(provider, hostedProviderConnected, isLoopbackOllama, projectPath, projectFolderTrusted) &&
+        (provider != CloudModelProviders.OpenAI || hostedCodeTaskApproved);
+
     public static string? GetProjectPathForQueuedTurn(string? projectPath, bool hasExplicitFiles, bool projectFolderTrusted) =>
         hasExplicitFiles || projectFolderTrusted ? projectPath : null;
 
