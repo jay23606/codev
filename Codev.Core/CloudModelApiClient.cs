@@ -62,6 +62,8 @@ public sealed class OpenAiCodeTaskUsageAccumulator
 /// <summary>Small REST client for hosted model discovery and text streaming. API keys are supplied per request; persistence is handled by the OS credential vault.</summary>
 public sealed class CloudModelApiClient(HttpClient http)
 {
+    public TimeSpan OpenAiCodeTaskRequestTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
     private static readonly Uri OpenAiBase = new("https://api.openai.com/v1/");
     private static readonly Uri AnthropicBase = new("https://api.anthropic.com/v1/");
     private const string AnthropicVersion = "2023-06-01";
@@ -108,6 +110,8 @@ public sealed class CloudModelApiClient(HttpClient http)
     {
         Validate(CloudModelProviders.OpenAI, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose an OpenAI model first.", nameof(model));
+        if (OpenAiCodeTaskRequestTimeout <= TimeSpan.Zero)
+            throw new InvalidOperationException("The OpenAI Code task request timeout must be greater than zero.");
         var payload = new Dictionary<string, object>
         {
             ["model"] = model,
@@ -123,42 +127,54 @@ public sealed class CloudModelApiClient(HttpClient http)
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
         if (onRequestPayload is not null) await onRequestPayload(payloadJson).ConfigureAwait(false);
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var reader = new StreamReader(stream);
-        var eventName = "";
-        var eventData = new StringBuilder();
-        OpenAiToolResponse? completedResponse = null;
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestTimeout.CancelAfter(OpenAiCodeTaskRequestTimeout);
+        try
         {
-            if (string.IsNullOrWhiteSpace(line))
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token).ConfigureAwait(false);
+            await EnsureSuccessAsync(response, requestTimeout.Token).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(requestTimeout.Token).ConfigureAwait(false);
+            using var reader = new StreamReader(stream);
+            var eventName = "";
+            var eventData = new StringBuilder();
+            OpenAiToolResponse? completedResponse = null;
+            while (await reader.ReadLineAsync(requestTimeout.Token).ConfigureAwait(false) is { } line)
             {
-                if (eventData.Length == 0) { eventName = ""; continue; }
-                var data = eventData.ToString();
-                eventData.Clear();
-                if (data == "[DONE]") break;
-                using var document = JsonDocument.Parse(data);
-                var root = document.RootElement;
-                var type = GetString(root, "type") ?? eventName;
-                if (type is "error" or "response.failed") throw new InvalidOperationException(ReadApiError(root));
-                if (type == "response.incomplete") throw new InvalidOperationException(ReadIncompleteResponse(root));
-                if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta && onTextDelta is not null)
-                    await onTextDelta(delta).ConfigureAwait(false);
-                if (type == "response.completed" && root.TryGetProperty("response", out var responseRoot))
-                    completedResponse = ParseOpenAiToolResponse(responseRoot);
-                eventName = "";
-                continue;
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    if (eventData.Length == 0) { eventName = ""; continue; }
+                    var data = eventData.ToString();
+                    eventData.Clear();
+                    if (data == "[DONE]") break;
+                    using var document = JsonDocument.Parse(data);
+                    var root = document.RootElement;
+                    var type = GetString(root, "type") ?? eventName;
+                    if (type is "error" or "response.failed") throw new InvalidOperationException(ReadApiError(root));
+                    if (type == "response.incomplete") throw new InvalidOperationException(ReadIncompleteResponse(root));
+                    if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta && onTextDelta is not null)
+                        await onTextDelta(delta).ConfigureAwait(false);
+                    if (type == "response.completed" && root.TryGetProperty("response", out var responseRoot))
+                        completedResponse = ParseOpenAiToolResponse(responseRoot);
+                    eventName = "";
+                    continue;
+                }
+                if (line.StartsWith(':')) continue;
+                if (line.StartsWith("event:", StringComparison.Ordinal)) eventName = line[6..].TrimStart();
+                else if (line.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    if (eventData.Length > 0) eventData.Append('\n');
+                    eventData.Append(line[5..].TrimStart());
+                }
             }
-            if (line.StartsWith(':')) continue;
-            if (line.StartsWith("event:", StringComparison.Ordinal)) eventName = line[6..].TrimStart();
-            else if (line.StartsWith("data:", StringComparison.Ordinal))
-            {
-                if (eventData.Length > 0) eventData.Append('\n');
-                eventData.Append(line[5..].TrimStart());
-            }
+            return completedResponse ?? throw new IOException("The OpenAI stream ended before the provider reported a completed response.");
         }
-        return completedResponse ?? throw new IOException("The OpenAI stream ended before the provider reported a completed response.");
+        catch (OperationCanceledException ex) when (requestTimeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            var timeoutLabel = OpenAiCodeTaskRequestTimeout >= TimeSpan.FromMinutes(1)
+                ? $"{OpenAiCodeTaskRequestTimeout.TotalMinutes:N0} minutes"
+                : $"{OpenAiCodeTaskRequestTimeout.TotalSeconds:N0} seconds";
+            throw new TimeoutException($"OpenAI Code task request timed out after {timeoutLabel}.", ex);
+        }
     }
 
     private static OpenAiToolResponse ParseOpenAiToolResponse(JsonElement root)

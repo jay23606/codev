@@ -499,6 +499,30 @@ public sealed class CloudModelApiClientTests
         }
     }
 
+    [Fact]
+    public async Task Times_out_a_stalled_openai_code_task_stream()
+    {
+        using var http = new HttpClient(new BlockingStreamHandler());
+        var client = new CloudModelApiClient(http) { OpenAiCodeTaskRequestTimeout = TimeSpan.FromMilliseconds(30) };
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
+            client.StreamOpenAiToolResponseAsync("key", "gpt-test", Array.Empty<object>(), Array.Empty<object>()));
+
+        Assert.Contains("OpenAI Code task request timed out", exception.Message);
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_is_not_reported_as_an_openai_code_task_timeout()
+    {
+        using var http = new HttpClient(new BlockingStreamHandler());
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(30));
+        var client = new CloudModelApiClient(http) { OpenAiCodeTaskRequestTimeout = TimeSpan.FromSeconds(2) };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.StreamOpenAiToolResponseAsync("key", "gpt-test", Array.Empty<object>(), Array.Empty<object>(),
+                cancellationToken: cancellation.Token));
+    }
+
     private static HttpResponseMessage Json(string value) => new(HttpStatusCode.OK) { Content = new StringContent(value, Encoding.UTF8, "application/json") };
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
