@@ -75,6 +75,9 @@ public sealed record ChatMessage(string Role, string Content)
     public string Thinking { get; init; } = "";
     [JsonIgnore] public bool HasThinking => !string.IsNullOrWhiteSpace(Thinking);
     public OllamaGenerationStats? GenerationStats { get; init; }
+    public OpenAiCodeTaskUsage? HostedUsage { get; init; }
+    [JsonIgnore] public bool HasHostedUsage => HostedUsage is not null;
+    [JsonIgnore] public string HostedUsageLabel => HostedUsage?.DisplayLabel ?? "";
     [JsonIgnore] public bool HasGenerationStats => GenerationStats is not null;
     [JsonIgnore] public string GenerationStatsLabel => GenerationStats?.ToDisplayString() ?? "";
 }

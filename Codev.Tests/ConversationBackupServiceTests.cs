@@ -35,7 +35,7 @@ public sealed class ConversationBackupServiceTests
             ProjectPath = @"C:\work\sample",
             PendingDiffComments = [new("src/app.cs", "+ change", "Check the error path.")],
             PendingRequestCount = 3,
-            Messages = [new("user", "Why does this fail?"), new ChatMessage("assistant", "I will trace the cause.") { Thinking = "I will inspect the failing path." }, new("user", "second question"), new("assistant", "second answer")]
+            Messages = [new("user", "Why does this fail?"), new ChatMessage("assistant", "I will trace the cause.") { Thinking = "I will inspect the failing path." }, new("user", "second question"), new ChatMessage("assistant", "second answer") { HostedUsage = new OpenAiCodeTaskUsage(900, 110, 3, 3, 3) }]
         };
 
         var backup = ConversationBackupService.Export([source], Options);
@@ -63,6 +63,7 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(123, imported.LastPromptOutputTokens);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
+        Assert.Equal(source.Messages[3].HostedUsage, imported.Messages[3].HostedUsage);
         Assert.Equal("I will inspect the failing path.", imported.Messages[1].Thinking);
         Assert.Equal(source.PendingDiffComments, imported.PendingDiffComments);
         Assert.Equal(0, imported.PendingRequestCount);

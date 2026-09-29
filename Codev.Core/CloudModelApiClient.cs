@@ -24,6 +24,40 @@ public sealed record CloudChatMessage(string Role, string Content);
 public sealed record OpenAiToolResponse(IReadOnlyList<JsonElement> OutputItems, IReadOnlyList<JsonElement> FunctionCalls,
     string OutputText, int? InputTokens, int? OutputTokens = null);
 
+public sealed record OpenAiCodeTaskUsage(int? InputTokens, int? OutputTokens, int InputReports, int OutputReports, int Responses)
+{
+    public string DisplayLabel
+    {
+        get
+        {
+            var input = InputTokens is { } inputTokens ? $"{(InputReports < Responses ? "at least " : "")}{inputTokens:N0} input" : "input unavailable";
+            var output = OutputTokens is { } outputTokens ? $"{(OutputReports < Responses ? "at least " : "")}{outputTokens:N0} output" : "output unavailable";
+            return $"OpenAI Code task · {Responses} completed API request(s) · {input} · {output} tokens";
+        }
+    }
+}
+
+public sealed class OpenAiCodeTaskUsageAccumulator
+{
+    private int _responses;
+    private int _inputReports;
+    private int _outputReports;
+    private int _inputTokens;
+    private int _outputTokens;
+
+    public OpenAiCodeTaskUsage? Add(OpenAiToolResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        _responses++;
+        if (response.InputTokens is { } input) { _inputReports++; _inputTokens += input; }
+        if (response.OutputTokens is { } output) { _outputReports++; _outputTokens += output; }
+        return _inputReports > 0 || _outputReports > 0
+            ? new OpenAiCodeTaskUsage(_inputReports > 0 ? _inputTokens : null, _outputReports > 0 ? _outputTokens : null,
+                _inputReports, _outputReports, _responses)
+            : null;
+    }
+}
+
 /// <summary>Small REST client for hosted model discovery and text streaming. API keys are supplied per request; persistence is handled by the OS credential vault.</summary>
 public sealed class CloudModelApiClient(HttpClient http)
 {

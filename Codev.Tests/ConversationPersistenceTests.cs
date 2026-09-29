@@ -44,7 +44,8 @@ public sealed class ConversationPersistenceTests
             CompactionThroughMessageCount = 4,
             Messages = [new("user", "before"), new ChatMessage("assistant", "reply")
             {
-                GenerationStats = new OllamaGenerationStats(TimeSpan.FromMilliseconds(90), 32, 16d, TimeSpan.FromSeconds(1))
+                GenerationStats = new OllamaGenerationStats(TimeSpan.FromMilliseconds(90), 32, 16d, TimeSpan.FromSeconds(1)),
+                HostedUsage = new OpenAiCodeTaskUsage(160, 24, 2, 2, 2)
             }, new("user", "middle one"), new("assistant", "middle reply"), new("user", "next"), new("assistant", "next reply")],
             ContextFiles = ["src/a.cs"],
             PendingDiffComments = [new("src/a.cs", "+ updated", "Check null handling.")],
@@ -83,6 +84,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal("unsent prompt", snapshot.Draft);
         Assert.Equal("before", snapshot.Messages[0].Content);
         Assert.Equal(source.Messages[1].GenerationStats, snapshot.Messages[1].GenerationStats);
+        Assert.Equal(source.Messages[1].HostedUsage, snapshot.Messages[1].HostedUsage);
         Assert.Equal("src/a.cs", Assert.Single(snapshot.ContextFiles));
         Assert.Equal(new GitDiffComment("src/a.cs", "+ updated", "Check null handling."), Assert.Single(snapshot.PendingDiffComments));
         Assert.Equal("model-a", Assert.Single(snapshot.PendingTurns).Model);

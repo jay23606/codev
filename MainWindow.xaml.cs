@@ -698,6 +698,8 @@ public partial class MainWindow : Window
             var content = new StackPanel();
             content.Children.Add(new TextBlock { Text = isUser ? "YOU" : "CODEV", FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrush(isUser ? "UserLabelBrush" : "AssistantLabelBrush"), Margin = new Thickness(0, 0, 0, 6) });
             content.Children.Add(body);
+            if (message.HostedUsage is { } hostedUsage)
+                content.Children.Add(new TextBlock { Text = hostedUsage.DisplayLabel, FontSize = 10, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(2, 6, 0, 0), ToolTip = "Provider-reported token totals across completed OpenAI Code task requests for this reply. A lower-bound label means one or more completed requests omitted usage." });
             var border = new Border { Child = content, Padding = new Thickness(isUser ? 15 : 0, isUser ? 12 : 8, isUser ? 15 : 0, isUser ? 12 : 8), Background = isUser ? ThemeBrush("MessageBubbleBrush") : Brushes.Transparent, CornerRadius = new CornerRadius(12), HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Stretch, MaxWidth = 720, Margin = new Thickness(0, 0, 0, 17) };
             var menu = new ContextMenu();
             var copy = new MenuItem { Header = "Copy message" };
@@ -2723,7 +2725,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException)
         {
             var partial = conversation.Messages[assistantIndex].Content;
-            conversation.Messages[assistantIndex] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]");
+            conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = string.IsNullOrWhiteSpace(partial) ? "Generation stopped." : partial + "\n\n[Generation stopped.]" };
         }
         catch (Exception ex)
         {
@@ -2731,7 +2733,7 @@ public partial class MainWindow : Window
             shouldNotifyCompletion = true;
             var partial = conversation.Messages[assistantIndex].Content;
             var detail = ModelRequestErrorDescription.Describe(turn.Provider, ex);
-            conversation.Messages[assistantIndex] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? detail : $"{partial}\n\n[Generation stopped: {detail}]");
+            conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = string.IsNullOrWhiteSpace(partial) ? detail : $"{partial}\n\n[Generation stopped: {detail}]" };
         }
         finally
         {
@@ -3041,6 +3043,7 @@ public partial class MainWindow : Window
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var transcript = new StringBuilder();
         var repeatedCalls = new RepeatedToolCallGuard();
+        var usageAccumulator = new OpenAiCodeTaskUsageAccumulator();
         for (var round = 0; round < OpenAiCodeTaskLimits.MaxModelStepsPerTurn; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -3059,6 +3062,12 @@ public partial class MainWindow : Window
                 new PromptContextSection("Available tool schemas", JsonSerializer.Serialize(tools, JsonSerializerOptions.Web)));
             var response = await CloudClient.CreateOpenAiToolResponseAsync(apiKey, turn.Model, input, tools, cancellationToken,
                 body => SetLastPromptContextAsync(conversation, turn.Provider, turn.Model, 0, sections, roundMessages, body));
+            if (usageAccumulator.Add(response) is { } turnUsage)
+            {
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { HostedUsage = turnUsage };
+                RenderAgentTranscript(conversation);
+                await SaveAsync();
+            }
             if (response.InputTokens is { } inputTokens)
             {
                 conversation.LastPromptTokens = inputTokens;
@@ -3075,7 +3084,7 @@ public partial class MainWindow : Window
                 if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
                 if (conversation.TaskChecklist.Count > 0)
                     transcript.AppendLine().AppendLine().Append("**Task checklist**").AppendLine().AppendLine(TaskChecklistService.FormatForDisplay(conversation.TaskChecklist));
-                conversation.Messages[assistantIndex] = new ChatMessage("assistant", transcript.ToString());
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript.ToString() };
                 RenderAgentTranscript(conversation);
                 return;
             }
@@ -3101,7 +3110,7 @@ public partial class MainWindow : Window
                     if (decision != MessageBoxResult.Yes)
                     {
                         transcript.AppendLine().AppendLine("Code task stopped because the model repeated the same tool call.");
-                        conversation.Messages[assistantIndex] = new ChatMessage("assistant", transcript.ToString());
+                        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript.ToString() };
                         RenderAgentTranscript(conversation);
                         return;
                     }
@@ -3115,7 +3124,7 @@ public partial class MainWindow : Window
                     UpdateChangesButton(conversation);
                 outputs.Add(new OpenAiFunctionOutput(callId, result));
                 transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**").AppendLine(result.Length > 6000 ? result[..6000] + "… [truncated]" : result);
-                conversation.Messages[assistantIndex] = new ChatMessage("assistant", transcript.ToString());
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript.ToString() };
                 RenderAgentTranscript(conversation);
                 await SaveAsync();
             }

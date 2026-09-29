@@ -4,6 +4,21 @@ using Codev;
 public sealed class OpenAiToolCallHistoryTests
 {
     [Fact]
+    public void Openai_code_task_usage_accumulates_provider_reports_and_marks_missing_rounds_as_lower_bounds()
+    {
+        var usage = new OpenAiCodeTaskUsageAccumulator();
+
+        Assert.Equal(new OpenAiCodeTaskUsage(12, 7, 1, 1, 1), usage.Add(new([], [], "", 12, 7)));
+        var total = usage.Add(new([], [], "", 5, null));
+
+        Assert.Equal(new OpenAiCodeTaskUsage(17, 7, 2, 1, 2), total);
+        Assert.Contains("17 input", total!.DisplayLabel);
+        Assert.DoesNotContain("at least 17 input", total.DisplayLabel);
+        Assert.Contains("at least 7 output", total.DisplayLabel);
+        Assert.Contains("2 completed API request(s)", total.DisplayLabel);
+    }
+
+    [Fact]
     public void Appends_all_provider_items_then_matching_tool_results_in_call_order()
     {
         using var document = JsonDocument.Parse("""

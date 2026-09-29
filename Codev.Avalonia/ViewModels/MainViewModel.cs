@@ -2313,6 +2313,7 @@ public sealed class MainViewModel : ViewModelBase
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var transcript = new System.Text.StringBuilder();
         var repeatedCalls = new Codev.RepeatedToolCallGuard();
+        var usageAccumulator = new Codev.OpenAiCodeTaskUsageAccumulator();
         var client = new Codev.CloudModelApiClient(_http);
         for (var round = 0; round < Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn; round++)
         {
@@ -2340,6 +2341,15 @@ public sealed class MainViewModel : ViewModelBase
                 normalizedHistory, requestBody));
             var response = await client.CreateOpenAiToolResponseAsync(currentOpenAiKey, turn.Model, input, toolSchemas,
                 cancellationToken, body => SetLastPromptRequestBodyAsync(conversation, body));
+            if (usageAccumulator.Add(response) is { } turnUsage)
+            {
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { HostedUsage = turnUsage };
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+                });
+                Persist();
+            }
             if (response.InputTokens is { } inputTokens)
                 await RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, 0, inputTokens);
             if (response.OutputTokens is { } outputTokens)
@@ -2751,7 +2761,7 @@ public sealed class MainViewModel : ViewModelBase
             if (generationStats is not null)
                 conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { GenerationStats = generationStats };
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
-                conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", Codev.ModelRequestErrorDescription.EmptyResponse(savedTurn.Provider));
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = Codev.ModelRequestErrorDescription.EmptyResponse(savedTurn.Provider) };
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {

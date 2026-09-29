@@ -84,6 +84,8 @@ It currently provides a Claude/Codex-inspired dark shell, locally persisted conv
 
 Completed local Ollama replies in Avalonia show first-token latency, generated tokens per second, output token count, and model load time when the server reports it. Hosted model replies do not show locally estimated performance stats.
 
+OpenAI Code task assistant replies show provider-reported input and output token totals summed across completed model requests in that turn. If the provider omits usage for any completed request, the affected total is labeled as a lower bound. The last-request context view continues to show usage for that individual request.
+
 Avalonia also supports user and trusted-project Markdown prompt commands with named arguments, and manages saved prompt templates through `/template-…` suggestions and the **Prompt templates** button; see [custom slash commands](docs/custom-slash-commands.md) or type `/commands` in the composer.
 
 Manually invoked user and trusted-project Markdown skills are also available through slash suggestions; type `/skills` for the folders and see [the skills guide](docs/skills.md).
