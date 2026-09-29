@@ -84,6 +84,8 @@ It currently provides a Claude/Codex-inspired dark shell, locally persisted conv
 
 The Advanced settings dialog also exposes optional GPT-5 and o-series OpenAI reasoning effort and response verbosity. Both controls default to the model setting and are stored per conversation, including queued turns.
 
+For supported OpenAI models, `/status` reports the active effort and verbosity overrides without making a model request.
+
 Completed local Ollama replies in Avalonia show first-token latency, generated tokens per second, output token count, and model load time when the server reports it. Hosted model replies do not show locally estimated performance stats.
 
 OpenAI Code task assistant replies show provider-reported input and output token totals summed across completed model requests in that turn. If the provider omits usage for any completed request, the affected total is labeled as a lower bound. The last-request context view continues to show usage for that individual request.

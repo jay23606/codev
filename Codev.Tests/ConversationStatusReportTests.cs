@@ -203,6 +203,21 @@ public sealed class ConversationStatusReportTests
     }
 
     [Fact]
+    public void Status_reports_openai_generation_overrides_without_exposing_any_secret()
+    {
+        var report = ConversationStatusReport.Build(new Conversation
+        {
+            Provider = CloudModelProviders.OpenAI,
+            Model = "gpt-5.4",
+            OpenAiReasoningEffort = "HIGH",
+            OpenAiVerbosity = "low"
+        }, false, 0, false, true);
+
+        Assert.Contains("OpenAI reasoning effort: high", report);
+        Assert.Contains("OpenAI response verbosity: low", report);
+    }
+
+    [Fact]
     public void Status_does_not_attribute_usage_from_a_different_selected_model()
     {
         var report = ConversationStatusReport.Build(new Conversation

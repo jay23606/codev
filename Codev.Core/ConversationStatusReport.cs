@@ -86,6 +86,8 @@ public static class ConversationStatusReport
             $"Temperature: {temperature}",
             $"Thinking: {(CloudModelProviders.IsCloud(conversation.Provider) ? "unavailable for hosted providers" : conversation.ThinkEnabled ? "requested" : "off")}",
             $"Sampling overrides: {(conversation.Provider == "ollama" ? sampling : "unavailable for hosted providers")}",
+            $"OpenAI reasoning effort: {(conversation.Provider == CloudModelProviders.OpenAI && OpenAiGenerationSettings.SupportsReasoningControls(conversation.Model) ? OpenAiGenerationSettings.NormalizeEffort(conversation.OpenAiReasoningEffort) ?? "model default" : "unavailable for this model")}",
+            $"OpenAI response verbosity: {(conversation.Provider == CloudModelProviders.OpenAI && OpenAiGenerationSettings.SupportsReasoningControls(conversation.Model) ? OpenAiGenerationSettings.NormalizeVerbosity(conversation.OpenAiVerbosity) ?? "model default" : "unavailable for this model")}",
             $"Mode: {(conversation.IsCodeTask ? "Code task" : conversation.IsPlanMode ? "Plan" : "Chat")}",
             $"OpenAI Code task consent: {hostedCodeTaskConsent}",
             $"Project: {project}",
