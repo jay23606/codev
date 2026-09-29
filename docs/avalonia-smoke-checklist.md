@@ -158,3 +158,8 @@ Reviewed file-and-conversation rewind, richer hunk navigation and staging/revert
 
 - In Code task, use a disposable source or documentation file that contains common prompt-injection language, then request an unrelated harmless edit; verify the approval dialog shows a potential-instruction warning but does not block or auto-approve the proposal.
 - Run a harmless command whose quoted text contains a flagged phrase and verify the same advisory appears; confirm the warning does not display secret values and normal code with none of the patterns receives no warning.
+
+## OpenAI Code task streaming
+
+- With an OpenAI key connected and Code task consent enabled, ask a disposable prompt that produces a longer response before using a tool. Verify assistant text appears while the Responses API call is still running, function calls execute only after the completed event, and the existing review/approval paths still gate changes and commands.
+- Interrupt a streamed OpenAI Code task after text appears; verify received text remains in the assistant message with the interruption marker. Also simulate a stream ending without a completed event and verify the partial text remains visible while the task reports the incomplete response.

@@ -3101,9 +3101,12 @@ public partial class MainWindow : Window
         onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
         onTranscript: async transcript =>
         {
-            conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript };
-            RenderAgentTranscript(conversation);
-            await SaveAsync();
+            await Dispatcher.InvokeAsync(async () =>
+            {
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript };
+                RenderAgentTranscript(conversation);
+                await SaveAsync();
+            }).Task.Unwrap();
         },
         cancellationToken: cancellationToken);
         var finalTranscript = result.Transcript;

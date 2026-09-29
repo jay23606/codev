@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace Codev;
 
@@ -37,8 +38,28 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
             cancellationToken.ThrowIfCancellationRequested();
             if (status is not null) await status($"OpenAI Code task · thinking · step {step + 1}/{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}");
             var apiKey = await prepareRequestAsync(step, input, cancellationToken);
-            var response = await client.CreateOpenAiToolResponseAsync(apiKey, model, input, tools, cancellationToken,
-                onRequestPayload);
+            var streamedText = new StringBuilder();
+            var lastPublished = Stopwatch.GetTimestamp();
+            OpenAiToolResponse response;
+            try
+            {
+                response = await client.StreamOpenAiToolResponseAsync(apiKey, model, input, tools, delta =>
+                {
+                    streamedText.Append(delta);
+                    if (onTranscript is null || Stopwatch.GetElapsedTime(lastPublished) < TimeSpan.FromMilliseconds(100))
+                        return Task.CompletedTask;
+                    lastPublished = Stopwatch.GetTimestamp();
+                    return onTranscript(transcript.ToString() + streamedText);
+                }, cancellationToken, onRequestPayload);
+            }
+            catch
+            {
+                if (onTranscript is not null && streamedText.Length > 0)
+                    await onTranscript(transcript.ToString() + streamedText);
+                throw;
+            }
+            if (onTranscript is not null && streamedText.Length > 0)
+                await onTranscript(transcript.ToString() + streamedText);
             var turnUsage = usage.Add(response);
             if (onResponse is not null) await onResponse(response, turnUsage);
 

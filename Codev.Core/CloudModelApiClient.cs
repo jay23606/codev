@@ -99,6 +99,70 @@ public sealed class CloudModelApiClient(HttpClient http)
                     ? $"The response was incomplete ({reason})." : $"The response ended with status '{status}'.";
             throw new InvalidOperationException($"OpenAI {detail}");
         }
+        return ParseOpenAiToolResponse(root);
+    }
+
+    public async Task<OpenAiToolResponse> StreamOpenAiToolResponseAsync(string apiKey, string model,
+        object input, IReadOnlyList<object> tools, Func<string, Task>? onTextDelta = null,
+        CancellationToken cancellationToken = default, Func<string, Task>? onRequestPayload = null)
+    {
+        Validate(CloudModelProviders.OpenAI, apiKey);
+        if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose an OpenAI model first.", nameof(model));
+        var payload = new Dictionary<string, object>
+        {
+            ["model"] = model,
+            ["input"] = input,
+            ["tools"] = tools,
+            ["tool_choice"] = "auto",
+            ["stream"] = true,
+            ["store"] = false,
+            ["max_output_tokens"] = OpenAiCodeTaskLimits.MaxOutputTokensPerRequest
+        };
+        var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
+        using var request = CreateRequest(HttpMethod.Post, new Uri(OpenAiBase, "responses"), CloudModelProviders.OpenAI, apiKey);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
+        if (onRequestPayload is not null) await onRequestPayload(payloadJson).ConfigureAwait(false);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var reader = new StreamReader(stream);
+        var eventName = "";
+        var eventData = new StringBuilder();
+        OpenAiToolResponse? completedResponse = null;
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                if (eventData.Length == 0) { eventName = ""; continue; }
+                var data = eventData.ToString();
+                eventData.Clear();
+                if (data == "[DONE]") break;
+                using var document = JsonDocument.Parse(data);
+                var root = document.RootElement;
+                var type = GetString(root, "type") ?? eventName;
+                if (type is "error" or "response.failed") throw new InvalidOperationException(ReadApiError(root));
+                if (type == "response.incomplete") throw new InvalidOperationException(ReadIncompleteResponse(root));
+                if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta && onTextDelta is not null)
+                    await onTextDelta(delta).ConfigureAwait(false);
+                if (type == "response.completed" && root.TryGetProperty("response", out var responseRoot))
+                    completedResponse = ParseOpenAiToolResponse(responseRoot);
+                eventName = "";
+                continue;
+            }
+            if (line.StartsWith(':')) continue;
+            if (line.StartsWith("event:", StringComparison.Ordinal)) eventName = line[6..].TrimStart();
+            else if (line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                if (eventData.Length > 0) eventData.Append('\n');
+                eventData.Append(line[5..].TrimStart());
+            }
+        }
+        return completedResponse ?? throw new IOException("The OpenAI stream ended before the provider reported a completed response.");
+    }
+
+    private static OpenAiToolResponse ParseOpenAiToolResponse(JsonElement root)
+    {
         var outputItems = root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Array
             ? output.EnumerateArray().Select(item => item.Clone()).ToArray() : [];
         var calls = outputItems.Where(item => GetString(item, "type") == "function_call").ToArray();

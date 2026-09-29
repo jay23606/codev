@@ -16,12 +16,12 @@ public sealed class OpenAiCodeTaskRunnerTests
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             requests.Add(JsonDocument.Parse(body));
             return requests.Count == 1
-                ? Json("""
+                ? OpenAiSse("""
                     {"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"list_files","arguments":"{}"}],"usage":{"input_tokens":10,"output_tokens":5}}
                     """)
-                : Json("""
+                : OpenAiSse("""
                     {"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"The folder is empty."}]}],"usage":{"input_tokens":20,"output_tokens":7}}
-                    """);
+                    """, "The folder is empty.");
         }));
         var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
         var toolExecutions = 0;
@@ -43,6 +43,8 @@ public sealed class OpenAiCodeTaskRunnerTests
             onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; });
 
         Assert.Equal(2, requests.Count);
+        Assert.True(requests[0].RootElement.GetProperty("stream").GetBoolean());
+        Assert.False(requests[0].RootElement.GetProperty("store").GetBoolean());
         Assert.Equal(1, toolExecutions);
         var followUpInput = requests[1].RootElement.GetProperty("input").EnumerateArray().ToArray();
         Assert.Equal("function_call", followUpInput[1].GetProperty("type").GetString());
@@ -61,7 +63,7 @@ public sealed class OpenAiCodeTaskRunnerTests
         using var http = new HttpClient(new ResponseHandler(_ =>
         {
             requests++;
-            return Json("{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call-" + requests +
+            return OpenAiSse("{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call-" + requests +
                 "\",\"name\":\"list_files\",\"arguments\":\"{}\"}]}");
         }));
         var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
@@ -92,7 +94,7 @@ public sealed class OpenAiCodeTaskRunnerTests
                 status = "completed",
                 output = new[] { new { type = "function_call", call_id = $"call-{requests}", name = "read_file", arguments } }
             });
-            return Json(body);
+            return OpenAiSse(body);
         }));
         var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
         var toolExecutions = 0;
@@ -115,7 +117,7 @@ public sealed class OpenAiCodeTaskRunnerTests
         using var http = new HttpClient(new ResponseHandler(_ =>
         {
             requests++;
-            return Json("""
+            return OpenAiSse("""
                 {"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"list_files","arguments":"{}"}]}
                 """);
         }));
@@ -131,10 +133,36 @@ public sealed class OpenAiCodeTaskRunnerTests
         Assert.Equal(1, requests);
     }
 
-    private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)
+    [Fact]
+    public async Task Keeps_partial_openai_text_visible_when_the_code_task_stream_is_interrupted()
     {
-        Content = new StringContent(body, Encoding.UTF8, "application/json")
-    };
+        using var http = new HttpClient(new ResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Partial plan\"}\n\n",
+                Encoding.UTF8, "text/event-stream")
+        }));
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+        var transcriptUpdates = new List<string>();
+
+        await Assert.ThrowsAsync<IOException>(() => runner.RunAsync("gpt-test",
+            [new { role = "user", content = "inspect" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => Task.FromResult("unused"),
+            (_, _, _) => Task.FromResult(false),
+            onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; }));
+
+        Assert.Contains("Partial plan", Assert.Single(transcriptUpdates));
+    }
+
+    private static HttpResponseMessage OpenAiSse(string response, string? textDelta = null)
+    {
+        var deltaEvent = textDelta is null ? "" : "data: " + JsonSerializer.Serialize(new { type = "response.output_text.delta", delta = textDelta }) + "\n\n";
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(deltaEvent + "data: {\"type\":\"response.completed\",\"response\":" + response + "}\n\n",
+                Encoding.UTF8, "text/event-stream")
+        };
+    }
 
     private sealed class ResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

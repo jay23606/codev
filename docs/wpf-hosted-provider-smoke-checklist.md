@@ -15,3 +15,4 @@ Use a disposable conversation. These checks call external APIs and may incur cha
 - [ ] Inspect settings, conversation history, and a conversation backup; verify no API key was written. Relaunch with saved keys and verify hosted conversations retain provider/model selection and Ollama remains available offline.
 - [ ] Export a conversation with hosted Code task and workspace sharing enabled; import it and verify both hosted data-sharing approvals are off and must be granted again in the new environment.
 - [ ] Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, leave the key field blank, and verify the selected environment key takes precedence over a saved key and is not copied to the vault.
+- [ ] In OpenAI Code task, verify Responses text streams into the assistant reply before a tool call completes; interrupt the stream and confirm received text remains visible with the interruption marker. This uses hosted API requests and may incur charges.

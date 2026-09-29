@@ -2373,8 +2373,12 @@ public sealed class MainViewModel : ViewModelBase
         onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
         onTranscript: async transcript =>
         {
-            await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript);
-            Persist();
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript };
+                if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
+                Persist();
+            });
         },
         cancellationToken: cancellationToken);
         var finalTranscript = result.Transcript;
