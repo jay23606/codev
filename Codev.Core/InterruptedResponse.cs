@@ -1,9 +1,16 @@
 namespace Codev;
 
-/// <summary>Recognizes and removes Codev's explicit stop marker while preserving partial assistant text.</summary>
+/// <summary>Recognizes interruption markers and preserves partial assistant text and metadata.</summary>
 public static class InterruptedResponse
 {
     public const string StopMarker = "[Generation stopped.]";
+    public const string ClosedMarker = "[Generation interrupted when Codev closed.]";
+
+    public static ChatMessage MarkClosed(ChatMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        return message with { Content = ClosedMarker };
+    }
 
     public static bool TryGetPartial(string? content, out string partial)
     {

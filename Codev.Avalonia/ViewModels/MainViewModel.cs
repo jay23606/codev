@@ -2795,7 +2795,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 if (conversation.Messages[i].Role == "assistant" && string.IsNullOrWhiteSpace(conversation.Messages[i].Content) &&
                     conversation.PendingTurns.All(turn => turn.AssistantIndex != i))
-                    conversation.Messages[i] = new Codev.ChatMessage("assistant", "[Generation interrupted when Codev closed.]");
+                    conversation.Messages[i] = Codev.InterruptedResponse.MarkClosed(conversation.Messages[i]);
             }
         }
         _queuePaused = _requestQueue.Count > 0;
