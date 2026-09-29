@@ -14,13 +14,13 @@ public sealed class CloudModelApiClientTests
         {
             observed = request;
             return Json("""
-                {"data":[{"id":"gpt-6-sol"},{"id":"gpt-6-codex"},{"id":"gpt-audio-preview"},{"id":"text-embedding-3-large"},{"id":"whisper-1"}]}
+                {"data":[{"id":"gpt-6-sol"},{"id":"gpt-6-codex"},{"id":"chat-latest"},{"id":"codex-mini-latest"},{"id":"gpt-audio-preview"},{"id":"text-embedding-3-large"},{"id":"whisper-1"}]}
                 """);
         }));
 
         var models = await new CloudModelApiClient(http).ListModelsAsync(CloudModelProviders.OpenAI, "test-openai-key");
 
-        Assert.Equal(["gpt-6-codex", "gpt-6-sol"], models.Select(model => model.Id));
+        Assert.Equal(["chat-latest", "codex-mini-latest", "gpt-6-codex", "gpt-6-sol"], models.Select(model => model.Id));
         Assert.Equal("Bearer", observed!.Headers.Authorization!.Scheme);
         Assert.Equal("test-openai-key", observed.Headers.Authorization.Parameter);
         Assert.DoesNotContain("test-openai-key", observed.RequestUri!.ToString());

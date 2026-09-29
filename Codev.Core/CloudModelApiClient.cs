@@ -445,7 +445,9 @@ public sealed class CloudModelApiClient(HttpClient http)
 
     private static bool IsOpenAiTextModel(string? id) => id is not null &&
         (id.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase) || id.StartsWith("o1", StringComparison.OrdinalIgnoreCase) ||
-         id.StartsWith("o3", StringComparison.OrdinalIgnoreCase) || id.StartsWith("o4", StringComparison.OrdinalIgnoreCase)) &&
+         id.StartsWith("o3", StringComparison.OrdinalIgnoreCase) || id.StartsWith("o4", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(id, "chat-latest", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(id, "codex-mini-latest", StringComparison.OrdinalIgnoreCase)) &&
         !ContainsAny(id, "audio", "transcribe", "realtime", "embedding", "moderation", "search", "tts", "image", "whisper");
 
     private static bool ContainsAny(string value, params string[] terms) => terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
