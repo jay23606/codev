@@ -9,6 +9,9 @@ public enum ConversationMode
 
 public static class ConversationModeCycle
 {
+    public static ConversationMode Default(string provider) =>
+        provider == CloudModelProviders.OpenAI ? ConversationMode.CodeTask : ConversationMode.Chat;
+
     public static ConversationMode Next(ConversationMode current, bool canEnterCodeTask) => current switch
     {
         ConversationMode.Chat => ConversationMode.Plan,

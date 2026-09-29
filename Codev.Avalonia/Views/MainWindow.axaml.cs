@@ -508,6 +508,15 @@ public partial class MainWindow : Window
             MaxWidth = 390
         };
         var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        void ShowSavedKeyStatus()
+        {
+            var selectedProvider = provider.SelectedItem?.ToString() == "Anthropic" ? Codev.CloudModelProviders.Anthropic : Codev.CloudModelProviders.OpenAI;
+            status.Text = viewModel.HasSavedCloudApiKey(selectedProvider)
+                ? $"A saved {selectedProvider} key is available from the OS credential store. Leave the key field blank, acknowledge hosted requests, and choose Connect and load models."
+                : "No saved key is available. Enter a key to save it after successful model discovery.";
+        }
+        provider.SelectionChanged += (_, _) => ShowSavedKeyStatus();
+        ShowSavedKeyStatus();
         var connect = new Button { Content = "Connect and load models", MinWidth = 170 };
         var forget = new Button { Content = "Remove saved key", MinWidth = 130 };
         var disable = new Button { Content = "Disable this session", MinWidth = 140 };

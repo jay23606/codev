@@ -177,6 +177,7 @@ public sealed class MainViewModel : ViewModelBase
         var startupConversation = Codev.ConversationStartupSelection.Choose(_conversations, LoadLastActiveConversationId());
         if (startupConversation is not null) SelectConversation(startupConversation);
         LoadSettings();
+        _ = RestoreSavedCloudApiKeysAsync();
         _ = LoadModelsAsync();
     }
 
@@ -358,7 +359,7 @@ public sealed class MainViewModel : ViewModelBase
         reason is not "Wait for the current response to finish before changing conversation mode.";
     public string CodeTaskUnavailableReason => GetCodeTaskUnavailableReason() ?? "";
     public string CodeTaskTooltip => IsCodeTask
-        ? $"Code task is on. {(IsOpenAIModel ? Codev.OpenAiCodeTaskLimits.Description + " " : "")}{ProjectCommandPermissionMode switch
+        ? $"Code task is on. {(IsOpenAIModel && ActiveConversation?.AllowHostedCodeTask != true ? "The first prompt asks permission to send prompts and tool results to OpenAI. " : "")}{(IsOpenAIModel ? Codev.OpenAiCodeTaskLimits.Description + " " : "")}{ProjectCommandPermissionMode switch
         {
             Codev.ProjectCommandPermissionMode.Allowlist => "Exact saved allow rules can skip approval; unlisted commands still ask.",
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
@@ -971,6 +972,7 @@ public sealed class MainViewModel : ViewModelBase
         return null;
     }
     public bool CloudRequestsEnabled => _cloudRequestsEnabled;
+    public bool HasSavedCloudApiKey(string provider) => _cloudApiKeys.ContainsKey(provider);
     public bool IncludeProjectContextForHosted
     {
         get => ActiveConversation?.IncludeProjectContextForHosted ?? false;
@@ -1057,11 +1059,14 @@ public sealed class MainViewModel : ViewModelBase
         {
             ActiveConversation.Model = choice.Name;
             ActiveConversation.Provider = choice.Provider;
+            if (ActiveConversation.Messages.Count == 0 && !ActiveConversation.IsPlanMode)
+                ActiveConversation.IsCodeTask = Codev.ConversationModeCycle.Default(choice.Provider) == Codev.ConversationMode.CodeTask;
             OnPropertyChanged(nameof(Model));
             OnPropertyChanged(nameof(Provider));
             OnPropertyChanged(nameof(IsLocalModel));
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(IsOpenAIModel));
+            OnPropertyChanged(nameof(IsCodeTask));
             OnPropertyChanged(nameof(CanOpenAdvancedModelSettings));
             OnPropertyChanged(nameof(CanOpenProjectActions));
             OnPropertyChanged(nameof(ProviderStatusLabel));
@@ -1072,6 +1077,8 @@ public sealed class MainViewModel : ViewModelBase
             NotifyCodeTaskAvailabilityProperties();
             ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
             Persist();
+            if (ActiveConversation.IsCodeTask && string.IsNullOrWhiteSpace(ActiveConversation.ProjectPath))
+                _ = EnableCodeTaskWithWorkspaceAsync(ActiveConversation);
         }
         RefreshContextSizes(choice.Name);
         RefreshContextEstimate();
@@ -1112,6 +1119,7 @@ public sealed class MainViewModel : ViewModelBase
             Model = Model,
             Provider = Provider,
             IsPlanMode = IsPlanMode,
+            IsCodeTask = !IsPlanMode && Codev.ConversationModeCycle.Default(Provider) == Codev.ConversationMode.CodeTask,
             OutputStyle = OutputStyle,
             ThinkEnabled = ThinkEnabled,
             IncludeRepoMap = IncludeRepoMap,
@@ -1120,6 +1128,7 @@ public sealed class MainViewModel : ViewModelBase
         };
         _conversations.Insert(0, conversation);
         SelectConversation(conversation);
+        if (conversation.IsCodeTask) _ = EnableCodeTaskWithWorkspaceAsync(conversation);
         Persist();
         RebuildLists();
     }
@@ -1871,14 +1880,22 @@ public sealed class MainViewModel : ViewModelBase
         }
         if (conversation.IsCodeTask && conversation.Provider == Codev.CloudModelProviders.OpenAI)
         {
-            if (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(conversation.Provider) || !conversation.AllowHostedCodeTask)
+            if (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(conversation.Provider))
             {
-                ReportContextActionStatus("Code task was not queued: reconnect OpenAI and enable Code task for this conversation first.");
+                ReportContextActionStatus("Code task was not queued: reconnect OpenAI and approve hosted requests first.");
                 return;
             }
+            if (!conversation.AllowHostedCodeTask)
+            {
+                if (ConfirmHostedCodeTaskConsentAsync is null || !await ConfirmHostedCodeTaskConsentAsync()) return;
+                conversation.AllowHostedCodeTask = true;
+                Persist();
+            }
+            if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !Directory.Exists(conversation.ProjectPath))
+                await EnableCodeTaskWithWorkspaceAsync(conversation);
             if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath))
             {
-                ReportContextActionStatus("Code task was not queued: choose or create a trusted workspace first.");
+                ReportContextActionStatus("Code task was not queued: trust the attached project folder or create a private workspace first.");
                 return;
             }
             var privateWorkspace = _conversationWorkspaces.IsConversationWorkspace(conversation.Id, conversation.ProjectPath);
@@ -3187,6 +3204,31 @@ public sealed class MainViewModel : ViewModelBase
                 : $"Could not connect to {provider}: {ex.Message}";
             await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = message);
             return false;
+        }
+    }
+
+    private async Task RestoreSavedCloudApiKeysAsync()
+    {
+        var restored = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var provider in new[] { Codev.CloudModelProviders.OpenAI, Codev.CloudModelProviders.Anthropic })
+            {
+                var key = await _cloudApiKeyVault.GetAsync(provider);
+                if (!string.IsNullOrWhiteSpace(key)) restored[provider] = key.Trim();
+            }
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                foreach (var (provider, key) in restored) _cloudApiKeys[provider] = key;
+                NotifyCodeTaskAvailabilityProperties();
+                if (restored.Count > 0 && !_cloudRequestsEnabled)
+                    ConnectionStatus = "Saved hosted API key restored · acknowledge hosted requests to connect for this session";
+            });
+        }
+        catch (Exception ex) when (IsCredentialStoreFailure(ex))
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                ConnectionStatus = $"Could not restore a saved hosted API key from the OS credential store ({ex.GetType().Name}). Re-enter and connect it to retry.");
         }
     }
 

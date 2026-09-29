@@ -12,7 +12,7 @@ This roadmap describes Codev's intended product scope. It does **not** claim fea
 
 - **Left rail:** Codev identity, new conversation, search, pinned conversations, recents, settings, and local model status.
 - **Top bar:** active conversation title, local privacy hint, model selector, and pin control.
-- **Provider choice:** Ollama is the default local provider; OpenAI and Anthropic API models are optional, clearly marked hosted choices with separate data-sharing consent. OpenAI Code task is available without attaching a project and provisions a private conversation workspace; project files and guidance require a separate per-conversation sharing choice. Anthropic remains chat and Plan only.
+- **Provider choice:** Ollama is the default local provider; OpenAI and Anthropic API models are optional, clearly marked hosted choices with separate data-sharing consent. New OpenAI conversations start in Code task and provision a private conversation workspace; first-use prompt/tool-result disclosure still requires consent, while project files and guidance require a separate per-conversation sharing choice. Anthropic remains chat and Plan only.
 - **Conversation canvas:** focused welcome state, task suggestions, right-aligned user bubbles, and left-aligned assistant messages without role labels.
 - **Composer:** multiline prompt, project-folder context control, and send action.
 - **Visual language:** warm terracotta action color, rounded quiet controls, spacious conversation column, and low-noise navigation. Dark mode is the default; light mode is also available and remembered locally.
