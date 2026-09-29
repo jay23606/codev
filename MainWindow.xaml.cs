@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<Window, DispatcherTimer> _completionToasts = [];
     private readonly DispatcherTimer _conversationSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly DispatcherTimer _draftSaveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private readonly DispatcherTimer _slashCommandReloadDebounce = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private Conversation? _active;
     private WorkspaceProject? _activeProject;
     private readonly SerialAsyncQueue<QueuedTurn> _requestQueue = new();
@@ -64,6 +65,7 @@ public partial class MainWindow : Window
     private bool _completionNotificationsEnabled = true;
     private double _chatFontSize = 14;
     private List<PromptTemplate> _promptTemplates = [];
+    private IReadOnlyList<SlashCommandDefinition> _userSlashCommands = [];
     private Uri _ollamaEndpoint = OllamaEndpoint.Default;
     private string _personalInstructions = "";
     private string _historyStorePath = StorePath;
@@ -72,6 +74,7 @@ public partial class MainWindow : Window
     private static string RecoveryStorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.recovered.json");
     private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
     private static string ProjectsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "projects.json");
+    private static string UserSlashCommandsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "commands");
 
     public MainWindow()
     {
@@ -112,6 +115,11 @@ public partial class MainWindow : Window
         AddContextButton.ContextMenu = contextMenu;
         _conversationSearchDebounce.Tick += (_, _) => { _conversationSearchDebounce.Stop(); RefreshConversationLists(); };
         _draftSaveDebounce.Tick += async (_, _) => await SaveDraftAsync();
+        _slashCommandReloadDebounce.Tick += async (_, _) =>
+        {
+            _slashCommandReloadDebounce.Stop();
+            await LoadUserSlashCommandsAsync();
+        };
         LoadThemePreference();
         SearchAllProjectsCheck.IsChecked = _searchAllProjects;
         ApplyTheme();
@@ -123,7 +131,11 @@ public partial class MainWindow : Window
         RefreshConversationLists();
         if (_conversations.Count > 0) SelectConversation(_conversations.OrderByDescending(c => c.UpdatedAt).First());
         PreviewKeyDown += MainWindow_PreviewKeyDown;
-        Loaded += async (_, _) => await LoadModelsAsync();
+        Loaded += async (_, _) =>
+        {
+            await LoadUserSlashCommandsAsync();
+            await LoadModelsAsync();
+        };
     }
 
     private void LoadThemePreference()
@@ -1857,6 +1869,7 @@ public partial class MainWindow : Window
     {
         var text = PromptBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(text) || _active is null) return;
+        if (text.StartsWith("/", StringComparison.Ordinal)) await LoadUserSlashCommandsAsync();
         if (await ExecuteExactSlashCommandAsync(text)) return;
         var isCodeTask = _codeTaskMode && _codeTaskConversationId == _active.Id;
         if (isCodeTask && _active.Provider == CloudModelProviders.OpenAI && !_active.IncludeProjectContextForHosted)
@@ -1973,11 +1986,27 @@ public partial class MainWindow : Window
     private static bool IsWpfSlashCommandSupported(SlashCommandAction action) => action is
         SlashCommandAction.ClearConversation or SlashCommandAction.CompactConversation or SlashCommandAction.ToggleCodeTask or
         SlashCommandAction.ExportConversation or SlashCommandAction.InitProject or SlashCommandAction.SelectModel or
-        SlashCommandAction.TogglePlan or SlashCommandAction.ShowStatus or SlashCommandAction.UserPrompt;
+        SlashCommandAction.TogglePlan or SlashCommandAction.ShowStatus or SlashCommandAction.OpenCommandsFolder or SlashCommandAction.UserPrompt;
 
     private IReadOnlyList<SlashCommandDefinition> GetAvailableSlashCommands() =>
         SlashCommandCatalog.All.Where(command => IsWpfSlashCommandSupported(command.Action))
-            .Concat(PromptTemplateCatalog.ToSlashCommands(_promptTemplates)).ToArray();
+            .Concat(_userSlashCommands)
+            .Concat(PromptTemplateCatalog.ToSlashCommands(_promptTemplates, _userSlashCommands.Select(command => command.Name))).ToArray();
+
+    private async Task LoadUserSlashCommandsAsync()
+    {
+        try
+        {
+            var loaded = await CustomSlashCommandService.LoadAsync(UserSlashCommandsPath, projectRoot: null, includeProjectCommands: false);
+            _userSlashCommands = loaded.Commands;
+            if (loaded.Warnings.Count > 0) AgentStatusLabel.Text = "Custom command: " + loaded.Warnings[0];
+            if (SlashCommandPopup.IsOpen) RefreshSlashCommandSuggestions();
+        }
+        catch (Exception ex)
+        {
+            AgentStatusLabel.Text = $"Could not load custom commands: {ex.Message}";
+        }
+    }
 
     private void RefreshSlashCommandSuggestions()
     {
@@ -2011,6 +2040,9 @@ public partial class MainWindow : Window
     private async Task<bool> ExecuteExactSlashCommandAsync(string text)
     {
         var command = GetAvailableSlashCommands().FirstOrDefault(candidate => SlashCommandCatalog.IsExactCommand(text, candidate));
+        var hasArguments = SlashCommandCatalog.TryGetCommandToken(text, text.Length, out var commandToken, out var invocationHasArguments) && invocationHasArguments;
+        if (command is null && hasArguments)
+            command = _userSlashCommands.FirstOrDefault(candidate => candidate.Name.Equals(commandToken, StringComparison.OrdinalIgnoreCase));
         if (command is null) return false;
 
         SlashCommandPopup.IsOpen = false;
@@ -2069,13 +2101,53 @@ public partial class MainWindow : Window
                     PromptBox.Clear();
                     await ExportConversationAsync(conversation!);
                     break;
-                case SlashCommandAction.InitProject:
+                case SlashCommandAction.OpenCommandsFolder:
+                    PromptBox.Clear();
+                    Directory.CreateDirectory(UserSlashCommandsPath);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = UserSlashCommandsPath,
+                        UseShellExecute = true
+                    });
+                    AgentStatusLabel.Text = $"User slash commands · {UserSlashCommandsPath} · Markdown prompts only; scripts are never run.";
+                    break;
                 case SlashCommandAction.UserPrompt:
+                    if (string.Equals(command.Scope, "template", StringComparison.OrdinalIgnoreCase))
+                    {
+                        command = PromptTemplateCatalog.ToSlashCommands(_promptTemplates, _userSlashCommands.Select(item => item.Name))
+                            .FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase))!;
+                    }
+                    else
+                    {
+                        var loaded = await CustomSlashCommandService.LoadAsync(UserSlashCommandsPath, projectRoot: null, includeProjectCommands: false);
+                        command = loaded.Commands.FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase));
+                    }
+                    if (command is null)
+                    {
+                        AgentStatusLabel.Text = "That custom command is no longer available. Check its Markdown file.";
+                        return true;
+                    }
+                    if (!hasArguments && command.ArgumentNames is { Count: > 0 })
+                    {
+                        PromptBox.Text = $"{command.Name} {string.Join(" ", command.ArgumentNames.Select(argument => argument + "="))}";
+                        PromptBox.CaretIndex = PromptBox.Text.Length;
+                        AgentStatusLabel.Text = "Fill in the named values, then press Enter to insert the expanded prompt for review.";
+                        break;
+                    }
+                    var expanded = CustomSlashCommandService.Expand(command, text);
+                    if (!expanded.Success)
+                    {
+                        AgentStatusLabel.Text = expanded.Error;
+                        break;
+                    }
+                    PromptBox.Text = expanded.Prompt;
+                    PromptBox.CaretIndex = PromptBox.Text.Length;
+                    AgentStatusLabel.Text = "Custom prompt inserted for review; edit it or press Enter when ready. It has not been sent.";
+                    break;
+                case SlashCommandAction.InitProject:
                     PromptBox.Text = command.Prompt ?? "";
                     PromptBox.CaretIndex = PromptBox.Text.Length;
-                    AgentStatusLabel.Text = command.Action == SlashCommandAction.InitProject
-                        ? "Project guidance prompt inserted for review; send it when ready."
-                        : "Saved prompt inserted for review; edit it or send it when ready.";
+                    AgentStatusLabel.Text = "Project guidance prompt inserted for review; send it when ready.";
                     break;
                 default:
                     return false;
@@ -2083,9 +2155,9 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AgentStatusLabel.Text = $"Could not run {command.Name}: {ex.Message}";
+            AgentStatusLabel.Text = $"Could not run {command?.Name ?? "slash command"}: {ex.Message}";
         }
-        if (command.Action != SlashCommandAction.SelectModel) PromptBox.Focus();
+        if (command?.Action != SlashCommandAction.SelectModel) PromptBox.Focus();
         return true;
     }
 
@@ -3762,6 +3834,12 @@ public partial class MainWindow : Window
     {
         if (_active is null || _isClosing) return;
         _active.Draft = PromptBox.Text;
+        if (PromptBox.Text.StartsWith("/", StringComparison.Ordinal))
+        {
+            _slashCommandReloadDebounce.Stop();
+            _slashCommandReloadDebounce.Start();
+        }
+        else _slashCommandReloadDebounce.Stop();
         RefreshSlashCommandSuggestions();
         if (!_applyingFileMention && !SlashCommandPopup.IsOpen) RefreshFileMentionSuggestions();
         DraftStatusLabel.Text = string.IsNullOrEmpty(PromptBox.Text) ? "" : "Saving draft…";
@@ -4353,6 +4431,7 @@ public partial class MainWindow : Window
         _closeFinalizing = true;
         _isClosing = true;
         _draftSaveDebounce.Stop();
+        _slashCommandReloadDebounce.Stop();
         IsEnabled = false;
         _requestCancellation?.Cancel();
         try { await _queueProcessorTask; }

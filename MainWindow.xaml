@@ -156,9 +156,10 @@
                                             <DataTemplate>
                                                 <Button Tag="{Binding}" HorizontalContentAlignment="Stretch" Background="Transparent" Foreground="{DynamicResource MainTextBrush}" BorderThickness="0" Padding="8,6" Click="SlashCommandSuggestion_Click">
                                                     <Grid>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="145"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="145"/><ColumnDefinition Width="*"/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="{Binding Name}" FontFamily="Consolas" VerticalAlignment="Center"/>
                                                         <TextBlock Grid.Column="1" Text="{Binding Description}" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                        <TextBlock Grid.Column="2" Text="{Binding ScopeLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Button>
                                             </DataTemplate>
