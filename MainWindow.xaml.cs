@@ -632,6 +632,44 @@ public partial class MainWindow : Window
                 catch (Exception ex) { ConnectionLabel.Text = $"Could not copy message: {ex.Message}"; }
             };
             menu.Items.Add(copy);
+            var summaryBoundary = message.IsAssistant ? messageIndex + 1 : messageIndex;
+            var canCompact = Codev.ConversationCompactionService.CanCompact(conversation, _activeRequestConversation is not null) &&
+                _requestQueue.Count == 0;
+            if (canCompact && Codev.ConversationCompactionService.IsValidBoundary(conversation.Messages, summaryBoundary) &&
+                summaryBoundary > conversation.CompactionThroughMessageCount)
+            {
+                menu.Items.Add(new Separator());
+                var summarize = new MenuItem { Header = "Summarize up to here" };
+                summarize.Click += async (_, _) => await SummarizeConversationAsync(conversation,
+                    throughMessageCount: summaryBoundary);
+                menu.Items.Add(summarize);
+            }
+            if (canCompact && message.IsUser && string.IsNullOrWhiteSpace(conversation.CompactionSummary))
+            {
+                var defaultBoundary = Codev.ConversationCompactionService.FindBoundary(conversation.Messages);
+                if (Codev.ConversationCompactionService.IsValidRange(conversation.Messages, messageIndex, defaultBoundary))
+                {
+                    var summarizeFrom = new MenuItem { Header = "Summarize from here" };
+                    summarizeFrom.Click += async (_, _) => await SummarizeConversationAsync(conversation,
+                        throughMessageCount: defaultBoundary, fromMessageCount: messageIndex);
+                    menu.Items.Add(summarizeFrom);
+                }
+            }
+            if (canCompact && !string.IsNullOrWhiteSpace(conversation.CompactionSummary))
+            {
+                var fullHistory = new MenuItem { Header = "Restore full history" };
+                fullHistory.Click += async (_, _) =>
+                {
+                    if (!ReferenceEquals(_active, conversation) || _requestQueue.Count > 0 ||
+                        !Codev.ConversationCompactionService.CanCompact(conversation, _activeRequestConversation is not null)) return;
+                    Codev.ConversationCompactionService.Clear(conversation);
+                    await SaveAsync();
+                    UpdateProviderUi(conversation);
+                    RenderMessages();
+                    AgentStatusLabel.Text = "Full conversation history restored for future requests.";
+                };
+                menu.Items.Add(fullHistory);
+            }
             if (_requestCancellation is null && conversation.PendingRequestCount == 0)
             {
                 menu.Items.Add(new Separator());
@@ -806,7 +844,9 @@ public partial class MainWindow : Window
         if (index < 0) return;
         PromptBox.Text = userMessage.Content;
         PromptBox.CaretIndex = PromptBox.Text.Length;
-        conversation.Messages.RemoveRange(index, conversation.Messages.Count - index);
+        Codev.ConversationRewindService.RestoreConversationOnly(conversation, index);
+        UpdateContextUsage(conversation);
+        UpdateProviderUi(conversation);
         RenderMessages();
         _ = SaveAsync();
         PromptBox.Focus();
@@ -1569,8 +1609,9 @@ public partial class MainWindow : Window
             var details = new List<string> { shortModel };
             if (item.LastPromptTokens > 0)
             {
-                var contextLimit = item.LastPromptContext > 0 ? item.LastPromptContext : item.NumCtx > 0 ? item.NumCtx : MaxContextForModel(item.LastPromptModel.Length > 0 ? item.LastPromptModel : item.Model);
-                details.Add($"{FormatTokenCount(item.LastPromptTokens)}/{FormatContextLimit(contextLimit)}");
+                var contextLimit = item.LastPromptContext;
+                details.Add(!CloudModelProviders.IsCloud(string.IsNullOrWhiteSpace(item.LastPromptProvider) ? "ollama" : item.LastPromptProvider) && contextLimit > 0
+                    ? $"{FormatTokenCount(item.LastPromptTokens)}/{FormatContextLimit(contextLimit)}" : $"{FormatTokenCount(item.LastPromptTokens)} tokens");
             }
             if (!string.IsNullOrWhiteSpace(item.ProjectPath)) details.Add(Path.GetFileName(item.ProjectPath));
             if (item.FileChanges.Count > 0) details.Add($"{item.FileChanges.Count} changes");
@@ -1581,7 +1622,14 @@ public partial class MainWindow : Window
             if (SearchPanel.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(SearchBox.Text) && ConversationSearch.FindMessageExcerpt(item, SearchBox.Text) is { } excerpt)
                 caption.Children.Add(new TextBlock { Text = "↳ " + excerpt, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 188, FontSize = 9, Foreground = ThemeBrush("WelcomeAccentBrush"), Margin = new Thickness(0, 2, 0, 0) });
             row.Children.Add(caption);
-            var contextText = item.LastPromptTokens > 0 ? $"Last prompt: {FormatTokenCount(item.LastPromptTokens)} / {FormatContextLimit(item.LastPromptContext > 0 ? item.LastPromptContext : item.NumCtx > 0 ? item.NumCtx : MaxContextForModel(item.LastPromptModel.Length > 0 ? item.LastPromptModel : item.Model))}" : "No prompt usage reported yet";
+            var usageProvider = string.IsNullOrWhiteSpace(item.LastPromptProvider) ? "ollama" : item.LastPromptProvider;
+            var contextLimitForTooltip = item.LastPromptContext;
+            var contextText = item.LastPromptTokens <= 0 ? "No prompt usage reported yet" :
+                CloudModelProviders.IsCloud(usageProvider)
+                    ? $"Last request: {FormatTokenCount(item.LastPromptTokens)} provider-reported input tokens ({usageProvider})"
+                    : contextLimitForTooltip > 0
+                        ? $"Last prompt: {FormatTokenCount(item.LastPromptTokens)} / {FormatContextLimit(contextLimitForTooltip)}"
+                        : $"Last prompt: {FormatTokenCount(item.LastPromptTokens)} tokens; Ollama's model-default context size is unknown";
             button.ToolTip = $"{title}\nModel: {modelLabel}\nWorkspace: {item.ProjectPath ?? "Quick chat"}\n{contextText}\nChanged files: {item.FileChanges.Count}\nLast activity: {item.UpdatedAt.LocalDateTime:g}\n{requestStatus}";
             button.Content = row;
             button.Click += (_, _) => SelectConversation(item);
@@ -2048,9 +2096,11 @@ public partial class MainWindow : Window
         UpdateActiveRequestStatus();
         var shouldNotifyCompletion = false;
         var completionFailed = false;
+        var requestCompleted = false;
         try
         {
             var history = conversation.Messages.Take(assistantIndex).Select(m => new ChatMessage(m.Role, m.Content)).ToList();
+            history = Codev.ConversationCompactionService.BuildPromptHistory(conversation, history).ToList();
             var hosted = CloudModelProviders.IsCloud(turn.Provider);
             if (hosted && !_hostedApiKeys.ContainsKey(turn.Provider))
                 throw new InvalidOperationException("Connect the selected hosted provider again before sending. API keys are held only for the current session.");
@@ -2105,6 +2155,7 @@ public partial class MainWindow : Window
                 await RunChatTurnAsync(conversation, assistantIndex, ollamaHistory, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
                 conversation.Messages[assistantIndex] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
+            requestCompleted = !string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content);
             shouldNotifyCompletion = true;
         }
         catch (OperationCanceledException)
@@ -2134,6 +2185,7 @@ public partial class MainWindow : Window
             RefreshConversationLists();
             UpdateSendControl();
             UpdateActiveRequestStatus();
+            if (requestCompleted && !_isClosing) await OfferCompactionIfNeededAsync(conversation, turn);
             if (shouldNotifyCompletion && !_isClosing && _completionNotificationsEnabled && (!IsActive || !ReferenceEquals(_active, conversation)))
                 ShowCompletionToast(conversation, completionFailed);
         }
@@ -2209,7 +2261,15 @@ public partial class MainWindow : Window
     {
         var messages = history.Select(message => new CloudChatMessage(message.Role, message.Content)).ToArray();
         var output = new StringBuilder();
-        await foreach (var chunk in CloudClient.StreamChatAsync(provider, apiKey, model, messages, cancellationToken))
+        await foreach (var chunk in CloudClient.StreamChatAsync(provider, apiKey, model, messages, cancellationToken,
+            onInputTokenCount: count => Dispatcher.InvokeAsync(() =>
+            {
+                conversation.LastPromptTokens = count;
+                conversation.LastPromptContext = 0;
+                conversation.LastPromptModel = model;
+                conversation.LastPromptProvider = provider;
+                UpdateContextUsage(conversation);
+            }).Task))
         {
             output.Append(chunk);
             var current = output.ToString();
@@ -2239,6 +2299,7 @@ public partial class MainWindow : Window
                 conversation.LastPromptTokens = promptTokens;
                 conversation.LastPromptContext = numCtx;
                 conversation.LastPromptModel = model;
+                conversation.LastPromptProvider = "ollama";
                 UpdateContextUsage(conversation);
             }
             if (json.RootElement.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var chunk))
@@ -2282,6 +2343,7 @@ public partial class MainWindow : Window
                 conversation.LastPromptTokens = promptTokens;
                 conversation.LastPromptContext = numCtx;
                 conversation.LastPromptModel = model;
+                conversation.LastPromptProvider = "ollama";
                 UpdateContextUsage(conversation);
             }
             var message = json.RootElement.GetProperty("message");
@@ -2362,6 +2424,21 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is not OperationCanceledException) { return "Error: " + ex.Message; }
     }
 
+    private async Task OfferCompactionIfNeededAsync(Conversation conversation, QueuedTurn turn)
+    {
+        if (!ReferenceEquals(_active, conversation) || turn.Provider != "ollama" || conversation.LastPromptProvider != "ollama" ||
+            !conversation.LastPromptModel.Equals(turn.Model, StringComparison.OrdinalIgnoreCase)) return;
+        var limit = conversation.LastPromptContext > 0 ? conversation.LastPromptContext : turn.NumCtx;
+        if (limit <= 0 || !Codev.ConversationCompactionService.ShouldOfferCompaction(conversation.LastPromptTokens, limit) ||
+            !Codev.ConversationCompactionService.CanCompact(conversation, false) || _requestQueue.Count > 0) return;
+        var boundary = Codev.ConversationCompactionService.FindBoundary(conversation.Messages, conversation.CompactionThroughMessageCount);
+        if (boundary <= 0) return;
+        var answer = MessageBox.Show(this,
+            $"Ollama used {FormatTokenCount(conversation.LastPromptTokens)} of the selected {FormatContextLimit(limit)} context. Summarize older complete turns and keep the latest {Codev.ConversationCompactionService.KeepRecentTurns} turns? You can review and edit the summary before applying it.",
+            "Conversation context is nearly full", MessageBoxButton.YesNo, MessageBoxImage.Information, MessageBoxResult.No);
+        if (answer == MessageBoxResult.Yes) await SummarizeConversationAsync(conversation);
+    }
+
     private async Task RunOpenAiCodeTaskTurnAsync(Conversation conversation, int assistantIndex,
         IReadOnlyList<ChatMessage> normalizedHistory, QueuedTurn turn, CancellationToken cancellationToken)
     {
@@ -2387,6 +2464,14 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("OpenAI Code task stopped because the provider connection or workspace-sharing consent was removed.");
             SetAgentStatus(conversation, $"OpenAI Code task · thinking · step {round + 1}/8");
             var response = await CloudClient.CreateOpenAiToolResponseAsync(apiKey, turn.Model, input, tools, cancellationToken);
+            if (response.InputTokens is { } inputTokens)
+            {
+                conversation.LastPromptTokens = inputTokens;
+                conversation.LastPromptContext = 0;
+                conversation.LastPromptModel = turn.Model;
+                conversation.LastPromptProvider = turn.Provider;
+                UpdateContextUsage(conversation);
+            }
             if (response.FunctionCalls.Count == 0)
             {
                 if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
@@ -2466,6 +2551,138 @@ public partial class MainWindow : Window
         {
             return CommandApprovalOutcome.Rejected;
         }
+    }
+
+    private async Task SummarizeConversationAsync(Conversation conversation, int? throughMessageCount = null, int? fromMessageCount = null)
+    {
+        if (!ReferenceEquals(_active, conversation) || !Codev.ConversationCompactionService.CanCompact(conversation, _activeRequestConversation is not null) ||
+            _requestQueue.Count > 0)
+        {
+            AgentStatusLabel.Text = "Wait for queued requests to finish before summarizing history.";
+            return;
+        }
+        var through = throughMessageCount ?? Codev.ConversationCompactionService.FindBoundary(conversation.Messages, conversation.CompactionThroughMessageCount);
+        var from = fromMessageCount ?? (string.IsNullOrWhiteSpace(conversation.CompactionSummary) ? 0 : conversation.CompactionFromMessageCount);
+        if (!Codev.ConversationCompactionService.IsValidRange(conversation.Messages, from, through) ||
+            (string.IsNullOrWhiteSpace(conversation.CompactionSummary) ? through <= from :
+                from != conversation.CompactionFromMessageCount || through <= conversation.CompactionThroughMessageCount))
+        {
+            AgentStatusLabel.Text = "Choose complete conversation turns outside the already summarized range.";
+            return;
+        }
+
+        try
+        {
+            var source = Codev.ConversationCompactionService.BuildSummaryMessages(conversation, through, from);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var summary = new StringBuilder();
+            if (Codev.CloudModelProviders.IsCloud(conversation.Provider))
+            {
+                if (!_hostedApiKeys.TryGetValue(conversation.Provider, out var key))
+                    throw new InvalidOperationException("Reconnect the hosted provider before summarizing with its model.");
+                var messages = source.Select(message => new CloudChatMessage(message.Role, message.Content)).ToArray();
+                await foreach (var delta in CloudClient.StreamChatAsync(conversation.Provider, key, conversation.Model,
+                    messages, timeout.Token, maxOutputTokens: 1500))
+                {
+                    summary.Append(delta);
+                    if (summary.Length > Codev.ConversationCompactionService.MaxSummaryCharacters)
+                        throw new InvalidOperationException("The generated summary exceeded the safe size limit.");
+                }
+            }
+            else
+            {
+                var context = conversation.NumCtx > 0 ? conversation.NumCtx : Math.Min(MaxContextForModel(conversation.Model), 32768);
+                var payload = new Dictionary<string, object>
+                {
+                    ["model"] = conversation.Model,
+                    ["messages"] = source,
+                    ["stream"] = false,
+                    ["think"] = false,
+                    ["options"] = new Dictionary<string, object> { ["num_predict"] = 1500, ["num_ctx"] = context }
+                };
+                using var response = await Http.PostAsJsonAsync(OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"), payload, timeout.Token);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
+                using var result = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
+                if (!result.RootElement.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var content))
+                    throw new InvalidOperationException("Ollama returned no summary text.");
+                summary.Append(content.GetString());
+            }
+            if (string.IsNullOrWhiteSpace(summary.ToString())) throw new InvalidOperationException("The selected model returned an empty summary.");
+            var proposal = new Codev.ConversationCompactionProposal(conversation.Id, through, summary.ToString().Trim(),
+                Math.Max(0, (through - (string.IsNullOrWhiteSpace(conversation.CompactionSummary) ? from : conversation.CompactionThroughMessageCount)) / 2),
+                Math.Max(0, (conversation.Messages.Count - through) / 2), from);
+            var editedSummary = ShowCompactionProposal(proposal);
+            if (editedSummary is null) return;
+            if (!ReferenceEquals(_active, conversation) || !Codev.ConversationCompactionService.Apply(conversation,
+                proposal with { Summary = editedSummary }, _activeRequestConversation is not null))
+            {
+                AgentStatusLabel.Text = "The conversation changed; the summary was not applied.";
+                return;
+            }
+            await SaveAsync();
+            UpdateProviderUi(conversation);
+            RenderMessages();
+            AgentStatusLabel.Text = $"Summarized {proposal.CompactedTurns} earlier turns. The original transcript remains available.";
+        }
+        catch (OperationCanceledException)
+        {
+            AgentStatusLabel.Text = "Summarization timed out after three minutes. The conversation is unchanged.";
+        }
+        catch (Exception ex)
+        {
+            AgentStatusLabel.Text = $"Could not summarize conversation: {ex.Message}";
+        }
+    }
+
+    private string? ShowCompactionProposal(Codev.ConversationCompactionProposal proposal)
+    {
+        var dialog = new Window
+        {
+            Title = "Review conversation summary", Width = 760, Height = 620, MinWidth = 580, MinHeight = 420,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this,
+            Background = ThemeBrush("MainSurfaceBrush"), Foreground = ThemeBrush("MainTextBrush"), ResizeMode = ResizeMode.CanResize
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var rangeStart = proposal.FromMessageCount + 1;
+        var rangeEnd = proposal.ThroughMessageCount;
+        layout.Children.Add(new TextBlock
+        {
+            Text = $"Review and edit the summary for conversation messages {rangeStart}–{rangeEnd}. Applying it changes future requests only; the transcript, export, and backups stay intact.",
+            TextWrapping = TextWrapping.Wrap, Foreground = ThemeBrush("MutedTextBrush"), Margin = new Thickness(0, 0, 0, 12)
+        });
+        var summaryBox = new TextBox
+        {
+            Text = proposal.Summary, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            FontSize = 13, Foreground = ThemeBrush("InputTextBrush"), Background = ThemeBrush("ComposerBrush"),
+            BorderBrush = ThemeBrush("ComposerBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(10)
+        };
+        Grid.SetRow(summaryBox, 2);
+        layout.Children.Add(summaryBox);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+        var cancel = new Button { Content = "Cancel", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var apply = new Button { Content = "Apply summary", Style = (Style)FindResource("SoftButton"), Padding = new Thickness(14, 7, 14, 7), IsDefault = true };
+        apply.Click += (_, args) =>
+        {
+            if (string.IsNullOrWhiteSpace(summaryBox.Text) || summaryBox.Text.Trim().Length > Codev.ConversationCompactionService.MaxSummaryCharacters)
+            {
+                MessageBox.Show(dialog, $"Enter a summary of 1–{Codev.ConversationCompactionService.MaxSummaryCharacters:N0} characters.", "Summary required", MessageBoxButton.OK, MessageBoxImage.Information);
+                args.Handled = true;
+                return;
+            }
+            dialog.DialogResult = true;
+        };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(apply);
+        Grid.SetRow(buttons, 3);
+        layout.Children.Add(buttons);
+        dialog.Content = layout;
+        return dialog.ShowDialog() == true ? summaryBox.Text.Trim() : null;
     }
 
     private string UpdateTaskChecklistFromModel(JsonElement arguments, Conversation conversation)
@@ -2795,11 +3012,23 @@ public partial class MainWindow : Window
             return;
         }
         if (_requestCancellation is not null && ReferenceEquals(_activeRequestConversation, _active))
-            AgentStatusLabel.Text = (_activeRequestIsCodeTask ? "Code task · Running locally…" : "Generating locally…") + (_queuePaused && _requestQueue.Count > 0 ? " · queue paused" : "");
+        {
+            var running = _activeRequestConversation;
+            var providerLabel = running is not null && CloudModelProviders.IsCloud(running.Provider)
+                ? running.Provider == CloudModelProviders.OpenAI ? "OpenAI" : "Anthropic"
+                : "locally";
+            AgentStatusLabel.Text = _activeRequestIsCodeTask
+                ? $"Code task · Running with {providerLabel}…" + (_queuePaused && _requestQueue.Count > 0 ? " · queue paused" : "")
+                : $"Generating {providerLabel}…" + (_queuePaused && _requestQueue.Count > 0 ? " · queue paused" : "");
+        }
         else if (_queuePaused && _requestQueue.Count > 0)
             AgentStatusLabel.Text = $"Queue paused · {_requestQueue.Count} request(s) waiting";
         else if (_active.PendingRequestCount > 0)
-            AgentStatusLabel.Text = $"Queued · {_active.PendingRequestCount} request(s) waiting for Ollama";
+            AgentStatusLabel.Text = $"Queued · {_active.PendingRequestCount} request(s) waiting for the selected model";
+        else if (_active.Provider == "ollama" && _active.LastPromptProvider == "ollama" && _active.LastPromptTokens > 0 &&
+                 _active.LastPromptContext <= 0 &&
+                 _active.LastPromptModel.Equals(_active.Model, StringComparison.OrdinalIgnoreCase))
+            AgentStatusLabel.Text = "Latest Ollama request used an unknown model-default context · choose CTX for the next request or summarize older messages";
         else AgentStatusLabel.Text = "Your conversations and model requests stay on this device.";
     }
 
@@ -3085,7 +3314,7 @@ public partial class MainWindow : Window
 
     private void UpdateProviderUi(Conversation conversation)
     {
-        ConversationPrivacyLabel.Text = conversation.Provider switch
+        var label = conversation.Provider switch
         {
             CloudModelProviders.OpenAI => conversation.IsCodeTask
                 ? "OpenAI Code task · workspace files and tool results may be sent"
@@ -3093,6 +3322,8 @@ public partial class MainWindow : Window
             CloudModelProviders.Anthropic => "Hosted · chat sent to Anthropic API (Claude)",
             _ => "Private · running on your machine"
         };
+        if (!string.IsNullOrWhiteSpace(conversation.CompactionSummary)) label += " · history summarized";
+        ConversationPrivacyLabel.Text = label;
     }
 
     private void RefreshContextPicker(Conversation? conversation)
@@ -3124,12 +3355,20 @@ public partial class MainWindow : Window
     private void UpdateContextUsage(Conversation conversation)
     {
         if (!ReferenceEquals(_active, conversation)) return;
-        var model = conversation.LastPromptTokens > 0 && !string.IsNullOrWhiteSpace(conversation.LastPromptModel) ? conversation.LastPromptModel : conversation.Model;
-        var limit = conversation.LastPromptContext > 0 ? conversation.LastPromptContext : conversation.NumCtx > 0 ? conversation.NumCtx : MaxContextForModel(model);
-        ContextUsageLabel.Text = conversation.LastPromptTokens > 0 ? $"{FormatTokenCount(conversation.LastPromptTokens)} / {FormatContextLimit(limit)}" : "";
-        ContextUsageLabel.ToolTip = conversation.LastPromptTokens > 0
-            ? "Latest prompt and conversation history token count reported by Ollama. The denominator is the selected request context size."
-            : "Ollama reports context use after the first response.";
+        var provider = string.IsNullOrWhiteSpace(conversation.LastPromptProvider) ? "ollama" : conversation.LastPromptProvider;
+        var matchesCurrent = conversation.LastPromptTokens > 0 &&
+            (string.IsNullOrWhiteSpace(conversation.LastPromptModel) || conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase)) &&
+            provider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase);
+        var limit = conversation.LastPromptContext;
+        ContextUsageLabel.Text = !matchesCurrent ? "" : CloudModelProviders.IsCloud(provider)
+            ? $"{FormatTokenCount(conversation.LastPromptTokens)} input tokens"
+            : limit > 0 ? $"{FormatTokenCount(conversation.LastPromptTokens)} / {FormatContextLimit(limit)}" : $"{FormatTokenCount(conversation.LastPromptTokens)} tokens";
+        ContextUsageLabel.ToolTip = !matchesCurrent ? "Prompt usage appears after the first response for this model." :
+            CloudModelProviders.IsCloud(provider)
+                ? $"Input token count reported by {provider}; hosted providers manage their own context limits."
+                : limit > 0
+                    ? "Latest prompt and conversation history token count reported by Ollama. The denominator is the selected request context size."
+                    : "Ollama reported prompt usage, but the latest request's model-default context size is unknown. Choose an explicit size for the next request or summarize older messages manually.";
     }
 
     private static string FormatTokenCount(int tokens) => tokens >= 1000 ? $"{tokens / 1000d:0.#}k" : tokens.ToString();
