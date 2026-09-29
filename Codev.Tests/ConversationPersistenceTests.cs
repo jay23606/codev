@@ -15,6 +15,7 @@ public sealed class ConversationPersistenceTests
         var turn = new PersistedQueuedTurn(1, "model-a", 8192, false, false, null,
             ["src/a.cs"], ["private"], DateTimeOffset.UnixEpoch, OutputStyle: ConversationOutputStyles.CodeOnly, ThinkEnabled: true,
             TopP: 0.8, TopK: 40, PresencePenalty: 0.2, RepeatPenalty: 1.1, NumPredict: 4096);
+        turn = turn with { OpenAiReasoningEffort = "high", OpenAiVerbosity = "low" };
         var source = new Conversation
         {
             Title = "Snapshot",
@@ -30,6 +31,8 @@ public sealed class ConversationPersistenceTests
             PresencePenalty = 0.2,
             RepeatPenalty = 1.1,
             NumPredict = 4096,
+            OpenAiReasoningEffort = "HIGH",
+            OpenAiVerbosity = "low",
             OutputStyle = ConversationOutputStyles.Explanatory,
             AllowHostedCodeTask = true,
             IncludeProjectContextForHosted = true,
@@ -71,6 +74,8 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(0.2, snapshot.PresencePenalty);
         Assert.Equal(1.1, snapshot.RepeatPenalty);
         Assert.Equal(4096, snapshot.NumPredict);
+        Assert.Equal("high", snapshot.OpenAiReasoningEffort);
+        Assert.Equal("low", snapshot.OpenAiVerbosity);
         Assert.Equal(ConversationOutputStyles.Explanatory, snapshot.OutputStyle);
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.True(snapshot.AllowHostedCodeTask);
@@ -97,5 +102,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(0.2, snapshot.PendingTurns[0].PresencePenalty);
         Assert.Equal(1.1, snapshot.PendingTurns[0].RepeatPenalty);
         Assert.Equal(4096, snapshot.PendingTurns[0].NumPredict);
+        Assert.Equal("high", snapshot.PendingTurns[0].OpenAiReasoningEffort);
+        Assert.Equal("low", snapshot.PendingTurns[0].OpenAiVerbosity);
     }
 }

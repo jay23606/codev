@@ -27,6 +27,8 @@ public static class ConversationPersistence
             PresencePenalty = ConversationSamplingSettings.NormalizePenalty(conversation.PresencePenalty),
             RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(conversation.RepeatPenalty),
             NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(conversation.NumPredict),
+            OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(conversation.OpenAiReasoningEffort),
+            OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(conversation.OpenAiVerbosity),
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptOutputTokens = conversation.LastPromptOutputTokens,
             LastPromptContext = conversation.LastPromptContext,
@@ -53,7 +55,9 @@ public static class ConversationPersistence
                 TopK = ConversationSamplingSettings.NormalizeTopK(turn.TopK),
                 PresencePenalty = ConversationSamplingSettings.NormalizePenalty(turn.PresencePenalty),
                 RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(turn.RepeatPenalty),
-                NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(turn.NumPredict)
+                NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(turn.NumPredict),
+                OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(turn.OpenAiReasoningEffort),
+                OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(turn.OpenAiVerbosity)
             }).ToList() ?? []
         }).ToList();
     }

@@ -28,6 +28,8 @@ public static class ConversationBackupService
             PresencePenalty = ConversationSamplingSettings.NormalizePenalty(conversation.PresencePenalty),
             RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(conversation.RepeatPenalty),
             NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(conversation.NumPredict),
+            OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(conversation.OpenAiReasoningEffort),
+            OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(conversation.OpenAiVerbosity),
             LastPromptTokens = conversation.LastPromptTokens,
             LastPromptOutputTokens = conversation.LastPromptOutputTokens,
             LastPromptContext = conversation.LastPromptContext,
@@ -97,6 +99,8 @@ public static class ConversationBackupService
             item.PresencePenalty = ConversationSamplingSettings.NormalizePenalty(item.PresencePenalty);
             item.RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(item.RepeatPenalty);
             item.NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(item.NumPredict);
+            item.OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(item.OpenAiReasoningEffort);
+            item.OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(item.OpenAiVerbosity);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;
             item.PendingTurns = [];

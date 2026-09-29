@@ -127,6 +127,28 @@ public sealed class CloudModelApiClientTests
     }
 
     [Fact]
+    public async Task Openai_chat_stream_includes_selected_reasoning_effort_and_verbosity()
+    {
+        string? body = null;
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("data: {\"type\":\"response.completed\"}\n\n", Encoding.UTF8, "text/event-stream")
+            };
+        }));
+
+        await foreach (var _ in new CloudModelApiClient(http).StreamChatAsync(
+                           CloudModelProviders.OpenAI, "key", "gpt-5.4", [new("user", "hello")],
+                           reasoningEffort: "high", verbosity: "low")) { }
+
+        using var payload = JsonDocument.Parse(body!);
+        Assert.Equal("high", payload.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        Assert.Equal("low", payload.RootElement.GetProperty("text").GetProperty("verbosity").GetString());
+    }
+
+    [Fact]
     public async Task Openai_responses_tool_calls_keep_response_items_and_usage_without_leaking_key()
     {
         HttpRequestMessage? observed = null;

@@ -29,7 +29,7 @@ public sealed class OpenAiCodeTaskRunnerTests
         var transcriptUpdates = new List<string>();
         var requestPayloadSnapshots = new List<string>();
 
-        var result = await runner.RunAsync("gpt-test", [new { role = "user", content = "list files" }],
+        var result = await runner.RunAsync("gpt-5.4", [new { role = "user", content = "list files" }],
             [new { type = "function", name = "list_files" }],
             (step, _, _) => Task.FromResult($"api-key-{step}"),
             (name, arguments, _) =>
@@ -42,7 +42,8 @@ public sealed class OpenAiCodeTaskRunnerTests
             (_, _, _) => Task.FromResult(false),
             onResponse: (_, usage) => { reportedUsage.Add(usage); return Task.CompletedTask; },
             onRequestPayload: body => { requestPayloadSnapshots.Add(body); return Task.CompletedTask; },
-            onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; });
+            onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; },
+            reasoningEffort: "high", verbosity: "low");
 
         Assert.Equal(2, requests.Count);
         Assert.Equal(2, requestPayloadSnapshots.Count);
@@ -50,6 +51,11 @@ public sealed class OpenAiCodeTaskRunnerTests
         Assert.False(requests[0].RootElement.GetProperty("store").GetBoolean());
         Assert.Equal(requests[0].RootElement.GetRawText(), requestPayloadSnapshots[0]);
         Assert.Equal(requests[1].RootElement.GetRawText(), requestPayloadSnapshots[1]);
+        Assert.All(requests, request =>
+        {
+            Assert.Equal("high", request.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+            Assert.Equal("low", request.RootElement.GetProperty("text").GetProperty("verbosity").GetString());
+        });
         Assert.Equal(1, toolExecutions);
         var followUpInput = requests[1].RootElement.GetProperty("input").EnumerateArray().ToArray();
         Assert.Equal("function_call", followUpInput[1].GetProperty("type").GetString());

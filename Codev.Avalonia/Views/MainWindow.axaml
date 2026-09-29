@@ -182,7 +182,7 @@
                                     <MenuItem Header="Full width" IsChecked="{Binding IsFullReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="0" ToggleType="Radio" />
                                 </MenuItem>
                                 <Separator />
-                                <MenuItem Header="Advanced model settings…" Click="AdvancedModelSettings_Click" IsEnabled="{Binding IsLocalModel}" />
+                                <MenuItem Header="Advanced model settings…" Click="AdvancedModelSettings_Click" IsEnabled="{Binding CanOpenAdvancedModelSettings}" />
                                 <MenuItem Header="Thinking mode" ToggleType="CheckBox" IsChecked="{Binding ThinkEnabled, Mode=TwoWay}" IsEnabled="{Binding IsLocalModel}" />
                                 <MenuItem Header="Loaded models and memory…" Click="LoadedModels_Click" />
                                 <MenuItem Header="Prompt templates…" Click="PromptTemplates_Click" />

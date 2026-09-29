@@ -648,6 +648,53 @@ public partial class MainWindow : Window
     private async void AdvancedModelSettings_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation) return;
+        if (!viewModel.IsLocalModel)
+        {
+            if (viewModel.Provider != Codev.CloudModelProviders.OpenAI ||
+                !Codev.OpenAiGenerationSettings.SupportsReasoningControls(conversation.Model)) return;
+            var primary = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#ECECEC" : "#262522"));
+            var secondary = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#B0B0B0" : "#65625D"));
+            var effort = OpenAiSetting(conversation.OpenAiReasoningEffort);
+            var verbosity = OpenAiSetting(conversation.OpenAiVerbosity);
+            var content = new StackPanel { Spacing = 12, Margin = new Thickness(20), Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#191919" : "#F5F4F1")) };
+            content.Children.Add(new TextBlock { Text = "These optional controls apply to GPT-5 and o-series OpenAI models. Model default leaves the corresponding API field out of the request.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = secondary, MaxWidth = 420 });
+            AddOpenAiSetting(content, "Reasoning effort", effort, "Low is faster and uses fewer reasoning tokens; high can help with harder coding tasks.", primary, secondary);
+            AddOpenAiSetting(content, "Response verbosity", verbosity, "Low produces more concise answers; high gives more explanation.", primary, secondary);
+            var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+            var openAiDialog = new Window { Title = "OpenAI generation settings", Width = 480, Height = 360, MinHeight = 320, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = content.Background, Foreground = primary };
+            var resetOpenAi = new Button { Content = "Use model defaults", Classes = { "soft" } };
+            resetOpenAi.Click += (_, _) => { viewModel.SetOpenAiGenerationSettings(null, null); openAiDialog.Close(); };
+            actions.Children.Add(resetOpenAi);
+            actions.Children.Add(new Button { Content = "Cancel", IsCancel = true });
+            var saveOpenAi = new Button { Content = "Save", IsDefault = true };
+            saveOpenAi.Click += (_, _) =>
+            {
+                viewModel.SetOpenAiGenerationSettings(SelectedOpenAiSetting(effort), SelectedOpenAiSetting(verbosity));
+                openAiDialog.Close();
+            };
+            actions.Children.Add(saveOpenAi);
+            content.Children.Add(actions);
+            openAiDialog.Content = new Border { Background = content.Background, Child = content };
+            await openAiDialog.ShowDialog(this);
+            return;
+
+            static ComboBox OpenAiSetting(string? selected)
+            {
+                var picker = new ComboBox { ItemsSource = new[] { "Model default", "Low", "Medium", "High" }, MinWidth = 180 };
+                picker.SelectedItem = selected is null ? "Model default" : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(selected);
+                return picker;
+            }
+
+            static void AddOpenAiSetting(StackPanel panel, string label, ComboBox picker, string hint,
+                global::Avalonia.Media.IBrush primaryBrush, global::Avalonia.Media.IBrush secondaryBrush)
+            {
+                panel.Children.Add(new TextBlock { Text = label, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Foreground = primaryBrush });
+                panel.Children.Add(new TextBlock { Text = hint, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = secondaryBrush });
+                panel.Children.Add(picker);
+            }
+
+            static string? SelectedOpenAiSetting(ComboBox picker) => picker.SelectedItem is string value && value != "Model default" ? value : null;
+        }
         var primaryLabelBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#ECECEC" : "#262522"));
         var secondaryLabelBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#B0B0B0" : "#65625D"));
         var hints = new Dictionary<string, string>(StringComparer.Ordinal)

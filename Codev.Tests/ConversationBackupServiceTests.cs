@@ -28,6 +28,8 @@ public sealed class ConversationBackupServiceTests
             PresencePenalty = 0.2,
             RepeatPenalty = 1.1,
             NumPredict = 4096,
+            OpenAiReasoningEffort = "high",
+            OpenAiVerbosity = "low",
             LastPromptTokens = 321,
             LastPromptOutputTokens = 123,
             CompactionSummary = "Earlier decisions and user goal.",
@@ -59,6 +61,8 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(source.PresencePenalty, imported.PresencePenalty);
         Assert.Equal(source.RepeatPenalty, imported.RepeatPenalty);
         Assert.Equal(source.NumPredict, imported.NumPredict);
+        Assert.Equal("high", imported.OpenAiReasoningEffort);
+        Assert.Equal("low", imported.OpenAiVerbosity);
         Assert.Equal(321, imported.LastPromptTokens);
         Assert.Equal(123, imported.LastPromptOutputTokens);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);

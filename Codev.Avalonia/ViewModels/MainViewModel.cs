@@ -213,6 +213,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IsLocalModel));
                 OnPropertyChanged(nameof(IsHostedModel));
                 OnPropertyChanged(nameof(IsOpenAIModel));
+                OnPropertyChanged(nameof(CanOpenAdvancedModelSettings));
                 OnPropertyChanged(nameof(CanOpenProjectActions));
                 OnPropertyChanged(nameof(ProviderStatusLabel));
                 OnPropertyChanged(nameof(IsPlanMode));
@@ -442,7 +443,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (string.IsNullOrWhiteSpace(value) || string.Equals(Model, value, StringComparison.OrdinalIgnoreCase)) return;
             if (ActiveConversation is null) SetProperty(ref _model, value);
-            else { ActiveConversation.Model = value; ActiveConversation.Provider = "ollama"; OnPropertyChanged(); OnPropertyChanged(nameof(Provider)); OnPropertyChanged(nameof(IsLocalModel)); OnPropertyChanged(nameof(ProviderStatusLabel)); OnPropertyChanged(nameof(SelectedModel)); Persist(); }
+            else { ActiveConversation.Model = value; ActiveConversation.Provider = "ollama"; OnPropertyChanged(); OnPropertyChanged(nameof(Provider)); OnPropertyChanged(nameof(IsLocalModel)); OnPropertyChanged(nameof(CanOpenAdvancedModelSettings)); OnPropertyChanged(nameof(ProviderStatusLabel)); OnPropertyChanged(nameof(SelectedModel)); Persist(); }
             _provider = "ollama";
             RefreshContextSizes(value);
             RefreshContextEstimate();
@@ -454,6 +455,8 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsLocalModel => Provider == "ollama";
     public bool IsHostedModel => Codev.CloudModelProviders.IsCloud(Provider);
     public bool IsOpenAIModel => Provider == Codev.CloudModelProviders.OpenAI;
+    public bool CanOpenAdvancedModelSettings => IsLocalModel ||
+        (IsOpenAIModel && Codev.OpenAiGenerationSettings.SupportsReasoningControls(ActiveConversation?.Model));
     public bool CanOpenProjectActions => HasProject || IsOpenAIModel;
 
     public string OutputStyle
@@ -485,7 +488,8 @@ public sealed class MainViewModel : ViewModelBase
 
     public string AdvancedModelSettingsLabel => ActiveConversation is { } conversation &&
         (conversation.Temperature.HasValue || conversation.TopP.HasValue || conversation.TopK.HasValue ||
-         conversation.PresencePenalty.HasValue || conversation.RepeatPenalty.HasValue || conversation.NumPredict.HasValue)
+         conversation.PresencePenalty.HasValue || conversation.RepeatPenalty.HasValue || conversation.NumPredict.HasValue ||
+         conversation.OpenAiReasoningEffort is not null || conversation.OpenAiVerbosity is not null)
         ? "Advanced ·" : "Advanced";
 
     public void SetSamplingSettings(double? temperature, double? topP, int? topK,
@@ -498,6 +502,15 @@ public sealed class MainViewModel : ViewModelBase
         conversation.PresencePenalty = Codev.ConversationSamplingSettings.NormalizePenalty(presencePenalty);
         conversation.RepeatPenalty = Codev.ConversationSamplingSettings.NormalizePenalty(repeatPenalty);
         conversation.NumPredict = Codev.ConversationSamplingSettings.NormalizeOutputTokens(numPredict);
+        OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
+        Persist();
+    }
+
+    public void SetOpenAiGenerationSettings(string? reasoningEffort, string? verbosity)
+    {
+        if (ActiveConversation is not { } conversation) return;
+        conversation.OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(reasoningEffort);
+        conversation.OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(verbosity);
         OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
         Persist();
     }
@@ -1029,6 +1042,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsLocalModel));
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(IsOpenAIModel));
+            OnPropertyChanged(nameof(CanOpenAdvancedModelSettings));
             OnPropertyChanged(nameof(CanOpenProjectActions));
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
@@ -1047,6 +1061,7 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsLocalModel));
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(IsOpenAIModel));
+            OnPropertyChanged(nameof(CanOpenAdvancedModelSettings));
             OnPropertyChanged(nameof(CanOpenProjectActions));
             OnPropertyChanged(nameof(ProviderStatusLabel));
             OnPropertyChanged(nameof(SelectedModel));
@@ -1893,7 +1908,8 @@ public sealed class MainViewModel : ViewModelBase
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
             conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
             conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle, conversation.ThinkEnabled,
-            conversation.TopP, conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, conversation.NumPredict);
+            conversation.TopP, conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, conversation.NumPredict,
+            OpenAiReasoningEffort: conversation.OpenAiReasoningEffort, OpenAiVerbosity: conversation.OpenAiVerbosity);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -2020,7 +2036,8 @@ public sealed class MainViewModel : ViewModelBase
                     throw new InvalidOperationException("Reconnect the hosted provider before compacting with its model.");
                 var messages = sourceMessages.Select(message => new Codev.CloudChatMessage(message.Role, message.Content)).ToArray();
                 await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
-                    conversation.Provider, key, conversation.Model, messages, timeout.Token, maxOutputTokens: 1500))
+                    conversation.Provider, key, conversation.Model, messages, timeout.Token, maxOutputTokens: 1500,
+                    reasoningEffort: conversation.OpenAiReasoningEffort, verbosity: conversation.OpenAiVerbosity))
                 {
                     summary.Append(delta);
                     if (summary.Length > Codev.ConversationCompactionService.MaxSummaryCharacters)
@@ -2380,7 +2397,8 @@ public sealed class MainViewModel : ViewModelBase
                 Persist();
             });
         },
-        cancellationToken: cancellationToken);
+        cancellationToken: cancellationToken,
+        reasoningEffort: turn.OpenAiReasoningEffort, verbosity: turn.OpenAiVerbosity);
         var finalTranscript = result.Transcript;
         if (conversation.TaskChecklist.Count > 0)
             finalTranscript += Environment.NewLine + Environment.NewLine + "**Task checklist**" + Environment.NewLine + Environment.NewLine + Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist);
@@ -2529,7 +2547,8 @@ public sealed class MainViewModel : ViewModelBase
                     new Codev.CloudChatMessage("user", input)
                 };
                 await foreach (var delta in new Codev.CloudModelApiClient(_http).StreamChatAsync(
-                                   turn.Provider, key, turn.Model, messages, cancellationToken, maxOutputTokens: 256))
+                                   turn.Provider, key, turn.Model, messages, cancellationToken, maxOutputTokens: 256,
+                                   reasoningEffort: turn.OpenAiReasoningEffort, verbosity: turn.OpenAiVerbosity))
                 {
                     if (result.Length + delta.Length > Codev.ProjectPathRuleRelevanceSelection.MaxResponseCharacters) return [];
                     result.Append(delta);
@@ -2733,7 +2752,8 @@ public sealed class MainViewModel : ViewModelBase
                                        conversation, savedTurn.Provider, savedTurn.Model, 0, inputTokens),
                                    onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
                                    onOutputTokenCount: outputTokens => RecordPromptOutputTokenUsageAsync(
-                                       conversation, savedTurn.Provider, savedTurn.Model, outputTokens)))
+                                       conversation, savedTurn.Provider, savedTurn.Model, outputTokens),
+                                   reasoningEffort: savedTurn.OpenAiReasoningEffort, verbosity: savedTurn.OpenAiVerbosity))
                 {
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
                 }
@@ -3188,6 +3208,7 @@ public sealed class MainViewModel : ViewModelBase
                     OnPropertyChanged(nameof(IsLocalModel));
                     OnPropertyChanged(nameof(IsHostedModel));
                     OnPropertyChanged(nameof(IsOpenAIModel));
+                    OnPropertyChanged(nameof(CanOpenAdvancedModelSettings));
                     OnPropertyChanged(nameof(CanOpenProjectActions));
                     OnPropertyChanged(nameof(ProviderStatusLabel));
                     OnPropertyChanged(nameof(IsCodeTask));
@@ -3293,6 +3314,13 @@ public sealed class MainViewModel : ViewModelBase
             foreach (var conversation in JsonSerializer.Deserialize<List<Codev.Conversation>>(File.ReadAllText(StorePath)) ?? [])
             {
                 conversation.PendingDiffComments ??= [];
+                conversation.OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(conversation.OpenAiReasoningEffort);
+                conversation.OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(conversation.OpenAiVerbosity);
+                conversation.PendingTurns = conversation.PendingTurns?.Select(turn => turn with
+                {
+                    OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(turn.OpenAiReasoningEffort),
+                    OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(turn.OpenAiVerbosity)
+                }).ToList() ?? [];
                 _conversations.Add(conversation);
                 if (conversation.LastPromptTokens > 0 && conversation.Messages.LastOrDefault()?.IsAssistant == true)
                     _lastPromptMessageCounts[conversation.Id] = conversation.Messages.Count;
