@@ -160,6 +160,42 @@ public sealed class OpenAiCodeTaskRunnerTests
     }
 
     [Fact]
+    public async Task Keeps_completed_usage_and_tool_transcript_when_the_next_openai_round_is_interrupted()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new ResponseHandler(_ =>
+        {
+            requests++;
+            if (requests == 1)
+                return OpenAiSse("""
+                    {"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"list_files","arguments":"{}"}],"usage":{"input_tokens":12,"output_tokens":4}}
+                    """);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Partial follow-up\"}\n\n",
+                    Encoding.UTF8, "text/event-stream")
+            };
+        }));
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+        var reportedUsage = new List<OpenAiCodeTaskUsage?>();
+        var transcriptUpdates = new List<string>();
+
+        await Assert.ThrowsAsync<IOException>(() => runner.RunAsync("gpt-test",
+            [new { role = "user", content = "list files" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => Task.FromResult("[\"src\"]"),
+            (_, _, _) => Task.FromResult(false),
+            onResponse: (_, usage) => { reportedUsage.Add(usage); return Task.CompletedTask; },
+            onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; }));
+
+        Assert.Equal(2, requests);
+        Assert.Equal(new OpenAiCodeTaskUsage(12, 4, 1, 1, 1), Assert.Single(reportedUsage));
+        Assert.Contains(transcriptUpdates, text => text.Contains("**list files**", StringComparison.Ordinal) &&
+            text.Contains("src", StringComparison.Ordinal) && text.Contains("Partial follow-up", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Publishes_openai_code_task_text_before_the_response_completes()
     {
         using var http = new HttpClient(new ResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
