@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly List<ModelOption> _models = [];
     private readonly Dictionary<string, string> _hostedApiKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<ModelOption>> _hostedModels = new(StringComparer.Ordinal);
+    private readonly Dictionary<Guid, PromptContextSnapshot> _lastPromptContexts = [];
     private static readonly CloudModelApiClient CloudClient = new(Http);
     private static readonly ICloudApiKeyVault HostedApiKeyVault = new CloudApiKeyVault();
     private readonly List<ContextOption> _contextSizes = [new(0, "Model default"), new(8192, "8K"), new(16384, "16K"), new(24576, "24K"), new(32768, "32K"), new(49152, "48K"), new(65536, "64K"), new(98304, "96K")];
@@ -2111,13 +2112,25 @@ public partial class MainWindow : Window
                 : turn.IsPlanMode
                     ? "You are Codev in read-only Plan mode. Give a concise, ordered implementation plan with key files, risks, and checks. Do not edit files, run commands, or claim that any work has been done. Ask a short clarifying question only if a missing detail blocks a useful plan."
                     : "You are Codev, a practical coding assistant. Be concise, explain decisions plainly, and focus on useful implementation details. The user is chatting through a local desktop app. Do not claim you changed files or ran commands; this mode is read-only.";
+            var promptComponents = new List<PromptContextSection> { new("System instructions", system) };
             var personalInstructions = hosted ? "" : PersonalAgentInstructions.Build(_personalInstructions);
-            if (!string.IsNullOrWhiteSpace(personalInstructions)) system += "\n\n" + personalInstructions;
+            if (!string.IsNullOrWhiteSpace(personalInstructions))
+            {
+                system += "\n\n" + personalInstructions;
+                promptComponents.Add(new PromptContextSection("Personal instructions", personalInstructions));
+            }
             var project = conversation.ProjectPath is null || (hosted && !turn.IsCodeTask) ? null : EnsureProject(conversation.ProjectPath);
             if (project is not null && !string.IsNullOrWhiteSpace(project.Instructions))
+            {
                 system += "\n\nProject-specific instructions (apply within this workspace):\n" + project.Instructions;
+                promptComponents.Add(new PromptContextSection("Project instructions", project.Instructions));
+            }
             if (project is not null)
-                system += "\n\n" + ProjectKnowledgeContext.Build(project.Knowledge);
+            {
+                var knowledgeContext = ProjectKnowledgeContext.Build(project.Knowledge);
+                system += "\n\n" + knowledgeContext;
+                if (!string.IsNullOrWhiteSpace(knowledgeContext)) promptComponents.Add(new PromptContextSection("Project knowledge", knowledgeContext));
+            }
             if (project is not null)
             {
                 var agentGuidance = await ProjectAgentInstructions.LoadAsync(
@@ -2126,12 +2139,20 @@ public partial class MainWindow : Window
                     manualRuleNames: ProjectPathInstructionRuleParser.FindManualMentions(
                         history.LastOrDefault(message => message.IsUser)?.Content),
                     includePathRules: false);
-                if (!string.IsNullOrWhiteSpace(agentGuidance)) system += "\n\n" + agentGuidance;
+                if (!string.IsNullOrWhiteSpace(agentGuidance))
+                {
+                    system += "\n\n" + agentGuidance;
+                    promptComponents.Add(new PromptContextSection("Project agent guidance", agentGuidance));
+                }
             }
             if (!hosted && !string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
             {
                 system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
-                system += "\n\n" + await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles, turn.ContextExclusions);
+                promptComponents.Add(new PromptContextSection("Project context scope", "The attached project folder is read-only context."));
+                var projectExcerpts = await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles, turn.ContextExclusions);
+                system += "\n\n" + projectExcerpts;
+                if (!string.IsNullOrWhiteSpace(projectExcerpts))
+                    promptComponents.Add(new PromptContextSection(turn.ContextFiles.Count > 0 ? "Selected source excerpts" : "Trusted project source excerpts", projectExcerpts));
             }
             history.Insert(0, new ChatMessage("system", system));
             var ollamaHistory = OllamaConversationHistory.Normalize(history)
@@ -2140,19 +2161,19 @@ public partial class MainWindow : Window
             {
                 if (!conversation.IncludeProjectContextForHosted)
                     throw new InvalidOperationException("OpenAI Code task stopped because this conversation's workspace-sharing consent is off.");
-                await RunOpenAiCodeTaskTurnAsync(conversation, assistantIndex, history, turn, cancellation.Token);
+                await RunOpenAiCodeTaskTurnAsync(conversation, assistantIndex, history, turn, cancellation.Token, promptComponents);
             }
             else if (hosted)
             {
-                await RunHostedChatTurnAsync(conversation, assistantIndex, history, turn.Provider, turn.Model, _hostedApiKeys[turn.Provider], cancellation.Token);
+                await RunHostedChatTurnAsync(conversation, assistantIndex, history, turn.Provider, turn.Model, _hostedApiKeys[turn.Provider], cancellation.Token, promptComponents);
             }
             else if (turn.IsCodeTask)
             {
                 var service = new WorkspaceFileService(turn.ProjectPath!, turn.ContextExclusions);
-                await RunAgentTurnAsync(conversation, assistantIndex, ollamaHistory, service, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
+                await RunAgentTurnAsync(conversation, assistantIndex, ollamaHistory, service, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token, promptComponents);
             }
             else
-                await RunChatTurnAsync(conversation, assistantIndex, ollamaHistory, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token);
+                await RunChatTurnAsync(conversation, assistantIndex, ollamaHistory, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token, promptComponents);
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
                 conversation.Messages[assistantIndex] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
             requestCompleted = !string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content);
@@ -2257,7 +2278,7 @@ public partial class MainWindow : Window
         else _completionToasts.Remove(toast);
     }
 
-    private async Task RunHostedChatTurnAsync(Conversation conversation, int assistantIndex, IReadOnlyList<ChatMessage> history, string provider, string model, string apiKey, CancellationToken cancellationToken)
+    private async Task RunHostedChatTurnAsync(Conversation conversation, int assistantIndex, IReadOnlyList<ChatMessage> history, string provider, string model, string apiKey, CancellationToken cancellationToken, IReadOnlyList<PromptContextSection> promptComponents)
     {
         var messages = history.Select(message => new CloudChatMessage(message.Role, message.Content)).ToArray();
         var output = new StringBuilder();
@@ -2268,8 +2289,10 @@ public partial class MainWindow : Window
                 conversation.LastPromptContext = 0;
                 conversation.LastPromptModel = model;
                 conversation.LastPromptProvider = provider;
-                UpdateContextUsage(conversation);
-            }).Task))
+                RecordLastPromptTokenCount(conversation, count);
+            }).Task,
+            onRequestPayload: body => SetLastPromptContextAsync(conversation, provider, model, 0,
+                BuildPromptContextSections(history, promptComponents), history, body)))
         {
             output.Append(chunk);
             var current = output.ToString();
@@ -2281,9 +2304,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, double? temperature, CancellationToken cancellationToken)
+    private async Task RunChatTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, string model, int numCtx, double? temperature, CancellationToken cancellationToken, IReadOnlyList<PromptContextSection> promptComponents)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat")) { Content = JsonContent.Create(BuildChatPayload(model, numCtx, temperature, history, stream: true)) };
+        var payload = BuildChatPayload(model, numCtx, temperature, history, stream: true);
+        var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
+        using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"))
+        { Content = new StringContent(payloadJson, Encoding.UTF8, "application/json") };
+        var normalizedHistory = history.Select(message => new ChatMessage(message.Role, message.Content)).ToArray();
+        await SetLastPromptContextAsync(conversation, "ollama", model, numCtx,
+            BuildPromptContextSections(normalizedHistory, promptComponents), normalizedHistory, payloadJson);
         using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -2300,7 +2329,7 @@ public partial class MainWindow : Window
                 conversation.LastPromptContext = numCtx;
                 conversation.LastPromptModel = model;
                 conversation.LastPromptProvider = "ollama";
-                UpdateContextUsage(conversation);
+                RecordLastPromptTokenCount(conversation, promptTokens);
             }
             if (json.RootElement.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var chunk))
             {
@@ -2311,10 +2340,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RunAgentTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, WorkspaceFileService service, string model, int numCtx, double? temperature, CancellationToken cancellationToken)
+    private async Task RunAgentTurnAsync(Conversation conversation, int assistantIndex, List<OllamaMessage> history, WorkspaceFileService service, string model, int numCtx, double? temperature, CancellationToken cancellationToken, IReadOnlyList<PromptContextSection> promptComponents)
     {
         if (Codev.TaskChecklistService.BuildPromptContext(conversation.TaskChecklist) is { Length: > 0 } checklistContext)
+        {
             history.Insert(Math.Min(1, history.Count), new OllamaMessage("system", checklistContext));
+            promptComponents = promptComponents.Append(new PromptContextSection("Task checklist", checklistContext)).ToArray();
+        }
         var shellName = ShellCommandResolver.ResolveCurrent().DisplayName;
         var tools = new object[]
         {
@@ -2330,10 +2362,18 @@ public partial class MainWindow : Window
         for (var round = 0; round < 8; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var payload = BuildChatPayload(model, numCtx, temperature, history, stream: false, tools);
+            var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
             using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"))
             {
-                Content = JsonContent.Create(BuildChatPayload(model, numCtx, temperature, history, stream: false, tools))
+                Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
             };
+            var normalizedHistory = history.Select(message => new ChatMessage(message.Role, message.Content)).ToArray();
+            await SetLastPromptContextAsync(conversation, "ollama", model, numCtx,
+                BuildPromptContextSections(normalizedHistory, promptComponents,
+                    new PromptContextSection("Available tool schemas", JsonSerializer.Serialize(tools, JsonSerializerOptions.Web)),
+                    new PromptContextSection("Generation controls", $"num_ctx={numCtx}; temperature={temperature?.ToString() ?? "model default"}")),
+                normalizedHistory, payloadJson);
             using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
             using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -2344,7 +2384,7 @@ public partial class MainWindow : Window
                 conversation.LastPromptContext = numCtx;
                 conversation.LastPromptModel = model;
                 conversation.LastPromptProvider = "ollama";
-                UpdateContextUsage(conversation);
+                RecordLastPromptTokenCount(conversation, promptTokens);
             }
             var message = json.RootElement.GetProperty("message");
             var text = message.TryGetProperty("content", out var contentElement) ? contentElement.GetString() ?? "" : "";
@@ -2440,7 +2480,8 @@ public partial class MainWindow : Window
     }
 
     private async Task RunOpenAiCodeTaskTurnAsync(Conversation conversation, int assistantIndex,
-        IReadOnlyList<ChatMessage> normalizedHistory, QueuedTurn turn, CancellationToken cancellationToken)
+        IReadOnlyList<ChatMessage> normalizedHistory, QueuedTurn turn, CancellationToken cancellationToken,
+        IReadOnlyList<PromptContextSection> promptComponents)
     {
         if (turn.Provider != CloudModelProviders.OpenAI || string.IsNullOrWhiteSpace(turn.ProjectPath) || !Directory.Exists(turn.ProjectPath))
             throw new InvalidOperationException("OpenAI Code task requires a conversation workspace.");
@@ -2463,14 +2504,19 @@ public partial class MainWindow : Window
             if (!_hostedApiKeys.TryGetValue(CloudModelProviders.OpenAI, out apiKey) || !conversation.IncludeProjectContextForHosted)
                 throw new InvalidOperationException("OpenAI Code task stopped because the provider connection or workspace-sharing consent was removed.");
             SetAgentStatus(conversation, $"OpenAI Code task · thinking · step {round + 1}/8");
-            var response = await CloudClient.CreateOpenAiToolResponseAsync(apiKey, turn.Model, input, tools, cancellationToken);
+            var roundMessages = normalizedHistory.ToArray();
+            var sections = BuildPromptContextSections(roundMessages, promptComponents,
+                new PromptContextSection("Tool calls and results", JsonSerializer.Serialize(input.Skip(normalizedHistory.Count), JsonSerializerOptions.Web)),
+                new PromptContextSection("Available tool schemas", JsonSerializer.Serialize(tools, JsonSerializerOptions.Web)));
+            var response = await CloudClient.CreateOpenAiToolResponseAsync(apiKey, turn.Model, input, tools, cancellationToken,
+                body => SetLastPromptContextAsync(conversation, turn.Provider, turn.Model, 0, sections, roundMessages, body));
             if (response.InputTokens is { } inputTokens)
             {
                 conversation.LastPromptTokens = inputTokens;
                 conversation.LastPromptContext = 0;
                 conversation.LastPromptModel = turn.Model;
                 conversation.LastPromptProvider = turn.Provider;
-                UpdateContextUsage(conversation);
+                RecordLastPromptTokenCount(conversation, inputTokens);
             }
             if (response.FunctionCalls.Count == 0)
             {
@@ -3356,19 +3402,108 @@ public partial class MainWindow : Window
     {
         if (!ReferenceEquals(_active, conversation)) return;
         var provider = string.IsNullOrWhiteSpace(conversation.LastPromptProvider) ? "ollama" : conversation.LastPromptProvider;
-        var matchesCurrent = conversation.LastPromptTokens > 0 &&
+        var hasSnapshot = _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot);
+        var snapshotMatches = hasSnapshot && snapshot!.Model.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
+            snapshot.Provider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase);
+        var matchesCurrent = snapshotMatches
+            ? snapshot!.ActualPromptTokens is not null
+            : conversation.LastPromptTokens > 0 &&
             (string.IsNullOrWhiteSpace(conversation.LastPromptModel) || conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase)) &&
             provider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase);
-        var limit = conversation.LastPromptContext;
-        ContextUsageLabel.Text = !matchesCurrent ? "" : CloudModelProviders.IsCloud(provider)
-            ? $"{FormatTokenCount(conversation.LastPromptTokens)} input tokens"
-            : limit > 0 ? $"{FormatTokenCount(conversation.LastPromptTokens)} / {FormatContextLimit(limit)}" : $"{FormatTokenCount(conversation.LastPromptTokens)} tokens";
-        ContextUsageLabel.ToolTip = !matchesCurrent ? "Prompt usage appears after the first response for this model." :
+        var currentProvider = snapshotMatches ? snapshot!.Provider : provider;
+        var currentTokens = snapshotMatches ? snapshot!.ActualPromptTokens ?? 0 : conversation.LastPromptTokens;
+        var limit = snapshotMatches ? snapshot!.ContextLimit : conversation.LastPromptContext;
+        ContextUsageLabel.Text = !matchesCurrent ? hasSnapshot ? "Request context" : "" : CloudModelProviders.IsCloud(currentProvider)
+            ? $"{FormatTokenCount(currentTokens)} input tokens"
+            : limit > 0 ? $"{FormatTokenCount(currentTokens)} / {FormatContextLimit(limit)}" : $"{FormatTokenCount(currentTokens)} tokens";
+        ContextUsageLabel.Cursor = hasSnapshot ? Cursors.Hand : Cursors.Arrow;
+        ContextUsageLabel.TextDecorations = hasSnapshot ? TextDecorations.Underline : null;
+        ContextUsageLabel.ToolTip = hasSnapshot ? "Click to inspect the exact last request JSON, normalized messages, context components, and rough token estimate." :
+            !matchesCurrent ? "Prompt usage appears after the first response for this model." :
             CloudModelProviders.IsCloud(provider)
                 ? $"Input token count reported by {provider}; hosted providers manage their own context limits."
                 : limit > 0
                     ? "Latest prompt and conversation history token count reported by Ollama. The denominator is the selected request context size."
                     : "Ollama reported prompt usage, but the latest request's model-default context size is unknown. Choose an explicit size for the next request or summarize older messages manually.";
+    }
+
+    private async Task SetLastPromptContextAsync(Conversation conversation, string provider, string model, int contextLimit,
+        IEnumerable<PromptContextSection> sections, IEnumerable<ChatMessage> messages, string requestBody)
+    {
+        var snapshot = PromptContextBreakdown.Create(provider, model, contextLimit, sections, messages, requestBody);
+        await Dispatcher.InvokeAsync(() =>
+        {
+            _lastPromptContexts[conversation.Id] = snapshot;
+            while (_lastPromptContexts.Count > 8)
+            {
+                var oldest = _lastPromptContexts.Keys.FirstOrDefault(id => id != conversation.Id);
+                if (oldest == Guid.Empty) break;
+                _lastPromptContexts.Remove(oldest);
+            }
+            UpdateContextUsage(conversation);
+        }).Task;
+    }
+
+    private void RecordLastPromptTokenCount(Conversation conversation, int count)
+    {
+        if (_lastPromptContexts.TryGetValue(conversation.Id, out var snapshot))
+            _lastPromptContexts[conversation.Id] = snapshot with { ActualPromptTokens = count };
+        UpdateContextUsage(conversation);
+    }
+
+    private static PromptContextSection[] BuildPromptContextSections(IEnumerable<ChatMessage> messages,
+        IEnumerable<PromptContextSection>? capturedComponents = null, params PromptContextSection[] additionalSections)
+    {
+        var materialized = messages.ToArray();
+        var sections = capturedComponents?.ToList() ?? [];
+        if (capturedComponents is null)
+        {
+            var instructions = materialized.Where(message => message.Role is "system" or "developer")
+                .Select(message => message.Content).Where(content => !string.IsNullOrWhiteSpace(content));
+            var instructionText = string.Join("\n\n", instructions);
+            if (!string.IsNullOrWhiteSpace(instructionText))
+                sections.Add(new PromptContextSection("System and project instructions/context", instructionText));
+        }
+        var historyText = string.Join("\n\n", materialized.Where(message => message.Role is not ("system" or "developer"))
+            .Select(message => $"[{message.Role}]\n{message.Content}"));
+        if (!string.IsNullOrWhiteSpace(historyText))
+            sections.Add(new PromptContextSection("Conversation history and tool results", historyText));
+        sections.AddRange(additionalSections);
+        return sections.ToArray();
+    }
+
+    private void ContextUsageLabel_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_active is not { } conversation || !_lastPromptContexts.TryGetValue(conversation.Id, out var snapshot)) return;
+        e.Handled = true;
+        var details = new TextBox
+        {
+            Text = snapshot.ToDisplayText(),
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            FontFamily = new FontFamily("Cascadia Mono"),
+            FontSize = 12,
+            Padding = new Thickness(12),
+            Background = ThemeBrush("MainSurfaceBrush"),
+            Foreground = ThemeBrush("MainTextBrush")
+        };
+        var dialog = new Window
+        {
+            Title = "Last request context",
+            Width = 900,
+            Height = 680,
+            MinWidth = 620,
+            MinHeight = 400,
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = ThemeBrush("MainSurfaceBrush"),
+            Foreground = ThemeBrush("MainTextBrush"),
+            Content = details
+        };
+        dialog.ShowDialog();
     }
 
     private static string FormatTokenCount(int tokens) => tokens >= 1000 ? $"{tokens / 1000d:0.#}k" : tokens.ToString();

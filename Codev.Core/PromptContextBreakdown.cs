@@ -28,7 +28,7 @@ public sealed record PromptContextSnapshot(
         foreach (var section in Sections)
             output.AppendLine($"• {section.Name}: {section.Content.Length:N0} characters · ≈{EstimateTokens(section.Content.Length):N0} tokens");
 
-        output.AppendLine().AppendLine("Normalized messages assembled for this request (before provider-specific payload formatting):");
+        output.AppendLine().AppendLine("Conversation messages included with this request (normalized before provider-specific formatting):");
         foreach (var message in Messages)
             output.AppendLine().Append('[').Append(message.Role).AppendLine("]").AppendLine(message.Content);
         if (SerializedRequestBody is { } requestBody)
