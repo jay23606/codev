@@ -52,6 +52,8 @@ public partial class MainWindow : Window
     private bool _loadingModel;
     private bool _loadingModels;
     private bool _updatingContext;
+    private bool _applyingFileMention;
+    private ProjectFileMention? _activeFileMention;
     private bool _codeTaskMode;
     private bool _planMode;
     private bool _showArchived;
@@ -2145,11 +2147,18 @@ public partial class MainWindow : Window
                     promptComponents.Add(new PromptContextSection("Project agent guidance", agentGuidance));
                 }
             }
-            if (!hosted && !string.IsNullOrWhiteSpace(turn.ProjectPath) && !turn.IsCodeTask)
+            var includeReadOnlyProjectContext = !hosted && !turn.IsCodeTask;
+            var includeSelectedCodeTaskFiles = turn.IsCodeTask && turn.ContextFiles.Count > 0 &&
+                (!hosted || conversation.IncludeProjectContextForHosted);
+            if (!string.IsNullOrWhiteSpace(turn.ProjectPath) && (includeReadOnlyProjectContext || includeSelectedCodeTaskFiles))
             {
-                system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
-                promptComponents.Add(new PromptContextSection("Project context scope", "The attached project folder is read-only context."));
-                var projectExcerpts = await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token, turn.ContextFiles, turn.ContextExclusions);
+                if (includeReadOnlyProjectContext)
+                {
+                    system += "\n\nThe user attached this local project folder: " + turn.ProjectPath + ". Project files are read-only context in this chat. Do not claim to have changed them.";
+                    promptComponents.Add(new PromptContextSection("Project context scope", "The attached project folder is read-only context."));
+                }
+                var projectExcerpts = await CollectProjectContextAsync(turn.ProjectPath, cancellation.Token,
+                    turn.ContextFiles, turn.ContextExclusions);
                 system += "\n\n" + projectExcerpts;
                 if (!string.IsNullOrWhiteSpace(projectExcerpts))
                     promptComponents.Add(new PromptContextSection(turn.ContextFiles.Count > 0 ? "Selected source excerpts" : "Trusted project source excerpts", projectExcerpts));
@@ -3158,9 +3167,7 @@ public partial class MainWindow : Window
 
     private async Task<string> CollectProjectContextAsync(string root, CancellationToken cancellationToken, IReadOnlyList<string>? selectedFiles = null, IReadOnlyList<string>? contextExclusions = null)
     {
-        var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { ".cs", ".xaml", ".csproj", ".sln", ".md", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".sql", ".xml", ".yml", ".yaml", ".toml", ".props", ".targets", ".ps1", ".sh", ".bat" };
-            var fileService = new WorkspaceFileService(root, contextExclusions);
+        var fileService = new WorkspaceFileService(root, contextExclusions);
         var output = new StringBuilder("Selected project files (limited read-only excerpts):\n");
         var count = 0;
         try
@@ -3169,7 +3176,6 @@ public partial class MainWindow : Window
             foreach (var relative in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!allowedExtensions.Contains(Path.GetExtension(relative))) continue;
                 if (fileService.IsContextExcluded(relative)) continue;
                 try
                 {
@@ -3192,6 +3198,28 @@ public partial class MainWindow : Window
 
     private void PromptBox_KeyDown(object sender, KeyEventArgs e)
     {
+        if (FileMentionPopup.IsOpen && e.Key is Key.Down or Key.Up)
+        {
+            var count = FileMentionListBox.Items.Count;
+            if (count > 0) FileMentionListBox.SelectedIndex = Math.Clamp(FileMentionListBox.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, count - 1);
+            e.Handled = true;
+            return;
+        }
+        if (FileMentionPopup.IsOpen && e.Key is Key.Enter or Key.Tab)
+        {
+            var selected = FileMentionListBox.SelectedItem as string ??
+                (e.Key == Key.Enter ? FileMentionListBox.Items.OfType<string>().FirstOrDefault() : null);
+            if (selected is not null) _ = ApplyProjectFileMentionAsync(selected);
+            e.Handled = selected is not null;
+            return;
+        }
+        if (FileMentionPopup.IsOpen && e.Key == Key.Escape)
+        {
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None) { e.Handled = true; _ = SendPromptAsync(); }
         else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; PromptBox.AppendText(Environment.NewLine); }
     }
@@ -3534,6 +3562,7 @@ public partial class MainWindow : Window
     {
         if (_active is null || _isClosing) return;
         _active.Draft = PromptBox.Text;
+        if (!_applyingFileMention) RefreshFileMentionSuggestions();
         DraftStatusLabel.Text = string.IsNullOrEmpty(PromptBox.Text) ? "" : "Saving draft…";
         _draftSaveDebounce.Stop();
         _draftSaveDebounce.Start();
@@ -3647,6 +3676,79 @@ public partial class MainWindow : Window
     private void Suggestion_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string text }) { PromptBox.Text = text; PromptBox.CaretIndex = PromptBox.Text.Length; PromptBox.Focus(); }
+    }
+
+    private void RefreshFileMentionSuggestions()
+    {
+        if (_active is not { ProjectPath: { Length: > 0 } projectPath } || !Directory.Exists(projectPath) ||
+            !ProjectFileMentionParser.TryGet(PromptBox.Text, PromptBox.CaretIndex, out var mention))
+        {
+            _activeFileMention = null;
+            FileMentionPopup.IsOpen = false;
+            return;
+        }
+        try
+        {
+            var project = EnsureProject(projectPath);
+            var service = new WorkspaceFileService(projectPath, project.ContextExclusions);
+            var suggestions = ProjectFileMentionSuggestions.Find(service, mention.Prefix);
+            _activeFileMention = suggestions.Count > 0 ? mention : null;
+            FileMentionListBox.ItemsSource = suggestions;
+            FileMentionListBox.SelectedIndex = -1;
+            FileMentionPopup.IsOpen = suggestions.Count > 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            _activeFileMention = null;
+            FileMentionPopup.IsOpen = false;
+        }
+    }
+
+    private async void FileMentionSuggestion_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Content: string path }) await ApplyProjectFileMentionAsync(path);
+    }
+
+    private async Task ApplyProjectFileMentionAsync(string relativePath)
+    {
+        var currentText = PromptBox.Text;
+        if (_active is not { ProjectPath: { Length: > 0 } projectPath } conversation ||
+            !ProjectFileMentionParser.TryGet(currentText, PromptBox.CaretIndex, out var mention) ||
+            _activeFileMention is null || mention.StartIndex != _activeFileMention.StartIndex ||
+            !FileMentionListBox.Items.OfType<string>().Contains(relativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            FileMentionPopup.IsOpen = false;
+            _activeFileMention = null;
+            return;
+        }
+        if (!conversation.ContextFiles.Contains(relativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            var project = EnsureProject(projectPath);
+            var fullPath = Path.Combine(projectPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            var result = ProjectContextSelection.AddFiles(new WorkspaceFileService(projectPath, project.ContextExclusions), conversation.ContextFiles, [fullPath]);
+            if (result.AddedCount == 0)
+            {
+                AgentStatusLabel.Text = "That file could not be added. It may be excluded, unsupported, or the 24-file context limit may be full.";
+                FileMentionPopup.IsOpen = false;
+                _activeFileMention = null;
+                return;
+            }
+            UpdateContextLabel(conversation);
+            RefreshConversationLists();
+        }
+        var (updatedText, caretIndex) = ProjectFileMentionParser.Insert(currentText, mention, relativePath);
+        FileMentionPopup.IsOpen = false;
+        _activeFileMention = null;
+        _applyingFileMention = true;
+        try
+        {
+            PromptBox.Text = updatedText;
+            PromptBox.CaretIndex = caretIndex;
+        }
+        finally { _applyingFileMention = false; }
+        conversation.Draft = updatedText;
+        PromptBox.Focus();
+        await SaveAsync();
     }
 
     private void AddContext_Click(object sender, RoutedEventArgs e)
