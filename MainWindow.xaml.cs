@@ -2245,7 +2245,7 @@ public partial class MainWindow : Window
             else
                 await RunChatTurnAsync(conversation, assistantIndex, ollamaHistory, turn.Model, turn.NumCtx, turn.Temperature, cancellation.Token, promptComponents);
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
-                conversation.Messages[assistantIndex] = new ChatMessage("assistant", "The model returned an empty response. Check that the selected model is installed and running in Ollama.");
+                conversation.Messages[assistantIndex] = new ChatMessage("assistant", ModelRequestErrorDescription.EmptyResponse(turn.Provider));
             requestCompleted = !string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content);
             shouldNotifyCompletion = true;
         }
@@ -2259,7 +2259,7 @@ public partial class MainWindow : Window
             completionFailed = true;
             shouldNotifyCompletion = true;
             var partial = conversation.Messages[assistantIndex].Content;
-            var detail = OllamaErrorDescription.Describe(ex);
+            var detail = ModelRequestErrorDescription.Describe(turn.Provider, ex);
             conversation.Messages[assistantIndex] = new ChatMessage("assistant", string.IsNullOrWhiteSpace(partial) ? detail : $"{partial}\n\n[Generation stopped: {detail}]");
         }
         finally

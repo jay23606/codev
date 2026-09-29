@@ -2699,7 +2699,7 @@ public sealed class MainViewModel : ViewModelBase
             if (generationStats is not null)
                 conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { GenerationStats = generationStats };
             if (string.IsNullOrWhiteSpace(conversation.Messages[assistantIndex].Content))
-                conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "The selected provider returned an empty response.");
+                conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", Codev.ModelRequestErrorDescription.EmptyResponse(savedTurn.Provider));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -2709,7 +2709,7 @@ public sealed class MainViewModel : ViewModelBase
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or IOException)
         {
             var partial = conversation.Messages[assistantIndex].Content;
-            var detail = Codev.OllamaErrorDescription.Describe(ex);
+            var detail = Codev.ModelRequestErrorDescription.Describe(savedTurn.Provider, ex);
             var failure = string.IsNullOrWhiteSpace(partial) ? detail : $"{partial}\n\n[Generation stopped: {detail}]";
             conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = failure };
         }
