@@ -75,6 +75,9 @@ public static class ConversationBackupService
             item.Title = Limit(item.Title, 300, "Imported conversation");
             item.Model = Limit(item.Model, 200, "");
             if (item.Provider is not ("ollama" or CloudModelProviders.OpenAI or CloudModelProviders.Anthropic)) item.Provider = "ollama";
+            // Provider data-sharing approvals are local consent and never transfer through portable backups.
+            item.AllowHostedCodeTask = false;
+            item.IncludeProjectContextForHosted = false;
             if (item.Provider != "ollama" || item.IsPlanMode) item.IsCodeTask = false;
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
             if (item.LastPromptProvider is not ("ollama" or CloudModelProviders.OpenAI or CloudModelProviders.Anthropic)) item.LastPromptProvider = "";

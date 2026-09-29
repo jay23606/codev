@@ -19,6 +19,7 @@ public sealed class Conversation
     public bool ThinkEnabled { get; set; }
     private string _outputStyle = ConversationOutputStyles.Balanced;
     public string OutputStyle { get => _outputStyle; set => _outputStyle = ConversationOutputStyles.Normalize(value); }
+    public bool AllowHostedCodeTask { get; set; }
     public bool IncludeProjectContextForHosted { get; set; }
     public bool IncludeRepoMap { get; set; }
     public int NumCtx { get; set; }

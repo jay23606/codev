@@ -17,6 +17,7 @@ public static class ConversationPersistence
             IsCodeTask = conversation.IsCodeTask,
             ThinkEnabled = conversation.ThinkEnabled,
             OutputStyle = conversation.OutputStyle,
+            AllowHostedCodeTask = conversation.AllowHostedCodeTask,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,
             NumCtx = conversation.NumCtx,

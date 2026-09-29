@@ -75,6 +75,25 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Hosted_data_sharing_approvals_do_not_transfer_through_backups()
+    {
+        var source = new Conversation
+        {
+            Provider = CloudModelProviders.OpenAI,
+            AllowHostedCodeTask = true,
+            IncludeProjectContextForHosted = true,
+            Messages = [new("user", "hello"), new("assistant", "reply")]
+        };
+
+        var backup = ConversationBackupService.Export([source], Options);
+        var imported = Assert.Single(ConversationBackupService.Import(backup, Options));
+
+        Assert.Contains("\"AllowHostedCodeTask\":false", backup, StringComparison.Ordinal);
+        Assert.False(imported.AllowHostedCodeTask);
+        Assert.False(imported.IncludeProjectContextForHosted);
+    }
+
+    [Fact]
     public void Backup_export_does_not_include_runtime_queue_recovery_state()
     {
         var conversation = new Conversation

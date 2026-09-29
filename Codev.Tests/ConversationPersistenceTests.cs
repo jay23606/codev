@@ -31,6 +31,7 @@ public sealed class ConversationPersistenceTests
             RepeatPenalty = 1.1,
             NumPredict = 4096,
             OutputStyle = ConversationOutputStyles.Explanatory,
+            AllowHostedCodeTask = true,
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
             LastPromptTokens = 321,
@@ -70,6 +71,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(4096, snapshot.NumPredict);
         Assert.Equal(ConversationOutputStyles.Explanatory, snapshot.OutputStyle);
         Assert.True(snapshot.IncludeProjectContextForHosted);
+        Assert.True(snapshot.AllowHostedCodeTask);
         Assert.True(snapshot.IncludeRepoMap);
         Assert.Equal(321, snapshot.LastPromptTokens);
         Assert.Equal(CloudModelProviders.Anthropic, snapshot.LastPromptProvider);

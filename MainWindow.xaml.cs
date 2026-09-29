@@ -2039,6 +2039,7 @@ public partial class MainWindow : Window
         else
         {
             _active.IncludeProjectContextForHosted = false;
+            if (ReferenceEquals(_activeRequestConversation, _active) && _activeRequestIsCodeTask) _requestCancellation?.Cancel();
         }
         UpdateContextLabel(_active);
         await SaveAsync();
@@ -2067,12 +2068,13 @@ public partial class MainWindow : Window
 
     private Task<bool> EnsureOpenAiCodeTaskConsentAsync(Conversation conversation)
     {
-        if (conversation.Provider != CloudModelProviders.OpenAI || conversation.IncludeProjectContextForHosted) return Task.FromResult(true);
+        if (conversation.Provider != CloudModelProviders.OpenAI || conversation.AllowHostedCodeTask) return Task.FromResult(true);
         var answer = MessageBox.Show(this,
             "Enable OpenAI Code task? OpenAI will receive prompts, project context you choose to share, and tool results. API usage may be billed. Project files and instructions remain excluded until you separately choose Share workspace.",
             "Enable OpenAI Code task", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (answer != MessageBoxResult.Yes) return Task.FromResult(false);
-        conversation.IncludeProjectContextForHosted = false;
+        conversation.AllowHostedCodeTask = true;
+        _ = SaveAsync();
         return Task.FromResult(true);
     }
 
