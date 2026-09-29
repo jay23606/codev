@@ -46,12 +46,35 @@ public sealed class ConversationRewindServiceTests
         {
             Messages = [new("user", "first"), new("assistant", "answer 1"), new("user", "second"), new("assistant", "answer 2"), new("user", "third"), new("assistant", "answer 3")],
             CompactionSummary = "Summary of first two exchanges.",
+            CompactionFromMessageCount = 2,
             CompactionThroughMessageCount = 4
         };
 
         ConversationRewindService.RestoreConversationOnly(conversation, 2);
 
         Assert.Empty(conversation.CompactionSummary);
+        Assert.Equal(0, conversation.CompactionFromMessageCount);
         Assert.Equal(0, conversation.CompactionThroughMessageCount);
+    }
+
+    [Fact]
+    public void Rewind_after_a_compacted_range_preserves_the_summary_and_its_boundaries()
+    {
+        var messages = Enumerable.Range(1, 7).SelectMany(index => new[]
+            { new ChatMessage("user", $"Question {index}"), new ChatMessage("assistant", $"Answer {index}") }).ToList();
+        var conversation = new Conversation
+        {
+            Messages = messages,
+            CompactionSummary = "Middle turns summarized.",
+            CompactionFromMessageCount = 4,
+            CompactionThroughMessageCount = 8
+        };
+
+        ConversationRewindService.RestoreConversationOnly(conversation, userMessageIndex: 10);
+
+        Assert.Equal("Middle turns summarized.", conversation.CompactionSummary);
+        Assert.Equal(4, conversation.CompactionFromMessageCount);
+        Assert.Equal(8, conversation.CompactionThroughMessageCount);
+        Assert.Equal(7, ConversationCompactionService.BuildPromptHistory(conversation, conversation.Messages).Count);
     }
 }

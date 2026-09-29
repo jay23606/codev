@@ -33,6 +33,7 @@ public sealed class ConversationHistoryClearServiceTests
         Assert.Equal(0, conversation.LastPromptContext);
         Assert.Empty(conversation.LastPromptModel);
         Assert.Empty(conversation.CompactionSummary);
+        Assert.Equal(0, conversation.CompactionFromMessageCount);
         Assert.Equal(0, conversation.CompactionThroughMessageCount);
         Assert.Empty(conversation.TaskChecklist);
         Assert.Equal("claude-sonnet", conversation.Model);

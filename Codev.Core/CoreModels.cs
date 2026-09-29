@@ -32,6 +32,7 @@ public sealed class Conversation
     public string LastPromptModel { get; set; } = "";
     public string LastPromptProvider { get; set; } = "";
     public string CompactionSummary { get; set; } = "";
+    public int CompactionFromMessageCount { get; set; }
     public int CompactionThroughMessageCount { get; set; }
     private List<TaskChecklistItem> _taskChecklist = [];
     public List<TaskChecklistItem> TaskChecklist { get => _taskChecklist; set => _taskChecklist = TaskChecklistService.NormalizeImported(value).ToList(); }

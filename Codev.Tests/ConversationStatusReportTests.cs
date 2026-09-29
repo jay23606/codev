@@ -142,6 +142,20 @@ public sealed class ConversationStatusReportTests
     }
 
     [Fact]
+    public void Status_describes_an_explicit_compaction_range_without_leaking_its_summary()
+    {
+        var report = ConversationStatusReport.Build(new Conversation
+        {
+            CompactionSummary = "private range summary",
+            CompactionFromMessageCount = 4,
+            CompactionThroughMessageCount = 8
+        }, false, 0, false, false);
+
+        Assert.Contains("Conversation summary: active · messages 5–8 summarized for future prompts", report);
+        Assert.DoesNotContain("private range summary", report);
+    }
+
+    [Fact]
     public void Hosted_status_labels_provider_usage_without_inventing_context_percentage()
     {
         var report = ConversationStatusReport.Build(new Conversation

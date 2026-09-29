@@ -3,7 +3,7 @@ using System.Text;
 namespace Codev;
 
 public sealed record ConversationCompactionProposal(Guid ConversationId, int ThroughMessageCount,
-    string Summary, int CompactedTurns, int KeptTurns);
+    string Summary, int CompactedTurns, int KeptTurns, int FromMessageCount = 0);
 
 /// <summary>Builds and applies explicit, editable summaries while preserving the original transcript.</summary>
 public static class ConversationCompactionService
@@ -38,18 +38,22 @@ public static class ConversationCompactionService
         return IsValidBoundary(messages, boundary) && boundary > alreadyCompactedThrough ? boundary : 0;
     }
 
-    public static IReadOnlyList<ChatMessage> BuildSummaryMessages(Conversation conversation, int throughMessageCount)
+    public static IReadOnlyList<ChatMessage> BuildSummaryMessages(Conversation conversation, int throughMessageCount, int? fromMessageCount = null)
     {
         ArgumentNullException.ThrowIfNull(conversation);
-        if (!IsValidBoundary(conversation.Messages, throughMessageCount) ||
-            throughMessageCount <= conversation.CompactionThroughMessageCount)
-            throw new ArgumentOutOfRangeException(nameof(throughMessageCount), "Choose an un-compacted boundary between complete conversation turns.");
+        var hasSummary = !string.IsNullOrWhiteSpace(conversation.CompactionSummary);
+        var from = fromMessageCount ?? (hasSummary ? conversation.CompactionFromMessageCount : 0);
+        var contentFrom = hasSummary ? conversation.CompactionThroughMessageCount : from;
+        if (!IsValidRange(conversation.Messages, from, throughMessageCount) ||
+            (hasSummary && from != conversation.CompactionFromMessageCount) || throughMessageCount <= contentFrom)
+            throw new ArgumentOutOfRangeException(nameof(throughMessageCount), "Choose an un-compacted range between complete conversation turns.");
 
         var input = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(conversation.CompactionSummary))
+        if (hasSummary)
             input.Append("Previous accepted summary:\n").AppendLine(conversation.CompactionSummary).AppendLine();
-        input.Append("New completed conversation messages to incorporate:\n");
-        for (var index = conversation.CompactionThroughMessageCount; index < throughMessageCount; index++)
+        input.Append(hasSummary ? "New completed conversation messages to incorporate:\n" :
+            $"Summarize only complete conversation messages {from + 1} through {throughMessageCount}; leave messages before and after this range intact:\n");
+        for (var index = contentFrom; index < throughMessageCount; index++)
         {
             var message = conversation.Messages[index];
             input.Append('[').Append(message.Role).AppendLine("]").AppendLine(message.Content).AppendLine();
@@ -69,13 +73,14 @@ public static class ConversationCompactionService
         ArgumentNullException.ThrowIfNull(conversation);
         ArgumentNullException.ThrowIfNull(messages);
         if (string.IsNullOrWhiteSpace(conversation.CompactionSummary) ||
-            !IsValidBoundary(messages, conversation.CompactionThroughMessageCount))
+            !IsValidRange(messages, conversation.CompactionFromMessageCount, conversation.CompactionThroughMessageCount))
             return messages.ToArray();
 
         return new ChatMessage[]
         {
             new("system", SummaryPrefix + conversation.CompactionSummary)
-        }.Concat(messages.Skip(conversation.CompactionThroughMessageCount)).ToArray();
+        }.Concat(messages.Take(conversation.CompactionFromMessageCount))
+            .Concat(messages.Skip(conversation.CompactionThroughMessageCount)).ToArray();
     }
 
     public static bool Apply(Conversation conversation, ConversationCompactionProposal proposal, bool isGenerating = false)
@@ -83,12 +88,15 @@ public static class ConversationCompactionService
         ArgumentNullException.ThrowIfNull(conversation);
         ArgumentNullException.ThrowIfNull(proposal);
         if (!CanCompact(conversation, isGenerating) || conversation.Id != proposal.ConversationId ||
-            proposal.ThroughMessageCount <= conversation.CompactionThroughMessageCount ||
-            !IsValidBoundary(conversation.Messages, proposal.ThroughMessageCount) ||
+            !IsValidRange(conversation.Messages, proposal.FromMessageCount, proposal.ThroughMessageCount) ||
+            (string.IsNullOrWhiteSpace(conversation.CompactionSummary)
+                ? proposal.ThroughMessageCount <= proposal.FromMessageCount
+                : proposal.FromMessageCount != conversation.CompactionFromMessageCount || proposal.ThroughMessageCount <= conversation.CompactionThroughMessageCount) ||
             string.IsNullOrWhiteSpace(proposal.Summary) || proposal.Summary.Trim().Length > MaxSummaryCharacters)
             return false;
 
         conversation.CompactionSummary = proposal.Summary.Trim();
+        conversation.CompactionFromMessageCount = proposal.FromMessageCount;
         conversation.CompactionThroughMessageCount = proposal.ThroughMessageCount;
         conversation.UpdatedAt = DateTimeOffset.Now;
         return true;
@@ -98,6 +106,7 @@ public static class ConversationCompactionService
     {
         ArgumentNullException.ThrowIfNull(conversation);
         conversation.CompactionSummary = "";
+        conversation.CompactionFromMessageCount = 0;
         conversation.CompactionThroughMessageCount = 0;
         conversation.UpdatedAt = DateTimeOffset.Now;
     }
@@ -105,4 +114,8 @@ public static class ConversationCompactionService
     public static bool IsValidBoundary(IReadOnlyList<ChatMessage>? messages, int boundary) =>
         messages is not null && boundary > 0 && boundary < messages.Count &&
         messages[boundary].IsUser && messages[boundary - 1].IsAssistant;
+
+    public static bool IsValidRange(IReadOnlyList<ChatMessage>? messages, int fromMessageCount, int throughMessageCount) =>
+        messages is not null && (fromMessageCount == 0 || IsValidBoundary(messages, fromMessageCount)) &&
+        IsValidBoundary(messages, throughMessageCount) && fromMessageCount < throughMessageCount;
 }

@@ -242,6 +242,10 @@
                                             Command="{Binding $parent[Window].DataContext.SummarizeConversationUpToCommand}"
                                             CommandParameter="{Binding}"
                                             ToolTip.Tip="Summarize complete exchanges before this prompt; keep this prompt and later messages verbatim" />
+                                    <Button Content="Summarize from here" Classes="soft" Padding="7,3" FontSize="10"
+                                            Command="{Binding $parent[Window].DataContext.SummarizeConversationFromCommand}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip.Tip="Choose this prompt as the beginning of the summary; the latest four complete exchanges stay verbatim" />
                                     <Button Content="Rewind" Classes="soft" Padding="7,3" FontSize="10"
                                             Command="{Binding $parent[Window].DataContext.RewindConversationCommand}"
                                             CommandParameter="{Binding MessageIndex}"

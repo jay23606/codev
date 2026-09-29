@@ -151,8 +151,29 @@ public sealed class ConversationBackupServiceTests
 
         var imported = Assert.Single(ConversationBackupService.Import(JsonSerializer.Serialize(new[] { invalid }, Options), Options));
 
-        Assert.Equal("stale summary", imported.CompactionSummary);
+        Assert.Equal("", imported.CompactionSummary);
+        Assert.Equal(0, imported.CompactionFromMessageCount);
         Assert.Equal(0, imported.CompactionThroughMessageCount);
+    }
+
+    [Fact]
+    public void Backup_round_trip_preserves_a_non_prefix_compaction_range()
+    {
+        var messages = Enumerable.Range(1, 6).SelectMany(index => new[]
+            { new ChatMessage("user", $"Question {index}"), new ChatMessage("assistant", $"Answer {index}") }).ToList();
+        var source = new Conversation
+        {
+            Messages = messages,
+            CompactionSummary = "Middle turns summarized.",
+            CompactionFromMessageCount = 4,
+            CompactionThroughMessageCount = 8
+        };
+
+        var imported = Assert.Single(ConversationBackupService.Import(ConversationBackupService.Export([source], Options), Options));
+
+        Assert.Equal(4, imported.CompactionFromMessageCount);
+        Assert.Equal(8, imported.CompactionThroughMessageCount);
+        Assert.Equal(9, ConversationCompactionService.BuildPromptHistory(imported, imported.Messages).Count);
     }
 
     [Fact]

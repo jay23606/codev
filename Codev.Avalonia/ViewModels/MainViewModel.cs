@@ -116,6 +116,7 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand ToggleCodeTaskCommand { get; }
     public ICommand EnableHostedCodeTaskConsentCommand { get; }
     public ICommand SummarizeConversationUpToCommand { get; }
+    public ICommand SummarizeConversationFromCommand { get; }
     public ICommand RemoveContextFileCommand { get; }
     public ICommand ClearContextFilesCommand { get; }
     public ICommand RemoveDiffCommentCommand { get; }
@@ -140,6 +141,10 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (value is Codev.ChatMessage message) _ = SummarizeConversationUpToAsync(message);
         }, value => value is Codev.ChatMessage message && CanSummarizeConversationUpTo(message));
+        SummarizeConversationFromCommand = new RelayCommand(value =>
+        {
+            if (value is Codev.ChatMessage message) _ = SummarizeConversationFromAsync(message);
+        }, value => value is Codev.ChatMessage message && CanSummarizeConversationFrom(message));
         RemoveContextFileCommand = new RelayCommand(value => { if (value is string path) RemoveContextFile(path); });
         ClearContextFilesCommand = new RelayCommand(_ => ClearContextFiles(), _ => SelectedContextFiles.Count > 0);
         RemoveDiffCommentCommand = new RelayCommand(value => { if (value is Codev.GitDiffComment comment) RemovePendingDiffComment(comment); });
@@ -159,6 +164,7 @@ public sealed class MainViewModel : ViewModelBase
         Messages.CollectionChanged += (_, _) =>
         {
             ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(ShouldOfferCompaction));
             OnPropertyChanged(nameof(ShouldWarnUnknownContext));
         };
@@ -186,6 +192,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ConversationTitle));
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(PinLabel));
                 OnPropertyChanged(nameof(MessageCountLabel));
                 OnPropertyChanged(nameof(HasCompactionSummary));
@@ -245,7 +252,9 @@ public sealed class MainViewModel : ViewModelBase
     public string MessageCountLabel => $"Local conversation · {Messages.Count} messages";
     public bool HasCompactionSummary => ActiveConversation is { } conversation && !string.IsNullOrWhiteSpace(conversation.CompactionSummary);
     public string CompactionStatusLabel => HasCompactionSummary && ActiveConversation is { } conversation
-        ? $"Earlier {conversation.CompactionThroughMessageCount} messages summarized for future prompts · original transcript preserved"
+        ? conversation.CompactionFromMessageCount == 0
+            ? $"Earlier {conversation.CompactionThroughMessageCount} messages summarized for future prompts · original transcript preserved"
+            : $"Messages {conversation.CompactionFromMessageCount + 1}–{conversation.CompactionThroughMessageCount} summarized for future prompts · original transcript preserved"
         : "";
     public bool ShouldOfferCompaction => ActiveConversation is { } conversation && !IsGenerating &&
         conversation.PendingRequestCount == 0 && !_queueProcessorRunning && _requestQueue.Count == 0 &&
@@ -406,6 +415,7 @@ public sealed class MainViewModel : ViewModelBase
                 ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)StopGenerationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)TogglePlanModeCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -1864,6 +1874,7 @@ public sealed class MainViewModel : ViewModelBase
         var turn = new QueuedChatTurn(conversation, queuedTurn);
         _requestQueue.Enqueue(turn);
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued locally · waiting for the current response");
         if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
         OnPropertyChanged(nameof(QueueStatusLabel));
@@ -1949,7 +1960,8 @@ public sealed class MainViewModel : ViewModelBase
         return true;
     }
 
-    public async Task<Codev.ConversationCompactionProposal?> CreateCompactionProposalAsync(CancellationToken cancellationToken = default, int? throughMessageCount = null)
+    public async Task<Codev.ConversationCompactionProposal?> CreateCompactionProposalAsync(CancellationToken cancellationToken = default,
+        int? throughMessageCount = null, int? fromMessageCount = null)
     {
         var conversation = ActiveConversation;
         if (!Codev.ConversationCompactionService.CanCompact(conversation, IsGenerating) || _queueProcessorRunning || _requestQueue.Count > 0)
@@ -1958,15 +1970,19 @@ public sealed class MainViewModel : ViewModelBase
             return null;
         }
         var boundary = throughMessageCount ?? Codev.ConversationCompactionService.FindBoundary(conversation!.Messages, conversation.CompactionThroughMessageCount);
-        if (boundary <= conversation!.CompactionThroughMessageCount || !Codev.ConversationCompactionService.IsValidBoundary(conversation.Messages, boundary))
+        var from = fromMessageCount ?? (string.IsNullOrWhiteSpace(conversation!.CompactionSummary) ? 0 : conversation.CompactionFromMessageCount);
+        if (!Codev.ConversationCompactionService.IsValidRange(conversation!.Messages, from, boundary) ||
+            (string.IsNullOrWhiteSpace(conversation.CompactionSummary)
+                ? boundary <= from
+                : from != conversation.CompactionFromMessageCount || boundary <= conversation.CompactionThroughMessageCount))
         {
-            ReportContextActionStatus("Choose a user prompt after at least one complete earlier exchange to summarize up to.");
+            ReportContextActionStatus("Choose a start and end boundary that enclose an un-compacted complete exchange.");
             return null;
         }
 
         try
         {
-            var sourceMessages = Codev.ConversationCompactionService.BuildSummaryMessages(conversation, boundary);
+            var sourceMessages = Codev.ConversationCompactionService.BuildSummaryMessages(conversation, boundary, from);
             var summary = new System.Text.StringBuilder();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(3));
@@ -2008,8 +2024,8 @@ public sealed class MainViewModel : ViewModelBase
 
             if (string.IsNullOrWhiteSpace(summary.ToString())) throw new InvalidOperationException("The selected model returned an empty summary.");
             return new Codev.ConversationCompactionProposal(conversation.Id, boundary, summary.ToString().Trim(),
-                (boundary - conversation.CompactionThroughMessageCount) / 2,
-                Math.Max(0, (conversation.Messages.Count - boundary) / 2));
+                (boundary - (string.IsNullOrWhiteSpace(conversation.CompactionSummary) ? from : conversation.CompactionThroughMessageCount)) / 2,
+                Math.Max(0, (conversation.Messages.Count - boundary) / 2), from);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -2040,6 +2056,24 @@ public sealed class MainViewModel : ViewModelBase
         if (proposal is not null) await (ShowCompactionProposalAsync?.Invoke(proposal) ?? Task.CompletedTask);
     }
 
+    private bool CanSummarizeConversationFrom(Codev.ChatMessage message)
+    {
+        var conversation = ActiveConversation;
+        if (conversation is null || !message.IsUser || !string.IsNullOrWhiteSpace(conversation.CompactionSummary)) return false;
+        var boundary = Codev.ConversationCompactionService.FindBoundary(conversation.Messages);
+        return Codev.ConversationCompactionService.CanCompact(conversation, IsGenerating) && !_queueProcessorRunning && _requestQueue.Count == 0 &&
+            Codev.ConversationCompactionService.IsValidRange(conversation.Messages, message.MessageIndex, boundary);
+    }
+
+    private async Task SummarizeConversationFromAsync(Codev.ChatMessage message)
+    {
+        var boundary = ActiveConversation is { } conversation
+            ? Codev.ConversationCompactionService.FindBoundary(conversation.Messages)
+            : 0;
+        var proposal = await CreateCompactionProposalAsync(throughMessageCount: boundary, fromMessageCount: message.MessageIndex);
+        if (proposal is not null) await (ShowCompactionProposalAsync?.Invoke(proposal) ?? Task.CompletedTask);
+    }
+
     public bool ApplyCompactionProposal(Codev.ConversationCompactionProposal proposal, string editedSummary)
     {
         if (!string.Equals(editedSummary, proposal.Summary, StringComparison.Ordinal)) proposal = proposal with { Summary = editedSummary };
@@ -2052,6 +2086,8 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasCompactionSummary));
         OnPropertyChanged(nameof(CompactionStatusLabel));
         OnPropertyChanged(nameof(ShouldOfferCompaction));
+        ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         Persist();
         ReportContextActionStatus("Summary applied to future prompts. The full transcript remains saved and visible.");
         return true;
@@ -2070,6 +2106,8 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasCompactionSummary));
         OnPropertyChanged(nameof(CompactionStatusLabel));
         OnPropertyChanged(nameof(ShouldOfferCompaction));
+        ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         Persist();
         ReportContextActionStatus("Future prompts will use the full conversation history again.");
         return true;
@@ -2080,6 +2118,7 @@ public sealed class MainViewModel : ViewModelBase
         if (_queueProcessorRunning || _queuePaused || _requestQueue.Count == 0) return;
         _queueProcessorRunning = true;
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         try
         {
             while (!_queuePaused && _requestQueue.TryDequeue(out var turn))
@@ -2091,6 +2130,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             _queueProcessorRunning = false;
             ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(QueueStatusLabel));
             OnPropertyChanged(nameof(HasQueuedTurns));
             ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
@@ -2724,6 +2764,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanReviewFileChanges));
         ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
         Persist();
     }
@@ -2733,6 +2774,7 @@ public sealed class MainViewModel : ViewModelBase
         if (_requestQueue.Count == 0) return;
         _queuePaused = false;
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsQueuePaused));
         OnPropertyChanged(nameof(QueueStatusLabel));
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
@@ -2761,6 +2803,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanReviewFileChanges));
         ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
+        ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsQueuePaused));
         OnPropertyChanged(nameof(QueueStatusLabel));
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();

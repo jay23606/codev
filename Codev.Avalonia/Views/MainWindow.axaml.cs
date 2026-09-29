@@ -1377,7 +1377,7 @@ public partial class MainWindow : Window
         };
         var status = new TextBlock
         {
-            Text = $"This summarizes {proposal.CompactedTurns} earlier complete exchange(s), keeping the latest {proposal.KeptTurns} exchange(s) verbatim. The original transcript stays visible, saved, and in exports. Review or edit the summary before applying it.",
+            Text = $"This summarizes complete exchanges in messages {proposal.FromMessageCount + 1} through {proposal.ThroughMessageCount}. Messages outside the selected range remain verbatim in future prompts, including the latest {proposal.KeptTurns} exchange(s). The original transcript stays visible, saved, and in exports. Review or edit the summary before applying it.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
         };

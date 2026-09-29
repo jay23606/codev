@@ -33,6 +33,7 @@ public static class ConversationBackupService
             LastPromptModel = conversation.LastPromptModel,
             LastPromptProvider = conversation.LastPromptProvider,
             CompactionSummary = conversation.CompactionSummary,
+            CompactionFromMessageCount = conversation.CompactionFromMessageCount,
             CompactionThroughMessageCount = conversation.CompactionThroughMessageCount,
             TaskChecklist = TaskChecklistService.NormalizeImported(conversation.TaskChecklist).ToList(),
             IsPinned = conversation.IsPinned,
@@ -78,9 +79,13 @@ public static class ConversationBackupService
             item.LastPromptModel = Limit(item.LastPromptModel, 200, "");
             if (item.LastPromptProvider is not ("ollama" or CloudModelProviders.OpenAI or CloudModelProviders.Anthropic)) item.LastPromptProvider = "";
             item.CompactionSummary = Limit(item.CompactionSummary, ConversationCompactionService.MaxSummaryCharacters, "");
-            item.CompactionThroughMessageCount = string.IsNullOrWhiteSpace(item.CompactionSummary) ||
-                !ConversationCompactionService.IsValidBoundary(item.Messages, item.CompactionThroughMessageCount)
-                ? 0 : item.CompactionThroughMessageCount;
+            if (string.IsNullOrWhiteSpace(item.CompactionSummary) ||
+                !ConversationCompactionService.IsValidRange(item.Messages, item.CompactionFromMessageCount, item.CompactionThroughMessageCount))
+            {
+                item.CompactionSummary = "";
+                item.CompactionFromMessageCount = 0;
+                item.CompactionThroughMessageCount = 0;
+            }
             item.TaskChecklist = TaskChecklistService.NormalizeImported(item.TaskChecklist).ToList();
             item.Temperature = ConversationSamplingSettings.Normalize(item.Temperature);
             item.TopP = ConversationSamplingSettings.NormalizeProbability(item.TopP);

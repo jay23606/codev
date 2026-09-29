@@ -55,7 +55,9 @@ public static class ConversationStatusReport
             : "not available for the selected model yet";
         var compaction = string.IsNullOrWhiteSpace(conversation.CompactionSummary)
             ? "off"
-            : $"active · first {Math.Max(0, conversation.CompactionThroughMessageCount):N0} messages summarized for future prompts";
+            : conversation.CompactionFromMessageCount == 0
+                ? $"active · first {Math.Max(0, conversation.CompactionThroughMessageCount):N0} messages summarized for future prompts"
+                : $"active · messages {conversation.CompactionFromMessageCount + 1:N0}–{Math.Max(0, conversation.CompactionThroughMessageCount):N0} summarized for future prompts";
         var instructionFiles = string.IsNullOrWhiteSpace(conversation.ProjectPath)
             ? "none · no project attached"
             : CloudModelProviders.IsCloud(conversation.Provider) && !conversation.IncludeProjectContextForHosted

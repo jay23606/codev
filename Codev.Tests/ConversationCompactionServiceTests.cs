@@ -69,6 +69,49 @@ public sealed class ConversationCompactionServiceTests
         Assert.Equal(11, ConversationCompactionService.BuildPromptHistory(compacted, conversation.Messages).Count);
     }
 
+    [Fact]
+    public void Explicit_start_boundary_summarizes_only_the_selected_middle_range()
+    {
+        var originalMessages = CreateTurns(9);
+        var conversation = new Conversation { Messages = [.. originalMessages] };
+        var proposal = new ConversationCompactionProposal(conversation.Id, 10, "Summary of turns three through five.", 3, 4, FromMessageCount: 4);
+
+        var summaryInput = ConversationCompactionService.BuildSummaryMessages(conversation, proposal.ThroughMessageCount, proposal.FromMessageCount);
+
+        Assert.DoesNotContain("Question 1", summaryInput[1].Content);
+        Assert.Contains("Question 3", summaryInput[1].Content);
+        Assert.Contains("Question 4", summaryInput[1].Content);
+        Assert.Contains("Question 5", summaryInput[1].Content);
+        Assert.DoesNotContain("Question 6", summaryInput[1].Content);
+        Assert.True(ConversationCompactionService.Apply(conversation, proposal));
+        var promptHistory = ConversationCompactionService.BuildPromptHistory(conversation, originalMessages);
+        Assert.Equal(13, promptHistory.Count);
+        Assert.Contains("Summary of turns three through five", promptHistory[0].Content);
+        Assert.Equal(originalMessages.Take(4), promptHistory.Skip(1).Take(4));
+        Assert.Equal(originalMessages.Skip(10), promptHistory.Skip(5));
+    }
+
+    [Fact]
+    public void Recompacting_an_explicit_range_extends_its_end_without_losing_the_start()
+    {
+        var conversation = new Conversation
+        {
+            Messages = CreateTurns(7),
+            CompactionSummary = "Summary of turns three and four.",
+            CompactionFromMessageCount = 4,
+            CompactionThroughMessageCount = 8
+        };
+
+        var input = ConversationCompactionService.BuildSummaryMessages(conversation, throughMessageCount: 10);
+
+        Assert.Contains("Summary of turns three and four", input[1].Content);
+        Assert.Contains("Question 5", input[1].Content);
+        Assert.DoesNotContain("Question 3", input[1].Content);
+        Assert.False(ConversationCompactionService.Apply(conversation,
+            new ConversationCompactionProposal(conversation.Id, 10, "Changed start", 2, 2, FromMessageCount: 2)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ConversationCompactionService.BuildSummaryMessages(conversation, 10, fromMessageCount: 2));
+    }
+
     [Theory]
     [InlineData(79, 100, false)]
     [InlineData(80, 100, true)]
