@@ -1856,6 +1856,16 @@ public partial class MainWindow : Window
     {
         var text = PromptBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(text) || _active is null) return;
+        if (text.Equals("/status", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ModelPicker.SelectedItem is ModelOption statusModel)
+            {
+                _active.Model = statusModel.Name;
+                _active.Provider = statusModel.Provider;
+            }
+            await AddLocalStatusReportAsync(_active, text);
+            return;
+        }
         var isCodeTask = _codeTaskMode && _codeTaskConversationId == _active.Id;
         if (isCodeTask && _active.Provider == CloudModelProviders.OpenAI && !_active.IncludeProjectContextForHosted)
         {
@@ -1914,6 +1924,57 @@ public partial class MainWindow : Window
         _requestQueue.Enqueue(turn);
         UpdateQueueControl();
         await ProcessQueuedTurnsAsync();
+    }
+
+    private async Task AddLocalStatusReportAsync(Conversation conversation, string command)
+    {
+        var projectPath = conversation.ProjectPath;
+        var hasProject = !string.IsNullOrWhiteSpace(projectPath) && Directory.Exists(projectPath);
+        IReadOnlyList<string>? instructionFiles = null;
+        if (hasProject && _lastPromptContexts.TryGetValue(conversation.Id, out var lastContext) &&
+            lastContext.Provider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase) &&
+            lastContext.Model.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase))
+        {
+            var guidance = lastContext.Sections.FirstOrDefault(section =>
+                section.Name.Equals("Project agent guidance", StringComparison.Ordinal) ||
+                section.Name.Equals("Project instructions (AGENTS.md and selected rules)", StringComparison.Ordinal))?.Content;
+            instructionFiles = ProjectAgentInstructions.GetIncludedRelativePaths(guidance);
+        }
+        var permissionPath = hasProject ? projectPath! : "";
+        var permissionRules = _projectCommandPermissions.GetRules(permissionPath);
+        var report = ConversationStatusReport.Build(conversation,
+            ReferenceEquals(_activeRequestConversation, conversation) && _requestCancellation is not null,
+            conversation.PendingRequestCount, _queuePaused, _hostedApiKeys.ContainsKey(conversation.Provider),
+            projectFolderTrusted: hasProject,
+            ollamaEndpoint: _ollamaEndpoint.ToString(),
+            ollamaEndpointIsLocal: OllamaEndpoint.IsLoopback(_ollamaEndpoint),
+            lastPromptInstructionFiles: instructionFiles,
+            commandPermissionMode: _projectCommandPermissions.GetMode(permissionPath),
+            allowedCommandRules: permissionRules.Count(rule => rule.Decision == ProjectCommandPermissionDecision.Allow && ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command)),
+            deniedCommandRules: permissionRules.Count(rule => rule.Decision == ProjectCommandPermissionDecision.Deny),
+            automaticProjectContextIncluded: hasProject && !conversation.IsCodeTask && !CloudModelProviders.IsCloud(conversation.Provider));
+        var userMessage = new ChatMessage("user", command) { MessageIndex = conversation.Messages.Count };
+        var assistantMessage = new ChatMessage("assistant", report) { MessageIndex = conversation.Messages.Count + 1 };
+        if (conversation.Messages.Count == 0)
+        {
+            conversation.Title = MakeTitle(command);
+            ConversationTitle.Text = conversation.Title;
+        }
+        conversation.Messages.Add(userMessage);
+        conversation.Messages.Add(assistantMessage);
+        conversation.Draft = "";
+        conversation.UpdatedAt = DateTimeOffset.Now;
+        _draftSaveDebounce.Stop();
+        DraftStatusLabel.Text = "";
+        FileMentionPopup.IsOpen = false;
+        _activeFileMention = null;
+        PromptBox.Clear();
+        WelcomePanel.Visibility = Visibility.Collapsed;
+        RenderMessages();
+        RefreshConversationLists();
+        UpdateSendControl();
+        UpdateActiveRequestStatus();
+        await SaveAsync();
     }
 
     private Task ProcessQueuedTurnsAsync()

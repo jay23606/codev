@@ -80,6 +80,18 @@ public sealed class ConversationStatusReportTests
     }
 
     [Fact]
+    public void Trusted_project_can_report_that_automatic_source_context_is_off_for_the_current_mode()
+    {
+        var conversation = new Conversation { ProjectPath = @"C:\work\app", Model = "coder" };
+
+        var report = ConversationStatusReport.Build(conversation, false, 0, false, false,
+            projectFolderTrusted: true, automaticProjectContextIncluded: false);
+
+        Assert.Contains("Folder trust: trusted", report);
+        Assert.Contains("Project context: automatic source context off for this mode", report);
+    }
+
+    [Fact]
     public void Remote_ollama_status_does_not_claim_requests_stay_local()
     {
         var report = ConversationStatusReport.Build(new Conversation { Model = "qwen3-coder:30b" }, false, 0, false, false,

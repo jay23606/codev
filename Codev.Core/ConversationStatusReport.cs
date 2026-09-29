@@ -8,7 +8,8 @@ public static class ConversationStatusReport
         string? ollamaEndpoint = null, bool ollamaEndpointIsLocal = true,
         IReadOnlyList<string>? lastPromptInstructionFiles = null,
         ProjectCommandPermissionMode commandPermissionMode = ProjectCommandPermissionMode.AskEveryTime,
-        int allowedCommandRules = 0, int deniedCommandRules = 0)
+        int allowedCommandRules = 0, int deniedCommandRules = 0,
+        bool? automaticProjectContextIncluded = null)
     {
         ArgumentNullException.ThrowIfNull(conversation);
 
@@ -28,7 +29,9 @@ public static class ConversationStatusReport
             ? "none"
             : conversation.ContextFiles.Count > 0
                 ? $"{conversation.ContextFiles.Count} selected file(s)"
-                : projectFolderTrusted ? "bounded source files included automatically" : "automatic context off for untrusted folder";
+                : projectFolderTrusted
+                    ? automaticProjectContextIncluded == false ? "automatic source context off for this mode" : "bounded source files included automatically"
+                    : "automatic context off for untrusted folder";
         if (CloudModelProviders.IsCloud(conversation.Provider) && !conversation.IncludeProjectContextForHosted)
             projectContext = "excluded from hosted requests";
 
