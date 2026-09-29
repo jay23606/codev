@@ -509,7 +509,7 @@ public sealed class MainViewModel : ViewModelBase
     public void SetOpenAiGenerationSettings(string? reasoningEffort, string? verbosity)
     {
         if (ActiveConversation is not { } conversation) return;
-        conversation.OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(reasoningEffort);
+        conversation.OpenAiReasoningEffort = Codev.OpenAiGenerationSettings.NormalizeEffort(reasoningEffort, conversation.Model);
         conversation.OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(verbosity);
         OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
         Persist();

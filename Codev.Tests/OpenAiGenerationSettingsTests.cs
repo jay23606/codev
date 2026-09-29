@@ -34,7 +34,20 @@ public sealed class OpenAiGenerationSettingsTests
         Assert.Empty(unsupported);
 
         var invalid = new Dictionary<string, object>();
-        OpenAiGenerationSettings.AddToPayload(invalid, "gpt-5.4", "xhigh", "verbose");
+        OpenAiGenerationSettings.AddToPayload(invalid, "gpt-5", "xhigh", "verbose");
         Assert.Empty(invalid);
+    }
+
+    [Fact]
+    public void Offers_only_documented_effort_values_for_restricted_models()
+    {
+        Assert.Equal(["high"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-5-pro"));
+        Assert.Null(OpenAiGenerationSettings.NormalizeEffort("low", "gpt-5-pro"));
+        var proPayload = new Dictionary<string, object>();
+        OpenAiGenerationSettings.AddToPayload(proPayload, "gpt-5-pro", "low", "low");
+        Assert.DoesNotContain("reasoning", proPayload.Keys);
+        Assert.Contains("text", proPayload.Keys);
+        Assert.Equal(["none", "low", "medium", "high"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-5.1"));
+        Assert.Equal(["none", "low", "medium", "high", "xhigh"], OpenAiGenerationSettings.ReasoningEffortOptions("gpt-5.1-codex-max"));
     }
 }

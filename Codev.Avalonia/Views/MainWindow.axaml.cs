@@ -654,10 +654,11 @@ public partial class MainWindow : Window
                 !Codev.OpenAiGenerationSettings.SupportsReasoningControls(conversation.Model)) return;
             var primary = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#ECECEC" : "#262522"));
             var secondary = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#B0B0B0" : "#65625D"));
-            var effort = OpenAiSetting(conversation.OpenAiReasoningEffort);
-            var verbosity = OpenAiSetting(conversation.OpenAiVerbosity);
+            var effort = OpenAiSetting(conversation.OpenAiReasoningEffort,
+                Codev.OpenAiGenerationSettings.ReasoningEffortOptions(conversation.Model));
+            var verbosity = OpenAiSetting(conversation.OpenAiVerbosity, ["low", "medium", "high"]);
             var content = new StackPanel { Spacing = 12, Margin = new Thickness(20), Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(viewModel.IsDarkTheme ? "#191919" : "#F5F4F1")) };
-            content.Children.Add(new TextBlock { Text = "These optional controls apply to GPT-5 and o-series OpenAI models. Model default leaves the corresponding API field out of the request.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = secondary, MaxWidth = 420 });
+            content.Children.Add(new TextBlock { Text = "These optional controls apply to supported GPT-5+ and o-series OpenAI models. Model default leaves the corresponding API field out of the request.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = secondary, MaxWidth = 420 });
             AddOpenAiSetting(content, "Reasoning effort", effort, "Low is faster and uses fewer reasoning tokens; high can help with harder coding tasks.", primary, secondary);
             AddOpenAiSetting(content, "Response verbosity", verbosity, "Low produces more concise answers; high gives more explanation.", primary, secondary);
             var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
@@ -678,10 +679,16 @@ public partial class MainWindow : Window
             await openAiDialog.ShowDialog(this);
             return;
 
-            static ComboBox OpenAiSetting(string? selected)
+            static ComboBox OpenAiSetting(string? selected, IReadOnlyList<string> options)
             {
-                var picker = new ComboBox { ItemsSource = new[] { "Model default", "Low", "Medium", "High" }, MinWidth = 180 };
-                picker.SelectedItem = selected is null ? "Model default" : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(selected);
+                var picker = new ComboBox
+                {
+                    ItemsSource = new[] { "Model default" }.Concat(options.Select(option => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(option))).ToArray(),
+                    MinWidth = 180
+                };
+                picker.SelectedItem = selected is not null && options.Contains(selected, StringComparer.OrdinalIgnoreCase)
+                    ? CultureInfo.InvariantCulture.TextInfo.ToTitleCase(selected)
+                    : "Model default";
                 return picker;
             }
 
