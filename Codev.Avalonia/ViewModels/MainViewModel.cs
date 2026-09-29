@@ -2311,37 +2311,52 @@ public sealed class MainViewModel : ViewModelBase
             _ => Task.FromResult(false), status: message => _ = SetConnectionStatusAsync(message),
             permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)));
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
-        var transcript = new System.Text.StringBuilder();
-        var repeatedCalls = new Codev.RepeatedToolCallGuard();
-        var usageAccumulator = new Codev.OpenAiCodeTaskUsageAccumulator();
         var client = new Codev.CloudModelApiClient(_http);
-        for (var round = 0; round < Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn; round++)
+        var runner = new Codev.OpenAiCodeTaskRunner(client);
+        var result = await runner.RunAsync(turn.Model, input, toolSchemas,
+            async (step, currentInput, token) =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !_projectFolderTrust.IsTrusted(turn.ProjectPath))
+                throw new InvalidOperationException("OpenAI Code task stopped because workspace trust was revoked.");
             if (!_cloudRequestsEnabled || !_cloudApiKeys.TryGetValue(Codev.CloudModelProviders.OpenAI, out var currentOpenAiKey) ||
                 !Codev.ProjectContextPolicy.CanUseOpenAiCodeTaskWorkspace(conversation.AllowHostedCodeTask,
                     turn.IncludeProjectContext && conversation.IncludeProjectContextForHosted,
                     _conversationWorkspaces.IsConversationWorkspace(conversation.Id, turn.ProjectPath)))
                 throw new InvalidOperationException("OpenAI Code task stopped because hosted requests or the consent required for this workspace were turned off.");
-            await SetConnectionStatusAsync($"OpenAI Code task · thinking · step {round + 1}/{Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn}");
-            var requestBody = JsonSerializer.Serialize(new
+            var sections = new[]
             {
-                model = turn.Model,
-                input,
-                tools = toolSchemas,
-                tool_choice = "auto",
-                stream = false,
-                store = false,
-                max_output_tokens = Codev.OpenAiCodeTaskLimits.MaxOutputTokensPerRequest
-            }, JsonSerializerOptions.Web);
+                new Codev.PromptContextSection("Conversation and tool results", JsonSerializer.Serialize(currentInput.Skip(normalizedHistory.Count), JsonSerializerOptions.Web)),
+                new Codev.PromptContextSection("Available tool schemas", JsonSerializer.Serialize(toolSchemas, JsonSerializerOptions.Web))
+            };
             await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create(
-                turn.Provider, turn.Model, 0,
-                [new Codev.PromptContextSection("Conversation and tool results", JsonSerializer.Serialize(input, JsonSerializerOptions.Web)),
-                 new Codev.PromptContextSection("Available tool schemas", JsonSerializer.Serialize(toolSchemas, JsonSerializerOptions.Web))],
-                normalizedHistory, requestBody));
-            var response = await client.CreateOpenAiToolResponseAsync(currentOpenAiKey, turn.Model, input, toolSchemas,
-                cancellationToken, body => SetLastPromptRequestBodyAsync(conversation, body));
-            if (usageAccumulator.Add(response) is { } turnUsage)
+                turn.Provider, turn.Model, 0, sections, normalizedHistory, ""));
+            return currentOpenAiKey;
+        }, async (name, arguments, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !_projectFolderTrust.IsTrusted(turn.ProjectPath))
+                throw new InvalidOperationException("Workspace trust was revoked during the Code task. No further tools will run until it is trusted again.");
+            var toolResult = name == "update_task_checklist"
+                ? await UpdateTaskChecklistFromModelAsync(conversation, arguments)
+                : await executor.ExecuteAsync(name, arguments, token);
+            Persist();
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                OnPropertyChanged(nameof(FileChangesCount));
+                OnPropertyChanged(nameof(FileChangesLabel));
+                OnPropertyChanged(nameof(CanReviewFileChanges));
+            });
+            return toolResult;
+        }, async (name, _, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            return await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
+        },
+        status: status => SetConnectionStatusAsync(status),
+        onResponse: async (response, turnUsage) =>
+        {
+            if (turnUsage is not null)
             {
                 conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { HostedUsage = turnUsage };
                 await Dispatcher.UIThread.InvokeAsync(() =>
@@ -2354,57 +2369,18 @@ public sealed class MainViewModel : ViewModelBase
                 await RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, 0, inputTokens);
             if (response.OutputTokens is { } outputTokens)
                 await RecordPromptOutputTokenUsageAsync(conversation, turn.Provider, turn.Model, outputTokens);
-            if (response.FunctionCalls.Count == 0)
-            {
-                if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
-                if (conversation.TaskChecklist.Count > 0)
-                    transcript.AppendLine().AppendLine().Append("**Task checklist**").AppendLine().AppendLine(Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist));
-                await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
-                return;
-            }
-            if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.AppendLine(response.OutputText);
-            var toolOutputs = new List<Codev.OpenAiFunctionOutput>(response.FunctionCalls.Count);
-            foreach (var call in response.FunctionCalls)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var name = call.TryGetProperty("name", out var nameElement) ? nameElement.GetString() ?? "" : "";
-                var callId = call.TryGetProperty("call_id", out var callIdElement) ? callIdElement.GetString() : null;
-                var rawArguments = call.TryGetProperty("arguments", out var argumentsElement) ? argumentsElement.GetString() : null;
-                if (string.IsNullOrWhiteSpace(callId) || string.IsNullOrWhiteSpace(rawArguments))
-                    throw new InvalidOperationException("OpenAI returned a malformed function call; Codev did not run it.");
-                using var argumentsDocument = JsonDocument.Parse(rawArguments);
-                var arguments = argumentsDocument.RootElement.Clone();
-                if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !_projectFolderTrust.IsTrusted(turn.ProjectPath))
-                    throw new InvalidOperationException("Workspace trust was revoked during the Code task. No further tools will run until it is trusted again.");
-                if (repeatedCalls.Record(name, arguments) >= Codev.RepeatedToolCallGuard.ConfirmationThreshold)
-                {
-                    var confirmed = await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
-                    if (!confirmed)
-                    {
-                        transcript.AppendLine().AppendLine("Code task stopped because the same tool call repeated. Send a follow-up with more guidance to continue.");
-                        await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
-                        return;
-                    }
-                    repeatedCalls.AllowOneMore();
-                }
-                await SetConnectionStatusAsync($"OpenAI Code task · {name.Replace('_', ' ')}");
-                var result = name == "update_task_checklist"
-                    ? await UpdateTaskChecklistFromModelAsync(conversation, arguments)
-                    : await executor.ExecuteAsync(name, arguments, cancellationToken);
-                toolOutputs.Add(new Codev.OpenAiFunctionOutput(callId, result));
-                Persist();
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    OnPropertyChanged(nameof(FileChangesCount));
-                    OnPropertyChanged(nameof(FileChangesLabel));
-                    OnPropertyChanged(nameof(CanReviewFileChanges));
-                });
-                transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**").AppendLine(TruncateToolOutput(result));
-                await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
-            }
-            Codev.OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, toolOutputs);
-        }
-        throw new InvalidOperationException($"OpenAI Code task reached the {Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-step limit. Send a follow-up to continue.");
+        },
+        onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
+        onTranscript: async transcript =>
+        {
+            await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript);
+            Persist();
+        },
+        cancellationToken: cancellationToken);
+        var finalTranscript = result.Transcript;
+        if (conversation.TaskChecklist.Count > 0)
+            finalTranscript += Environment.NewLine + Environment.NewLine + "**Task checklist**" + Environment.NewLine + Environment.NewLine + Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist);
+        await SetAssistantTranscriptAsync(conversation, assistantIndex, finalTranscript);
     }
 
     private static object[] CreateCodeTaskToolSchemas(Codev.ShellCommandSpec shell) =>

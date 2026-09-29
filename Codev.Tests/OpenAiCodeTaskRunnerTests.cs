@@ -1,0 +1,147 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Codev;
+
+namespace Codev.Tests;
+
+public sealed class OpenAiCodeTaskRunnerTests
+{
+    [Fact]
+    public async Task Runs_function_call_round_trip_and_returns_final_text_with_cumulative_usage()
+    {
+        var requests = new List<JsonDocument>();
+        using var http = new HttpClient(new ResponseHandler(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            requests.Add(JsonDocument.Parse(body));
+            return requests.Count == 1
+                ? Json("""
+                    {"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"list_files","arguments":"{}"}],"usage":{"input_tokens":10,"output_tokens":5}}
+                    """)
+                : Json("""
+                    {"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"The folder is empty."}]}],"usage":{"input_tokens":20,"output_tokens":7}}
+                    """);
+        }));
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+        var toolExecutions = 0;
+        var reportedUsage = new List<OpenAiCodeTaskUsage?>();
+        var transcriptUpdates = new List<string>();
+
+        var result = await runner.RunAsync("gpt-test", [new { role = "user", content = "list files" }],
+            [new { type = "function", name = "list_files" }],
+            (step, _, _) => Task.FromResult($"api-key-{step}"),
+            (name, arguments, _) =>
+            {
+                Assert.Equal("list_files", name);
+                Assert.Equal(JsonValueKind.Object, arguments.ValueKind);
+                toolExecutions++;
+                return Task.FromResult("[]");
+            },
+            (_, _, _) => Task.FromResult(false),
+            onResponse: (_, usage) => { reportedUsage.Add(usage); return Task.CompletedTask; },
+            onTranscript: text => { transcriptUpdates.Add(text); return Task.CompletedTask; });
+
+        Assert.Equal(2, requests.Count);
+        Assert.Equal(1, toolExecutions);
+        var followUpInput = requests[1].RootElement.GetProperty("input").EnumerateArray().ToArray();
+        Assert.Equal("function_call", followUpInput[1].GetProperty("type").GetString());
+        Assert.Equal("function_call_output", followUpInput[2].GetProperty("type").GetString());
+        Assert.Equal("[]", followUpInput[2].GetProperty("output").GetString());
+        Assert.Contains("The folder is empty.", result.Transcript);
+        Assert.Equal(new OpenAiCodeTaskUsage(30, 12, 2, 2, 2), result.Usage);
+        Assert.Equal(result.Usage, reportedUsage[^1]);
+        Assert.Contains("**list files**", transcriptUpdates[0]);
+    }
+
+    [Fact]
+    public async Task Repeated_identical_function_call_stops_after_user_declines()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new ResponseHandler(_ =>
+        {
+            requests++;
+            return Json("{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call-" + requests +
+                "\",\"name\":\"list_files\",\"arguments\":\"{}\"}]}");
+        }));
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+        var toolExecutions = 0;
+        var repeatedPrompts = 0;
+
+        var result = await runner.RunAsync("gpt-test", [new { role = "user", content = "list files" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => { toolExecutions++; return Task.FromResult("[]"); },
+            (_, _, _) => { repeatedPrompts++; return Task.FromResult(false); });
+
+        Assert.Equal(3, requests);
+        Assert.Equal(2, toolExecutions);
+        Assert.Equal(1, repeatedPrompts);
+        Assert.Contains("same tool call repeated", result.Transcript);
+    }
+
+    [Fact]
+    public async Task Stops_after_the_shared_model_step_limit()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new ResponseHandler(_ =>
+        {
+            requests++;
+            var arguments = JsonSerializer.Serialize("{\"step\":" + requests + "}");
+            var body = JsonSerializer.Serialize(new
+            {
+                status = "completed",
+                output = new[] { new { type = "function_call", call_id = $"call-{requests}", name = "read_file", arguments } }
+            });
+            return Json(body);
+        }));
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+        var toolExecutions = 0;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync("gpt-test",
+            [new { role = "user", content = "read files" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => { toolExecutions++; return Task.FromResult("contents"); },
+            (_, _, _) => Task.FromResult(false)));
+
+        Assert.Equal(OpenAiCodeTaskLimits.MaxModelStepsPerTurn, requests);
+        Assert.Equal(requests, toolExecutions);
+        Assert.Contains($"{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-step limit", exception.Message);
+    }
+
+    [Fact]
+    public async Task Cancellation_after_a_tool_result_prevents_another_api_request()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new ResponseHandler(_ =>
+        {
+            requests++;
+            return Json("""
+                {"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"list_files","arguments":"{}"}]}
+                """);
+        }));
+        using var cancellation = new CancellationTokenSource();
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync("gpt-test",
+            [new { role = "user", content = "list files" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => { cancellation.Cancel(); return Task.FromResult("[]"); },
+            (_, _, _) => Task.FromResult(false), cancellationToken: cancellation.Token));
+
+        Assert.Equal(1, requests);
+    }
+
+    private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json")
+    };
+
+    private sealed class ResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(respond(request));
+        }
+    }
+}

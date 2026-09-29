@@ -3030,8 +3030,6 @@ public partial class MainWindow : Window
     {
         if (turn.Provider != CloudModelProviders.OpenAI || string.IsNullOrWhiteSpace(turn.ProjectPath) || !Directory.Exists(turn.ProjectPath))
             throw new InvalidOperationException("OpenAI Code task could not find its conversation workspace.");
-        if (!_hostedApiKeys.TryGetValue(CloudModelProviders.OpenAI, out var apiKey))
-            throw new InvalidOperationException("Reconnect OpenAI before sending a Code task.");
         var files = new WorkspaceFileService(turn.ProjectPath, turn.ContextExclusions);
         var tools = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(ShellCommandResolver.ResolveCurrent());
         var executor = new CodeTaskToolExecutor(files, conversation,
@@ -3041,28 +3039,48 @@ public partial class MainWindow : Window
             status: message => SetAgentStatus(conversation, message),
             permissionApproval: proposal => ApproveOpenAiCommandAsync(proposal, files.ContextExclusions, cancellationToken));
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
-        var transcript = new StringBuilder();
-        var repeatedCalls = new RepeatedToolCallGuard();
-        var usageAccumulator = new OpenAiCodeTaskUsageAccumulator();
-        for (var round = 0; round < OpenAiCodeTaskLimits.MaxModelStepsPerTurn; round++)
+        var runner = new OpenAiCodeTaskRunner(CloudClient);
+        var result = await runner.RunAsync(turn.Model, input, tools,
+            async (step, currentInput, token) =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
             if (!IsProjectTrusted(turn.ProjectPath))
                 throw new InvalidOperationException("OpenAI Code task stopped because workspace trust was revoked.");
-            if (!_hostedApiKeys.TryGetValue(CloudModelProviders.OpenAI, out apiKey))
+            if (!_hostedApiKeys.TryGetValue(CloudModelProviders.OpenAI, out var currentApiKey))
                 throw new InvalidOperationException("OpenAI Code task stopped because the provider connection was removed.");
             if (!ProjectContextPolicy.CanUseOpenAiCodeTaskWorkspace(conversation.AllowHostedCodeTask,
                     turn.IncludeProjectContextForHosted && conversation.IncludeProjectContextForHosted,
                     _conversationWorkspaces.IsConversationWorkspace(conversation.Id, turn.ProjectPath)))
                 throw new InvalidOperationException("OpenAI Code task stopped because the consent required for this workspace was revoked.");
-            SetAgentStatus(conversation, $"OpenAI Code task · thinking · step {round + 1}/{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}");
             var roundMessages = normalizedHistory.ToArray();
             var sections = BuildPromptContextSections(roundMessages, promptComponents,
-                new PromptContextSection("Tool calls and results", JsonSerializer.Serialize(input.Skip(normalizedHistory.Count), JsonSerializerOptions.Web)),
+                new PromptContextSection("Tool calls and results", JsonSerializer.Serialize(currentInput.Skip(normalizedHistory.Count), JsonSerializerOptions.Web)),
                 new PromptContextSection("Available tool schemas", JsonSerializer.Serialize(tools, JsonSerializerOptions.Web)));
-            var response = await CloudClient.CreateOpenAiToolResponseAsync(apiKey, turn.Model, input, tools, cancellationToken,
-                body => SetLastPromptContextAsync(conversation, turn.Provider, turn.Model, 0, sections, roundMessages, body));
-            if (usageAccumulator.Add(response) is { } turnUsage)
+            await SetLastPromptContextAsync(conversation, turn.Provider, turn.Model, 0, sections, roundMessages, "");
+            return currentApiKey;
+        }, async (name, args, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            if (!IsProjectTrusted(turn.ProjectPath))
+                throw new InvalidOperationException("OpenAI Code task stopped because workspace trust was revoked.");
+            var toolResult = name == "update_task_checklist"
+                ? UpdateTaskChecklistFromModel(args, conversation)
+                : await executor.ExecuteAsync(name, args, token);
+            if (!string.Equals(name, "update_task_checklist", StringComparison.Ordinal))
+                UpdateChangesButton(conversation);
+            return toolResult;
+        }, (name, _, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            var decision = MessageBox.Show(this,
+                $"The model requested the same '{name.Replace('_', ' ')}' operation {RepeatedToolCallGuard.ConfirmationThreshold} times with identical arguments. Continue once?",
+                "Repeated tool call", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            return Task.FromResult(decision == MessageBoxResult.Yes);
+        },
+        status: status => { SetAgentStatus(conversation, status); return Task.CompletedTask; },
+        onResponse: async (response, turnUsage) =>
+        {
+            if (turnUsage is not null)
             {
                 conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { HostedUsage = turnUsage };
                 RenderAgentTranscript(conversation);
@@ -3079,58 +3097,20 @@ public partial class MainWindow : Window
             }
             if (response.OutputTokens is { } outputTokens)
                 await RecordLastPromptOutputTokenCountAsync(conversation, turn.Provider, turn.Model, outputTokens);
-            if (response.FunctionCalls.Count == 0)
-            {
-                if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
-                if (conversation.TaskChecklist.Count > 0)
-                    transcript.AppendLine().AppendLine().Append("**Task checklist**").AppendLine().AppendLine(TaskChecklistService.FormatForDisplay(conversation.TaskChecklist));
-                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript.ToString() };
-                RenderAgentTranscript(conversation);
-                return;
-            }
-            if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.AppendLine(response.OutputText);
-            var outputs = new List<OpenAiFunctionOutput>(response.FunctionCalls.Count);
-            foreach (var call in response.FunctionCalls)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!IsProjectTrusted(turn.ProjectPath))
-                    throw new InvalidOperationException("OpenAI Code task stopped because workspace trust was revoked.");
-                var name = call.TryGetProperty("name", out var nameElement) ? nameElement.GetString() ?? "" : "";
-                var callId = call.TryGetProperty("call_id", out var idElement) ? idElement.GetString() : null;
-                var rawArguments = call.TryGetProperty("arguments", out var argsElement) ? argsElement.GetString() : null;
-                if (string.IsNullOrWhiteSpace(callId) || string.IsNullOrWhiteSpace(rawArguments))
-                    throw new InvalidOperationException("OpenAI returned a malformed function call; Codev did not run it.");
-                using var argsDocument = JsonDocument.Parse(rawArguments);
-                var args = argsDocument.RootElement.Clone();
-                if (repeatedCalls.Record(name, args) >= RepeatedToolCallGuard.ConfirmationThreshold)
-                {
-                    var decision = MessageBox.Show(this,
-                        $"The model requested the same '{name.Replace('_', ' ')}' operation {RepeatedToolCallGuard.ConfirmationThreshold} times with identical arguments. Continue once?",
-                        "Repeated tool call", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-                    if (decision != MessageBoxResult.Yes)
-                    {
-                        transcript.AppendLine().AppendLine("Code task stopped because the model repeated the same tool call.");
-                        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript.ToString() };
-                        RenderAgentTranscript(conversation);
-                        return;
-                    }
-                    repeatedCalls.AllowOneMore();
-                }
-                SetAgentStatus(conversation, $"OpenAI Code task · {name.Replace('_', ' ')}");
-                var result = name == "update_task_checklist"
-                    ? UpdateTaskChecklistFromModel(args, conversation)
-                    : await executor.ExecuteAsync(name, args, cancellationToken);
-                if (!string.Equals(name, "update_task_checklist", StringComparison.Ordinal))
-                    UpdateChangesButton(conversation);
-                outputs.Add(new OpenAiFunctionOutput(callId, result));
-                transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**").AppendLine(result.Length > 6000 ? result[..6000] + "… [truncated]" : result);
-                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript.ToString() };
-                RenderAgentTranscript(conversation);
-                await SaveAsync();
-            }
-            OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, outputs);
-        }
-        throw new InvalidOperationException($"OpenAI Code task reached the {OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-step limit. Send a follow-up to continue.");
+        },
+        onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
+        onTranscript: async transcript =>
+        {
+            conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript };
+            RenderAgentTranscript(conversation);
+            await SaveAsync();
+        },
+        cancellationToken: cancellationToken);
+        var finalTranscript = result.Transcript;
+        if (conversation.TaskChecklist.Count > 0)
+            finalTranscript += Environment.NewLine + Environment.NewLine + "**Task checklist**" + Environment.NewLine + Environment.NewLine + TaskChecklistService.FormatForDisplay(conversation.TaskChecklist);
+        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = finalTranscript };
+        RenderAgentTranscript(conversation);
     }
 
     private async Task<CommandApprovalOutcome> ApproveOpenAiCommandAsync(CodeTaskCommandProposal proposal,
@@ -4080,6 +4060,14 @@ public partial class MainWindow : Window
             _lastPromptContexts[conversation.Id] = snapshot with { ActualPromptTokens = count };
         UpdateContextUsage(conversation);
     }
+
+    private Task SetLastPromptRequestBodyAsync(Conversation conversation, string requestBody) =>
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_lastPromptContexts.TryGetValue(conversation.Id, out var snapshot))
+                _lastPromptContexts[conversation.Id] = snapshot with { SerializedRequestBody = requestBody };
+            UpdateContextUsage(conversation);
+        }).Task;
 
     private Task RecordLastPromptOutputTokenCountAsync(Conversation conversation, string provider, string model, int count) =>
         Dispatcher.InvokeAsync(() =>
