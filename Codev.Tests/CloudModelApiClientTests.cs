@@ -208,6 +208,23 @@ public sealed class CloudModelApiClientTests
         Assert.Contains(expected, exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("response.incomplete", "{\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}", "max_output_tokens")]
+    [InlineData("response.failed", "{\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"quota limit reached\"}}}", "quota limit reached")]
+    public async Task Openai_streaming_tool_responses_report_incomplete_and_failed_turns(string _, string eventJson, string expected)
+    {
+        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("data: " + eventJson + "\n\n", Encoding.UTF8, "text/event-stream")
+        }));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new CloudModelApiClient(http).StreamOpenAiToolResponseAsync("key", "gpt-example",
+                Array.Empty<object>(), Array.Empty<object>()));
+
+        Assert.Contains(expected, exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task Openai_tool_response_preserves_refusal_text_without_invoking_a_tool()
     {
