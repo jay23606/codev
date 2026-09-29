@@ -13,6 +13,12 @@ public static class CloudModelProviders
     public static bool IsCloud(string? provider) => provider is OpenAI or Anthropic;
 }
 
+public static class OpenAiCodeTaskLimits
+{
+    public const int MaxOutputTokensPerRequest = 4096;
+    public const int MaxModelStepsPerTurn = 8;
+}
+
 public sealed record CloudModel(string Provider, string Id, string DisplayName);
 public sealed record CloudChatMessage(string Role, string Content);
 public sealed record OpenAiToolResponse(IReadOnlyList<JsonElement> OutputItems, IReadOnlyList<JsonElement> FunctionCalls,
@@ -39,7 +45,7 @@ public sealed class CloudModelApiClient(HttpClient http)
             ["tool_choice"] = "auto",
             ["stream"] = false,
             ["store"] = false,
-            ["max_output_tokens"] = 4096
+            ["max_output_tokens"] = OpenAiCodeTaskLimits.MaxOutputTokensPerRequest
         };
         var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
         using var request = CreateRequest(HttpMethod.Post, new Uri(OpenAiBase, "responses"), CloudModelProviders.OpenAI, apiKey);

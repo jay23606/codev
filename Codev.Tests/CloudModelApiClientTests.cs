@@ -146,6 +146,8 @@ public sealed class CloudModelApiClientTests
         Assert.Contains("\"tool_choice\":\"auto\"", body);
         Assert.Contains("\"type\":\"function\"", body);
         Assert.DoesNotContain("secret-api-key", body);
+        using var requestJson = JsonDocument.Parse(body!);
+        Assert.Equal(OpenAiCodeTaskLimits.MaxOutputTokensPerRequest, requestJson.RootElement.GetProperty("max_output_tokens").GetInt32());
         Assert.Equal(321, requestBody.InputTokens);
         Assert.Equal(87, requestBody.OutputTokens);
         Assert.Single(requestBody.FunctionCalls);

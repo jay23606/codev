@@ -3041,7 +3041,7 @@ public partial class MainWindow : Window
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var transcript = new StringBuilder();
         var repeatedCalls = new RepeatedToolCallGuard();
-        for (var round = 0; round < 8; round++)
+        for (var round = 0; round < OpenAiCodeTaskLimits.MaxModelStepsPerTurn; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsProjectTrusted(turn.ProjectPath))
@@ -3052,7 +3052,7 @@ public partial class MainWindow : Window
                     turn.IncludeProjectContextForHosted && conversation.IncludeProjectContextForHosted,
                     _conversationWorkspaces.IsConversationWorkspace(conversation.Id, turn.ProjectPath)))
                 throw new InvalidOperationException("OpenAI Code task stopped because the consent required for this workspace was revoked.");
-            SetAgentStatus(conversation, $"OpenAI Code task · thinking · step {round + 1}/8");
+            SetAgentStatus(conversation, $"OpenAI Code task · thinking · step {round + 1}/{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}");
             var roundMessages = normalizedHistory.ToArray();
             var sections = BuildPromptContextSections(roundMessages, promptComponents,
                 new PromptContextSection("Tool calls and results", JsonSerializer.Serialize(input.Skip(normalizedHistory.Count), JsonSerializerOptions.Web)),
@@ -3121,7 +3121,7 @@ public partial class MainWindow : Window
             }
             OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, outputs);
         }
-        throw new InvalidOperationException("OpenAI Code task reached the eight-step tool limit. Send a follow-up to continue.");
+        throw new InvalidOperationException($"OpenAI Code task reached the {OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-step limit. Send a follow-up to continue.");
     }
 
     private async Task<CommandApprovalOutcome> ApproveOpenAiCommandAsync(CodeTaskCommandProposal proposal,

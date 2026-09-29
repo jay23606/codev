@@ -357,7 +357,7 @@ public sealed class MainViewModel : ViewModelBase
         reason is not "Wait for the current response to finish before changing conversation mode.";
     public string CodeTaskUnavailableReason => GetCodeTaskUnavailableReason() ?? "";
     public string CodeTaskTooltip => IsCodeTask
-        ? $"Code task is on. {ProjectCommandPermissionMode switch
+        ? $"Code task is on. {(IsOpenAIModel ? $"Codev caps OpenAI Code tasks at {Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn} model steps per turn and {Codev.OpenAiCodeTaskLimits.MaxOutputTokensPerRequest:N0} output tokens per request. " : "")}{ProjectCommandPermissionMode switch
         {
             Codev.ProjectCommandPermissionMode.Allowlist => "Exact saved allow rules can skip approval; unlisted commands still ask.",
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
@@ -2314,7 +2314,7 @@ public sealed class MainViewModel : ViewModelBase
         var transcript = new System.Text.StringBuilder();
         var repeatedCalls = new Codev.RepeatedToolCallGuard();
         var client = new Codev.CloudModelApiClient(_http);
-        for (var round = 0; round < 8; round++)
+        for (var round = 0; round < Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!_cloudRequestsEnabled || !_cloudApiKeys.TryGetValue(Codev.CloudModelProviders.OpenAI, out var currentOpenAiKey) ||
@@ -2322,7 +2322,7 @@ public sealed class MainViewModel : ViewModelBase
                     turn.IncludeProjectContext && conversation.IncludeProjectContextForHosted,
                     _conversationWorkspaces.IsConversationWorkspace(conversation.Id, turn.ProjectPath)))
                 throw new InvalidOperationException("OpenAI Code task stopped because hosted requests or the consent required for this workspace were turned off.");
-            await SetConnectionStatusAsync($"OpenAI Code task · thinking · step {round + 1}/8");
+            await SetConnectionStatusAsync($"OpenAI Code task · thinking · step {round + 1}/{Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn}");
             var requestBody = JsonSerializer.Serialize(new
             {
                 model = turn.Model,
@@ -2331,7 +2331,7 @@ public sealed class MainViewModel : ViewModelBase
                 tool_choice = "auto",
                 stream = false,
                 store = false,
-                max_output_tokens = 4096
+                max_output_tokens = Codev.OpenAiCodeTaskLimits.MaxOutputTokensPerRequest
             }, JsonSerializerOptions.Web);
             await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create(
                 turn.Provider, turn.Model, 0,
@@ -2394,7 +2394,7 @@ public sealed class MainViewModel : ViewModelBase
             }
             Codev.OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, toolOutputs);
         }
-        throw new InvalidOperationException("OpenAI Code task reached the eight-step tool limit. Send a follow-up to continue.");
+        throw new InvalidOperationException($"OpenAI Code task reached the {Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-step limit. Send a follow-up to continue.");
     }
 
     private static object[] CreateCodeTaskToolSchemas(Codev.ShellCommandSpec shell) =>
