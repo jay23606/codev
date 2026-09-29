@@ -193,11 +193,12 @@ public sealed class ConversationStatusReportTests
             Provider = CloudModelProviders.OpenAI,
             Model = "hosted-model",
             LastPromptTokens = 1_024,
+            LastPromptOutputTokens = 128,
             LastPromptModel = "hosted-model",
             LastPromptProvider = CloudModelProviders.OpenAI
         }, false, 0, false, true);
 
-        Assert.Contains("Last request usage: 1,024 provider-reported input tokens", report);
+        Assert.Contains("Last request usage: 1,024 input · 128 output tokens (provider-reported)", report);
         Assert.DoesNotContain("% of", report);
     }
 

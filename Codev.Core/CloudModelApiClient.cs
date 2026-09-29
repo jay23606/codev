@@ -16,7 +16,7 @@ public static class CloudModelProviders
 public sealed record CloudModel(string Provider, string Id, string DisplayName);
 public sealed record CloudChatMessage(string Role, string Content);
 public sealed record OpenAiToolResponse(IReadOnlyList<JsonElement> OutputItems, IReadOnlyList<JsonElement> FunctionCalls,
-    string OutputText, int? InputTokens);
+    string OutputText, int? InputTokens, int? OutputTokens = null);
 
 /// <summary>Small REST client for hosted model discovery and text streaming. API keys are supplied per request; persistence is handled by the OS credential vault.</summary>
 public sealed class CloudModelApiClient(HttpClient http)
@@ -69,7 +69,9 @@ public sealed class CloudModelApiClient(HttpClient http)
                     else if (GetString(block, "type") == "refusal" && GetString(block, "refusal") is { } refusal) outputText.Append(refusal);
         int? inputTokens = root.TryGetProperty("usage", out var usage) && usage.TryGetProperty("input_tokens", out var inputTokenValue) &&
             inputTokenValue.TryGetInt32(out var count) && count >= 0 ? count : null;
-        return new OpenAiToolResponse(outputItems, calls, outputText.ToString(), inputTokens);
+        int? outputTokens = root.TryGetProperty("usage", out usage) && usage.TryGetProperty("output_tokens", out var outputTokenValue) &&
+            outputTokenValue.TryGetInt32(out var outputCount) && outputCount >= 0 ? outputCount : null;
+        return new OpenAiToolResponse(outputItems, calls, outputText.ToString(), inputTokens, outputTokens);
     }
 
     public async Task<IReadOnlyList<CloudModel>> ListModelsAsync(string provider, string apiKey, CancellationToken cancellationToken = default)
@@ -144,7 +146,8 @@ public sealed class CloudModelApiClient(HttpClient http)
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         int? maxOutputTokens = null,
         Func<int, Task>? onInputTokenCount = null,
-        Func<string, Task>? onRequestPayload = null)
+        Func<string, Task>? onRequestPayload = null,
+        Func<int, Task>? onOutputTokenCount = null)
     {
         Validate(provider, apiKey);
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("Choose a hosted model first.", nameof(model));
@@ -181,6 +184,8 @@ public sealed class CloudModelApiClient(HttpClient http)
                     throw new InvalidOperationException(ReadApiError(root));
                 if (onInputTokenCount is not null && TryReadInputTokenCount(provider, type, root) is { } inputTokenCount)
                     await onInputTokenCount(inputTokenCount).ConfigureAwait(false);
+                if (onOutputTokenCount is not null && TryReadOutputTokenCount(provider, type, root) is { } outputTokenCount)
+                    await onOutputTokenCount(outputTokenCount).ConfigureAwait(false);
                 if (provider == CloudModelProviders.OpenAI)
                 {
                     if (type == "response.output_text.delta" && GetString(root, "delta") is { Length: > 0 } delta)
@@ -299,6 +304,19 @@ public sealed class CloudModelApiClient(HttpClient http)
         if (provider == CloudModelProviders.Anthropic && type == "message_start" &&
             root.TryGetProperty("message", out var message) && message.TryGetProperty("usage", out var anthropicUsage) &&
             anthropicUsage.TryGetProperty("input_tokens", out var anthropicInput) && anthropicInput.TryGetInt32(out var anthropicCount) && anthropicCount >= 0)
+            return anthropicCount;
+        return null;
+    }
+
+    private static int? TryReadOutputTokenCount(string provider, string type, JsonElement root)
+    {
+        if (provider == CloudModelProviders.OpenAI && type == "response.completed" &&
+            root.TryGetProperty("response", out var response) && response.TryGetProperty("usage", out var openAiUsage) &&
+            openAiUsage.TryGetProperty("output_tokens", out var openAiOutput) && openAiOutput.TryGetInt32(out var openAiCount) && openAiCount >= 0)
+            return openAiCount;
+        if (provider == CloudModelProviders.Anthropic && type == "message_delta" &&
+            root.TryGetProperty("usage", out var anthropicUsage) && anthropicUsage.TryGetProperty("output_tokens", out var anthropicOutput) &&
+            anthropicOutput.TryGetInt32(out var anthropicCount) && anthropicCount >= 0)
             return anthropicCount;
         return null;
     }

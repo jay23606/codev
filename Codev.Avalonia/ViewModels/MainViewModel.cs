@@ -302,7 +302,11 @@ public sealed class MainViewModel : ViewModelBase
     public string ContextEstimateLabel => _contextEstimateLabel;
     public bool HasLastPromptContext => ActiveConversation is { } conversation && _lastPromptContexts.ContainsKey(conversation.Id);
     public string LastPromptContextLabel => ActiveConversation is { } conversation && _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot)
-        ? snapshot.ActualPromptTokens is { } actual ? $"Last request · {actual:N0} input tokens" : $"Last request · ≈{snapshot.EstimatedPromptTokens:N0} estimated tokens"
+        ? snapshot.ActualPromptTokens is { } actual
+            ? Codev.CloudModelProviders.IsCloud(snapshot.Provider) && conversation.LastPromptOutputTokens is { } output
+                ? $"Last request · {actual:N0} in · {output:N0} out"
+                : $"Last request · {actual:N0} input tokens"
+            : $"Last request · ≈{snapshot.EstimatedPromptTokens:N0} estimated tokens"
         : "View request context";
     public bool CanIncludeRepoMap => HasProject && (SelectedContextFiles.Count > 0 || IsProjectTrusted) && (!IsHostedModel || IncludeProjectContextForHosted);
     public string RepoMapEstimateLabel => IncludeRepoMap && CanIncludeRepoMap ? "Repo map: up to ≈2,000 tokens." : "";
@@ -2338,6 +2342,8 @@ public sealed class MainViewModel : ViewModelBase
                 cancellationToken, body => SetLastPromptRequestBodyAsync(conversation, body));
             if (response.InputTokens is { } inputTokens)
                 await RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, 0, inputTokens);
+            if (response.OutputTokens is { } outputTokens)
+                await RecordPromptOutputTokenUsageAsync(conversation, turn.Provider, turn.Model, outputTokens);
             if (response.FunctionCalls.Count == 0)
             {
                 if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
@@ -2446,6 +2452,7 @@ public sealed class MainViewModel : ViewModelBase
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             conversation.LastPromptTokens = promptTokens;
+            conversation.LastPromptOutputTokens = null;
             conversation.LastPromptContext = contextLimit;
             conversation.LastPromptModel = model;
             conversation.LastPromptProvider = provider;
@@ -2458,6 +2465,20 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ShouldOfferCompaction));
                 OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             }
+        });
+    }
+
+    private async Task RecordPromptOutputTokenUsageAsync(Codev.Conversation conversation, string provider, string model, int outputTokens)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (!conversation.LastPromptModel.Equals(model, StringComparison.OrdinalIgnoreCase) ||
+                !conversation.LastPromptProvider.Equals(provider, StringComparison.OrdinalIgnoreCase))
+                conversation.LastPromptTokens = 0;
+            conversation.LastPromptOutputTokens = outputTokens;
+            conversation.LastPromptModel = model;
+            conversation.LastPromptProvider = provider;
+            if (ReferenceEquals(ActiveConversation, conversation)) OnPropertyChanged(nameof(LastPromptContextLabel));
         });
     }
 
@@ -2720,7 +2741,9 @@ public sealed class MainViewModel : ViewModelBase
                                    savedTurn.Provider, apiKey, savedTurn.Model, cloudMessages, token.Token,
                                    onInputTokenCount: inputTokens => RecordPromptTokenUsageAsync(
                                        conversation, savedTurn.Provider, savedTurn.Model, 0, inputTokens),
-                                   onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body)))
+                                   onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
+                                   onOutputTokenCount: outputTokens => RecordPromptOutputTokenUsageAsync(
+                                       conversation, savedTurn.Provider, savedTurn.Model, outputTokens)))
                 {
                     await AppendAssistantDeltaAsync(conversation, assistantIndex, output, delta);
                 }

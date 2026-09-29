@@ -12,6 +12,7 @@ public sealed class ConversationRewindServiceTests
             Messages = [new("user", "first"), new("assistant", "answer 1"), new("user", "second"), new("assistant", "answer 2")],
             FileChanges = [new("src/app.cs", null, DateTimeOffset.UnixEpoch, "Create", PreviousFileExisted: false)],
             LastPromptTokens = 500,
+            LastPromptOutputTokens = 90,
             LastPromptContext = 4096,
             LastPromptModel = "local-model"
         };
@@ -25,6 +26,7 @@ public sealed class ConversationRewindServiceTests
         Assert.Equal(1, conversation.Messages[1].MessageIndex);
         Assert.Single(conversation.FileChanges);
         Assert.Equal(0, conversation.LastPromptTokens);
+        Assert.Null(conversation.LastPromptOutputTokens);
         Assert.Equal(0, conversation.LastPromptContext);
         Assert.Empty(conversation.LastPromptModel);
     }

@@ -29,6 +29,7 @@ public static class ConversationBackupService
             RepeatPenalty = ConversationSamplingSettings.NormalizePenalty(conversation.RepeatPenalty),
             NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(conversation.NumPredict),
             LastPromptTokens = conversation.LastPromptTokens,
+            LastPromptOutputTokens = conversation.LastPromptOutputTokens,
             LastPromptContext = conversation.LastPromptContext,
             LastPromptModel = conversation.LastPromptModel,
             LastPromptProvider = conversation.LastPromptProvider,

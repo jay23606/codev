@@ -14,6 +14,7 @@ public static class ConversationHistoryClearService
         conversation.Title = "New conversation";
         conversation.Draft = "";
         conversation.LastPromptTokens = 0;
+        conversation.LastPromptOutputTokens = null;
         conversation.LastPromptContext = 0;
         conversation.LastPromptModel = "";
         conversation.LastPromptProvider = "";

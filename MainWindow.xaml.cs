@@ -2827,13 +2827,15 @@ public partial class MainWindow : Window
             onInputTokenCount: count => Dispatcher.InvokeAsync(() =>
             {
                 conversation.LastPromptTokens = count;
+                conversation.LastPromptOutputTokens = null;
                 conversation.LastPromptContext = 0;
                 conversation.LastPromptModel = model;
                 conversation.LastPromptProvider = provider;
                 RecordLastPromptTokenCount(conversation, count);
             }).Task,
             onRequestPayload: body => SetLastPromptContextAsync(conversation, provider, model, 0,
-                BuildPromptContextSections(history, promptComponents), history, body)))
+                BuildPromptContextSections(history, promptComponents), history, body),
+            onOutputTokenCount: count => RecordLastPromptOutputTokenCountAsync(conversation, provider, model, count)))
         {
             output.Append(chunk);
             var current = output.ToString();
@@ -3060,11 +3062,14 @@ public partial class MainWindow : Window
             if (response.InputTokens is { } inputTokens)
             {
                 conversation.LastPromptTokens = inputTokens;
+                conversation.LastPromptOutputTokens = null;
                 conversation.LastPromptContext = 0;
                 conversation.LastPromptModel = turn.Model;
                 conversation.LastPromptProvider = turn.Provider;
                 RecordLastPromptTokenCount(conversation, inputTokens);
             }
+            if (response.OutputTokens is { } outputTokens)
+                await RecordLastPromptOutputTokenCountAsync(conversation, turn.Provider, turn.Model, outputTokens);
             if (response.FunctionCalls.Count == 0)
             {
                 if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
@@ -4019,22 +4024,25 @@ public partial class MainWindow : Window
         var snapshotMatches = hasSnapshot && snapshot!.Model.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
             snapshot.Provider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase);
         var matchesCurrent = snapshotMatches
-            ? snapshot!.ActualPromptTokens is not null
-            : conversation.LastPromptTokens > 0 &&
+            ? snapshot!.ActualPromptTokens is not null || conversation.LastPromptOutputTokens is not null
+            : (conversation.LastPromptTokens > 0 || conversation.LastPromptOutputTokens is not null) &&
             (string.IsNullOrWhiteSpace(conversation.LastPromptModel) || conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase)) &&
             provider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase);
         var currentProvider = snapshotMatches ? snapshot!.Provider : provider;
         var currentTokens = snapshotMatches ? snapshot!.ActualPromptTokens ?? 0 : conversation.LastPromptTokens;
+        var currentOutputTokens = conversation.LastPromptOutputTokens;
         var limit = snapshotMatches ? snapshot!.ContextLimit : conversation.LastPromptContext;
         ContextUsageLabel.Text = !matchesCurrent ? hasSnapshot ? "Request context" : "" : CloudModelProviders.IsCloud(currentProvider)
-            ? $"{FormatTokenCount(currentTokens)} input tokens"
+            ? currentTokens > 0 && currentOutputTokens is { } outputTokens
+                ? $"{FormatTokenCount(currentTokens)} in · {FormatTokenCount(outputTokens)} out"
+                : currentTokens > 0 ? $"{FormatTokenCount(currentTokens)} input tokens" : $"{FormatTokenCount(currentOutputTokens ?? 0)} output tokens"
             : limit > 0 ? $"{FormatTokenCount(currentTokens)} / {FormatContextLimit(limit)}" : $"{FormatTokenCount(currentTokens)} tokens";
         ContextUsageLabel.Cursor = hasSnapshot ? Cursors.Hand : Cursors.Arrow;
         ContextUsageLabel.TextDecorations = hasSnapshot ? TextDecorations.Underline : null;
         ContextUsageLabel.ToolTip = hasSnapshot ? "Click to inspect the exact last request JSON, normalized messages, context components, and rough token estimate." :
             !matchesCurrent ? "Prompt usage appears after the first response for this model." :
             CloudModelProviders.IsCloud(provider)
-                ? $"Input token count reported by {provider}; hosted providers manage their own context limits."
+                ? $"Input and output token counts reported by {provider}; hosted providers manage their own context limits."
                 : limit > 0
                     ? "Latest prompt and conversation history token count reported by Ollama. The denominator is the selected request context size."
                     : "Ollama reported prompt usage, but the latest request's model-default context size is unknown. Choose an explicit size for the next request or summarize older messages manually.";
@@ -4063,6 +4071,18 @@ public partial class MainWindow : Window
             _lastPromptContexts[conversation.Id] = snapshot with { ActualPromptTokens = count };
         UpdateContextUsage(conversation);
     }
+
+    private Task RecordLastPromptOutputTokenCountAsync(Conversation conversation, string provider, string model, int count) =>
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (!conversation.LastPromptModel.Equals(model, StringComparison.OrdinalIgnoreCase) ||
+                !conversation.LastPromptProvider.Equals(provider, StringComparison.OrdinalIgnoreCase))
+                conversation.LastPromptTokens = 0;
+            conversation.LastPromptOutputTokens = count;
+            conversation.LastPromptModel = model;
+            conversation.LastPromptProvider = provider;
+            UpdateContextUsage(conversation);
+        }).Task;
 
     private static PromptContextSection[] BuildPromptContextSections(IEnumerable<ChatMessage> messages,
         IEnumerable<PromptContextSection>? capturedComponents = null, params PromptContextSection[] additionalSections)

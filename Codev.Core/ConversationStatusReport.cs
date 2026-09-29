@@ -50,11 +50,15 @@ public static class ConversationStatusReport
         var canIncludeRepoMap = !string.IsNullOrWhiteSpace(conversation.ProjectPath) &&
             (conversation.ContextFiles.Count > 0 || projectFolderTrusted) &&
             (!CloudModelProviders.IsCloud(conversation.Provider) || conversation.IncludeProjectContextForHosted);
-        var lastPromptUsage = conversation.LastPromptTokens > 0 &&
-            conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
-            conversation.LastPromptProvider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase)
+        var lastPromptUsageMatches = conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
+            conversation.LastPromptProvider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase);
+        var lastPromptUsage = lastPromptUsageMatches && (conversation.LastPromptTokens > 0 || conversation.LastPromptOutputTokens is not null)
             ? CloudModelProviders.IsCloud(conversation.Provider)
-                ? $"{conversation.LastPromptTokens:N0} provider-reported input tokens"
+                ? conversation.LastPromptTokens > 0 && conversation.LastPromptOutputTokens is { } outputTokens
+                    ? $"{conversation.LastPromptTokens:N0} input · {outputTokens:N0} output tokens (provider-reported)"
+                    : conversation.LastPromptTokens > 0
+                        ? $"{conversation.LastPromptTokens:N0} provider-reported input tokens"
+                        : $"{conversation.LastPromptOutputTokens:N0} provider-reported output tokens"
                 : conversation.LastPromptContext > 0
                     ? $"{conversation.LastPromptTokens:N0} input tokens · {Math.Round(100d * conversation.LastPromptTokens / conversation.LastPromptContext):N0}% of {conversation.LastPromptContext:N0} tokens"
                     : $"{conversation.LastPromptTokens:N0} input tokens · context usage unavailable"

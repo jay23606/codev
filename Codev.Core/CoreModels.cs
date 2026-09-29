@@ -30,6 +30,7 @@ public sealed class Conversation
     public double? RepeatPenalty { get; set; }
     public int? NumPredict { get; set; }
     public int LastPromptTokens { get; set; }
+    public int? LastPromptOutputTokens { get; set; }
     public int LastPromptContext { get; set; }
     public string LastPromptModel { get; set; } = "";
     public string LastPromptProvider { get; set; } = "";

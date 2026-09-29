@@ -19,6 +19,7 @@ public static class ConversationRewindService
             conversation.Messages[index] = conversation.Messages[index] with { MessageIndex = index };
         conversation.Draft = draft;
         conversation.LastPromptTokens = 0;
+        conversation.LastPromptOutputTokens = null;
         conversation.LastPromptContext = 0;
         conversation.LastPromptModel = "";
         conversation.LastPromptProvider = "";

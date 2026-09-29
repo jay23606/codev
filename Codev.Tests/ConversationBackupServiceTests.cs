@@ -28,6 +28,8 @@ public sealed class ConversationBackupServiceTests
             PresencePenalty = 0.2,
             RepeatPenalty = 1.1,
             NumPredict = 4096,
+            LastPromptTokens = 321,
+            LastPromptOutputTokens = 123,
             CompactionSummary = "Earlier decisions and user goal.",
             CompactionThroughMessageCount = 2,
             ProjectPath = @"C:\work\sample",
@@ -57,6 +59,8 @@ public sealed class ConversationBackupServiceTests
         Assert.Equal(source.PresencePenalty, imported.PresencePenalty);
         Assert.Equal(source.RepeatPenalty, imported.RepeatPenalty);
         Assert.Equal(source.NumPredict, imported.NumPredict);
+        Assert.Equal(321, imported.LastPromptTokens);
+        Assert.Equal(123, imported.LastPromptOutputTokens);
         Assert.Equal(source.ProjectPath, imported.ProjectPath);
         Assert.Equal(source.Messages, imported.Messages);
         Assert.Equal("I will inspect the failing path.", imported.Messages[1].Thinking);

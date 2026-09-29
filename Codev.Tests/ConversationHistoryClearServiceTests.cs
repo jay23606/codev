@@ -15,6 +15,7 @@ public sealed class ConversationHistoryClearServiceTests
             ContextFiles = ["src/App.cs"],
             IsPinned = true,
             LastPromptTokens = 1200,
+            LastPromptOutputTokens = 80,
             LastPromptContext = 8192,
             LastPromptModel = "claude-sonnet",
             CompactionSummary = "Old summary",
@@ -30,6 +31,7 @@ public sealed class ConversationHistoryClearServiceTests
         Assert.Equal("New conversation", conversation.Title);
         Assert.Empty(conversation.Draft);
         Assert.Equal(0, conversation.LastPromptTokens);
+        Assert.Null(conversation.LastPromptOutputTokens);
         Assert.Equal(0, conversation.LastPromptContext);
         Assert.Empty(conversation.LastPromptModel);
         Assert.Empty(conversation.CompactionSummary);

@@ -35,6 +35,7 @@ public sealed class ConversationPersistenceTests
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
             LastPromptTokens = 321,
+            LastPromptOutputTokens = 123,
             LastPromptContext = 4096,
             LastPromptModel = "claude-sonnet-test",
             LastPromptProvider = CloudModelProviders.Anthropic,
@@ -74,6 +75,7 @@ public sealed class ConversationPersistenceTests
         Assert.True(snapshot.AllowHostedCodeTask);
         Assert.True(snapshot.IncludeRepoMap);
         Assert.Equal(321, snapshot.LastPromptTokens);
+        Assert.Equal(123, snapshot.LastPromptOutputTokens);
         Assert.Equal(CloudModelProviders.Anthropic, snapshot.LastPromptProvider);
         Assert.Equal("Accepted older context.", snapshot.CompactionSummary);
         Assert.Equal(2, snapshot.CompactionFromMessageCount);

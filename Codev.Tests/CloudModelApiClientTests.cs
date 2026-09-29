@@ -132,7 +132,7 @@ public sealed class CloudModelApiClientTests
                 {"status":"completed","output":[
                   {"type":"reasoning","id":"rs_123","summary":[]},
                   {"type":"function_call","id":"fc_123","call_id":"call_123","name":"list_files","arguments":"{\"relative_directory\":\"\"}"}
-                ],"usage":{"input_tokens":321}}
+                ],"usage":{"input_tokens":321,"output_tokens":87}}
                 """);
         }));
         var requestBody = await new CloudModelApiClient(http).CreateOpenAiToolResponseAsync("secret-api-key", "gpt-example",
@@ -147,10 +147,47 @@ public sealed class CloudModelApiClientTests
         Assert.Contains("\"type\":\"function\"", body);
         Assert.DoesNotContain("secret-api-key", body);
         Assert.Equal(321, requestBody.InputTokens);
+        Assert.Equal(87, requestBody.OutputTokens);
         Assert.Single(requestBody.FunctionCalls);
         Assert.Equal("call_123", requestBody.FunctionCalls[0].GetProperty("call_id").GetString());
         Assert.Equal("list_files", requestBody.FunctionCalls[0].GetProperty("name").GetString());
         Assert.Equal(2, requestBody.OutputItems.Count);
+    }
+
+    [Fact]
+    public async Task Openai_stream_reports_provider_supplied_output_tokens()
+    {
+        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":17,\"output_tokens\":9}}}\n\n", Encoding.UTF8, "text/event-stream")
+        }));
+        var inputTokens = 0;
+        var outputTokens = 0;
+
+        await foreach (var _ in new CloudModelApiClient(http).StreamChatAsync(CloudModelProviders.OpenAI, "key", "model",
+                           [new("user", "hello")], onInputTokenCount: count => { inputTokens = count; return Task.CompletedTask; },
+                           onOutputTokenCount: count => { outputTokens = count; return Task.CompletedTask; })) { }
+
+        Assert.Equal(17, inputTokens);
+        Assert.Equal(9, outputTokens);
+    }
+
+    [Fact]
+    public async Task Anthropic_stream_reports_provider_supplied_output_tokens()
+    {
+        const string sse = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":17}}}\n\n" +
+                           "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":9}}\n\n" +
+                           "data: {\"type\":\"message_stop\"}\n\n";
+        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(sse, Encoding.UTF8, "text/event-stream")
+        }));
+        var outputTokens = 0;
+
+        await foreach (var _ in new CloudModelApiClient(http).StreamChatAsync(CloudModelProviders.Anthropic, "key", "model",
+                           [new("user", "hello")], onOutputTokenCount: count => { outputTokens = count; return Task.CompletedTask; })) { }
+
+        Assert.Equal(9, outputTokens);
     }
 
     [Theory]
