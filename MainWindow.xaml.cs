@@ -138,6 +138,7 @@ public partial class MainWindow : Window
             await LoadUserSlashCommandsAsync();
             await LoadSavedHostedProvidersAsync();
             await LoadModelsAsync();
+            if (_active is not null) SelectConversation(_active);
         };
     }
 
@@ -562,6 +563,7 @@ public partial class MainWindow : Window
             }
             _hostedApiKeys[providerId] = apiKey;
             _hostedModels[providerId] = discovered.Select(model => new ModelOption(model.Id, $"{(providerId == CloudModelProviders.OpenAI ? "OpenAI" : "Claude")} · {model.DisplayName}", providerId)).ToList();
+            var restoreCodeTask = _active is { IsCodeTask: true } currentConversation && currentConversation.Provider == providerId;
             await LoadModelsAsync();
             var first = _hostedModels[providerId][0];
             _loadingModel = true;
@@ -571,13 +573,14 @@ public partial class MainWindow : Window
                 _active.Provider = providerId;
                 _active.Model = first.Name;
                 _active.IsPlanMode = false;
-                _active.IsCodeTask = providerId == CloudModelProviders.OpenAI && _codeTaskMode && _codeTaskConversationId == _active.Id;
+                _active.IsCodeTask = providerId == CloudModelProviders.OpenAI &&
+                    (restoreCodeTask || (_codeTaskMode && _codeTaskConversationId == _active.Id));
                 UpdateProviderUi(_active);
                 UpdateTaskChecklistButton();
             }
             ModelOptionsButton.IsEnabled = false;
             _loadingModel = false;
-            if (_active is not null) { UpdateModeButtons(); RefreshContextPicker(_active); UpdateContextLabel(_active); await SaveAsync(); }
+            if (_active is not null) { SelectConversation(_active); UpdateModeButtons(); RefreshContextPicker(_active); UpdateContextLabel(_active); await SaveAsync(); }
             AgentStatusLabel.Text = $"Connected · {discovered.Count} hosted models available{saveWarning}";
         }
         catch (Exception ex)
