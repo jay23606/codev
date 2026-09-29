@@ -15,6 +15,9 @@ public static class ProjectContextPolicy
         CanRunCodeTask(provider, hostedProviderConnected, isLoopbackOllama, projectPath, projectFolderTrusted, projectFolderExists) &&
         (provider != CloudModelProviders.OpenAI || hostedCodeTaskApproved);
 
+    public static bool CanUseOpenAiCodeTaskWorkspace(bool hostedCodeTaskApproved, bool hostedWorkspaceSharingApproved,
+        bool isCodevPrivateWorkspace) => hostedCodeTaskApproved && (hostedWorkspaceSharingApproved || isCodevPrivateWorkspace);
+
     public static string? GetProjectPathForQueuedTurn(string? projectPath, bool hasExplicitFiles, bool projectFolderTrusted) =>
         hasExplicitFiles || projectFolderTrusted ? projectPath : null;
 

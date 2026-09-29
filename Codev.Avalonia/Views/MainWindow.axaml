@@ -120,7 +120,7 @@
                         <Button Classes="soft" Content="Project actions…" HorizontalAlignment="Stretch" FontSize="10" IsEnabled="{Binding CanOpenProjectActions}">
                             <Button.Flyout>
                                 <MenuFlyout>
-                                    <MenuItem Header="Allow OpenAI coding tools to receive project files and tool results" ToggleType="CheckBox" IsChecked="{Binding IncludeProjectContextForHosted, Mode=TwoWay}" IsEnabled="{Binding IsOpenAIModel}" ToolTip.Tip="This conversation's requested file contents and command output may be sent to OpenAI." />
+                                    <MenuItem Header="Share workspace with OpenAI" ToggleType="CheckBox" IsChecked="{Binding IncludeProjectContextForHosted, Mode=TwoWay}" IsEnabled="{Binding IsOpenAIModel}" ToolTip.Tip="Project files and instructions from this conversation's attached workspace may be sent to OpenAI. Tool and command results are governed by OpenAI Code task consent." />
                                     <MenuItem Header="Git status and changes…" IsEnabled="{Binding HasProject}" Click="GitStatus_Click" />
                                     <MenuItem Header="{Binding FileChangesLabel}" IsEnabled="{Binding CanReviewFileChanges}" Click="ReviewFileChanges_Click" />
                                     <MenuItem Header="{Binding ProjectTrustLabel}" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />

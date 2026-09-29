@@ -60,10 +60,28 @@ public sealed class ConversationStatusReportTests
         Assert.Contains("Context window: managed by provider", report);
         Assert.Contains("Thinking: unavailable for hosted providers", report);
         Assert.Contains("Project context: excluded from hosted requests", report);
+        Assert.Contains(provider == CloudModelProviders.OpenAI
+            ? "OpenAI Code task consent: not granted"
+            : "OpenAI Code task consent: not applicable", report);
         Assert.Contains("Repository map: unavailable under the current context policy", report);
         Assert.Contains("Queue: response in progress", report);
         Assert.Contains("Hosted requests: enabled for this session", report);
         Assert.Contains("Folder trust: untrusted", report);
+    }
+
+    [Fact]
+    public void Status_reports_openai_task_consent_separately_from_workspace_sharing()
+    {
+        var report = ConversationStatusReport.Build(new Conversation
+        {
+            Provider = CloudModelProviders.OpenAI,
+            Model = "hosted-model",
+            AllowHostedCodeTask = true,
+            IncludeProjectContextForHosted = false
+        }, false, 0, false, true);
+
+        Assert.Contains("OpenAI Code task consent: granted for this conversation", report);
+        Assert.Contains("Project context: excluded from hosted requests", report);
     }
 
     [Fact]

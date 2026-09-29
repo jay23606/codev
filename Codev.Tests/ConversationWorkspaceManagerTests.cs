@@ -19,6 +19,9 @@ public sealed class ConversationWorkspaceManagerTests : IDisposable
         Assert.NotEqual(first, second);
         Assert.Equal(Path.Combine(_root, "Codev", "workspaces"), Directory.GetParent(first)!.FullName);
         Assert.True(manager.IsManagedWorkspace(first));
+        Assert.True(manager.IsConversationWorkspace(firstId, first));
+        Assert.False(manager.IsConversationWorkspace(secondId, first));
+        Assert.False(manager.IsConversationWorkspace(Guid.Empty, first));
     }
 
     [Fact]

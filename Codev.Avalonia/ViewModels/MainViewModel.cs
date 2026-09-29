@@ -359,8 +359,11 @@ public sealed class MainViewModel : ViewModelBase
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
             _ => "Commands ask every time."
         }} Change this under Project actions → Command permissions. File changes still require review."
-        : IsOpenAIModel && _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) && !IncludeProjectContextForHosted
-            ? "Enable OpenAI Code task. Codev will ask before sending workspace files and tool results to OpenAI; if no folder is attached, it creates a private workspace for this conversation. Commands still follow project approval."
+        : IsOpenAIModel && _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) &&
+          ActiveConversation?.AllowHostedCodeTask != true
+            ? "Enable OpenAI Code task. Codev will ask before sending prompts and tool results to OpenAI. Sharing an attached project is a separate choice; a private workspace works with sharing off. Commands still follow project approval."
+        : IsOpenAIModel && HasProject && !IncludeProjectContextForHosted
+            ? "Share workspace with OpenAI before sending a Code task in this attached project. A private Codev workspace does not need workspace-sharing consent."
             : GetCodeTaskUnavailableReason() ?? "Enable Code task. Commands still follow the separate project command-approval policy.";
 
     private void NotifyCodeTaskAvailabilityProperties()
@@ -891,7 +894,7 @@ public sealed class MainViewModel : ViewModelBase
         if (conversation.IsCodeTask) SetConversationMode(ConversationMode.Chat);
         else if (conversation.Provider == Codev.CloudModelProviders.OpenAI &&
                  _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) &&
-                 !conversation.IncludeProjectContextForHosted)
+                 !conversation.AllowHostedCodeTask)
         {
             if (HasProject && !IsProjectTrusted)
             {
@@ -899,7 +902,8 @@ public sealed class MainViewModel : ViewModelBase
                 return;
             }
             if (ConfirmHostedCodeTaskConsentAsync is null || !await ConfirmHostedCodeTaskConsentAsync()) return;
-            IncludeProjectContextForHosted = true;
+            conversation.AllowHostedCodeTask = true;
+            Persist();
             await EnableCodeTaskWithWorkspaceAsync(conversation);
         }
         else if (GetCodeTaskUnavailableReason() is { } reason)
@@ -914,7 +918,7 @@ public sealed class MainViewModel : ViewModelBase
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(conversation.ProjectPath))
+            if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !Directory.Exists(conversation.ProjectPath))
             {
                 var workspace = _conversationWorkspaces.GetOrCreateWorkspace(conversation.Id);
                 await _projectFolderTrust.TrustAsync(workspace);
@@ -1839,13 +1843,31 @@ public sealed class MainViewModel : ViewModelBase
             ReportContextActionStatus("Connect the selected provider and acknowledge that prompts and selected project context will be sent off-device before sending.");
             return;
         }
-        if (conversation.IsCodeTask && (conversation.Provider == "ollama"
-                ? !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) || string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath)
-                : conversation.Provider != Codev.CloudModelProviders.OpenAI || !_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(conversation.Provider) ||
-                  !conversation.IncludeProjectContextForHosted || string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath)))
+        if (conversation.IsCodeTask && conversation.Provider == "ollama" &&
+            (!Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) || string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath)))
         {
-            ReportContextActionStatus("Code task was not queued: it requires a supported provider, current cloud and project-context consent when hosted, and a currently trusted workspace.");
+            ReportContextActionStatus("Code task was not queued: it requires local Ollama and a currently trusted workspace.");
             return;
+        }
+        if (conversation.IsCodeTask && conversation.Provider == Codev.CloudModelProviders.OpenAI)
+        {
+            if (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(conversation.Provider) || !conversation.AllowHostedCodeTask)
+            {
+                ReportContextActionStatus("Code task was not queued: reconnect OpenAI and enable Code task for this conversation first.");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !_projectFolderTrust.IsTrusted(conversation.ProjectPath))
+            {
+                ReportContextActionStatus("Code task was not queued: choose or create a trusted workspace first.");
+                return;
+            }
+            var privateWorkspace = _conversationWorkspaces.IsConversationWorkspace(conversation.Id, conversation.ProjectPath);
+            if (!Codev.ProjectContextPolicy.CanUseOpenAiCodeTaskWorkspace(conversation.AllowHostedCodeTask,
+                    conversation.IncludeProjectContextForHosted, privateWorkspace))
+            {
+                ReportContextActionStatus("To let OpenAI work in the attached project, enable Share workspace with OpenAI. Without that permission, Code task can use a private Codev workspace.");
+                return;
+            }
         }
         var sentText = Codev.GitDiffPromptBuilder.AppendComments(text, PendingDiffComments.ToArray());
         var titleText = string.IsNullOrWhiteSpace(text) ? "Review selected diff" : text;
@@ -2291,9 +2313,11 @@ public sealed class MainViewModel : ViewModelBase
         for (var round = 0; round < 8; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_cloudRequestsEnabled || !conversation.IncludeProjectContextForHosted ||
-                !_cloudApiKeys.TryGetValue(Codev.CloudModelProviders.OpenAI, out var currentOpenAiKey))
-                throw new InvalidOperationException("OpenAI Code task stopped because hosted requests or project-context consent was turned off.");
+            if (!_cloudRequestsEnabled || !_cloudApiKeys.TryGetValue(Codev.CloudModelProviders.OpenAI, out var currentOpenAiKey) ||
+                !Codev.ProjectContextPolicy.CanUseOpenAiCodeTaskWorkspace(conversation.AllowHostedCodeTask,
+                    turn.IncludeProjectContext && conversation.IncludeProjectContextForHosted,
+                    _conversationWorkspaces.IsConversationWorkspace(conversation.Id, turn.ProjectPath)))
+                throw new InvalidOperationException("OpenAI Code task stopped because hosted requests or the consent required for this workspace were turned off.");
             await SetConnectionStatusAsync($"OpenAI Code task · thinking · step {round + 1}/8");
             var requestBody = JsonSerializer.Serialize(new
             {
@@ -2558,8 +2582,11 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (savedTurn.IsCodeTask && (savedTurn.Provider == "ollama" && !Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ||
                 savedTurn.Provider != "ollama" && (savedTurn.Provider != Codev.CloudModelProviders.OpenAI || !_cloudRequestsEnabled ||
-                    !_cloudApiKeys.ContainsKey(savedTurn.Provider) || !savedTurn.IncludeProjectContext)))
-                throw new InvalidOperationException("This Code task can no longer run because its provider connection or hosted project-context consent is unavailable.");
+                    !_cloudApiKeys.ContainsKey(savedTurn.Provider) ||
+                    !Codev.ProjectContextPolicy.CanUseOpenAiCodeTaskWorkspace(conversation.AllowHostedCodeTask,
+                        savedTurn.IncludeProjectContext && conversation.IncludeProjectContextForHosted,
+                        _conversationWorkspaces.IsConversationWorkspace(conversation.Id, savedTurn.ProjectPath)))))
+                throw new InvalidOperationException("This Code task can no longer run because its provider connection or required hosted data-sharing consent is unavailable.");
             if (savedTurn.IsCodeTask) await ClearLastPromptContextAsync(conversation);
             var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama", savedTurn.OutputStyle);
             var fullConversationHistory = conversation.Messages.Take(assistantIndex)

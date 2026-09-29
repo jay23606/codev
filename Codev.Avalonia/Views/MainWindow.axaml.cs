@@ -196,7 +196,7 @@ public partial class MainWindow : Window
     }
 
     private Task<bool> ConfirmHostedCodeTaskConsentAsync() => ConfirmGitActionAsync(this, "Allow OpenAI Code task?",
-        "For this conversation, Codev may send requested workspace files, project instructions, and tool or command results to the OpenAI API. OpenAI API usage may incur separate charges. If no folder is attached, Codev will create a private workspace for this conversation. File changes still require your review, and commands still follow project approval.");
+        "For this conversation, Codev may send your prompts and tool or command results to the OpenAI API. OpenAI API usage may incur separate charges. If no folder is attached, Codev will create a private workspace. Sharing an attached project's files and instructions is a separate choice. File changes still require your review, and commands still follow project approval.");
 
     private async Task<bool> ConfirmConversationRewindAsync(int messageIndex)
     {

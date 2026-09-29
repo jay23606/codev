@@ -30,6 +30,15 @@ public sealed class ProjectContextPolicyTests
         bool connected, bool approved, bool expected) =>
         Assert.Equal(expected, ProjectContextPolicy.CanSendCodeTask(provider, connected, approved, false, null, false));
 
+    [Theory]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, true, true, false)]
+    public void Openai_code_task_requires_task_consent_and_separate_sharing_for_attached_workspaces(
+        bool taskConsent, bool workspaceSharing, bool privateWorkspace, bool expected) =>
+        Assert.Equal(expected, ProjectContextPolicy.CanUseOpenAiCodeTaskWorkspace(taskConsent, workspaceSharing, privateWorkspace));
+
     [Fact]
     public void Untrusted_folder_auto_context_is_omitted_from_the_queued_turn()
     {

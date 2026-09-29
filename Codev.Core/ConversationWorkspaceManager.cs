@@ -45,7 +45,25 @@ public sealed class ConversationWorkspaceManager
             var name = Path.GetFileName(fullPath);
             return name.StartsWith("session-", StringComparison.Ordinal) && Guid.TryParseExact(name[8..], "N", out _);
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or PathTooLongException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    public bool IsConversationWorkspace(Guid conversationId, string? path)
+    {
+        if (conversationId == Guid.Empty || string.IsNullOrWhiteSpace(path)) return false;
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            return string.Equals(fullPath, GetWorkspacePath(conversationId), PathComparison) &&
+                   Directory.Exists(fullPath) &&
+                   (File.GetAttributes(_codevRoot) & FileAttributes.ReparsePoint) == 0 &&
+                   (File.GetAttributes(_root) & FileAttributes.ReparsePoint) == 0 &&
+                   (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) == 0;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
             return false;
         }

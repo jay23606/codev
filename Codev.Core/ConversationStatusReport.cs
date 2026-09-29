@@ -40,6 +40,9 @@ public static class ConversationStatusReport
             : queuedTurns > 0
                 ? $"{queuedTurns} queued turn(s)"
                 : isGenerating ? "response in progress" : "idle";
+        var hostedCodeTaskConsent = conversation.Provider == CloudModelProviders.OpenAI
+            ? conversation.AllowHostedCodeTask ? "granted for this conversation" : "not granted"
+            : "not applicable";
         var folderTrust = string.IsNullOrWhiteSpace(conversation.ProjectPath)
             ? "not applicable"
             : !projectFolderTrusted ? "untrusted"
@@ -80,6 +83,7 @@ public static class ConversationStatusReport
             $"Thinking: {(CloudModelProviders.IsCloud(conversation.Provider) ? "unavailable for hosted providers" : conversation.ThinkEnabled ? "requested" : "off")}",
             $"Sampling overrides: {(conversation.Provider == "ollama" ? sampling : "unavailable for hosted providers")}",
             $"Mode: {(conversation.IsCodeTask ? "Code task" : conversation.IsPlanMode ? "Plan" : "Chat")}",
+            $"OpenAI Code task consent: {hostedCodeTaskConsent}",
             $"Project: {project}",
             $"Folder trust: {folderTrust}",
             $"Project context: {projectContext}",
