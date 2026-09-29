@@ -62,6 +62,29 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     {
         Assert.False(ReadOnlyCommandClassifier.IsReadOnly("cat missing.txt", _root, "bash"));
         Assert.False(ReadOnlyCommandClassifier.IsReadOnly("cat README.md", _root, "custom-shell"));
+        Assert.False(ReadOnlyCommandClassifier.IsReadOnly("pwd", Path.Combine(_root, "missing"), "bash"));
+    }
+
+    [Fact]
+    public void Location_commands_refuse_codev_app_data_roots()
+    {
+        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localData)) return;
+        var protectedRoot = Path.Combine(localData, "Codev");
+        var protectedRootExisted = Directory.Exists(protectedRoot);
+        Directory.CreateDirectory(protectedRoot);
+        var project = Path.Combine(protectedRoot, "read-only-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(project);
+        try
+        {
+            Assert.False(ReadOnlyCommandClassifier.IsReadOnly("pwd", project, "bash"));
+            Assert.False(ReadOnlyCommandClassifier.IsReadOnly("Get-Location", project, "PowerShell"));
+        }
+        finally
+        {
+            Directory.Delete(project);
+            if (!protectedRootExisted && !Directory.EnumerateFileSystemEntries(protectedRoot).Any()) Directory.Delete(protectedRoot);
+        }
     }
 
     [Fact]
@@ -151,6 +174,29 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
             // Symlink creation is unavailable in some Windows configurations.
         }
         finally { File.Delete(outside); }
+    }
+
+    [Fact]
+    public void Location_commands_refuse_a_symlinked_project_root()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "Codev-outside-root-" + Guid.NewGuid().ToString("N"));
+        var link = Path.Combine(Path.GetTempPath(), "Codev-linked-root-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        try
+        {
+            Directory.CreateSymbolicLink(link, outside);
+            Assert.False(ReadOnlyCommandClassifier.IsReadOnly("pwd", link, "bash"));
+            Assert.False(ReadOnlyCommandClassifier.IsReadOnly("Get-Location", link, "PowerShell"));
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            // Symlink creation is unavailable in some Windows configurations.
+        }
+        finally
+        {
+            if (Directory.Exists(link)) Directory.Delete(link);
+            Directory.Delete(outside);
+        }
     }
 
     public void Dispose()

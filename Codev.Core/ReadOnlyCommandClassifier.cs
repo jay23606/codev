@@ -26,6 +26,8 @@ public static class ReadOnlyCommandClassifier
                            shellName.Contains("pwsh", StringComparison.OrdinalIgnoreCase);
         var isUnix = IsOneOf(shellName, "bash", "zsh", "sh", "fish");
 
+        var root = Path.GetFullPath(projectPath);
+        if (!Directory.Exists(root) || IsProtectedProjectPath(root) || HasReparsePoint(root)) return false;
         if (isPowerShell && IsOneOf(verb, "Get-Location", "pwd") && parts.Length == 1) return true;
         if (isUnix && IsOneOf(verb, "pwd") && parts.Length == 1) return true;
 
@@ -38,9 +40,6 @@ public static class ReadOnlyCommandClassifier
         if (!listCommand && !readCommand) return false;
         if (readCommand && !OperatingSystem.IsWindows()) return false;
 
-        var root = Path.GetFullPath(projectPath);
-        if (IsProtectedProjectPath(root)) return false;
-        if (HasReparsePoint(root)) return false;
         WorkspaceFileService workspace;
         try { workspace = new WorkspaceFileService(root, contextExclusions); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
