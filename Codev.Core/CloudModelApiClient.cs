@@ -18,6 +18,8 @@ public static class OpenAiCodeTaskLimits
 {
     public const int MaxOutputTokensPerRequest = 4096;
     public const int MaxModelStepsPerTurn = 8;
+    public static string Description =>
+        $"OpenAI Code task limits: up to {MaxModelStepsPerTurn} model steps per turn and {MaxOutputTokensPerRequest:N0} output tokens per request.";
 }
 
 public sealed record CloudModel(string Provider, string Id, string DisplayName);

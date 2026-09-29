@@ -7,6 +7,13 @@ namespace Codev.Tests;
 public sealed class CloudModelApiClientTests
 {
     [Fact]
+    public void Openai_code_task_limit_description_matches_runner_limits()
+    {
+        Assert.Contains(OpenAiCodeTaskLimits.MaxModelStepsPerTurn.ToString(), OpenAiCodeTaskLimits.Description);
+        Assert.Contains(OpenAiCodeTaskLimits.MaxOutputTokensPerRequest.ToString("N0"), OpenAiCodeTaskLimits.Description);
+    }
+
+    [Fact]
     public async Task Lists_openai_chat_models_with_bearer_auth_and_omits_unrelated_models()
     {
         HttpRequestMessage? observed = null;

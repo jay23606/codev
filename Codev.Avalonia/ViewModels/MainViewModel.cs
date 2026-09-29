@@ -357,7 +357,7 @@ public sealed class MainViewModel : ViewModelBase
         reason is not "Wait for the current response to finish before changing conversation mode.";
     public string CodeTaskUnavailableReason => GetCodeTaskUnavailableReason() ?? "";
     public string CodeTaskTooltip => IsCodeTask
-        ? $"Code task is on. {(IsOpenAIModel ? $"Codev caps OpenAI Code tasks at {Codev.OpenAiCodeTaskLimits.MaxModelStepsPerTurn} model steps per turn and {Codev.OpenAiCodeTaskLimits.MaxOutputTokensPerRequest:N0} output tokens per request. " : "")}{ProjectCommandPermissionMode switch
+        ? $"Code task is on. {(IsOpenAIModel ? Codev.OpenAiCodeTaskLimits.Description + " " : "")}{ProjectCommandPermissionMode switch
         {
             Codev.ProjectCommandPermissionMode.Allowlist => "Exact saved allow rules can skip approval; unlisted commands still ask.",
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",

@@ -2066,7 +2066,7 @@ public partial class MainWindow : Window
             ? "Anthropic hosted models support chat and Plan mode; Code task currently supports OpenAI and local Ollama."
             : _active?.Provider == CloudModelProviders.OpenAI
                 ? _hostedApiKeys.ContainsKey(CloudModelProviders.OpenAI)
-                    ? "OpenAI Code task is available with or without an attached project. Codev uses a private per-chat workspace when none is attached."
+                    ? $"{OpenAiCodeTaskLimits.Description} It is available with or without an attached project; Codev uses a private per-chat workspace when none is attached."
                     : "Connect OpenAI to enable hosted Code task."
             : _codeTaskMode
                 ? "Code task mode is on: file changes need your approval; command permissions are configurable per project."
