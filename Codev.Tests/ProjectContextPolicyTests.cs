@@ -4,6 +4,19 @@ namespace Codev.Tests;
 
 public sealed class ProjectContextPolicyTests
 {
+    [Theory]
+    [InlineData(CloudModelProviders.OpenAI, true, false, null, false, true)]
+    [InlineData(CloudModelProviders.OpenAI, false, false, null, false, false)]
+    [InlineData(CloudModelProviders.OpenAI, true, false, @"C:\work\repo", false, true)]
+    [InlineData(CloudModelProviders.Anthropic, true, false, null, false, false)]
+    [InlineData("ollama", false, true, @"C:\work\repo", true, true)]
+    [InlineData("ollama", false, false, @"C:\work\repo", true, false)]
+    [InlineData("ollama", false, true, @"C:\work\repo", false, false)]
+    [InlineData("ollama", false, true, null, false, false)]
+    public void Code_task_availability_depends_on_provider_support_and_local_trust(string provider,
+        bool connected, bool loopback, string? projectPath, bool trusted, bool expected) =>
+        Assert.Equal(expected, ProjectContextPolicy.CanRunCodeTask(provider, connected, loopback, projectPath, trusted));
+
     [Fact]
     public void Untrusted_folder_auto_context_is_omitted_from_the_queued_turn()
     {

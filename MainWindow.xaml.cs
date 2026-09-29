@@ -1941,6 +1941,7 @@ public partial class MainWindow : Window
             MessageBox.Show(this, "Reconnect OpenAI before enabling Code task.", "OpenAI connection required", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
+        if (!_codeTaskMode && _active.Provider == CloudModelProviders.OpenAI && !await EnsureOpenAiCodeTaskConsentAsync(_active)) return;
         if (!_codeTaskMode && _active.Provider == "ollama" && !string.IsNullOrWhiteSpace(_active.ProjectPath) && Directory.Exists(_active.ProjectPath) &&
             !_projectFolderTrust.IsTrusted(_active.ProjectPath))
         {
@@ -2014,13 +2015,9 @@ public partial class MainWindow : Window
         PlanModeButton.Background = _planMode ? ThemeBrush("AgentModeOnBrush") : ThemeBrush("SecondaryButtonBrush");
         PlanModeButton.ToolTip = _planMode ? "Plan mode is read-only; no file or command tools are available." : "Ask for a read-only implementation plan.";
         CodeTaskButton.Content = _codeTaskMode ? "◆  Code task on" : "◇  Code task";
-        CodeTaskButton.IsEnabled = _active?.Provider switch
-        {
-            CloudModelProviders.Anthropic => false,
-            CloudModelProviders.OpenAI => _hostedApiKeys.ContainsKey(CloudModelProviders.OpenAI),
-            "ollama" => OllamaEndpoint.IsLoopback(_ollamaEndpoint),
-            _ => false
-        };
+        CodeTaskButton.IsEnabled = _active is not null && ProjectContextPolicy.CanRunCodeTask(_active.Provider,
+            _hostedApiKeys.ContainsKey(CloudModelProviders.OpenAI), OllamaEndpoint.IsLoopback(_ollamaEndpoint),
+            _active.ProjectPath, IsProjectTrusted(_active.ProjectPath));
         CodeTaskButton.Background = _codeTaskMode ? ThemeBrush("AgentModeOnBrush") : ThemeBrush("SecondaryButtonBrush");
         CodeTaskButton.ToolTip = _active?.Provider == CloudModelProviders.Anthropic
             ? "Anthropic hosted models support chat and Plan mode; Code task currently supports OpenAI and local Ollama."
@@ -2033,6 +2030,17 @@ public partial class MainWindow : Window
                 : "Chat mode is read-only. Enable Code task for reviewed project changes.";
     }
 
+    private Task<bool> EnsureOpenAiCodeTaskConsentAsync(Conversation conversation)
+    {
+        if (conversation.Provider != CloudModelProviders.OpenAI || conversation.IncludeProjectContextForHosted) return Task.FromResult(true);
+        var answer = MessageBox.Show(this,
+            "Enable OpenAI Code task? OpenAI will receive prompts, project context you choose to share, and tool results. API usage may be billed. Project files and instructions remain excluded until you separately choose Share workspace.",
+            "Enable OpenAI Code task", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return Task.FromResult(false);
+        conversation.IncludeProjectContextForHosted = false;
+        return Task.FromResult(true);
+    }
+
     private async Task SendPromptAsync()
     {
         var text = PromptBox.Text.Trim();
@@ -2040,6 +2048,7 @@ public partial class MainWindow : Window
         if (text.StartsWith("/", StringComparison.Ordinal)) await LoadUserSlashCommandsAsync();
         if (await ExecuteExactSlashCommandAsync(text)) return;
         var isCodeTask = _codeTaskMode && _codeTaskConversationId == _active.Id;
+        if (isCodeTask && _active.Provider == CloudModelProviders.OpenAI && !await EnsureOpenAiCodeTaskConsentAsync(_active)) return;
         if (isCodeTask && _active.Provider == "ollama" && !IsProjectTrusted(_active.ProjectPath))
         {
             AgentStatusLabel.Text = "Code task was not sent because its project folder is not trusted. Trust the folder from the project list, then enable Code task again.";
