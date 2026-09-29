@@ -136,6 +136,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             await LoadUserSlashCommandsAsync();
+            await LoadSavedHostedProvidersAsync();
             await LoadModelsAsync();
         };
     }
@@ -425,6 +426,40 @@ public partial class MainWindow : Window
     }
 
     private async void ModelPicker_DropDownOpened(object sender, EventArgs e) => await LoadModelsAsync();
+
+    private async Task LoadSavedHostedProvidersAsync()
+    {
+        foreach (var providerId in new[] { CloudModelProviders.OpenAI, CloudModelProviders.Anthropic })
+        {
+            var envName = providerId == CloudModelProviders.OpenAI ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+            var apiKey = Environment.GetEnvironmentVariable(envName)?.Trim();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(apiKey)) apiKey = await HostedApiKeyVault.GetAsync(providerId);
+            }
+            catch (Exception ex)
+            {
+                AgentStatusLabel.Text = $"Could not load saved {providerId} credentials ({ex.GetType().Name}); connect manually to retry.";
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(apiKey)) continue;
+            try
+            {
+                var discovered = await CloudClient.ListModelsAsync(providerId, apiKey);
+                if (discovered.Count == 0) continue;
+                _hostedApiKeys[providerId] = apiKey;
+                _hostedModels[providerId] = discovered
+                    .Select(model => new ModelOption(model.Id,
+                        $"{(providerId == CloudModelProviders.OpenAI ? "OpenAI" : "Claude")} · {model.DisplayName}", providerId))
+                    .ToList();
+            }
+            catch
+            {
+                // Keep startup local and quiet when a saved credential has expired or the network is unavailable.
+                // The Connect dialog remains the explicit place to diagnose or replace the credential.
+            }
+        }
+    }
 
     private void AddReconnectPlaceholder()
     {
