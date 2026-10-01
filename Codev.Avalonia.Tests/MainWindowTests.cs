@@ -46,6 +46,114 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Footer_auto_selection_persists_and_skips_inline_command_approval()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "app-data");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(appData);
+            viewModel.SetProjectFolder(project);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var selector = Assert.IsType<Button>(window.FindControl<Button>("ProjectCommandModeButton"));
+            Assert.Equal("Ask every time ▾", selector.Content?.ToString());
+            var menu = Assert.IsType<MenuFlyout>(selector.Flyout);
+            menu.ShowAt(selector);
+            var autoItem = Assert.Single(menu.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "Auto · approve unless denied");
+            await Dispatcher.UIThread.InvokeAsync(() => autoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)));
+
+            var modeDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while ((viewModel.ProjectCommandPermissionMode != ProjectCommandPermissionMode.Auto || selector.Content?.ToString() != "Auto ▾") &&
+                   DateTimeOffset.UtcNow < modeDeadline)
+                await Task.Delay(20);
+            Assert.Equal(ProjectCommandPermissionMode.Auto, viewModel.ProjectCommandPermissionMode);
+            Assert.Equal("Auto ▾", selector.Content?.ToString());
+            var permissionPath = (string)typeof(MainViewModel).GetField("ProjectCommandPermissionsPath", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewModel)!;
+            var permissionDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while (ProjectCommandPermissionRegistry.Load(permissionPath).GetMode(project) != ProjectCommandPermissionMode.Auto &&
+                   DateTimeOffset.UtcNow < permissionDeadline)
+                await Task.Delay(20);
+            Assert.Equal(ProjectCommandPermissionMode.Auto, ProjectCommandPermissionRegistry.Load(permissionPath).GetMode(project));
+
+            var approvePolicy = typeof(MainViewModel).GetMethod("ApproveCommandWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var proposal = new CodeTaskCommandProposal("cargo check --manifest-path signaling/Cargo.toml", project, "PowerShell", IsVerification: true);
+            var pendingApproval = Assert.IsAssignableFrom<Task<CommandApprovalOutcome>>(approvePolicy.Invoke(viewModel, [proposal, Array.Empty<string>()]));
+            Assert.Equal(CommandApprovalOutcome.Approved, await pendingApproval);
+            Assert.False(Assert.IsType<Border>(window.FindControl<Border>("InlineApprovalPanel")).IsVisible);
+
+            window.Close();
+            window = null;
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            var restored = new MainViewModel(appData);
+            try
+            {
+                Assert.Equal(project, restored.ActiveConversation?.ProjectPath);
+                Assert.Equal(ProjectCommandPermissionMode.Auto, restored.ProjectCommandPermissionMode);
+                var restoredWindow = new MainWindow { DataContext = restored };
+                try
+                {
+                    restoredWindow.Show();
+                    restoredWindow.UpdateLayout();
+                    Assert.Equal("Auto ▾", restoredWindow.FindControl<Button>("ProjectCommandModeButton")?.Content?.ToString());
+                }
+                finally { restoredWindow.Close(); }
+            }
+            finally
+            {
+                await StopAndFlushAsync(restored);
+            }
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    private static async Task StopAndFlushAsync(MainViewModel viewModel)
+    {
+        var startup = typeof(MainViewModel).GetField("_managedWorkspacePermissionDefaultsTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task;
+        if (startup is not null) await startup.WaitAsync(TimeSpan.FromSeconds(5));
+        await viewModel.SavePendingDraftAsync();
+        await viewModel.StopBackgroundCommandsAndShutdownAsync();
+        var persistence = typeof(MainViewModel).GetField("_persistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task;
+        if (persistence is not null) await persistence.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private static async Task DeleteAutoModeTestDirectoryAsync(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var expectedParent = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui") + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(expectedParent, StringComparison.OrdinalIgnoreCase) ||
+            !Guid.TryParse(Path.GetFileName(fullPath), out _))
+            throw new InvalidOperationException($"Refusing to remove a path outside the isolated Auto-mode test directory: {fullPath}");
+
+        for (var attempt = 0; attempt < 20 && Directory.Exists(fullPath); attempt++)
+        {
+            try
+            {
+                Directory.Delete(fullPath, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 19)
+            {
+                await Task.Delay(50);
+            }
+        }
+        if (Directory.Exists(fullPath)) throw new IOException($"Could not clean up the isolated Auto-mode test directory: {fullPath}");
+    }
+
+    [AvaloniaFact]
     public async Task Project_formatter_menu_is_available_only_for_trusted_projects()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-project-formatter-ui", Guid.NewGuid().ToString("N"));

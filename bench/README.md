@@ -37,6 +37,10 @@ node bench/report.cjs results.jsonl comparison.html --hardware "a laptop with 32
 
 Run one model at a time and avoid other heavy work while it runs, or the timings will be unreliable. `run.cjs` appends one JSON line per finished task and unloads models between runs so each starts cold. See the comments at the top of each script for every option.
 
+## Shadow-snapshot sizing prototype
+
+To measure the cost of copying a large tracked-plus-untracked source tree before a command, run `pwsh -NoProfile -File bench/shadow-snapshot.ps1`. The script creates an isolated temporary Git repository with 10,000 source files, binary assets, untracked files, and ignored build output; copies the tracked and non-ignored files to a temporary snapshot; verifies every copied file by SHA-256; reports copy time and disk use; then removes only its uniquely named temporary directories. It does not touch a real project. Parameters at the top of the script let you scale the fixture.
+
 ## Results in this folder
 
 `results/2026-09-28.jsonl` is the raw data behind the published page, `results/2026-09-28-big-budget.jsonl` is the follow-up run with a larger thinking budget, and `results/2026-09-28-verdict.html` is the written conclusion shown at the top of the page. To rebuild the page:
