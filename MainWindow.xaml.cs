@@ -3333,23 +3333,23 @@ public partial class MainWindow : Window
     {
         if (arguments.ValueKind != JsonValueKind.Object || arguments.GetRawText().Length > 500_000)
             return "Rejected: MCP tool arguments must be a JSON object no larger than 500,000 characters.";
-        if (!IsProjectTrusted(projectPath)) return "Rejected: project trust was revoked; the MCP tool was not called.";
+        if (!IsProjectTrusted(projectPath)) return $"Rejected: project trust was revoked; the MCP {tool.Operation.ToString().ToLowerInvariant()} was not called.";
         var mode = _projectCommandPermissions.GetMode(projectPath);
         var decision = _projectMcpPermissions.Evaluate(projectPath, mode, tool.ServerId, tool.ToolName);
         if (decision == ProjectCommandPermissionDecision.Deny)
-            return "Denied by a saved project MCP tool permission rule; the server was not called.";
+            return "Denied by a saved project MCP operation permission rule; the server was not called.";
         if (decision == ProjectCommandPermissionDecision.Ask && !profileApprovalSatisfied)
         {
             var choice = ShowMcpToolApproval(tool, arguments);
             if (choice == ProjectCommandApprovalChoice.Cancel)
-                return "Rejected by user; the MCP tool was not called.";
+                return $"Rejected by user; the MCP {tool.Operation.ToString().ToLowerInvariant()} was not called.";
             try
             {
                 if (choice == ProjectCommandApprovalChoice.DenyExactCommand)
                 {
                     await _projectMcpPermissions.SetRuleAsync(projectPath, tool.ServerId, tool.ToolName,
                         ProjectCommandPermissionDecision.Deny, cancellationToken);
-                    return "Denied by a saved project MCP tool permission rule; the server was not called.";
+                    return "Denied by a saved project MCP operation permission rule; the server was not called.";
                 }
                 if (choice == ProjectCommandApprovalChoice.AllowExactCommand)
                     await _projectMcpPermissions.SetRuleAsync(projectPath, tool.ServerId, tool.ToolName,
@@ -3357,7 +3357,7 @@ public partial class MainWindow : Window
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
-                return $"Rejected: could not save the MCP permission rule ({ex.GetType().Name}); the server was not called.";
+                    return $"Rejected: could not save the MCP permission rule ({ex.GetType().Name}); the server was not called.";
             }
         }
 
@@ -3365,8 +3365,9 @@ public partial class MainWindow : Window
         {
             SetAgentStatus(conversation, $"Code task · calling {tool.ServerName}/{tool.ToolName}…");
             var result = await session.CallAsync(tool.FunctionName, arguments, cancellationToken);
-            return UntrustedToolOutput.Format("MCP tool output", result.Length <= 8000 ? result : result[..8000] + "\n… [tool output truncated]",
-                command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_tool");
+            var operation = tool.Operation.ToString().ToLowerInvariant();
+            return UntrustedToolOutput.Format($"MCP {operation} output", result.Length <= 8000 ? result : result[..8000] + "\n… [operation output truncated]",
+                command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + operation);
         }
         finally
         {
@@ -3408,6 +3409,7 @@ public partial class MainWindow : Window
             turnUserMessageIndex: assistantIndex - 1,
             mcpTools: mcpSession.Tools,
             mcpPermissionApproval: (tool, arguments, profileApprovalSatisfied) => ApproveOpenAiMcpToolAsync(conversation, tool, arguments, cancellationToken, profileApprovalSatisfied),
+            mcpCall: (tool, arguments, token) => mcpSession.CallAsync(tool.FunctionName, arguments, token),
             agentProfilePermission: (name, arguments) => CheckAgentProfileToolPermissionAsync(agentProfile, conversation, name, arguments),
             agentProfile: agentProfile);
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
@@ -3564,7 +3566,7 @@ public partial class MainWindow : Window
     {
         var dialog = new Window
         {
-            Title = "Approve MCP tool",
+            Title = $"Approve MCP {tool.Operation.ToString().ToLowerInvariant()}",
             Width = 650,
             Height = 470,
             MinWidth = 540,
@@ -3588,11 +3590,11 @@ public partial class MainWindow : Window
         var body = new StackPanel();
         body.Children.Add(new TextBlock
         {
-            Text = $"The model requested {tool.ServerName} · {tool.ToolName}. Server descriptions and arguments are untrusted data. Review the exact call before allowing it.",
+            Text = $"The model requested an MCP {tool.Operation.ToString().ToLowerInvariant()} from {tool.ServerName} · {tool.ToolName}. Server descriptions and arguments are untrusted data. Review the exact operation before allowing it.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 10)
         });
-        body.Children.Add(new TextBlock { Text = $"Server: {tool.ServerName} ({tool.ServerId})\nTool: {tool.ToolName}", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
+        body.Children.Add(new TextBlock { Text = $"Server: {tool.ServerName} ({tool.ServerId})\nOperation: {tool.ToolName}", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
         var call = new TextBox
         {
             Text = JsonSerializer.Serialize(arguments, new JsonSerializerOptions { WriteIndented = true }),
@@ -3609,8 +3611,8 @@ public partial class MainWindow : Window
         DockPanel.SetDock(body, Dock.Top);
         layout.Children.Add(body);
         AddButton("Cancel", ProjectCommandApprovalChoice.Cancel);
-        AddButton("Deny exact tool", ProjectCommandApprovalChoice.DenyExactCommand);
-        AddButton("Allow exact tool + run", ProjectCommandApprovalChoice.AllowExactCommand, _projectMcpPermissions.CanPersist);
+        AddButton("Deny exact operation", ProjectCommandApprovalChoice.DenyExactCommand);
+        AddButton("Allow exact operation + run", ProjectCommandApprovalChoice.AllowExactCommand, _projectMcpPermissions.CanPersist);
         AddButton("Run once", ProjectCommandApprovalChoice.RunOnce);
         dialog.Content = layout;
         dialog.ShowDialog();

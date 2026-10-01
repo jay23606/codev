@@ -130,6 +130,7 @@ public sealed class McpCodeTaskToolTests
         var clientToServer = new Pipe();
         var serverToClient = new Pipe();
         var toolCalls = 0;
+        var resourceReads = 0;
         await using var server = McpServer.Create(
             new StreamServerTransport(clientToServer.Reader.AsStream(), serverToClient.Writer.AsStream()),
             new McpServerOptions
@@ -141,6 +142,20 @@ public sealed class McpCodeTaskToolTests
                         Interlocked.Increment(ref toolCalls);
                         return $"Echo: {message}";
                     }, new() { Name = "echo" })
+                ],
+                PromptCollection =
+                [
+                    McpServerPrompt.Create((string subject) => $"Review {subject} for correctness.",
+                        new() { Name = "review_subject", Description = "Review one subject." })
+                ],
+                ResourceCollection =
+                [
+                    McpServerResource.Create(() =>
+                    {
+                        Interlocked.Increment(ref resourceReads);
+                        return "Shared MCP notes.";
+                    },
+                        new() { UriTemplate = "test://mcp/notes", Name = "notes", Description = "Shared notes.", MimeType = "text/plain" })
                 ]
             });
         var serverRun = server.RunAsync();
@@ -153,11 +168,40 @@ public sealed class McpCodeTaskToolTests
                 [new McpServerConfiguration("memory", "In-memory test", McpServerTransportKind.Stdio, Enabled: true, Command: "unused")],
                 _ => new StreamClientTransport(clientToServer.Writer.AsStream(), serverToClient.Reader.AsStream()),
                 cancellationToken: CancellationToken.None);
-            var tool = Assert.Single(session.Tools.Values);
+            var tool = Assert.Single(session.Tools.Values, candidate => candidate.Operation == McpCodeTaskOperationKind.Tool);
             using var arguments = JsonDocument.Parse("""{"message":"hello"}""");
 
             Assert.Equal("echo", tool.ToolName);
-            Assert.Contains("connected; 1 tool(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
+            Assert.Equal(3, session.Tools.Count);
+            using var ollamaSchemas = JsonDocument.Parse(JsonSerializer.Serialize(
+                CodeTaskToolSchemaFactory.CreateOllamaTools(ShellCommandResolver.ResolveCurrent(), session.Tools.Values), JsonSerializerOptions.Web));
+            var ollamaNames = ollamaSchemas.RootElement.EnumerateArray()
+                .Select(schema => schema.GetProperty("function").GetProperty("name").GetString()).ToArray();
+            using var openAiSchemas = JsonDocument.Parse(JsonSerializer.Serialize(
+                CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(ShellCommandResolver.ResolveCurrent(), session.Tools.Values), JsonSerializerOptions.Web));
+            var openAiNames = openAiSchemas.RootElement.EnumerateArray().Select(schema => schema.GetProperty("name").GetString()).ToArray();
+            Assert.Contains("connected; 1 tool(s), 1 prompt(s), and 1 resource(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
+            var prompt = Assert.Single(session.Prompts.Values);
+            Assert.Equal("review_subject", prompt.Name);
+            var promptText = await session.GetPromptAsync(prompt.FunctionName, new Dictionary<string, string> { ["subject"] = "the parser" });
+            Assert.Contains("Review the parser for correctness.", promptText, StringComparison.Ordinal);
+            Assert.Contains("untrusted_tool_output", promptText, StringComparison.Ordinal);
+            var resource = Assert.Single(session.Resources.Values);
+            Assert.Equal("notes", resource.Name);
+            var resourceText = await session.ReadResourceAsync(resource.FunctionName);
+            Assert.Contains("Shared MCP notes.", resourceText, StringComparison.Ordinal);
+            Assert.Contains("untrusted_tool_output", resourceText, StringComparison.Ordinal);
+            using var promptArguments = JsonDocument.Parse("""{"subject":"the parser"}""");
+            var promptTool = session.Tools[prompt.FunctionName];
+            Assert.Equal(McpCodeTaskOperationKind.Prompt, promptTool.Operation);
+            Assert.Contains("Review the parser for correctness.", await session.CallAsync(prompt.FunctionName, promptArguments.RootElement));
+            Assert.Contains(prompt.FunctionName, ollamaNames);
+            Assert.Contains(resource.FunctionName, ollamaNames);
+            Assert.Contains(prompt.FunctionName, openAiNames);
+            Assert.Contains(resource.FunctionName, openAiNames);
+            var resourceTool = session.Tools[resource.FunctionName];
+            Assert.Equal(McpCodeTaskOperationKind.Resource, resourceTool.Operation);
+            Assert.Contains("Shared MCP notes.", await session.CallAsync(resource.FunctionName, JsonDocument.Parse("{}").RootElement));
             var permissions = ProjectMcpToolPermissionRegistry.Load(Path.Combine(workspace, "permissions.json"));
             var commandPermissions = ProjectCommandPermissionRegistry.Load(Path.Combine(workspace, "command-permissions.json"));
             await commandPermissions.SetModeAsync(workspace, ProjectCommandPermissionMode.Auto);
@@ -167,6 +211,7 @@ public sealed class McpCodeTaskToolTests
             var executor = new CodeTaskToolExecutor(new WorkspaceFileService(workspace), new Conversation(),
                 _ => Task.FromResult(false), _ => Task.FromResult(false),
                 mcpTools: session.Tools,
+                mcpCall: (mcpTool, args, token) => session.CallAsync(mcpTool.FunctionName, args, token),
                 agentProfile: profile,
                 agentProfilePermission: (name, _) =>
                 {
@@ -197,11 +242,24 @@ public sealed class McpCodeTaskToolTests
             Assert.Contains("Echo: hello", returned.Content, StringComparison.Ordinal);
             Assert.Equal(1, Volatile.Read(ref toolCalls));
             Assert.Equal(0, promptCount);
+            var promptResult = await executor.ExecuteAsync(prompt.FunctionName, promptArguments.RootElement);
+            Assert.Contains("Review the parser for correctness.", promptResult, StringComparison.Ordinal);
+            Assert.Contains("untrusted_tool_output", promptResult, StringComparison.Ordinal);
+            using var emptyArguments = JsonDocument.Parse("{}");
+            var resourceResult = await executor.ExecuteAsync(resource.FunctionName, emptyArguments.RootElement);
+            Assert.Contains("Shared MCP notes.", resourceResult, StringComparison.Ordinal);
+            Assert.Contains("untrusted_tool_output", resourceResult, StringComparison.Ordinal);
+            Assert.Equal(0, promptCount);
+            Assert.Equal(3, Volatile.Read(ref resourceReads));
 
             await permissions.SetRuleAsync(workspace, tool.ServerId, tool.ToolName, ProjectCommandPermissionDecision.Deny);
             var denied = await executor.ExecuteAsync(tool.FunctionName, arguments.RootElement);
             Assert.Contains("Denied by a saved project MCP tool permission rule", denied, StringComparison.Ordinal);
             Assert.Equal(1, Volatile.Read(ref toolCalls));
+            await permissions.SetRuleAsync(workspace, resource.ServerId, "resource " + resource.Name, ProjectCommandPermissionDecision.Deny);
+            var deniedResource = await executor.ExecuteAsync(resource.FunctionName, emptyArguments.RootElement);
+            Assert.Contains("Denied by a saved project MCP tool permission rule", deniedResource, StringComparison.Ordinal);
+            Assert.Equal(3, Volatile.Read(ref resourceReads));
         }
         finally
         {
@@ -246,13 +304,13 @@ public sealed class McpCodeTaskToolTests
                     Url: $"http://127.0.0.1:{port}/mcp")
             ]);
 
-            var tool = Assert.Single(session.Tools.Values);
+            var tool = Assert.Single(session.Tools.Values, candidate => candidate.Operation == McpCodeTaskOperationKind.Tool);
             using var arguments = JsonDocument.Parse("""{"message":"hello"}""");
             var result = await session.CallAsync(tool.FunctionName, arguments.RootElement);
 
             Assert.Equal("echo", tool.ToolName);
             Assert.Contains("Echo from legacy SSE: hello", result, StringComparison.Ordinal);
-            Assert.Contains("connected; 1 tool(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
+            Assert.Contains("connected; 1 tool(s), 0 prompt(s), and 0 resource(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
         }
         finally
         {
@@ -401,7 +459,7 @@ public sealed class McpCodeTaskToolTests
             }
             await using (session)
             {
-                var tool = Assert.Single(session.Tools.Values);
+                var tool = Assert.Single(session.Tools.Values, candidate => candidate.Operation == McpCodeTaskOperationKind.Tool);
                 using var arguments = JsonDocument.Parse("""{"message":"first"}""");
                 Assert.Contains("OAuth echo: first", await session.CallAsync(tool.FunctionName, arguments.RootElement));
             }

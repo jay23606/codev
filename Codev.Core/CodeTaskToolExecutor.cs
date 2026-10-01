@@ -25,7 +25,8 @@ public sealed class CodeTaskToolExecutor(
     Func<string, JsonElement, Task<AgentToolProfileDecision>>? agentProfilePermission = null,
     AgentProfile? agentProfile = null,
     IReadOnlyDictionary<string, SlashCommandDefinition>? agentSkills = null,
-    Func<SlashCommandDefinition, string, CancellationToken, Task<string>>? agentSkillInvocation = null)
+    Func<SlashCommandDefinition, string, CancellationToken, Task<string>>? agentSkillInvocation = null,
+    Func<McpCodeTaskTool, JsonElement, CancellationToken, Task<string>>? mcpCall = null)
 {
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> ToolArgumentLimits =
         new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
@@ -129,44 +130,54 @@ public sealed class CodeTaskToolExecutor(
         status?.Invoke($"Code task · calling {tool.ServerName}/{tool.ToolName}…");
         try
         {
-            var callArguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText(), new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
-            var output = await McpOperationTimeout.RunAsync(
-                async token => await tool.ClientTool.CallAsync(callArguments, cancellationToken: token).ConfigureAwait(false), tool.ExecutionTimeoutMs, cancellationToken);
-            var text = new System.Text.StringBuilder();
-            var truncated = false;
-            if (output.IsError == true) McpToolOutputFormatter.Append(text, "MCP server reported a tool error.", ref truncated);
-            foreach (var block in output.Content)
-            {
-                if (block is ModelContextProtocol.Protocol.TextContentBlock content && !string.IsNullOrEmpty(content.Text))
-                    McpToolOutputFormatter.Append(text, content.Text, ref truncated);
-                else McpToolOutputFormatter.Append(text, $"[{block.Type} content omitted from text-only Code task results]", ref truncated);
-                if (truncated) break;
-            }
-            if (output.StructuredContent is { } structured && structured.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
-            {
-                McpToolOutputFormatter.Append(text, "Structured content:", ref truncated, blankLine: true);
-                McpToolOutputFormatter.Append(text, structured.GetRawText(), ref truncated, separator: false);
-            }
-            var result = text.Length == 0 ? "MCP tool returned no text content." : text.ToString();
-            var source = $"MCP tool output: {tool.ServerName}/{tool.ToolName}";
+            var result = mcpCall is not null
+                ? await mcpCall(tool, arguments, cancellationToken).ConfigureAwait(false)
+                : await CallLegacyMcpToolAsync(tool, arguments, cancellationToken).ConfigureAwait(false);
+            var operation = tool.Operation.ToString().ToLowerInvariant();
+            var source = $"MCP {operation} output: {tool.ServerName}/{tool.ToolName}";
             AddContextSource(source);
             TrackUntrustedContent(source, result);
-            return UntrustedToolOutput.Format("MCP tool output", result, command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_tool");
+            return UntrustedToolOutput.Format($"MCP {operation} output", result, command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + operation);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (OperationCanceledException)
         {
-            return UntrustedToolOutput.Format("MCP tool error", "The MCP server canceled the tool call.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_tool");
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.ToString().ToLowerInvariant()} error", "The MCP server canceled the operation.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ToString().ToLowerInvariant());
         }
         catch (TimeoutException)
         {
-            return UntrustedToolOutput.Format("MCP tool error", $"The external MCP call timed out after {tool.ExecutionTimeoutMs} ms.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_tool");
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.ToString().ToLowerInvariant()} error", $"The external MCP operation timed out after {tool.ExecutionTimeoutMs} ms.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ToString().ToLowerInvariant());
         }
         catch (Exception ex)
         {
-            return UntrustedToolOutput.Format("MCP tool error", $"The external MCP call failed ({ex.GetType().Name}). Check the server configuration and logs.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_tool");
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.ToString().ToLowerInvariant()} error", $"The external MCP operation failed ({ex.GetType().Name}). Check the server configuration and logs.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ToString().ToLowerInvariant());
         }
         finally { status?.Invoke("Code task · Thinking…"); }
+    }
+
+    private static async Task<string> CallLegacyMcpToolAsync(McpCodeTaskTool tool, JsonElement arguments, CancellationToken cancellationToken)
+    {
+        if (tool.Operation != McpCodeTaskOperationKind.Tool || tool.ClientTool is null)
+            throw new InvalidOperationException("This MCP operation is no longer available.");
+        var callArguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText(), new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+        var output = await McpOperationTimeout.RunAsync(
+            async token => await tool.ClientTool.CallAsync(callArguments, cancellationToken: token).ConfigureAwait(false), tool.ExecutionTimeoutMs, cancellationToken);
+        var text = new System.Text.StringBuilder();
+        var truncated = false;
+        if (output.IsError == true) McpToolOutputFormatter.Append(text, "MCP server reported a tool error.", ref truncated);
+        foreach (var block in output.Content)
+        {
+            if (block is ModelContextProtocol.Protocol.TextContentBlock content && !string.IsNullOrEmpty(content.Text))
+                McpToolOutputFormatter.Append(text, content.Text, ref truncated);
+            else McpToolOutputFormatter.Append(text, $"[{block.Type} content omitted from text-only Code task results]", ref truncated);
+            if (truncated) break;
+        }
+        if (output.StructuredContent is { } structured && structured.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+        {
+            McpToolOutputFormatter.Append(text, "Structured content:", ref truncated, blankLine: true);
+            McpToolOutputFormatter.Append(text, structured.GetRawText(), ref truncated, separator: false);
+        }
+        return text.Length == 0 ? "MCP tool returned no text content." : text.ToString();
     }
 
     private static string? ValidateToolArguments(string name, JsonElement arguments)

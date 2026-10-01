@@ -127,7 +127,7 @@ public sealed record ChatMessage(string Role, string Content)
 public sealed record ChatToolOutput(string Header, string Content, string? Command = null, string? Activity = null, string? Path = null)
 {
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool HasCommand => Activity != "mcp_tool" && !string.IsNullOrWhiteSpace(Command);
+    public bool HasCommand => Activity is not ("mcp_tool" or "mcp_prompt" or "mcp_resource") && !string.IsNullOrWhiteSpace(Command);
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string Summary => HasCommand ? $"Ran {Command}" : Activity switch
@@ -140,6 +140,8 @@ public sealed record ChatToolOutput(string Header, string Content, string? Comma
         "search_web" or "web_search" => "Searched the web",
         "list_files" => "Listed files",
         "mcp_tool" => $"Used MCP tool · {Command ?? Header}",
+        "mcp_prompt" => $"Used MCP prompt · {Command ?? Header}",
+        "mcp_resource" => $"Read MCP resource · {Command ?? Header}",
         "loaded_skill" => $"Loaded skill · {Path ?? Header}",
         _ => Header
     };
@@ -162,6 +164,8 @@ public static class ToolOutputSummary
                 "search_files" => "searched files",
                 "list_files" => "listed files",
                 "mcp_tool" => "used MCP tools",
+                "mcp_prompt" => "used MCP prompts",
+                "mcp_resource" => "read MCP resources",
                 "loaded_skill" => "loaded skills",
                 "search_web" or "web_search" => "searched the web",
                 _ => "did other things"

@@ -382,7 +382,7 @@ public partial class MainWindow : Window
             ClearInlineApproval();
             _pendingMcpApproval = tcs;
             var panel = new StackPanel { Spacing = 8 };
-            panel.Children.Add(new TextBlock { Text = $"Review MCP tool call: {tool.ServerName} · {tool.ToolName}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
+            panel.Children.Add(new TextBlock { Text = $"Review MCP {tool.Operation.ToString().ToLowerInvariant()} call: {tool.ServerName} · {tool.ToolName}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
             panel.Children.Add(new TextBlock { Text = tool.Description, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
             var args = new TextBox
             {
@@ -393,7 +393,7 @@ public partial class MainWindow : Window
                 Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#242424"))
             };
             panel.Children.Add(args);
-            panel.Children.Add(new TextBlock { Text = "The MCP server and its results are external and untrusted. Review the arguments before allowing the call.", FontSize = 10, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+            panel.Children.Add(new TextBlock { Text = "The MCP server and its results are external and untrusted. Review the arguments before allowing this operation.", FontSize = 10, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
             var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
             void Add(string label, Codev.ProjectCommandApprovalChoice choice)
             {
@@ -402,8 +402,8 @@ public partial class MainWindow : Window
                 buttons.Children.Add(button);
             }
             Add("Cancel", Codev.ProjectCommandApprovalChoice.Cancel);
-            Add("Deny this tool", Codev.ProjectCommandApprovalChoice.DenyExactCommand);
-            Add("Allow tool + run", Codev.ProjectCommandApprovalChoice.AllowExactCommand);
+            Add("Deny this operation", Codev.ProjectCommandApprovalChoice.DenyExactCommand);
+            Add("Allow + run", Codev.ProjectCommandApprovalChoice.AllowExactCommand);
             Add("Run once", Codev.ProjectCommandApprovalChoice.RunOnce);
             panel.Children.Add(buttons);
             InlineApprovalContent.Content = panel;
