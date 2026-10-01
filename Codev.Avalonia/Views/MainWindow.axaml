@@ -313,7 +313,7 @@
                 </Grid>
             </Border>
             <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
-                <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22" MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Center">
+                <ItemsControl x:Name="MessageList" ItemsSource="{Binding Messages}" Margin="0,22" MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Center">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
                             <StackPanel IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="{Binding ReadingWidth}" Margin="48,0,24,0" Spacing="4">
@@ -347,7 +347,7 @@
                                     </Border>
                                 </Expander>
                                 <md:MarkdownScrollViewer Markdown="{Binding DisplayContent}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
-                                <Expander Header="{Binding CommandToolOutputsHeader}" IsExpanded="False" IsVisible="{Binding HasToolOutputs}" ToolTip.Tip="Expand to inspect each tool action and its output.">
+                                <Expander x:Name="CommandToolOutputsExpander" Header="{Binding CommandToolOutputsHeader}" IsExpanded="False" IsVisible="{Binding HasToolOutputs}" ToolTip.Tip="Expand to inspect each tool action and its output.">
                                     <ItemsControl ItemsSource="{Binding CommandToolOutputs}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="core:ChatToolOutput">

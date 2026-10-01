@@ -39,6 +39,9 @@ jobs:
       - name: Build Avalonia UI spike
         run: dotnet build Codev.Avalonia/Codev.Avalonia.csproj --configuration Release
 
+      - name: Run Avalonia headless UI tests
+        run: dotnet test Codev.Avalonia.Tests/Codev.Avalonia.Tests.csproj --configuration Release --logger "console;verbosity=minimal"
+
       - name: Launch Avalonia under a virtual Linux display
         if: runner.os == 'Linux'
         run: |
