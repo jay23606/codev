@@ -186,6 +186,52 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Agent_profile_editor_validates_then_saves_and_reloads_user_profile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-agent-profile-editor-ui", Guid.NewGuid().ToString("N"));
+        var profileStore = new UserAgentProfileStore(root);
+        var profileService = new TestAgentProfileEditorService(profileStore);
+        var editor = new AgentProfileEditorWindow(profileService, await profileService.GetUserAgentProfileDocumentsAsync());
+        try
+        {
+            editor.Show();
+            editor.UpdateLayout();
+            var fileName = Assert.Single(editor.GetVisualDescendants().OfType<TextBox>(), control => control.Name == "AgentProfileFileNameTextBox");
+            var contents = Assert.Single(editor.GetVisualDescendants().OfType<TextBox>(), control => control.Name == "AgentProfileContentsTextBox");
+            var status = Assert.Single(editor.GetVisualDescendants().OfType<TextBlock>(), control => control.Name == "AgentProfileEditorStatus");
+            var create = Assert.Single(editor.GetVisualDescendants().OfType<Button>(), control => control.Name == "NewProfileButton");
+            var save = Assert.Single(editor.GetVisualDescendants().OfType<Button>(), control => control.Name == "SaveAgentProfileButton");
+
+            await Dispatcher.UIThread.InvokeAsync(() => create.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            fileName.Text = "reviewer";
+            contents.Text = "This is not a valid profile.";
+            await Dispatcher.UIThread.InvokeAsync(() => save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await Assert.ThrowsAsync<InvalidDataException>(() => profileService.LastSaveTask.WaitAsync(TimeSpan.FromSeconds(5)));
+            await WaitForStatusAsync(status, "Profile was not saved");
+
+            Assert.False(File.Exists(Path.Combine(root, "reviewer.md")));
+            Assert.Contains("Profile was not saved", status.Text, StringComparison.Ordinal);
+
+            contents.Text = "---\nname: Reviewer\ndescription: Review source changes carefully.\ndefault_permission: ask\ntools: read_file=allow, search_files=allow\n---\nInspect the relevant code before suggesting edits.\n";
+            await Dispatcher.UIThread.InvokeAsync(() => save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await profileService.LastSaveTask.WaitAsync(TimeSpan.FromSeconds(5));
+            await WaitForStatusAsync(status, "Profile saved and available");
+
+            var saved = await profileService.GetUserAgentProfileDocumentsAsync();
+            Assert.Equal("reviewer.md", Assert.Single(saved).FileName);
+            Assert.Contains("name: Reviewer", saved[0].Contents, StringComparison.Ordinal);
+            Assert.Contains("Profile saved and available in the Code task profile picker", status.Text, StringComparison.Ordinal);
+            var selection = Assert.Single(editor.GetVisualDescendants().OfType<ComboBox>(), control => control.Name == "AgentProfileSelectionComboBox");
+            Assert.Contains("reviewer.md", selection.ItemsSource!.Cast<string>());
+        }
+        finally
+        {
+            editor.Close();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public void File_review_is_readable_collapsed_by_default_and_keeps_decisions_visible()
     {
         var window = new MainWindow();
@@ -218,12 +264,38 @@ public sealed class MainWindowTests
     private sealed record TestProjectPermissionViewModel(bool HasProject,
         bool CanPersistProjectCommandPermissions, string ProjectCommandPermissionModeLabel);
 
+    private sealed class TestAgentProfileEditorService(UserAgentProfileStore store) : Codev.Avalonia.ViewModels.IUserAgentProfileEditorService
+    {
+        public Task LastSaveTask { get; private set; } = Task.CompletedTask;
+
+        public Task<IReadOnlyList<AgentProfileDocument>> GetUserAgentProfileDocumentsAsync(CancellationToken cancellationToken = default) =>
+            store.LoadDocumentsAsync(cancellationToken);
+
+        public async Task SaveUserAgentProfileAsync(string fileName, string contents, CancellationToken cancellationToken = default)
+        {
+            LastSaveTask = store.SaveAsync(fileName, contents, cancellationToken);
+            await LastSaveTask;
+        }
+    }
+
     private static void AssertReadableContrast(TextBox textBox)
     {
         var foreground = Assert.IsType<SolidColorBrush>(textBox.Foreground).Color;
         var background = Assert.IsType<SolidColorBrush>(textBox.Background).Color;
         Assert.True(ContrastRatio(foreground, background) >= 4.5,
             $"Expected readable text contrast, got {foreground} on {background}.");
+    }
+
+    private static async Task WaitForStatusAsync(TextBlock status, string expected)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            if (status.Text?.Contains(expected, StringComparison.Ordinal) == true) return;
+            await Task.Delay(10);
+        }
+        Assert.Contains(expected, status.Text, StringComparison.Ordinal);
     }
 
     private static double ContrastRatio(Color foreground, Color background)

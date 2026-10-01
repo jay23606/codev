@@ -16,7 +16,7 @@ using System.Diagnostics;
 namespace Codev.Avalonia.ViewModels;
 
 /// <summary>Local conversation browser for the Avalonia renderer prototype.</summary>
-public sealed class MainViewModel : ViewModelBase
+public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorService
 {
     private static readonly string StorePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-conversations.json");
