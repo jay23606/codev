@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
+using Avalonia.Input;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -322,17 +323,29 @@ public sealed class MainWindowTests
             Assert.Equal("Reviewer", viewModel.SelectedAgentProfileName);
             Assert.Equal("Reviewer", conversation.AgentProfileName);
             Assert.Equal("Reviewer agent", viewModel.PrimaryAgentLabel);
+
+            picker.SelectedValue = "Plan";
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Equal("Plan", conversation.AgentProfileName);
+            Assert.Equal("Plan agent", viewModel.PrimaryAgentLabel);
+
+            picker.SelectedValue = "";
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Null(conversation.AgentProfileName);
+            Assert.Equal("Build agent", viewModel.PrimaryAgentLabel);
+
+            window.KeyPress(Key.A, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.A, "A");
+            Assert.Equal("Plan", conversation.AgentProfileName);
+            Assert.Equal("Plan agent", viewModel.PrimaryAgentLabel);
+
+            window.KeyPress(Key.A, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.A, "A");
+            Assert.Null(conversation.AgentProfileName);
+            Assert.Equal("Build agent", viewModel.PrimaryAgentLabel);
         }
         finally
         {
             window.Close();
             await viewModel.StopBackgroundCommandsAndShutdownAsync();
-            if (Directory.Exists(root))
-            {
-                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-                    File.SetAttributes(file, FileAttributes.Normal);
-                Directory.Delete(root, recursive: true);
-            }
         }
     }
 
