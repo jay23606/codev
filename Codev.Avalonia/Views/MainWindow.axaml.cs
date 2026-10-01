@@ -382,7 +382,7 @@ public partial class MainWindow : Window
             ClearInlineApproval();
             _pendingMcpApproval = tcs;
             var panel = new StackPanel { Spacing = 8 };
-            panel.Children.Add(new TextBlock { Text = $"Review MCP {tool.Operation.ToString().ToLowerInvariant()} call: {tool.ServerName} · {tool.ToolName}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
+            panel.Children.Add(new TextBlock { Text = $"Review MCP {tool.Operation.DisplayName()} call: {tool.ServerName} · {tool.ToolName}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
             panel.Children.Add(new TextBlock { Text = tool.Description, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
             var args = new TextBox
             {

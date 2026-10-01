@@ -131,6 +131,7 @@ public sealed class McpCodeTaskToolTests
         var serverToClient = new Pipe();
         var toolCalls = 0;
         var resourceReads = 0;
+        var resourceTemplateReads = 0;
         await using var server = McpServer.Create(
             new StreamServerTransport(clientToServer.Reader.AsStream(), serverToClient.Writer.AsStream()),
             new McpServerOptions
@@ -155,7 +156,12 @@ public sealed class McpCodeTaskToolTests
                         Interlocked.Increment(ref resourceReads);
                         return "Shared MCP notes.";
                     },
-                        new() { UriTemplate = "test://mcp/notes", Name = "notes", Description = "Shared notes.", MimeType = "text/plain" })
+                        new() { UriTemplate = "test://mcp/notes", Name = "notes", Description = "Shared notes.", MimeType = "text/plain" }),
+                    McpServerResource.Create((string id) =>
+                    {
+                        Interlocked.Increment(ref resourceTemplateReads);
+                        return $"Item {id}.";
+                    }, new() { UriTemplate = "test://mcp/items/{id}", Name = "item_by_id", Description = "Read one item.", MimeType = "text/plain" })
                 ]
             });
         var serverRun = server.RunAsync();
@@ -172,7 +178,7 @@ public sealed class McpCodeTaskToolTests
             using var arguments = JsonDocument.Parse("""{"message":"hello"}""");
 
             Assert.Equal("echo", tool.ToolName);
-            Assert.Equal(3, session.Tools.Count);
+            Assert.Equal(4, session.Tools.Count);
             using var ollamaSchemas = JsonDocument.Parse(JsonSerializer.Serialize(
                 CodeTaskToolSchemaFactory.CreateOllamaTools(ShellCommandResolver.ResolveCurrent(), session.Tools.Values), JsonSerializerOptions.Web));
             var ollamaNames = ollamaSchemas.RootElement.EnumerateArray()
@@ -180,7 +186,7 @@ public sealed class McpCodeTaskToolTests
             using var openAiSchemas = JsonDocument.Parse(JsonSerializer.Serialize(
                 CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(ShellCommandResolver.ResolveCurrent(), session.Tools.Values), JsonSerializerOptions.Web));
             var openAiNames = openAiSchemas.RootElement.EnumerateArray().Select(schema => schema.GetProperty("name").GetString()).ToArray();
-            Assert.Contains("connected; 1 tool(s), 1 prompt(s), and 1 resource(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
+            Assert.Contains("connected; 1 tool(s), 1 prompt(s), 1 resource(s), and 1 resource template(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
             var prompt = Assert.Single(session.Prompts.Values);
             Assert.Equal("review_subject", prompt.Name);
             var promptText = await session.GetPromptAsync(prompt.FunctionName, new Dictionary<string, string> { ["subject"] = "the parser" });
@@ -188,6 +194,8 @@ public sealed class McpCodeTaskToolTests
             Assert.Contains("untrusted_tool_output", promptText, StringComparison.Ordinal);
             var resource = Assert.Single(session.Resources.Values);
             Assert.Equal("notes", resource.Name);
+            var resourceTemplate = Assert.Single(session.ResourceTemplates.Values);
+            Assert.Equal("item_by_id", resourceTemplate.Name);
             var resourceText = await session.ReadResourceAsync(resource.FunctionName);
             Assert.Contains("Shared MCP notes.", resourceText, StringComparison.Ordinal);
             Assert.Contains("untrusted_tool_output", resourceText, StringComparison.Ordinal);
@@ -197,8 +205,13 @@ public sealed class McpCodeTaskToolTests
             Assert.Contains("Review the parser for correctness.", await session.CallAsync(prompt.FunctionName, promptArguments.RootElement));
             Assert.Contains(prompt.FunctionName, ollamaNames);
             Assert.Contains(resource.FunctionName, ollamaNames);
+            Assert.Contains(resourceTemplate.FunctionName, ollamaNames);
             Assert.Contains(prompt.FunctionName, openAiNames);
             Assert.Contains(resource.FunctionName, openAiNames);
+            Assert.Contains(resourceTemplate.FunctionName, openAiNames);
+            using var templateArguments = JsonDocument.Parse("""{"id":"42"}""");
+            Assert.Contains("Item 42.", await session.CallAsync(resourceTemplate.FunctionName, templateArguments.RootElement));
+            Assert.Equal(1, Volatile.Read(ref resourceTemplateReads));
             var resourceTool = session.Tools[resource.FunctionName];
             Assert.Equal(McpCodeTaskOperationKind.Resource, resourceTool.Operation);
             Assert.Contains("Shared MCP notes.", await session.CallAsync(resource.FunctionName, JsonDocument.Parse("{}").RootElement));
@@ -251,6 +264,13 @@ public sealed class McpCodeTaskToolTests
             Assert.Contains("untrusted_tool_output", resourceResult, StringComparison.Ordinal);
             Assert.Equal(0, promptCount);
             Assert.Equal(3, Volatile.Read(ref resourceReads));
+            var templateResult = await executor.ExecuteAsync(resourceTemplate.FunctionName, templateArguments.RootElement);
+            Assert.Contains("Item 42.", templateResult, StringComparison.Ordinal);
+            Assert.Contains("untrusted_tool_output", templateResult, StringComparison.Ordinal);
+            var parsedTemplate = ToolOutputTranscriptParser.Parse("**MCP resource template output**\n" + templateResult);
+            Assert.Equal("mcp_resource_template", Assert.Single(parsedTemplate.Outputs).Activity);
+            Assert.Contains("read MCP resource templates", ToolOutputSummary.Build(parsedTemplate.Outputs), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(2, Volatile.Read(ref resourceTemplateReads));
 
             await permissions.SetRuleAsync(workspace, tool.ServerId, tool.ToolName, ProjectCommandPermissionDecision.Deny);
             var denied = await executor.ExecuteAsync(tool.FunctionName, arguments.RootElement);
@@ -260,6 +280,10 @@ public sealed class McpCodeTaskToolTests
             var deniedResource = await executor.ExecuteAsync(resource.FunctionName, emptyArguments.RootElement);
             Assert.Contains("Denied by a saved project MCP tool permission rule", deniedResource, StringComparison.Ordinal);
             Assert.Equal(3, Volatile.Read(ref resourceReads));
+            await permissions.SetRuleAsync(workspace, resourceTemplate.ServerId, "resource template " + resourceTemplate.Name, ProjectCommandPermissionDecision.Deny);
+            var deniedTemplate = await executor.ExecuteAsync(resourceTemplate.FunctionName, templateArguments.RootElement);
+            Assert.Contains("Denied by a saved project MCP tool permission rule", deniedTemplate, StringComparison.Ordinal);
+            Assert.Equal(2, Volatile.Read(ref resourceTemplateReads));
         }
         finally
         {
@@ -310,7 +334,7 @@ public sealed class McpCodeTaskToolTests
 
             Assert.Equal("echo", tool.ToolName);
             Assert.Contains("Echo from legacy SSE: hello", result, StringComparison.Ordinal);
-            Assert.Contains("connected; 1 tool(s), 0 prompt(s), and 0 resource(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
+            Assert.Contains("connected; 1 tool(s), 0 prompt(s), 0 resource(s), and 0 resource template(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
         }
         finally
         {

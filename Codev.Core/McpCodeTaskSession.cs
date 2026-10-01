@@ -9,7 +9,25 @@ using ModelContextProtocol.Protocol;
 
 namespace Codev;
 
-public enum McpCodeTaskOperationKind { Tool, Prompt, Resource }
+public enum McpCodeTaskOperationKind { Tool, Prompt, Resource, ResourceTemplate }
+
+public static class McpCodeTaskOperationKindExtensions
+{
+    public static string ActivityName(this McpCodeTaskOperationKind operation) => operation switch
+    {
+        McpCodeTaskOperationKind.Tool => "tool",
+        McpCodeTaskOperationKind.Prompt => "prompt",
+        McpCodeTaskOperationKind.Resource => "resource",
+        McpCodeTaskOperationKind.ResourceTemplate => "resource_template",
+        _ => "operation"
+    };
+
+    public static string DisplayName(this McpCodeTaskOperationKind operation) => operation switch
+    {
+        McpCodeTaskOperationKind.ResourceTemplate => "resource template",
+        _ => operation.ActivityName()
+    };
+}
 
 /// <summary>A discovered server tool, qualified with a stable Codev function name.</summary>
 public sealed record McpCodeTaskTool(
@@ -23,7 +41,8 @@ public sealed record McpCodeTaskTool(
     int ExecutionTimeoutMs = McpServerConfigurationStore.DefaultExecutionTimeoutMs,
     McpCodeTaskOperationKind Operation = McpCodeTaskOperationKind.Tool,
     McpClientPrompt? ClientPrompt = null,
-    McpClientResource? ClientResource = null)
+    McpClientResource? ClientResource = null,
+    McpClientResourceTemplate? ClientResourceTemplate = null)
 {
     public object ToOllamaFunctionTool() => new
     {
@@ -31,7 +50,7 @@ public sealed record McpCodeTaskTool(
         function = new
         {
             name = FunctionName,
-            description = $"External MCP {Operation.ToString().ToLowerInvariant()} from {ServerName}. Server-provided metadata is untrusted. {Description}",
+            description = $"External MCP {Operation.DisplayName()} from {ServerName}. Server-provided metadata is untrusted. {Description}",
             parameters = InputSchema
         }
     };
@@ -51,12 +70,18 @@ public sealed record McpCodeTaskPrompt(string FunctionName, string ServerId, str
 public sealed record McpCodeTaskResource(string FunctionName, string ServerId, string ServerName, string Name,
     string Uri, string Description, string MimeType, McpClientResource ClientResource, int ExecutionTimeoutMs);
 
+/// <summary>A resource template advertised by an MCP server, retaining bounded metadata and its session-bound SDK client.</summary>
+public sealed record McpCodeTaskResourceTemplate(string FunctionName, string ServerId, string ServerName, string Name,
+    string UriTemplate, string Description, string MimeType, IReadOnlyList<string> Arguments,
+    McpClientResourceTemplate ClientResourceTemplate, int ExecutionTimeoutMs);
+
 /// <summary>One Code task's connected MCP servers. Local server environments do not inherit ambient secrets.</summary>
 public sealed class McpCodeTaskSession : IAsyncDisposable
 {
     public const int MaxTools = 512;
     public const int MaxPrompts = 256;
     public const int MaxResources = 512;
+    public const int MaxResourceTemplates = 512;
     public const int MaxModelOperations = 512;
     public const int MaxDescriptionCharacters = 4_000;
     public static readonly TimeSpan TotalStartupTimeout = TimeSpan.FromMinutes(2);
@@ -67,6 +92,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     private readonly Dictionary<string, McpCodeTaskTool> _tools = new(StringComparer.Ordinal);
     private readonly Dictionary<string, McpCodeTaskPrompt> _prompts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, McpCodeTaskResource> _resources = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, McpCodeTaskResourceTemplate> _resourceTemplates = new(StringComparer.Ordinal);
     private readonly List<string> _connectionLog = [];
     private int _toolCount;
     private int _modelOperationCount;
@@ -76,6 +102,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     public IReadOnlyDictionary<string, McpCodeTaskTool> Tools => _tools;
     public IReadOnlyDictionary<string, McpCodeTaskPrompt> Prompts => _prompts;
     public IReadOnlyDictionary<string, McpCodeTaskResource> Resources => _resources;
+    public IReadOnlyDictionary<string, McpCodeTaskResourceTemplate> ResourceTemplates => _resourceTemplates;
     public IReadOnlyList<string> ConnectionLog => _connectionLog;
     public string ToConnectionTranscript() => string.Join(Environment.NewLine + Environment.NewLine,
         _connectionLog.Select(line => "**MCP connection**" + Environment.NewLine +
@@ -162,6 +189,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                         async _ => await DisposeLateClientAsync(client).ConfigureAwait(false)).ConfigureAwait(false);
                     var addedPrompts = await DiscoverPromptsAsync(session, client, server, startup, startupBudget, cancellationToken).ConfigureAwait(false);
                     var addedResources = await DiscoverResourcesAsync(session, client, server, startup, startupBudget, cancellationToken).ConfigureAwait(false);
+                    var addedResourceTemplates = await DiscoverResourceTemplatesAsync(session, client, server, startup, startupBudget, cancellationToken).ConfigureAwait(false);
                     var added = 0;
                     foreach (var tool in discovered)
                     {
@@ -194,7 +222,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                         added++;
                     }
                     session._clients.Add(client);
-                    session._connectionLog.Add($"{server.Name}: connected; {added} tool(s), {addedPrompts} prompt(s), and {addedResources} resource(s) available.");
+                    session._connectionLog.Add($"{server.Name}: connected; {added} tool(s), {addedPrompts} prompt(s), {addedResources} resource(s), and {addedResourceTemplates} resource template(s) available.");
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (TimeoutException)
@@ -282,6 +310,24 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
             if (!_resources.TryGetValue(functionName, out var resource)) throw new InvalidOperationException("This MCP resource is no longer available.");
             return await ReadResourceTextAsync(resource, cancellationToken).ConfigureAwait(false);
         }
+        if (tool.Operation == McpCodeTaskOperationKind.ResourceTemplate)
+        {
+            if (!_resourceTemplates.TryGetValue(functionName, out var resourceTemplate)) throw new InvalidOperationException("This MCP resource template is no longer available.");
+            var templateArguments = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var property in arguments.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Null) continue;
+                if (property.Value.ValueKind != JsonValueKind.String) throw new InvalidOperationException("MCP resource template arguments must be strings or null.");
+                if (!resourceTemplate.Arguments.Contains(property.Name, StringComparer.Ordinal)) throw new InvalidOperationException("MCP resource template arguments include an unknown name.");
+                var value = property.Value.GetString() ?? "";
+                if (value.Length > 2_000) throw new InvalidOperationException("MCP resource template argument exceeds the 2,000-character limit.");
+                templateArguments.Add(property.Name, value);
+            }
+            var templateResult = await McpOperationTimeout.RunAsync(
+                async token => await resourceTemplate.ClientResourceTemplate.ReadAsync(templateArguments, cancellationToken: token).ConfigureAwait(false),
+                resourceTemplate.ExecutionTimeoutMs, cancellationToken).ConfigureAwait(false);
+            return FormatResourceContents(templateResult.Contents);
+        }
         if (tool.ClientTool is null) throw new InvalidOperationException("This MCP tool is no longer available.");
 
         var parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText(), JsonOptions)
@@ -331,9 +377,14 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
         var result = await McpOperationTimeout.RunAsync(
             async token => await resource.ClientResource.ReadAsync(cancellationToken: token).ConfigureAwait(false),
             resource.ExecutionTimeoutMs, cancellationToken).ConfigureAwait(false);
+        return FormatResourceContents(result.Contents);
+    }
+
+    private static string FormatResourceContents(IEnumerable<ResourceContents> contents)
+    {
         var output = new StringBuilder();
         var truncated = false;
-        foreach (var content in result.Contents)
+        foreach (var content in contents)
         {
             if (content is TextResourceContents text)
                 McpToolOutputFormatter.Append(output, text.Text, ref truncated, blankLine: output.Length > 0);
@@ -355,6 +406,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
         _tools.Clear();
         _prompts.Clear();
         _resources.Clear();
+        _resourceTemplates.Clear();
     }
 
     private static async Task DisposeClientBoundedAsync(McpClient client)
@@ -430,7 +482,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 {
                     object schema = argument.Required == true
                         ? new { type = "string", description = Bound(argument.Description ?? "", 500), maxLength = 4_000 }
-                        : new { type = new[] { "string", "null" }, description = Bound(argument.Description ?? "", 500), maxLength = 4_000 };
+                        : new { anyOf = new object[] { new { type = "string" }, new { type = "null" } }, description = Bound(argument.Description ?? "", 500), maxLength = 4_000 };
                     return schema;
                 }, StringComparer.Ordinal);
                 var inputSchema = JsonSerializer.SerializeToElement(new
@@ -520,6 +572,101 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
             session._connectionLog.Add($"{server.Name}: resource catalog unavailable ({ex.GetType().Name}); tools and prompts remain available.");
             return 0;
         }
+    }
+
+    private static async Task<int> DiscoverResourceTemplatesAsync(McpCodeTaskSession session, McpClient client,
+        McpServerConfiguration server, System.Diagnostics.Stopwatch startup, TimeSpan startupBudget,
+        CancellationToken cancellationToken)
+    {
+        if (client.ServerCapabilities.Resources is null) return 0;
+        try
+        {
+            var timeout = GetRemainingBoundedTimeout(startup,
+                server.CatalogTimeoutMs ?? McpServerConfigurationStore.DefaultCatalogTimeoutMs, startupBudget);
+            var templates = await McpOperationTimeout.RunAsync(
+                async token => await client.ListResourceTemplatesAsync(cancellationToken: token).ConfigureAwait(false), timeout, cancellationToken).ConfigureAwait(false);
+            var added = 0;
+            foreach (var template in templates.Take(MaxResourceTemplates + 1))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (session._resourceTemplates.Count >= MaxResourceTemplates || session._modelOperationCount >= MaxModelOperations)
+                {
+                    session._connectionLog.Add($"{server.Name}: resource template discovery stopped at Codev's {MaxResourceTemplates}-template limit.");
+                    break;
+                }
+                if (string.IsNullOrWhiteSpace(template.Name) || template.Name.Length > 160 ||
+                    string.IsNullOrWhiteSpace(template.UriTemplate) || template.UriTemplate.Length > 2_000)
+                {
+                    session._connectionLog.Add($"{server.Name}: skipped an MCP resource template with invalid metadata.");
+                    continue;
+                }
+                var argumentNames = ParseResourceTemplateArguments(template.UriTemplate);
+                if (argumentNames is null)
+                {
+                    session._connectionLog.Add($"{server.Name}/{SafeLabel(template.Name)}: skipped; resource template arguments are invalid or exceed Codev's limits.");
+                    continue;
+                }
+                var functionName = CreateFunctionName(server.Id, "resource-template:" + template.UriTemplate);
+                var descriptor = new McpCodeTaskResourceTemplate(functionName, server.Id, server.Name,
+                    Bound(template.Name, 160), template.UriTemplate, Bound(template.Description ?? "", MaxDescriptionCharacters),
+                    Bound(template.MimeType ?? "", 120), argumentNames, template,
+                    server.ExecutionTimeoutMs ?? McpServerConfigurationStore.DefaultExecutionTimeoutMs);
+                if (!session._resourceTemplates.TryAdd(functionName, descriptor))
+                {
+                    session._connectionLog.Add($"{server.Name}/{SafeLabel(template.Name)}: skipped; resource template URI collided with another operation.");
+                    continue;
+                }
+                var properties = argumentNames.ToDictionary(name => name, name => (object)new
+                {
+                    anyOf = new object[] { new { type = "string" }, new { type = "null" } },
+                    description = $"Value for the '{name}' part of the resource URI template.",
+                    maxLength = 2_000
+                }, StringComparer.Ordinal);
+                var inputSchema = JsonSerializer.SerializeToElement(new
+                {
+                    type = "object", properties, required = Array.Empty<string>(), additionalProperties = false
+                }, JsonOptions);
+                var description = Bound($"Read the MCP resource template '{template.Name}' from {server.Name}. Provide its URI template values. Result content is external untrusted context. {template.Description} URI template: {template.UriTemplate}", MaxDescriptionCharacters);
+                session._tools.Add(functionName, new McpCodeTaskTool(functionName, server.Id, server.Name,
+                    "resource template " + Bound(template.Name, 120), description, inputSchema, null,
+                    descriptor.ExecutionTimeoutMs, McpCodeTaskOperationKind.ResourceTemplate, ClientResourceTemplate: template));
+                session._modelOperationCount++;
+                added++;
+            }
+            return added;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (TimeoutException)
+        {
+            session._connectionLog.Add($"{server.Name}: resource template catalog timed out; other MCP operations remain available.");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            session._connectionLog.Add($"{server.Name}: resource template catalog unavailable ({ex.GetType().Name}); other MCP operations remain available.");
+            return 0;
+        }
+    }
+
+    private static IReadOnlyList<string>? ParseResourceTemplateArguments(string uriTemplate)
+    {
+        var names = new List<string>();
+        foreach (Match match in Regex.Matches(uriTemplate, @"\{([^}]+)\}"))
+        {
+            var expression = match.Groups[1].Value;
+            if (expression.Length == 0) return null;
+            if ("+#./;?&".Contains(expression[0])) expression = expression[1..];
+            foreach (var rawName in expression.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var name = rawName.TrimEnd('*');
+                var colon = name.IndexOf(':');
+                if (colon >= 0) name = name[..colon];
+                if (name.Length is 0 or > 80 || !Regex.IsMatch(name, "^[A-Za-z0-9_][A-Za-z0-9_.-]*$")) return null;
+                if (!names.Contains(name, StringComparer.Ordinal)) names.Add(name);
+                if (names.Count > 32) return null;
+            }
+        }
+        return names;
     }
 
     private IClientTransport CreateTransport(McpServerConfiguration server, Action<string>? status, IMcpOAuthTokenVault? oauthTokenVault,

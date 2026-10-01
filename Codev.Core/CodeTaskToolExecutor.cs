@@ -133,24 +133,25 @@ public sealed class CodeTaskToolExecutor(
             var result = mcpCall is not null
                 ? await mcpCall(tool, arguments, cancellationToken).ConfigureAwait(false)
                 : await CallLegacyMcpToolAsync(tool, arguments, cancellationToken).ConfigureAwait(false);
-            var operation = tool.Operation.ToString().ToLowerInvariant();
+            var operation = tool.Operation.DisplayName();
+            var activity = tool.Operation.ActivityName();
             var source = $"MCP {operation} output: {tool.ServerName}/{tool.ToolName}";
             AddContextSource(source);
             TrackUntrustedContent(source, result);
-            return UntrustedToolOutput.Format($"MCP {operation} output", result, command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + operation);
+            return UntrustedToolOutput.Format($"MCP {operation} output", result, command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + activity);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (OperationCanceledException)
         {
-            return UntrustedToolOutput.Format($"MCP {tool.Operation.ToString().ToLowerInvariant()} error", "The MCP server canceled the operation.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ToString().ToLowerInvariant());
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.DisplayName()} error", "The MCP server canceled the operation.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ActivityName());
         }
         catch (TimeoutException)
         {
-            return UntrustedToolOutput.Format($"MCP {tool.Operation.ToString().ToLowerInvariant()} error", $"The external MCP operation timed out after {tool.ExecutionTimeoutMs} ms.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ToString().ToLowerInvariant());
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.DisplayName()} error", $"The external MCP operation timed out after {tool.ExecutionTimeoutMs} ms.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ActivityName());
         }
         catch (Exception ex)
         {
-            return UntrustedToolOutput.Format($"MCP {tool.Operation.ToString().ToLowerInvariant()} error", $"The external MCP operation failed ({ex.GetType().Name}). Check the server configuration and logs.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ToString().ToLowerInvariant());
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.DisplayName()} error", $"The external MCP operation failed ({ex.GetType().Name}). Check the server configuration and logs.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ActivityName());
         }
         finally { status?.Invoke("Code task · Thinking…"); }
     }

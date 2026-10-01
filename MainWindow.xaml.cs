@@ -3333,7 +3333,7 @@ public partial class MainWindow : Window
     {
         if (arguments.ValueKind != JsonValueKind.Object || arguments.GetRawText().Length > 500_000)
             return "Rejected: MCP tool arguments must be a JSON object no larger than 500,000 characters.";
-        if (!IsProjectTrusted(projectPath)) return $"Rejected: project trust was revoked; the MCP {tool.Operation.ToString().ToLowerInvariant()} was not called.";
+        if (!IsProjectTrusted(projectPath)) return $"Rejected: project trust was revoked; the MCP {tool.Operation.DisplayName()} was not called.";
         var mode = _projectCommandPermissions.GetMode(projectPath);
         var decision = _projectMcpPermissions.Evaluate(projectPath, mode, tool.ServerId, tool.ToolName);
         if (decision == ProjectCommandPermissionDecision.Deny)
@@ -3342,7 +3342,7 @@ public partial class MainWindow : Window
         {
             var choice = ShowMcpToolApproval(tool, arguments);
             if (choice == ProjectCommandApprovalChoice.Cancel)
-                return $"Rejected by user; the MCP {tool.Operation.ToString().ToLowerInvariant()} was not called.";
+                return $"Rejected by user; the MCP {tool.Operation.DisplayName()} was not called.";
             try
             {
                 if (choice == ProjectCommandApprovalChoice.DenyExactCommand)
@@ -3365,9 +3365,9 @@ public partial class MainWindow : Window
         {
             SetAgentStatus(conversation, $"Code task · calling {tool.ServerName}/{tool.ToolName}…");
             var result = await session.CallAsync(tool.FunctionName, arguments, cancellationToken);
-            var operation = tool.Operation.ToString().ToLowerInvariant();
+            var operation = tool.Operation.DisplayName();
             return UntrustedToolOutput.Format($"MCP {operation} output", result.Length <= 8000 ? result : result[..8000] + "\n… [operation output truncated]",
-                command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + operation);
+                command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ActivityName());
         }
         finally
         {
@@ -3566,7 +3566,7 @@ public partial class MainWindow : Window
     {
         var dialog = new Window
         {
-            Title = $"Approve MCP {tool.Operation.ToString().ToLowerInvariant()}",
+            Title = $"Approve MCP {tool.Operation.DisplayName()}",
             Width = 650,
             Height = 470,
             MinWidth = 540,
@@ -3590,7 +3590,7 @@ public partial class MainWindow : Window
         var body = new StackPanel();
         body.Children.Add(new TextBlock
         {
-            Text = $"The model requested an MCP {tool.Operation.ToString().ToLowerInvariant()} from {tool.ServerName} · {tool.ToolName}. Server descriptions and arguments are untrusted data. Review the exact operation before allowing it.",
+            Text = $"The model requested an MCP {tool.Operation.DisplayName()} from {tool.ServerName} · {tool.ToolName}. Server descriptions and arguments are untrusted data. Review the exact operation before allowing it.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 10)
         });
