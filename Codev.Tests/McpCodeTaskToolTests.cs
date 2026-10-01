@@ -76,6 +76,18 @@ public sealed class McpCodeTaskToolTests
         Assert.Contains("mcp_gitlab_search_projects_0123456789abcdef", hostedNames);
     }
 
+    [Fact]
+    public void Built_in_debug_profile_ask_for_mcp_tools_defers_to_auto_but_asks_in_ask_mode()
+    {
+        const string profileText = "---\nname: ReviewMcp\ndescription: Ask before external MCP operations.\ntools: mcp_*=ask\n---\nInspect before calling MCP tools.";
+        Assert.True(AgentProfileCatalog.TryParse("review-mcp.md", profileText, "user", out var profile, out var error), error);
+        var permission = AgentProfilePolicy.PermissionFor(profile, "mcp_github_search_0123456789abcdef");
+
+        Assert.Equal(AgentToolPermission.Ask, permission);
+        Assert.False(AgentProfilePolicy.RequiresOneCallApproval(permission, ProjectCommandPermissionMode.Auto));
+        Assert.True(AgentProfilePolicy.RequiresOneCallApproval(permission, ProjectCommandPermissionMode.AskEveryTime));
+    }
+
     private static McpCodeTaskTool CreateMcpTool(string functionName, string serverId, string toolName)
     {
         using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"additionalProperties":false}""");
