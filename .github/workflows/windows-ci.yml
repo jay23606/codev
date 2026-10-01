@@ -36,6 +36,12 @@ jobs:
       - name: Run portable tests
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
 
+      - name: Run native macOS MCP OAuth Keychain smoke
+        if: runner.os == 'macOS'
+        env:
+          CODEV_TEST_NATIVE_MCP_OAUTH_VAULT: '1'
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
+
       - name: Build Avalonia UI spike
         run: dotnet build Codev.Avalonia/Codev.Avalonia.csproj --configuration Release
 
