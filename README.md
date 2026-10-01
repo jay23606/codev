@@ -6,11 +6,15 @@
 
 Claude Desktop and the Codex app are the closest things to what Codev wants to be: a standalone, chat-first desktop app for coding with an AI assistant, not a terminal tool or an editor extension. Both require a paid hosted model. The tools that *do* run fully local and free (Aider, OpenCode, Cline, Gemini CLI, and others) are terminal-first or editor-extension-first; none of them is a dedicated desktop app built around that same chat-and-review experience. Codev exists to fill that specific gap: the Claude/Codex-style desktop UX, pointed at a local Ollama model instead of a subscription, with no editor dependency.
 
-This only became realistic recently. Reasoning-capable, agentic mixture-of-experts models in the 30B-parameter class now run at usable speed on ordinary consumer hardware — [measured results for this project](comparison.html) show a 35B model at roughly 26 tokens/second on a CPU-only laptop with 62 GB RAM. That performance bar wasn't clearable even two years ago.
+This only became realistic recently. Reasoning-capable, agentic mixture-of-experts models in the 30B-parameter class now run at usable speed on ordinary consumer hardware — [measured results for this project](https://raw.githack.com/jay23606/codev/main/comparison.html) show a 35B model at roughly 26 tokens/second on a CPU-only laptop with 62 GB RAM. That performance bar wasn't clearable even two years ago.
 
 ## What it is
 
 Codev is a standalone desktop coding workspace for local language models. The full-featured app runs on Windows today; a cross-platform Avalonia version for Windows, macOS and Linux is in progress and shares its core logic (see [Run](#run) and [Repository layout](#repository-layout)). It connects directly to Ollama on `127.0.0.1` by default; a different server can be configured explicitly in Settings, with a warning before using a non-local endpoint. No VS Code dependency is required.
+
+## Download
+
+**[Download the latest Windows build](https://github.com/jay23606/codev/releases/latest)** — a self-contained `win-x64` zip; unzip and run `Codev.exe`, no .NET install required. Requires Windows 10/11. This is the full-featured WPF app; the cross-platform Avalonia app is still a prototype (see [Run](#run)) and isn't published as a binary yet. Builds are produced by [a GitHub Actions workflow](.github/workflows/release.yml) and are not code-signed, so Windows SmartScreen may warn on first run.
 
 ## First preview
 
@@ -184,7 +188,7 @@ Codev discovers installed models from Ollama at startup and refreshes the picker
 
 Legacy Ollama tags for the same weights are recognized and shown under the same friendly model name.
 
-For a measured comparison of these and other models on this project's kind of tasks (accuracy, speed and agent behaviour, run on one CPU-only laptop), see [comparison.html](comparison.html).
+For a measured comparison of these and other models on this project's kind of tasks (accuracy, speed and agent behaviour, run on one CPU-only laptop), see [comparison.html](https://raw.githack.com/jay23606/codev/main/comparison.html) (GitHub shows raw HTML source for files in the repo; this link renders it instead).
 
 ## Privacy
 
