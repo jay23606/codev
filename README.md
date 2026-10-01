@@ -139,7 +139,7 @@ dotnet test Codev.Tests/Codev.Tests.csproj                    # portable tests: 
 dotnet test Codev.Windows.Tests/Codev.Windows.Tests.csproj    # WPF renderer and PowerShell tests: Windows only
 ```
 
-GitHub Actions builds `Codev.Core` and the Avalonia UI and runs the portable tests on Windows, Linux and macOS for every push and pull request. The desktop release workflow packages self-contained Windows x64, Linux x64, macOS Apple silicon, and macOS Intel archives for `v*` tags; manual dispatch runs the same cross-platform checks without publishing a release. The Windows-only tests and legacy WPF publish run on Windows. Native macOS/Linux interaction checks and hosted validation of the desktop release workflow remain open.
+GitHub Actions builds `Codev.Core` and the Avalonia UI and runs the portable tests on Windows, Linux and macOS for every push and pull request. The desktop workflow also publishes and launch-smokes self-contained Windows x64, Linux x64, macOS Apple silicon, and macOS Intel packages on pull requests and manual dispatch, without creating a release; only `v*` tag pushes publish the archives as a GitHub Release. The Windows-only tests and legacy WPF publish run on Windows. Native macOS/Linux interaction checks remain open.
 
 ## Repository layout
 
