@@ -24,7 +24,7 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
 
     public event EventHandler? Changed;
 
-    public async Task<BackgroundCommandSnapshot> StartAsync(Guid conversationId, string command, string workingDirectory,
+    public Task<BackgroundCommandSnapshot> StartAsync(Guid conversationId, string command, string workingDirectory,
         ShellCommandSpec shell, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -35,29 +35,43 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
         var startInfo = shell.CreateStartInfo(AutoSafeCommandClassifier.PrepareApprovedExecutionCommand(command, root), root);
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var entry = new Entry(Guid.NewGuid().ToString("N")[..12], conversationId, command, root, process, DateTimeOffset.UtcNow);
-        lock (_gate)
+        var registered = false;
+        try
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            var running = _entries.Values.Count(item => item.Status == "Running");
-            var conversationRunning = _entries.Values.Count(item => item.ConversationId == conversationId && item.Status == "Running");
-            if (running >= MaxRunningTotal) throw new InvalidOperationException($"At most {MaxRunningTotal} background commands can run at once.");
-            if (conversationRunning >= MaxRunningPerConversation) throw new InvalidOperationException($"At most {MaxRunningPerConversation} background commands can run in one conversation.");
-            while (_entries.Count >= MaxRetainedEntries)
+            lock (_gate)
             {
-                var completed = _entries.Values.Where(item => item.Status == "Exited").OrderBy(item => item.StartedAt).FirstOrDefault();
-                if (completed is null) throw new InvalidOperationException("The background command history is full; stop or clear completed commands before starting another.");
-                _entries.Remove(completed.Id);
-                completed.Process.Dispose();
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                var running = _entries.Values.Count(item => item.Status == "Running");
+                var conversationRunning = _entries.Values.Count(item => item.ConversationId == conversationId && item.Status == "Running");
+                if (running >= MaxRunningTotal) throw new InvalidOperationException($"At most {MaxRunningTotal} background commands can run at once.");
+                if (conversationRunning >= MaxRunningPerConversation) throw new InvalidOperationException($"At most {MaxRunningPerConversation} background commands can run in one conversation.");
+                while (_entries.Count >= MaxRetainedEntries)
+                {
+                    var completed = _entries.Values.Where(item => item.Status == "Exited").OrderBy(item => item.StartedAt).FirstOrDefault();
+                    if (completed is null) throw new InvalidOperationException("The background command history is full; stop or clear completed commands before starting another.");
+                    _entries.Remove(completed.Id);
+                    completed.Process.Dispose();
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!process.Start()) throw new InvalidOperationException($"Could not start {shell.DisplayName}.");
+                _entries.Add(entry.Id, entry);
+                registered = true;
+                entry.ReadStdout = DrainAsync(process.StandardOutput, entry, "");
+                entry.ReadStderr = DrainAsync(process.StandardError, entry, "STDERR: ");
+                entry.WaitForExit = WatchExitAsync(entry);
             }
-            if (!process.Start()) throw new InvalidOperationException($"Could not start {shell.DisplayName}.");
-            _entries.Add(entry.Id, entry);
-            entry.ReadStdout = DrainAsync(process.StandardOutput, entry, "");
-            entry.ReadStderr = DrainAsync(process.StandardError, entry, "STDERR: ");
-            entry.WaitForExit = WatchExitAsync(entry);
+        }
+        catch
+        {
+            if (!registered)
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+                process.Dispose();
+            }
+            throw;
         }
         Changed?.Invoke(this, EventArgs.Empty);
-        await Task.Yield();
-        return Snapshot(entry);
+        return Task.FromResult(Snapshot(entry));
     }
 
     public IReadOnlyList<BackgroundCommandSnapshot> List(Guid conversationId)

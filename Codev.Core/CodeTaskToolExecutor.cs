@@ -424,7 +424,7 @@ public sealed class CodeTaskToolExecutor(
             {
                 CommandApprovalOutcome.Denied => "Denied by a saved project command permission rule; the command was not started.",
                 CommandApprovalOutcome.ApprovedReadOnly => "Rejected: read-only command mode does not allow long-running shell processes.",
-                _ => "Rejected by user; the command was not started."
+                _ => "Rejected by the selected project command policy or user; the command was not started."
             };
         try
         {

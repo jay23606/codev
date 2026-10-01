@@ -91,6 +91,21 @@ public sealed class BackgroundCommandManagerTests
     }
 
     [Fact]
+    public async Task Canceled_start_does_not_launch_or_register_a_process()
+    {
+        await using var manager = new BackgroundCommandManager();
+        using var cancellation = new CancellationTokenSource();
+        var owner = Guid.NewGuid();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.StartAsync(owner,
+            OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30", Path.GetTempPath(),
+            ShellCommandResolver.ResolveCurrent(), cancellation.Token));
+
+        Assert.Empty(manager.List(owner));
+    }
+
+    [Fact]
     public async Task Running_command_limit_is_enforced_per_conversation()
     {
         await using var manager = new BackgroundCommandManager();
