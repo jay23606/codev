@@ -189,6 +189,45 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
+    public void Plan_profile_removes_write_command_mcp_delegation_and_background_tools_from_both_provider_schemas()
+    {
+        var plan = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Plan");
+        using var schema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{},"required":[],"additionalProperties":false}""");
+        var mcpTool = new McpCodeTaskTool("mcp_github_search_abc", "github", "GitHub", "search", "Search repositories.", schema.RootElement.Clone(), null);
+        var shell = ShellCommandResolver.ResolveCurrent();
+
+        var ollama = ToolNames(CodeTaskToolSchemaFactory.CreateOllamaTools(shell, [mcpTool], plan,
+            allowDelegation: true, allowBackgroundCommands: true));
+        var openAi = ToolNames(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, [mcpTool], plan,
+            allowDelegation: true, allowBackgroundCommands: true));
+
+        foreach (var names in new[] { ollama, openAi })
+        {
+            Assert.Contains("list_files", names);
+            Assert.Contains("read_file", names);
+            Assert.Contains("search_files", names);
+            Assert.DoesNotContain("create_file", names);
+            Assert.DoesNotContain("write_file", names);
+            Assert.DoesNotContain("apply_patch", names);
+            Assert.DoesNotContain("run_command", names);
+            Assert.DoesNotContain("verify_command", names);
+            Assert.DoesNotContain("mcp_github_search_abc", names);
+            Assert.DoesNotContain("delegate_task", names);
+            Assert.DoesNotContain("start_background_command", names);
+            Assert.DoesNotContain("read_background_command", names);
+            Assert.DoesNotContain("stop_background_command", names);
+        }
+    }
+
+    private static HashSet<string> ToolNames(object[] tools)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(tools));
+        return document.RootElement.EnumerateArray()
+            .Select(tool => (tool.TryGetProperty("function", out var function) ? function : tool).GetProperty("name").GetString()!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    [Fact]
     public void Legacy_builtin_code_selection_migrates_to_build_but_custom_code_profile_is_preserved()
     {
         var builtInCode = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Code");
