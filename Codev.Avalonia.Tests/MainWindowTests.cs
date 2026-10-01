@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Codev;
+using Codev.Avalonia.ViewModels;
 using Codev.Avalonia.Views;
 using System.Reflection;
 using System.Text.Json;
@@ -292,6 +293,46 @@ public sealed class MainWindowTests
         {
             editor.Close();
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Code_task_profile_picker_selects_a_saved_profile_on_the_active_conversation()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "Codev-agent-profile-picker-ui", Guid.NewGuid().ToString("N"));
+        var store = new UserAgentProfileStore(Path.Combine(root, "Codev", "agents"));
+        await store.SaveAsync("reviewer.md", "---\nname: Reviewer\ndescription: Review source changes.\n---\nInspect first, then report clearly.\n");
+        var viewModel = new MainViewModel(root);
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            await viewModel.RefreshAgentProfilesAsync();
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            typeof(MainViewModel).GetMethod("SetConversationMode", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(viewModel, [ConversationMode.CodeTask]);
+            window.Show();
+            window.UpdateLayout();
+
+            var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
+            Assert.True(picker.IsEnabled);
+            Assert.Contains(viewModel.AgentProfiles, profile => profile.Name == "Reviewer");
+            picker.SelectedValue = "Reviewer";
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            Assert.Equal("Reviewer", viewModel.SelectedAgentProfileName);
+            Assert.Equal("Reviewer", conversation.AgentProfileName);
+            Assert.Equal("Reviewer agent", viewModel.PrimaryAgentLabel);
+        }
+        finally
+        {
+            window.Close();
+            await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            if (Directory.Exists(root))
+            {
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(root, recursive: true);
+            }
         }
     }
 
