@@ -1593,7 +1593,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
     }
 
-    private async Task<Codev.Conversation?> CreateIsolatedChildSessionCoreAsync(Codev.Conversation parent, bool selectChild)
+    private async Task<Codev.Conversation?> CreateIsolatedChildSessionCoreAsync(Codev.Conversation parent, bool selectChild,
+        bool invokedFromCurrentParentTurn = false)
     {
         if (!_conversations.Contains(parent)) return null;
         var parentProjectPath = parent.ProjectPath;
@@ -1602,7 +1603,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             ReportContextActionStatus("Child sessions cannot create more child sessions.");
             return null;
         }
-        if (IsConversationBusy(parent))
+        var isBusy = IsConversationBusy(parent);
+        var isCurrentParentTurn = invokedFromCurrentParentTurn && ReferenceEquals(_generationConversation, parent);
+        if (!Codev.ChildSessionCreationPolicy.CanCreateChild(isBusy, isCurrentParentTurn))
         {
             ReportContextActionStatus("Wait for this conversation to finish before creating a child session.");
             return null;
@@ -1726,7 +1729,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         if (target.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase))
             return "An Orchestrator cannot delegate to another Orchestrator.";
 
-        var child = await CreateIsolatedChildSessionCoreAsync(parent, selectChild: false);
+        var child = await CreateIsolatedChildSessionCoreAsync(parent, selectChild: false, invokedFromCurrentParentTurn: true);
         if (child is null) return ContextActionStatus;
         child.Title = task.Length <= 72 ? task : task[..69].TrimEnd() + "…";
         child.AgentProfileName = target.Name;
