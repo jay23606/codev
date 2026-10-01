@@ -436,6 +436,36 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_policy_starts_background_command_without_showing_approval_dialog()
+    {
+        var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-background-command-permissions.json"));
+        await registry.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
+        var approvalDialogShown = false;
+        await using var manager = new BackgroundCommandManager();
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false),
+            backgroundCommands: manager,
+            permissionApproval: async proposal =>
+            {
+                var result = await approvalPolicy.ApproveAsync(proposal, requestApproval: _ =>
+                {
+                    approvalDialogShown = true;
+                    return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+                });
+                return result.Outcome;
+            });
+
+        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var result = await ExecuteAsync(executor, "start_background_command", JsonSerializer.Serialize(new { command }));
+
+        Assert.Contains("Started background command", result, StringComparison.Ordinal);
+        Assert.False(approvalDialogShown);
+        var started = Assert.Single(manager.List(_conversation.Id));
+        Assert.True(await manager.StopAsync(_conversation.Id, started.Id));
+    }
+
+    [Fact]
     public async Task Read_only_permission_executes_inspection_without_launching_the_shell()
     {
         File.WriteAllText(Path.Combine(_root, "README.md"), "safe inspection output");

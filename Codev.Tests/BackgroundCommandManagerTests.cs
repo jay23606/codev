@@ -26,6 +26,24 @@ public sealed class BackgroundCommandManagerTests
     }
 
     [Fact]
+    public void Background_command_description_matches_auto_and_ask_permission_behavior()
+    {
+        var tool = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(
+            CodeTaskToolSchemaFactory.CreateOllamaTools(ShellCommandResolver.ResolveCurrent(), allowBackgroundCommands: true),
+            System.Text.Json.JsonSerializerOptions.Web));
+        var description = tool.RootElement.EnumerateArray()
+            .Single(item => item.GetProperty("function").GetProperty("name").GetString() == "start_background_command")
+            .GetProperty("function").GetProperty("description").GetString();
+
+        Assert.NotNull(description);
+        Assert.Contains("Auto runs it without approval", description, StringComparison.Ordinal);
+        Assert.Contains("exact saved deny rule", description, StringComparison.Ordinal);
+        Assert.Contains("Ask and Allowlist", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("exact command must be approved", description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unsandboxed", description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Background_command_activities_are_described_as_started_and_read()
     {
         var started = new ChatMessage("assistant", "**start_background_command**\n" + UntrustedToolOutput.Format("background command", "Started id", command: "npm run dev", activity: "background_command_started"));
