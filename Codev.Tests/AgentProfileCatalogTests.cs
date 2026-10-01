@@ -138,6 +138,86 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Imports_bounded_OpenCode_agent_frontmatter_and_maps_permissions_safely()
+    {
+        Directory.CreateDirectory(_project);
+        var openCodeAgents = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(openCodeAgents);
+        await File.WriteAllTextAsync(Path.Combine(openCodeAgents, "reviewer.md"), """
+            ---
+            description: Review changes and run focused checks.
+            mode: subagent
+            model: anthropic/claude-sonnet-4
+            temperature: 0.1
+            permission:
+              edit: deny
+              bash:
+                npm test: allow
+                git push*: deny
+                git status*: ask
+            tools:
+              read: true
+              webfetch: false
+            ---
+            Review changes for correctness and test coverage.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        var profile = Assert.Single(loaded.Profiles, item => item.Name == "reviewer");
+        Assert.Equal("project-opencode", profile.Scope);
+        Assert.Equal("subagent", profile.Mode);
+        Assert.Null(profile.Model);
+        Assert.Equal(0.1, profile.Temperature);
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "write_file"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "read_file"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "run_command", "npm test"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "git push origin main"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(profile, "verify_command", "git status --short"));
+        Assert.Contains(loaded.Warnings, warning => warning.Contains("model preference was not applied", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Imports_OpenCode_user_profiles_from_explicit_compatible_directory()
+    {
+        var openCodeAgents = Path.Combine(_root, "opencode", "agents");
+        Directory.CreateDirectory(openCodeAgents);
+        await File.WriteAllTextAsync(Path.Combine(openCodeAgents, "docs.md"), """
+            ---
+            description: Explain API behavior.
+            mode: primary
+            ---
+            Read the relevant API implementation and explain it.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "codev-user"), null,
+            includeProjectProfiles: false, additionalUserProfileDirectories: [openCodeAgents]);
+
+        var profile = Assert.Single(loaded.Profiles, item => item.Name == "docs");
+        Assert.Equal("user-opencode", profile.Scope);
+        Assert.Equal("primary", profile.Mode);
+        Assert.Equal(Path.Combine(openCodeAgents, "docs.md"), profile.FilePath);
+        Assert.Null(loaded.Warnings.FirstOrDefault(warning => warning.Contains("model preference", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData("permission:\\n  bash:\\n    '*': { allow: true }", "permission.bash patterns must map safe command patterns")]
+    [InlineData("mode: unknown", "mode must be primary, subagent, or all")]
+    [InlineData("permission:\\n  unknown: allow", "does not map to a supported Codev tool")]
+    public async Task Rejects_unsupported_or_ambiguous_OpenCode_agent_permissions(string fields, string expectedWarning)
+    {
+        var directory = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(directory);
+        var contents = "---\ndescription: Fail closed.\n" + fields.Replace("\\n", "\n", StringComparison.Ordinal) + "\n---\nDo not weaken policy.";
+        await File.WriteAllTextAsync(Path.Combine(directory, "unsafe.md"), contents);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "unsafe");
+        Assert.Contains(loaded.Warnings, warning => warning.Contains(expectedWarning, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Reserved_plan_profile_cannot_be_overridden_by_project_or_user_markdown()
     {
         var userDirectory = Path.Combine(_root, "user-plan");

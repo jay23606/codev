@@ -32,7 +32,8 @@ public sealed record AgentProfile(
     string FilePath,
     IReadOnlyList<string>? AllowedEditPaths = null,
     IReadOnlyList<string>? DeniedEditPaths = null,
-    IReadOnlyDictionary<string, AgentToolPermission>? CommandPermissions = null);
+    IReadOnlyDictionary<string, AgentToolPermission>? CommandPermissions = null,
+    string Mode = "all");
 
 public sealed record AgentProfileLoadResult(IReadOnlyList<AgentProfile> Profiles, IReadOnlyList<string> Warnings);
 
@@ -92,6 +93,18 @@ public static class AgentProfileCatalog
     private static readonly Regex SafeName = new("^[a-z][a-z0-9_-]{0,39}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex SafeTool = new("^(?:[a-z][a-z0-9_*-?]{0,63}|mcp:\\*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex CommandClauseSeparators = new("(?:&&|\\|\\||[;|])", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly string[] ProjectAgentPaths = [Path.Combine(".codev", "agents"), Path.Combine(".opencode", "agents")];
+
+    public static IReadOnlyList<string> GetCompatibleUserAgentProfileDirectories()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(home)) return [];
+        var configRoot = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        if (string.IsNullOrWhiteSpace(configRoot) || !Path.IsPathRooted(configRoot)) configRoot = Path.Combine(home, ".config");
+        var openCodeConfig = Environment.GetEnvironmentVariable("OPENCODE_CONFIG_DIR");
+        if (string.IsNullOrWhiteSpace(openCodeConfig) || !Path.IsPathRooted(openCodeConfig)) openCodeConfig = Path.Combine(configRoot, "opencode");
+        return [Path.Combine(openCodeConfig, "agents")];
+    }
     public static IReadOnlyList<AgentProfile> BuiltInProfiles { get; } =
     [
         BuiltIn("Code", "General coding work under Codev's selected project permissions.",
@@ -127,18 +140,43 @@ public static class AgentProfileCatalog
     }
 
     public static async Task<AgentProfileLoadResult> LoadAsync(string userProfilesDirectory, string? projectRoot,
-        bool includeProjectProfiles, CancellationToken cancellationToken = default)
+        bool includeProjectProfiles, CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? additionalUserProfileDirectories = null)
     {
         var warnings = new List<string>();
         var user = await LoadScopeAsync(userProfilesDirectory, "user", warnings, cancellationToken).ConfigureAwait(false);
+        foreach (var directory in additionalUserProfileDirectories ?? [])
+        {
+            if (user.Count >= MaxProfilesPerScope) break;
+            if (!HasNoLinkedPathSegments(directory))
+            {
+                warnings.Add("An OpenCode user agent directory was skipped because it is a symbolic link or has a linked ancestor.");
+                continue;
+            }
+            user.AddRange(await LoadOpenCodeScopeAsync(directory, "user-opencode", warnings, cancellationToken,
+                MaxProfilesPerScope - user.Count).ConfigureAwait(false));
+        }
         var project = new List<AgentProfile>();
         if (includeProjectProfiles && !string.IsNullOrWhiteSpace(projectRoot) && Directory.Exists(projectRoot) &&
             HasNoLinkedPathSegments(projectRoot))
         {
-            var path = Path.Combine(Path.GetFullPath(projectRoot), ".codev", "agents");
-            if (IsSafeProjectDirectory(projectRoot, path))
-                project = await LoadScopeAsync(path, "project", warnings, cancellationToken).ConfigureAwait(false);
-            else warnings.Add("Project agent profiles were skipped because .codev/agents is a symbolic link or resolves outside the project.");
+            foreach (var relativePath in ProjectAgentPaths)
+            {
+                if (project.Count >= MaxProfilesPerScope) break;
+                var path = Path.Combine(Path.GetFullPath(projectRoot), relativePath);
+                if (!IsSafeProjectDirectory(projectRoot, path, relativePath))
+                {
+                    warnings.Add($"Project agent profiles in '{relativePath.Replace('\\', '/')}' were skipped because the folder is a symbolic link or resolves outside the project.");
+                    continue;
+                }
+                var remaining = MaxProfilesPerScope - project.Count;
+                var scope = relativePath.StartsWith(Path.Combine(".opencode", "agents"), StringComparison.Ordinal)
+                    ? "project-opencode" : "project";
+                var loaded = scope == "project"
+                    ? await LoadScopeAsync(path, scope, warnings, cancellationToken, remaining).ConfigureAwait(false)
+                    : await LoadOpenCodeScopeAsync(path, scope, warnings, cancellationToken, remaining).ConfigureAwait(false);
+                project.AddRange(loaded);
+            }
         }
 
         var merged = new List<AgentProfile>();
@@ -186,7 +224,7 @@ public static class AgentProfileCatalog
             if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
             var colon = trimmed.IndexOf(':');
             if (colon <= 0) return Fail("Each frontmatter field must use key: value syntax.", out error);
-            var key = trimmed[..colon].Trim();
+            var key = Unquote(trimmed[..colon].Trim());
             var value = trimmed[(colon + 1)..].Trim().Trim('"', '\'');
             if (key.Equals("name", StringComparison.OrdinalIgnoreCase)) displayName = value;
             else if (key.Equals("description", StringComparison.OrdinalIgnoreCase)) description = value;
@@ -302,16 +340,17 @@ public static class AgentProfileCatalog
     }
 
     private static async Task<List<AgentProfile>> LoadScopeAsync(string directory, string scope, List<string> warnings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, int maxProfiles = MaxProfilesPerScope)
     {
         var result = new List<AgentProfile>();
         try
         {
             if (!Directory.Exists(directory)) return result;
             if (IsReparsePoint(directory)) { warnings.Add($"The {scope} agent profile directory is a symbolic link and was skipped."); return result; }
-            var files = Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly).Take(MaxProfilesPerScope + 1).ToArray();
-            if (files.Length > MaxProfilesPerScope) warnings.Add($"Only the first {MaxProfilesPerScope} {scope} agent profiles are loaded.");
-            foreach (var path in files.Take(MaxProfilesPerScope).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            var files = Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly)
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).Take(maxProfiles + 1).ToArray();
+            if (files.Length > maxProfiles) warnings.Add($"Only the first {maxProfiles} {scope} agent profiles are loaded.");
+            foreach (var path in files.Take(maxProfiles))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
@@ -333,12 +372,240 @@ public static class AgentProfileCatalog
         return result;
     }
 
-    private static bool IsSafeProjectDirectory(string projectRoot, string profileDirectory)
+    private static async Task<List<AgentProfile>> LoadOpenCodeScopeAsync(string directory, string scope, List<string> warnings,
+        CancellationToken cancellationToken, int maxProfiles)
+    {
+        var result = new List<AgentProfile>();
+        try
+        {
+            if (!Directory.Exists(directory)) return result;
+            if (IsReparsePoint(directory))
+            {
+                warnings.Add($"The {scope} agent profile directory is a symbolic link and was skipped.");
+                return result;
+            }
+            var files = Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly)
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).Take(maxProfiles + 1).ToArray();
+            if (files.Length > maxProfiles) warnings.Add($"Only the first {maxProfiles} {scope} agent profiles are loaded.");
+            foreach (var path in files.Take(maxProfiles))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var fileName = Path.GetFileName(path);
+                try
+                {
+                    if (IsReparsePoint(path)) { warnings.Add($"OpenCode agent '{fileName}' is a symbolic link and was skipped."); continue; }
+                    if (new FileInfo(path).Length > MaxProfileFileBytes) { warnings.Add($"OpenCode agent '{fileName}' exceeds the size limit and was skipped."); continue; }
+                    var text = StrictUtf8.GetString(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+                    if (TryParseOpenCodeAgent(fileName, text, scope, out var profile, out var modelWarning, out var error) && profile is not null)
+                    {
+                        result.Add(profile with { FilePath = path });
+                        if (modelWarning is not null) warnings.Add($"OpenCode agent '{fileName}': {modelWarning}");
+                    }
+                    else warnings.Add($"OpenCode agent '{fileName}' was skipped: {error}");
+                }
+                catch (DecoderFallbackException) { warnings.Add($"OpenCode agent '{fileName}' is not valid UTF-8 and was skipped."); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+                { warnings.Add($"OpenCode agent '{fileName}' could not be read."); }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        { warnings.Add($"The {scope} agent profile directory could not be read."); }
+        return result;
+    }
+
+    private static bool TryParseOpenCodeAgent(string fileName, string contents, string scope,
+        out AgentProfile? profile, out string? modelWarning, out string error)
+    {
+        profile = null;
+        modelWarning = null;
+        error = "";
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        if (!fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || !SafeName.IsMatch(name))
+            return Fail("use a Markdown filename with a simple agent name", out error);
+        if (contents.Length > MaxProfileFileBytes) return Fail("agent profile files are limited to 32 KB", out error);
+        var lines = contents.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        if (lines.Length < 4 || lines[0].Trim() != "---") return Fail("start the profile with frontmatter between --- lines", out error);
+        var end = Array.FindIndex(lines, 1, line => line.Trim() == "---");
+        if (end < 0) return Fail("agent profile frontmatter is missing its closing --- line", out error);
+
+        string? description = null;
+        string? model = null;
+        string mode = "all";
+        double? temperature = null;
+        int? maxSteps = null;
+        string? section = null;
+        var commandPatternSection = false;
+        var toolPermissions = new Dictionary<string, AgentToolPermission>(StringComparer.OrdinalIgnoreCase);
+        var commandPermissions = new Dictionary<string, AgentToolPermission>(StringComparer.Ordinal);
+        foreach (var line in lines.Skip(1).Take(end - 1))
+        {
+            var indent = line.TakeWhile(char.IsWhiteSpace).Count();
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
+            if (indent is not (0 or 2 or 4) || (indent > 0 && section is null))
+                return Fail("OpenCode agent mappings must use two-space indentation without implicit blocks", out error);
+            var colon = trimmed.IndexOf(':');
+            if (colon <= 0) return Fail("each supported agent field must use key: value syntax", out error);
+            var key = Unquote(trimmed[..colon].Trim());
+            var value = Unquote(trimmed[(colon + 1)..].Trim());
+
+            if (indent == 0)
+            {
+                commandPatternSection = false;
+                if (key.Equals("permission", StringComparison.OrdinalIgnoreCase) || key.Equals("tools", StringComparison.OrdinalIgnoreCase))
+                {
+                    section = key.ToLowerInvariant();
+                    if (value.Length != 0) return Fail($"the OpenCode '{key}' field must use a YAML mapping", out error);
+                    continue;
+                }
+                section = null;
+                if (key.Equals("description", StringComparison.OrdinalIgnoreCase)) description = value;
+                else if (key.Equals("mode", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (value is not ("primary" or "subagent" or "all")) return Fail("mode must be primary, subagent, or all", out error);
+                    mode = value;
+                }
+                else if (key.Equals("model", StringComparison.OrdinalIgnoreCase)) model = value;
+                else if (key.Equals("temperature", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || !double.IsFinite(parsed) || parsed is < 0 or > 2)
+                        return Fail("temperature must be a number from 0 through 2", out error);
+                    temperature = parsed;
+                }
+                else if (key.Equals("name", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!value.Equals(name, StringComparison.OrdinalIgnoreCase)) return Fail("name must match the Markdown filename", out error);
+                }
+                else if (key.Equals("maxSteps", StringComparison.OrdinalIgnoreCase) || key.Equals("max_steps", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed is < 1 or > CodeTaskLimits.MaxModelStepsPerTurn)
+                        return Fail($"{key} must be from 1 through {CodeTaskLimits.MaxModelStepsPerTurn}", out error);
+                    maxSteps = parsed;
+                }
+                else if (key.Equals("hidden", StringComparison.OrdinalIgnoreCase) || key.Equals("color", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Display-only fields do not change Codev's tool permissions.
+                }
+                else if (key.Equals("permission", StringComparison.OrdinalIgnoreCase) || key.Equals("tools", StringComparison.OrdinalIgnoreCase))
+                    return Fail($"the OpenCode '{key}' field must use an indented YAML mapping", out error);
+                else return Fail($"unsupported OpenCode agent field '{key}'", out error);
+                continue;
+            }
+
+            if (section == "permission" && indent == 2)
+            {
+                if (key.Equals("bash", StringComparison.OrdinalIgnoreCase) && value.Length == 0)
+                {
+                    commandPatternSection = true;
+                    continue;
+                }
+                commandPatternSection = false;
+                if (!TryParsePermission(value, out var permission)) return Fail($"permission.{key} must be allow, ask, or deny", out error);
+                if (!IsSupportedOpenCodePermission(key)) return Fail($"permission.{key} does not map to a supported Codev tool", out error);
+                if (!ApplyOpenCodePermission(toolPermissions, key, permission, out var permissionError)) return Fail(permissionError, out error);
+                continue;
+            }
+            if (section == "permission" && indent >= 4 && commandPatternSection)
+            {
+                if (!TryParsePermission(value, out var permission) || !IsValidCommandPattern(key))
+                    return Fail("permission.bash patterns must map safe command patterns to allow, ask, or deny", out error);
+                MergePermission(commandPermissions, key, permission);
+                continue;
+            }
+            if (section == "tools" && indent == 2)
+            {
+                if (!bool.TryParse(value, out var enabled)) return Fail($"tools.{key} must be true or false", out error);
+                if (!ApplyOpenCodePermission(toolPermissions, key, enabled ? AgentToolPermission.Allow : AgentToolPermission.Deny, out var toolError))
+                    return Fail(toolError, out error);
+                continue;
+            }
+            return Fail("nested OpenCode agent fields are not supported except permission.bash command patterns", out error);
+        }
+
+        if (string.IsNullOrWhiteSpace(description) || description.Length > 180)
+            return Fail("description must contain 1–180 characters", out error);
+        var instructions = string.Join('\n', lines.Skip(end + 1)).Trim();
+        if (instructions.Length == 0 || instructions.Length > MaxInstructionsCharacters)
+            return Fail($"agent instructions must contain 1–{MaxInstructionsCharacters} characters", out error);
+        var normalized = new StringBuilder()
+            .AppendLine("---")
+            .Append("name: ").AppendLine(name)
+            .Append("description: ").AppendLine(description)
+            .AppendLine("default_permission: ask");
+        if (temperature is not null) normalized.Append("temperature: ").AppendLine(temperature.Value.ToString(CultureInfo.InvariantCulture));
+        if (maxSteps is not null) normalized.Append("max_steps: ").AppendLine(maxSteps.Value.ToString(CultureInfo.InvariantCulture));
+        if (toolPermissions.Count > 0)
+            normalized.Append("tools: ").AppendLine(string.Join(", ", toolPermissions.Select(rule => $"{rule.Key}={rule.Value.ToString().ToLowerInvariant()}")));
+        // Keep command patterns in the profile model without serializing through its comma-list
+        // syntax: OpenCode patterns can themselves contain commas and whitespace.
+        normalized.AppendLine("---").AppendLine(instructions);
+        if (!TryParse(fileName, normalized.ToString(), scope, out profile, out error) || profile is null) return false;
+        profile = profile with
+        {
+            Mode = mode,
+            Model = null,
+            ToolPermissions = toolPermissions.Where(rule => !rule.Key.Equals("run_command", StringComparison.OrdinalIgnoreCase) &&
+                !rule.Key.Equals("verify_command", StringComparison.OrdinalIgnoreCase) &&
+                !rule.Key.Equals("start_background_command", StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(rule => rule.Key, rule => rule.Value, StringComparer.OrdinalIgnoreCase),
+            CommandPermissions = commandPermissions.Count == 0 ? null : commandPermissions
+        };
+        modelWarning = string.IsNullOrWhiteSpace(model) ? null : "the OpenCode model preference was not applied; choose the provider/model in Codev.";
+        return true;
+    }
+
+    private static bool ApplyOpenCodePermission(Dictionary<string, AgentToolPermission> target, string permissionName,
+        AgentToolPermission permission, out string error)
+    {
+        error = "";
+        var normalized = permissionName.ToLowerInvariant();
+        var tools = normalized switch
+        {
+            "edit" or "write" => new[] { "create_file", "write_file", "apply_patch" },
+            "bash" => new[] { "run_command", "verify_command", "start_background_command" },
+            "read" => new[] { "list_files", "read_file", "search_files" },
+            "list" or "glob" => new[] { "list_files" },
+            "grep" => new[] { "search_files" },
+            "task" => new[] { "delegate_task" },
+            "skill" => new[] { "load_skill_*" },
+            "webfetch" or "websearch" or "external_directory" or "lsp" or "question" or "doom_loop" => [],
+            _ when SafeTool.IsMatch(permissionName) => [permissionName],
+            _ => []
+        };
+        if (tools.Length == 0 && normalized is not ("webfetch" or "websearch" or "external_directory" or "lsp" or "question" or "doom_loop"))
+        {
+            error = $"permission.{permissionName} does not map to a supported Codev tool";
+            return false;
+        }
+        foreach (var tool in tools) MergePermission(target, tool, permission);
+        return true;
+    }
+
+    private static bool IsSupportedOpenCodePermission(string name) => name.ToLowerInvariant() is
+        "edit" or "write" or "bash" or "read" or "list" or "glob" or "grep" or "task" or "skill" or
+        "webfetch" or "websearch" or "external_directory" or "lsp" or "question" or "doom_loop";
+
+    private static void MergePermission(Dictionary<string, AgentToolPermission> rules, string key, AgentToolPermission permission)
+    {
+        if (!rules.TryGetValue(key, out var current) || PermissionRank(permission) > PermissionRank(current)) rules[key] = permission;
+    }
+
+    private static int PermissionRank(AgentToolPermission permission) => permission switch
+    {
+        AgentToolPermission.Deny => 3,
+        AgentToolPermission.Ask => 2,
+        _ => 1
+    };
+
+    private static string Unquote(string value) => value.Length >= 2 && value[0] == value[^1] && value[0] is '\'' or '"'
+        ? value[1..^1] : value;
+
+    private static bool IsSafeProjectDirectory(string projectRoot, string profileDirectory, string relativePath)
     {
         var root = Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!Path.GetFullPath(profileDirectory).StartsWith(root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) return false;
         var current = Path.GetFullPath(projectRoot);
-        foreach (var segment in new[] { ".codev", "agents" })
+        foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
             if (Directory.Exists(current) && IsReparsePoint(current)) return false;

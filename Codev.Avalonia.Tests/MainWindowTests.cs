@@ -317,6 +317,11 @@ public sealed class MainWindowTests
             var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.True(picker.IsEnabled);
             Assert.Contains(viewModel.AgentProfiles, profile => profile.Name == "Reviewer");
+            var opencodeDirectory = Path.Combine(root, ".opencode", "agents");
+            Directory.CreateDirectory(opencodeDirectory);
+            await File.WriteAllTextAsync(Path.Combine(opencodeDirectory, "subtask.md"), "---\ndescription: Handle delegated work.\nmode: subagent\n---\nWork only on the bounded delegated task.");
+            await viewModel.RefreshAgentProfilesAsync();
+            Assert.DoesNotContain(viewModel.AgentProfiles, profile => profile.Name == "subtask");
             picker.SelectedValue = "Reviewer";
             await Dispatcher.UIThread.InvokeAsync(() => { });
 

@@ -74,6 +74,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private bool _isReviewRunning;
     private bool _isUnloadingModel;
     private string _lastSlashCommandWarning = "";
+    private string _lastAgentProfileWarning = "";
     private readonly Queue<QueuedChatTurn> _requestQueue = new();
     private readonly HashSet<Guid> _runningParallelChildren = [];
     private readonly Dictionary<Guid, CancellationTokenSource> _parallelChildCancellation = [];
@@ -1730,11 +1731,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             return "The parent assistant turn is no longer available for this delegation.";
 
         var catalog = await Codev.AgentProfileCatalog.LoadAsync(UserAgentProfilesPath, parent.ProjectPath,
-            includeProjectProfiles: true, cancellationToken);
+            includeProjectProfiles: true, cancellationToken, Codev.AgentProfileCatalog.GetCompatibleUserAgentProfileDirectories());
         var target = catalog.Profiles.FirstOrDefault(profile => profile.Name.Equals(agentName, StringComparison.OrdinalIgnoreCase));
         if (target is null) return $"Agent profile '{agentName}' is not installed in this trusted project or user profile catalog.";
         if (target.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase))
             return "An Orchestrator cannot delegate to another Orchestrator.";
+        if (target.Mode == "primary") return $"Agent profile '{target.Name}' is configured for primary use and cannot be delegated to.";
 
         var child = await CreateIsolatedChildSessionCoreAsync(parent, selectChild: false, invokedFromCurrentParentTurn: true);
         if (child is null) return ContextActionStatus;
@@ -1833,8 +1835,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         {
             Directory.CreateDirectory(UserAgentProfilesPath);
             var loaded = await Codev.AgentProfileCatalog.LoadAsync(UserAgentProfilesPath, conversation?.ProjectPath,
-                conversation?.ProjectPath is { Length: > 0 } project && _projectFolderTrust.IsTrusted(project), cancellationToken);
+                conversation?.ProjectPath is { Length: > 0 } project && _projectFolderTrust.IsTrusted(project), cancellationToken,
+                Codev.AgentProfileCatalog.GetCompatibleUserAgentProfileDirectories());
             if (!ReferenceEquals(ActiveConversation, conversation)) return;
+            if (loaded.Warnings.Count > 0 && !loaded.Warnings[0].Equals(_lastAgentProfileWarning, StringComparison.Ordinal))
+            {
+                _lastAgentProfileWarning = loaded.Warnings[0];
+                ReportContextActionStatus("Agent profile: " + loaded.Warnings[0]);
+            }
             var currentProfileName = conversation?.AgentProfileName;
             var migratedProfileName = Codev.AgentProfileCatalog.MigrateBuiltInCodeSelection(currentProfileName, loaded.Profiles);
             if (conversation is not null && !string.Equals(currentProfileName, migratedProfileName, StringComparison.Ordinal))
@@ -1848,7 +1856,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 });
             }
             var choices = new List<AgentProfileChoice> { new("", "Build", "Use the default coding agent with the selected project permissions. Ctrl+Shift+A switches between Build and Plan.") };
-            choices.AddRange(loaded.Profiles.Select(profile => new AgentProfileChoice(profile.Name,
+            choices.AddRange(loaded.Profiles.Where(profile => profile.Mode is "all" or "primary").Select(profile => new AgentProfileChoice(profile.Name,
                 profile.Model is { Length: > 0 } model ? $"{profile.Name} · {model}" : profile.Name, profile.Description)));
             var selected = conversation?.AgentProfileName;
             if (!string.IsNullOrWhiteSpace(selected) && choices.All(choice => !choice.Name.Equals(selected, StringComparison.OrdinalIgnoreCase)))
@@ -3335,10 +3343,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             if (savedTurn.IsCodeTask && !string.IsNullOrWhiteSpace(savedTurn.AgentProfileName))
             {
                 var profiles = await Codev.AgentProfileCatalog.LoadAsync(UserAgentProfilesPath, savedTurn.ProjectPath,
-                    !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath), token.Token);
+                    !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath), token.Token,
+                    Codev.AgentProfileCatalog.GetCompatibleUserAgentProfileDirectories());
                 selectedAgentProfile = profiles.Profiles.FirstOrDefault(profile => profile.Name.Equals(savedTurn.AgentProfileName, StringComparison.OrdinalIgnoreCase));
                 if (selectedAgentProfile is null)
                     throw new InvalidOperationException($"Agent profile '{savedTurn.AgentProfileName}' is unavailable. Refresh the profile list or choose another profile before continuing.");
+                if ((selectedAgentProfile.Mode == "subagent" && conversation.ParentConversationId is null) ||
+                    (selectedAgentProfile.Mode == "primary" && conversation.ParentConversationId is not null))
+                    throw new InvalidOperationException($"Agent profile '{selectedAgentProfile.Name}' cannot run in this conversation role.");
                 if (!string.IsNullOrWhiteSpace(selectedAgentProfile.Model) && !selectedAgentProfile.Model.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))
                     savedTurn = savedTurn with { Model = selectedAgentProfile.Model };
                 if (savedTurn.Provider == "ollama" && selectedAgentProfile.Temperature is { } profileTemperature)
