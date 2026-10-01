@@ -2,6 +2,8 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Codev;
@@ -72,6 +74,7 @@ public sealed class MainWindowTests
             var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
             var command = Assert.Single(content.GetVisualDescendants().OfType<TextBox>(), box => box.Text == proposal.Command);
             Assert.True(command.IsReadOnly);
+            AssertReadableContrast(command);
             var runOnce = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Run once & verify");
 
             await Dispatcher.UIThread.InvokeAsync(() => runOnce.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
@@ -83,5 +86,59 @@ public sealed class MainWindowTests
         {
             window.Close();
         }
+    }
+
+    [AvaloniaFact]
+    public void File_review_is_readable_collapsed_by_default_and_keeps_decisions_visible()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var buildReview = typeof(MainWindow).GetMethod("BuildFileApprovalContent", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var review = Assert.IsAssignableFrom<Control>(buildReview.Invoke(window,
+                ["index.html", "", "<h1>Updated</h1>", true, null, null]));
+            var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
+            content.Content = review;
+            window.UpdateLayout();
+
+            var details = Assert.Single(review.GetVisualDescendants().OfType<Expander>(), expander => expander.Header?.ToString() == "Show current and proposed files");
+            Assert.False(details.IsExpanded);
+            details.IsExpanded = true;
+            window.UpdateLayout();
+            var panes = review.GetLogicalDescendants().OfType<TextBox>().ToArray();
+            Assert.Equal(2, panes.Length);
+            Assert.All(panes, AssertReadableContrast);
+            Assert.Contains(review.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Keep unchanged");
+            Assert.Contains(review.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Approve & create");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static void AssertReadableContrast(TextBox textBox)
+    {
+        var foreground = Assert.IsType<SolidColorBrush>(textBox.Foreground).Color;
+        var background = Assert.IsType<SolidColorBrush>(textBox.Background).Color;
+        Assert.True(ContrastRatio(foreground, background) >= 4.5,
+            $"Expected readable text contrast, got {foreground} on {background}.");
+    }
+
+    private static double ContrastRatio(Color foreground, Color background)
+    {
+        static double Linear(byte channel)
+        {
+            var value = channel / 255d;
+            return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+        }
+
+        static double Luminance(Color color) =>
+            0.2126 * Linear(color.R) + 0.7152 * Linear(color.G) + 0.0722 * Linear(color.B);
+
+        var first = Luminance(foreground);
+        var second = Luminance(background);
+        return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
     }
 }
