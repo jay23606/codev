@@ -1984,7 +1984,7 @@ public partial class MainWindow : Window
         var content = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
         content.Children.Add(new TextBlock
         {
-            Text = "A skill is a folder containing SKILL.md. It appears as /skill-name with its description in the menu. Selecting it loads the prompt into the composer for review; it is never sent automatically. Skills are manually invoked only, and Codev does not run scripts from skill folders or let the model trigger them.",
+            Text = "A skill is a folder containing SKILL.md. It appears as /skill-name with its description in the menu. Selecting it loads the prompt into the composer for review; it is never sent automatically. In Code tasks, the model can request a skill through its restricted loader tool. Codev does not run scripts from skill folders.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
         content.Children.Add(new Border
@@ -2002,13 +2002,19 @@ public partial class MainWindow : Window
         });
         content.Children.Add(new TextBlock { Text = "User skills · available in all conversations", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
         content.Children.Add(new TextBox { Text = viewModel.UserSkillsFolder, IsReadOnly = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MinHeight = 44 });
+        content.Children.Add(new TextBlock
+        {
+            Text = "Also discovers shared skills in ~/.config/opencode/skills, ~/.claude/skills, and ~/.agents/skills. XDG_CONFIG_HOME and OPENCODE_CONFIG_DIR are respected for OpenCode.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Classes = { "muted" }
+        });
         var openUser = new Button { Content = "Open user skills folder", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left };
         openUser.Click += async (_, _) => await OpenCommandFolderAsync(viewModel.UserSkillsFolder, viewModel);
         content.Children.Add(openUser);
         content.Children.Add(new TextBlock { Text = "Project skills · trusted project only", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Margin = new Thickness(0, 5, 0, 0) });
         content.Children.Add(new TextBox
         {
-            Text = projectFolder ?? (viewModel.HasProject ? "Trust this project to enable its .codev/skills folder." : "Attach and trust a project to use project skills."),
+            Text = projectFolder ?? (viewModel.HasProject ? "Trust this project to enable .codev/skills, .opencode/skills, .claude/skills, and .agents/skills." : "Attach and trust a project to use project skills."),
             IsReadOnly = true,
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             MinHeight = 44

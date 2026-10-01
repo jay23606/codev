@@ -429,6 +429,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         ? Path.Combine(ActiveConversation!.ProjectPath!, ".codev", "commands")
         : null;
     public string UserSkillsFolder => UserSkillsPath;
+    private static IReadOnlyList<string> CompatibleUserSkillFolders => Codev.ProjectSkillCatalog.GetCompatibleUserSkillDirectories();
     public string UserAgentProfilesFolder => UserAgentProfilesPath;
     public async Task<IReadOnlyList<Codev.McpServerConfiguration>> GetMcpServerConfigurationsAsync(CancellationToken cancellationToken = default) =>
         await _mcpServerConfigurations.LoadAsync(cancellationToken);
@@ -1905,7 +1906,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var userCommands = loaded.Commands.Where(command => hasArguments
             ? command.Name.Equals(token, StringComparison.OrdinalIgnoreCase)
             : command.Name.StartsWith(token, StringComparison.OrdinalIgnoreCase));
-        var skills = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, projectPath, IsProjectTrusted, cancellationToken);
+        var skills = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, projectPath, IsProjectTrusted, cancellationToken,
+            CompatibleUserSkillFolders);
         if (skills.Warnings.Count > 0)
         {
             var warning = skills.Warnings[0];
@@ -1943,13 +1945,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
         if (command.Scope is "skill-user" or "skill-project")
         {
-            var skills = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
+            var skills = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken,
+                CompatibleUserSkillFolders);
             var currentSkill = skills.Skills.FirstOrDefault(item => item.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(item.Scope, command.Scope, StringComparison.OrdinalIgnoreCase));
             return currentSkill is null
                 ? new(false, "", "That skill is no longer available. Check its Markdown file and project trust setting.")
                 : await Codev.ProjectSkillCatalog.ReadPromptAsync(currentSkill, UserSkillsPath, ActiveConversation?.ProjectPath,
-                    IsProjectTrusted, invocation, cancellationToken);
+                    IsProjectTrusted, invocation, cancellationToken, CompatibleUserSkillFolders);
         }
         var loaded = await Codev.CustomSlashCommandService.LoadAsync(UserSlashCommandsPath,
             ActiveConversation?.ProjectPath, IsProjectTrusted, cancellationToken);
@@ -1965,7 +1968,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         var projectPath = conversation.ProjectPath;
         var trusted = !string.IsNullOrWhiteSpace(projectPath) && _projectFolderTrust.IsTrusted(projectPath);
-        var loaded = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, trusted ? projectPath : null, trusted, cancellationToken);
+        var loaded = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, trusted ? projectPath : null, trusted, cancellationToken,
+            CompatibleUserSkillFolders);
         if (loaded.Warnings.Count > 0)
             ReportContextActionStatus("Agent skill: " + loaded.Warnings[0]);
         return loaded.Skills;
@@ -1978,7 +1982,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var trusted = !string.IsNullOrWhiteSpace(projectPath) && _projectFolderTrust.IsTrusted(projectPath);
         if (selectedSkill.Scope == "skill-project" && !trusted)
             throw new InvalidOperationException("Project skill access stopped because project trust is no longer enabled.");
-        var loaded = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, trusted ? projectPath : null, trusted, cancellationToken);
+        var loaded = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, trusted ? projectPath : null, trusted, cancellationToken,
+            CompatibleUserSkillFolders);
         var current = loaded.Skills.FirstOrDefault(skill =>
             skill.Name.Equals(selectedSkill.Name, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(skill.Scope, selectedSkill.Scope, StringComparison.OrdinalIgnoreCase));
@@ -1986,7 +1991,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             throw new InvalidOperationException("That skill changed or is no longer available. Refresh the task and try again.");
         var invocation = string.IsNullOrWhiteSpace(arguments) ? current.Name : current.Name + " " + arguments;
         var expansion = await Codev.ProjectSkillCatalog.ReadPromptAsync(current, UserSkillsPath,
-            trusted ? projectPath : null, trusted, invocation, cancellationToken);
+            trusted ? projectPath : null, trusted, invocation, cancellationToken, CompatibleUserSkillFolders);
         if (!expansion.Success) throw new InvalidOperationException(expansion.Error ?? "The skill prompt could not be loaded.");
         return expansion.Prompt;
     }

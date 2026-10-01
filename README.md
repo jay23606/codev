@@ -108,7 +108,7 @@ OpenAI Code task assistant replies show provider-reported input and output token
 
 Avalonia also supports user and trusted-project Markdown prompt commands with named arguments, and manages saved prompt templates through `/template-…` suggestions and the **Prompt templates** button; see [custom slash commands](docs/custom-slash-commands.md) or type `/commands` in the composer.
 
-User and trusted-project Markdown skills are available through slash suggestions and as on-demand tools in Code tasks; type `/skills` for the folders and see [the skills guide](docs/skills.md).
+User and trusted-project Markdown skills are available through slash suggestions and as on-demand tools in Code tasks. Codev also discovers standard OpenCode, Claude, and Agents `SKILL.md` locations; type `/skills` for the folders and see [the skills guide](docs/skills.md).
 
 Fork an idle Avalonia conversation from its sidebar context menu to continue in a separate chat. The fork copies its history, settings, project link, and Codev-managed rollback checkpoints; busy conversations must finish and clear their queue first.
 

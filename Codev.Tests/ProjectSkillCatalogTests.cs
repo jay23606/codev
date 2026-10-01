@@ -62,6 +62,109 @@ public sealed class ProjectSkillCatalogTests
     }
 
     [Fact]
+    public async Task Discovers_opencode_claude_and_agent_skills_only_inside_trusted_project()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var user = Path.Combine(root, "user-skills");
+            var project = Path.Combine(root, "project");
+            var codevSkill = Path.Combine(project, ".codev", "skills", "review");
+            var openCodeSkill = Path.Combine(project, ".opencode", "skills", "review");
+            var claudeSkill = Path.Combine(project, ".claude", "skills", "release");
+            var agentSkill = Path.Combine(project, ".agents", "skills", "tests");
+            Directory.CreateDirectory(codevSkill);
+            Directory.CreateDirectory(openCodeSkill);
+            Directory.CreateDirectory(claudeSkill);
+            Directory.CreateDirectory(agentSkill);
+            await File.WriteAllTextAsync(Path.Combine(codevSkill, "SKILL.md"), Markdown("Codev review."));
+            await File.WriteAllTextAsync(Path.Combine(openCodeSkill, "SKILL.md"),
+                "---\nname: review\ndescription: OpenCode format review skill\nlicense: MIT\ncompatibility: Works with Codev\nmetadata:\n  author: team\n  version: '1'\n---\nOpenCode review.");
+            await File.WriteAllTextAsync(Path.Combine(claudeSkill, "SKILL.md"),
+                "---\nname: release\ndescription: Claude format release skill\n---\nClaude release.");
+            await File.WriteAllTextAsync(Path.Combine(agentSkill, "SKILL.md"),
+                "---\nname: tests\ndescription: Agent format testing skill\n---\nAgent tests.");
+            var mismatched = Path.Combine(project, ".opencode", "skills", "wrong-folder");
+            Directory.CreateDirectory(mismatched);
+            await File.WriteAllTextAsync(Path.Combine(mismatched, "SKILL.md"),
+                "---\nname: different-name\ndescription: Mismatched skill\n---\nDo not load.");
+
+            var untrusted = await ProjectSkillCatalog.LoadAsync(user, project, includeProjectSkills: false);
+            Assert.Empty(untrusted.Skills);
+
+            var trusted = await ProjectSkillCatalog.LoadAsync(user, project, includeProjectSkills: true);
+            Assert.Equal(["/skill-review", "/skill-release", "/skill-tests"], trusted.Skills.Select(skill => skill.Name));
+            Assert.Contains(trusted.Warnings, warning => warning.Contains("match its folder", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(Path.Combine(codevSkill, "SKILL.md"), trusted.Skills[0].FilePath);
+            var loaded = await ProjectSkillCatalog.ReadPromptAsync(trusted.Skills[2], user, project, projectTrusted: true,
+                trusted.Skills[2].Name);
+            Assert.True(loaded.Success, loaded.Error);
+            Assert.Equal("Agent tests.", loaded.Prompt);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Discovers_compatible_user_skill_directories_and_reloads_from_its_original_root()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var codevUser = Path.Combine(root, "codev-user");
+            var compatibleUser = Path.Combine(root, "opencode", "skills");
+            var directory = Path.Combine(compatibleUser, "release");
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(Path.Combine(directory, "SKILL.md"),
+                "---\nname: release\ndescription: Shared user release skill\n---\nPrepare release notes.");
+
+            var loaded = await ProjectSkillCatalog.LoadAsync(codevUser, null, includeProjectSkills: false,
+                additionalUserSkillsDirectories: [compatibleUser]);
+            var skill = Assert.Single(loaded.Skills);
+            Assert.Equal("skill-user", skill.Scope);
+            Assert.Equal(Path.Combine(directory, "SKILL.md"), skill.FilePath);
+            var expanded = await ProjectSkillCatalog.ReadPromptAsync(skill, codevUser, null, projectTrusted: false,
+                skill.Name, additionalUserSkillsDirectories: [compatibleUser]);
+            Assert.True(expanded.Success, expanded.Error);
+            Assert.Equal("Prepare release notes.", expanded.Prompt);
+
+            var unrelatedFile = Path.Combine(directory, "notes.md");
+            await File.WriteAllTextAsync(unrelatedFile, Markdown("Do not load this file."));
+            var forged = skill with { FilePath = unrelatedFile };
+            var rejected = await ProjectSkillCatalog.ReadPromptAsync(forged, codevUser, null, projectTrusted: false, skill.Name,
+                additionalUserSkillsDirectories: [compatibleUser]);
+            Assert.False(rejected.Success);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Skips_symlinked_opencode_skill_root_and_rejects_its_saved_reference()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var project = Path.Combine(root, "project");
+            var external = Path.Combine(root, "external-skills");
+            Directory.CreateDirectory(project);
+            var externalSkill = Path.Combine(external, "review");
+            Directory.CreateDirectory(externalSkill);
+            await File.WriteAllTextAsync(Path.Combine(externalSkill, "SKILL.md"), Markdown("External instructions."));
+            try { Directory.CreateSymbolicLink(Path.Combine(project, ".opencode"), external); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var loaded = await ProjectSkillCatalog.LoadAsync(Path.Combine(root, "user-skills"), project, includeProjectSkills: true);
+            Assert.Empty(loaded.Skills);
+            Assert.Contains(loaded.Warnings, warning => warning.Contains(".opencode/skills", StringComparison.Ordinal));
+            var stale = new SlashCommandDefinition("/skill-review", "review", SlashCommandAction.UserPrompt, null, null,
+                "skill-project", FilePath: Path.Combine(externalSkill, "SKILL.md"));
+            var expanded = await ProjectSkillCatalog.ReadPromptAsync(stale, Path.Combine(root, "user-skills"), project,
+                projectTrusted: true, stale.Name);
+            Assert.False(expanded.Success);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task Project_skills_are_not_loaded_through_a_symlinked_project_ancestor()
     {
         var root = CreateTempDirectory();
