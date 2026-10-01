@@ -73,16 +73,22 @@ function literalSearch(files, query, limit = 50) {
   const needle = query.toLowerCase()
   for (const file of files) {
     let offset = 0
-    const lines = file.content.split(/\r?\n/)
+    const lines = file.content.split(/\r\n|\r|\n/)
     for (let index = 0; index < lines.length; index++) {
       if (matches.length >= limit) return matches
       const line = lines[index]
       if (line.toLowerCase().includes(needle)) {
         const chunk = file.ranges.findIndex(range => offset >= range.start && offset <= range.end)
-        matches.push({ relativePath: file.relativePath, chunk: Math.max(0, chunk), content: line.trim().slice(0, 320), line: index + 1 })
+        const trimmed = line.trim()
+        const excerpt = trimmed.length > 320 ? `${trimmed.slice(0, 320)}…` : trimmed
+        matches.push({ relativePath: file.relativePath, chunk: Math.max(0, chunk), content: excerpt, line: index + 1 })
         if (matches.length >= limit) return matches
       }
-      offset += line.length + (index < lines.length - 1 ? 1 : 0)
+      offset += line.length
+      if (index < lines.length - 1) {
+        if (file.content.startsWith('\r\n', offset)) offset += 2
+        else if (file.content[offset] === '\r' || file.content[offset] === '\n') offset++
+      }
     }
   }
   return matches
@@ -255,6 +261,10 @@ async function selftest() {
   assert.equal(literal[0].line, 2)
   assert.equal(literalSearch(files, 'SYMBOLIC LINKS')[0].line, 2)
   assert.equal(literalSearch(files, 'missing').length, 0)
+  const crlfContent = `head\r\n${'x'.repeat(CHUNK_CHARS)}\r\ntarget after a long CRLF line`
+  const crlfChunks = chunkText(crlfContent)
+  const crlf = literalSearch([{ relativePath: 'Crlf.cs', content: crlfContent, ranges: crlfChunks.map(({ start, end }) => ({ start, end })) }], 'target after')
+  assert.equal(crlf[0].chunk, crlfChunks.findIndex(chunk => crlfContent.indexOf('target after') >= chunk.start && crlfContent.indexOf('target after') <= chunk.end))
   const capped = literalSearch([{ relativePath: 'Many.cs', content: Array(60).fill('needle').join('\n'), ranges: [{ start: 0, end: 1000 }] }], 'needle', 50)
   assert.equal(capped.length, 50)
   assert.equal(capped[49].line, 50)
