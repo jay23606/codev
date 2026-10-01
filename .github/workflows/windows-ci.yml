@@ -14,6 +14,7 @@ jobs:
   portable-core:
     name: Portable core (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +35,12 @@ jobs:
         run: dotnet build Codev.Core/Codev.Core.csproj --configuration Release --no-restore
 
       - name: Run portable tests
+        if: runner.os != 'macOS'
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
+
+      - name: Run portable tests with hang diagnostics on macOS
+        if: runner.os == 'macOS'
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 5m --blame-hang-dump-type none --logger "console;verbosity=normal"
 
       - name: Run native Linux MCP OAuth Secret Service smoke
         if: runner.os == 'Linux'
