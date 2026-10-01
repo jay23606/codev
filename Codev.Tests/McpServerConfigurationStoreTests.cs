@@ -41,7 +41,9 @@ public sealed class McpServerConfigurationStoreTests : IDisposable
     [InlineData("https://example.test/mcp?token=secret")]
     [InlineData("https://example.test/mcp#secret")]
     [InlineData("file:///tmp/mcp")]
-    public void Rejects_http_endpoints_that_could_persist_credentials_or_use_an_unsupported_scheme(string url)
+    [InlineData("http://example.test/mcp")]
+    [InlineData("http://192.168.1.20:8080/mcp")]
+    public void Rejects_invalid_http_endpoints_that_could_leak_credentials_or_use_an_unsupported_scheme(string url)
     {
         var configuration = new McpServerConfiguration("remote", "Remote", McpServerTransportKind.Http, true, Url: url);
 
@@ -71,6 +73,18 @@ public sealed class McpServerConfigurationStoreTests : IDisposable
         Assert.True(remote.OAuthEnabled);
         Assert.False(local.OAuthEnabled);
         Assert.False(headerAuth.OAuthEnabled);
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1:3000/mcp")]
+    [InlineData("http://localhost:3000/mcp")]
+    [InlineData("http://[::1]:3000/mcp")]
+    public void Allows_plain_http_for_loopback_mcp_servers(string url)
+    {
+        var configuration = McpServerConfigurationStore.NormalizeAndValidate(
+            new McpServerConfiguration("local", "Local", McpServerTransportKind.Http, true, Url: url));
+
+        Assert.True(configuration.OAuthEnabled);
     }
 
     [Fact]

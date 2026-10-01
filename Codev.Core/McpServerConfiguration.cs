@@ -153,6 +153,8 @@ public sealed class McpServerConfigurationStore(string path)
             if (!Uri.TryCreate(url, UriKind.Absolute, out var endpoint) || endpoint.Scheme is not ("http" or "https") ||
                 !string.IsNullOrEmpty(endpoint.UserInfo) || !string.IsNullOrEmpty(endpoint.Query) || !string.IsNullOrEmpty(endpoint.Fragment))
                 throw new ArgumentException("An HTTP MCP server needs an absolute HTTP or HTTPS URL without embedded credentials, query strings, or fragments. Use an environment-backed header mapping for authentication.", nameof(server));
+            if (endpoint.Scheme == Uri.UriSchemeHttp && !endpoint.IsLoopback)
+                throw new ArgumentException("MCP servers on non-loopback hosts must use HTTPS; plain HTTP is limited to loopback endpoints.", nameof(server));
             if (command.Length > 0 || arguments.Length > 0 || workingDirectory.Length > 0 || environment.Count > 0)
                 throw new ArgumentException("Command, arguments, working directory, and process environment can only be set for stdio MCP servers.", nameof(server));
         }
