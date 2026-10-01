@@ -129,6 +129,7 @@ function ordinalIgnoreCaseCompare(left, right) {
 }
 
 async function readLiteralSearchPaths(root) {
+  const excludeBenchmarkArtifacts = await hasA9BenchmarkHarness(root)
   const paths = [], pending = ['']
   let scanned = 0
   while (pending.length && paths.length < MAX_LITERAL_FILES && scanned < MAX_SCANNED_ENTRIES) {
@@ -143,6 +144,7 @@ async function readLiteralSearchPaths(root) {
       if (entry.isSymbolicLink()) continue
       const relative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
+        if (excludeBenchmarkArtifacts && relative.toLowerCase() === 'bench') continue
         if (!IGNORED_DIRS.has(entry.name.toLowerCase())) pending.push(relative)
         continue
       }
@@ -155,6 +157,7 @@ async function readLiteralSearchPaths(root) {
 async function readCorpus(root) {
   const rootInfo = await fs.lstat(root)
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('Source root must be a real directory, not a symbolic link.')
+  const excludeBenchmarkArtifacts = await hasA9BenchmarkHarness(root)
   const chunks = [], files = []
   let fileCount = 0, byteCount = 0
   async function visit(relativeDir) {
@@ -165,6 +168,7 @@ async function readCorpus(root) {
       if (entry.isSymbolicLink() || !safeName(entry.name)) continue
       const relative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
+        if (excludeBenchmarkArtifacts && relative.toLowerCase() === 'bench') continue
         if (!IGNORED_DIRS.has(entry.name.toLowerCase())) await visit(relative)
         continue
       }
@@ -190,6 +194,15 @@ async function readCorpus(root) {
   const byPath = new Map(files.map(file => [file.relativePath, file]))
   const literalFiles = (await readLiteralSearchPaths(root)).map(relative => byPath.get(relative)).filter(Boolean)
   return { chunks, files, literalFiles, fileCount, byteCount }
+}
+
+async function hasA9BenchmarkHarness(root) {
+  try {
+    return (await fs.stat(path.join(root, 'bench', 'a9-retrieval.cjs'))).isFile()
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false
+    throw error
+  }
 }
 
 async function postJson(route, payload) {
@@ -335,6 +348,31 @@ async function selftest() {
   } finally {
     await fs.rm(literalRoot, { recursive: true, force: true })
   }
+  const harnessRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codev-a9-harness-selftest-'))
+  try {
+    await fs.mkdir(path.join(harnessRoot, 'bench', 'results'), { recursive: true })
+    await fs.mkdir(path.join(harnessRoot, 'src'))
+    await fs.writeFile(path.join(harnessRoot, 'bench', 'a9-retrieval.cjs'), "targets: ['src/WorkspaceFileService.cs']")
+    await fs.writeFile(path.join(harnessRoot, 'bench', 'results', 'a9-prior.jsonl'), 'prior answer includes src/WorkspaceFileService.cs')
+    await fs.writeFile(path.join(harnessRoot, 'src', 'WorkspaceFileService.cs'), 'class WorkspaceFileService {}')
+    const filtered = await readCorpus(harnessRoot)
+    assert(filtered.files.some(file => file.relativePath === 'src/WorkspaceFileService.cs'))
+    assert(!filtered.files.some(file => file.relativePath.startsWith('bench/')))
+    assert(!filtered.literalFiles.some(file => file.relativePath.startsWith('bench/')))
+
+    const ordinaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codev-a9-ordinary-bench-selftest-'))
+    try {
+      await fs.mkdir(path.join(ordinaryRoot, 'bench'))
+      await fs.writeFile(path.join(ordinaryRoot, 'bench', 'benchmark.js'), 'export const helper = true')
+      const ordinary = await readCorpus(ordinaryRoot)
+      assert(ordinary.files.some(file => file.relativePath === 'bench/benchmark.js'))
+      assert(ordinary.literalFiles.some(file => file.relativePath === 'bench/benchmark.js'))
+    } finally {
+      await fs.rm(ordinaryRoot, { recursive: true, force: true })
+    }
+  } finally {
+    await fs.rm(harnessRoot, { recursive: true, force: true })
+  }
   const crlfContent = `head\r\n${'x'.repeat(CHUNK_CHARS)}\r\ntarget after a long CRLF line`
   const crlfChunks = chunkText(crlfContent)
   const crlf = literalSearch([{ relativePath: 'Crlf.cs', content: crlfContent, ranges: crlfChunks.map(({ start, end }) => ({ start, end })) }], 'target after')
@@ -385,6 +423,8 @@ async function main() {
   const revision = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true })
   const sourceCommit = revision.status === 0 ? revision.stdout.trim() : null
   process.stderr.write(`Reading bounded source corpus from ${root}\n`)
+  if (await hasA9BenchmarkHarness(root))
+    process.stderr.write('Excluding bench/ because it contains the benchmark task targets and prior answer artifacts.\n')
   const corpus = await readCorpus(root)
   if (!corpus.chunks.length) throw new Error('No supported source chunks were found.')
   process.stderr.write(`Embedding ${corpus.chunks.length} chunks with ${embeddingModel}; no model download will be attempted.\n`)
