@@ -47,8 +47,8 @@ public partial class MainWindow : Window
         {
             if (DataContext is ViewModels.MainViewModel viewModel)
             {
-                await viewModel.SavePendingDraftAsync();
-                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                try { await viewModel.SavePendingDraftAsync(); }
+                finally { await viewModel.StopBackgroundCommandsAndShutdownAsync(); }
             }
         };
     }
