@@ -3383,6 +3383,24 @@ public sealed class MainViewModel : ViewModelBase
                         new Codev.WorkspaceFileService(savedTurn.ProjectPath, savedTurn.ContextExclusions), savedTurn, thinking, token.Token, contextSources,
                         capturedCodeTaskSections, selectedAgentProfile);
                 }
+                else if (savedTurn.IsPlanMode)
+                {
+                    var options = Codev.OllamaRequestOptions.Build(savedTurn.NumCtx, savedTurn.Temperature, savedTurn.TopP, savedTurn.TopK,
+                        savedTurn.PresencePenalty, savedTurn.RepeatPenalty, savedTurn.NumPredict);
+                    var plan = await new Codev.OllamaStructuredPlanClient(_http, _ollamaEndpoint)
+                        .CreatePlanAsync(savedTurn.Model, normalizedHistory, options, savedTurn.ThinkEnabled,
+                            body => SetLastPromptRequestBodyAsync(conversation, body), token.Token);
+                    await AppendAssistantDeltaAsync(conversation, assistantIndex, output, plan.Markdown);
+                    if (plan.PromptTokens is { } promptTokens)
+                        await RecordPromptTokenUsageAsync(conversation, savedTurn.Provider, savedTurn.Model, savedTurn.NumCtx, promptTokens);
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (ReferenceEquals(ActiveConversation, conversation))
+                            ConnectionStatus = plan.UsedStructuredOutput
+                                ? "Plan ready · structured output"
+                                : "Plan ready · text fallback";
+                    });
+                }
                 else
                 {
                 var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["think"] = savedTurn.ThinkEnabled, ["stream"] = true };
