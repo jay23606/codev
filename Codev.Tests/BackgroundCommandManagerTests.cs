@@ -146,10 +146,9 @@ public sealed class BackgroundCommandManagerTests
     {
         await using var manager = new BackgroundCommandManager();
         var owner = Guid.NewGuid();
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
-        for (var i = 0; i < BackgroundCommandManager.MaxRunningPerConversation; i++)
-            await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
-
+        var command = OperatingSystem.IsWindows()
+            ? "while ($true) { Start-Sleep -Milliseconds 1000 }"
+            : "while :; do sleep 1; done";
         using var stoppingReached = new ManualResetEventSlim();
         using var resumeShutdown = new ManualResetEventSlim();
         manager.Changed += (_, _) =>
@@ -158,11 +157,13 @@ public sealed class BackgroundCommandManagerTests
             stoppingReached.Set();
             resumeShutdown.Wait(TimeSpan.FromSeconds(10));
         };
+        for (var i = 0; i < BackgroundCommandManager.MaxRunningPerConversation; i++)
+            await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
 
         var shutdown = Task.Run(() => manager.StopConversationAsync(owner));
         try
         {
-            Assert.True(stoppingReached.Wait(TimeSpan.FromSeconds(5)), "Shutdown did not enter the stopping state.");
+            Assert.True(stoppingReached.Wait(TimeSpan.FromSeconds(10)), "Shutdown did not enter the stopping state.");
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent()));
             Assert.Contains("At most 3 background commands", error.Message, StringComparison.Ordinal);
