@@ -35,6 +35,15 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
 
         var input = initialInput.ToList();
         var transcript = new StringBuilder();
+        string? lastPublishedTranscript = null;
+
+        async Task PublishTranscriptAsync(string value)
+        {
+            if (onTranscript is null || string.Equals(lastPublishedTranscript, value, StringComparison.Ordinal)) return;
+            lastPublishedTranscript = value;
+            await onTranscript(value).ConfigureAwait(false);
+        }
+
         var repeatedCalls = new RepeatedToolCallGuard();
         var usage = new OpenAiCodeTaskUsageAccumulator();
         var stepLimit = Math.Clamp(maxSteps ?? OpenAiCodeTaskLimits.MaxModelStepsPerTurn, 1, OpenAiCodeTaskLimits.MaxModelStepsPerTurn);
@@ -54,24 +63,24 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
                     if (onTranscript is null || Stopwatch.GetElapsedTime(lastPublished) < TimeSpan.FromMilliseconds(100))
                         return Task.CompletedTask;
                     lastPublished = Stopwatch.GetTimestamp();
-                    return onTranscript(transcript.ToString() + streamedText);
+                    return PublishTranscriptAsync(transcript.ToString() + streamedText);
                 }, cancellationToken, onRequestPayload, reasoningEffort, verbosity, reasoningMode);
             }
             catch
             {
                 if (onTranscript is not null && streamedText.Length > 0)
-                    await onTranscript(transcript.ToString() + streamedText);
+                    await PublishTranscriptAsync(transcript.ToString() + streamedText).ConfigureAwait(false);
                 throw;
             }
             if (onTranscript is not null && streamedText.Length > 0)
-                await onTranscript(transcript.ToString() + streamedText);
+                await PublishTranscriptAsync(transcript.ToString() + streamedText).ConfigureAwait(false);
             var turnUsage = usage.Add(response);
             if (onResponse is not null) await onResponse(response, turnUsage);
 
             if (response.FunctionCalls.Count == 0)
             {
                 if (!string.IsNullOrWhiteSpace(response.OutputText)) transcript.Append(response.OutputText);
-                if (onTranscript is not null) await onTranscript(transcript.ToString());
+                await PublishTranscriptAsync(transcript.ToString()).ConfigureAwait(false);
                 return new OpenAiCodeTaskRunResult(transcript.ToString(), turnUsage);
             }
 
@@ -94,7 +103,7 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
                     if (!confirmed)
                     {
                         transcript.AppendLine().AppendLine("Code task stopped because the same tool call repeated. Send a follow-up with more guidance to continue.");
-                        if (onTranscript is not null) await onTranscript(transcript.ToString());
+                        await PublishTranscriptAsync(transcript.ToString()).ConfigureAwait(false);
                         return new OpenAiCodeTaskRunResult(transcript.ToString(), turnUsage);
                     }
                     repeatedCalls.AllowOneMore();
@@ -106,7 +115,7 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
                 outputs.Add(new OpenAiFunctionOutput(callId, result));
                 transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**")
                     .AppendLine(UntrustedToolOutput.Truncate(result, MaxToolResultTranscriptCharacters));
-                if (onTranscript is not null) await onTranscript(transcript.ToString());
+                await PublishTranscriptAsync(transcript.ToString()).ConfigureAwait(false);
             }
             OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, outputs);
 
@@ -114,7 +123,7 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
             {
                 transcript.AppendLine().AppendLine()
                     .Append($"OpenAI Code task reached its {stepLimit}-request limit. The completed tool results are shown above; send a follow-up to continue.");
-                if (onTranscript is not null) await onTranscript(transcript.ToString());
+                await PublishTranscriptAsync(transcript.ToString()).ConfigureAwait(false);
                 if (status is not null) await status("OpenAI Code task · request limit reached");
                 return new OpenAiCodeTaskRunResult(transcript.ToString(), turnUsage);
             }

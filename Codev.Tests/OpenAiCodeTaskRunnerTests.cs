@@ -198,10 +198,10 @@ public sealed class OpenAiCodeTaskRunnerTests
     [Fact]
     public async Task Keeps_partial_openai_text_visible_when_the_code_task_stream_is_interrupted()
     {
+        const string partialEvent = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Partial plan\"}\n\n";
         using var http = new HttpClient(new ResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Partial plan\"}\n\n",
-                Encoding.UTF8, "text/event-stream")
+            Content = new StreamContent(new PartialThenFailingStream(partialEvent))
         }));
         var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
         var transcriptUpdates = new List<string>();
@@ -315,6 +315,30 @@ public sealed class OpenAiCodeTaskRunnerTests
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             if (_sent) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken);
+            _sent = true;
+            _data.AsMemory().CopyTo(buffer);
+            return _data.Length;
+        }
+    }
+
+    private sealed class PartialThenFailingStream(string initialData) : Stream
+    {
+        private readonly byte[] _data = Encoding.UTF8.GetBytes(initialData);
+        private bool _sent;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_sent) throw new IOException("Test stream interrupted after partial text.");
             await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken);
             _sent = true;
             _data.AsMemory().CopyTo(buffer);
