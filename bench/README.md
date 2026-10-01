@@ -41,6 +41,18 @@ Run one model at a time and avoid other heavy work while it runs, or the timings
 
 To measure the cost of copying a large tracked-plus-untracked source tree before a command, run `pwsh -NoProfile -File bench/shadow-snapshot.ps1`. The script creates an isolated temporary Git repository with 10,000 source files, binary assets, untracked files, and ignored build output; copies the tracked and non-ignored files to a temporary snapshot; verifies every copied file by SHA-256; reports copy time and disk use; then removes only its uniquely named temporary directories. It does not touch a real project. Parameters at the top of the script let you scale the fixture.
 
+## A9 literal-versus-semantic retrieval comparison
+
+This harness measures the V3 question of whether semantic retrieval helps supported local models find Codev implementations. It asks six fixed questions against the current Codev source tree and runs each in **literal-only**, **semantic-only**, and **both** tool modes. Each task/mode/run is appended as one JSONL row with the source commit, corpus size, index-build time, known-target top-k, tool-call validity, answer pass/fail, relevant/irrelevant returned chunks, and task latency. The final summary reports pass and validity rates, average noise, and latency. The task targets are hidden from model prompts.
+
+```bash
+node bench/a9-retrieval.cjs --selftest
+node bench/a9-retrieval.cjs --model qwen3.6:35b-a3b --embedding nomic-embed-text --runs 3 --out bench/results/a9-qwen36.jsonl
+node bench/a9-retrieval.cjs --model qwen3.8:27b --embedding nomic-embed-text --runs 3 --out bench/results/a9-qwen38.jsonl
+```
+
+Both endpoints must be loopback Ollama. The harness never downloads models and refuses a non-loopback server because it sends source excerpts to `/api/embed` and `/api/chat`. The default corpus is the current repo; `--root` can select a disposable Codev checkout. It skips symlinks, hidden paths, ignored build folders, unsupported files, and secret-like filenames, and enforces file/byte/chunk bounds. Use a fresh output file per benchmark run. No real retrieval result is recorded until an embedding model is installed and the full repeated comparison has completed.
+
 ## Results in this folder
 
 `results/2026-09-28.jsonl` is the raw data behind the published page, `results/2026-09-28-big-budget.jsonl` is the follow-up run with a larger thinking budget, and `results/2026-09-28-verdict.html` is the written conclusion shown at the top of the page. To rebuild the page:
