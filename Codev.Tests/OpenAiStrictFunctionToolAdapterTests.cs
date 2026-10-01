@@ -25,6 +25,24 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
     }
 
     [Fact]
+    public void File_tool_descriptions_explain_that_auto_applies_without_review()
+    {
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var descriptions = CodeTaskToolSchemaFactory.CreateOllamaTools(shell)
+            .Select(tool => JsonSerializer.SerializeToElement(tool))
+            .Concat(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell)
+                .Select(tool => JsonSerializer.SerializeToElement(tool)))
+            .Select(tool => tool.TryGetProperty("function", out var function) ? function : tool)
+            .Where(tool => tool.GetProperty("name").GetString() is "create_file" or "write_file" or "apply_patch")
+            .Select(tool => tool.GetProperty("description").GetString() ?? "")
+            .ToArray();
+
+        Assert.Equal(6, descriptions.Length);
+        Assert.All(descriptions, description => Assert.Contains("Auto mode applies", description, StringComparison.Ordinal));
+        Assert.All(descriptions, description => Assert.Contains("may show", description, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Selected_profile_removes_denied_tools_from_strict_schema_but_keeps_approved_categories()
     {
         using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"required":[],"additionalProperties":false}""");
