@@ -11,6 +11,7 @@
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
+const os = require('node:os')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
@@ -20,10 +21,12 @@ const CHUNK_CHARS = 1800
 const CHUNK_OVERLAP = 240
 const TOP_K = 8
 const MAX_FILES = 8000
+const MAX_LITERAL_FILES = 500
+const MAX_SCANNED_ENTRIES = 10000
 const MAX_BYTES = 80 * 1024 * 1024
 const MAX_CHUNKS = 40000
 const IGNORED_DIRS = new Set(['.git', '.vs', '.idea', 'bin', 'obj', 'node_modules', 'packages', 'dist', 'build', 'coverage'])
-const EXTENSIONS = new Set(['.cs', '.xaml', '.csproj', '.sln', '.cshtml', '.razor', '.js', '.jsx', '.ts', '.tsx', '.html', '.css', '.scss', '.md', '.mdx', '.txt', '.json', '.xml', '.yml', '.yaml', '.toml', '.ini', '.cfg', '.conf', '.py', '.go', '.rs', '.java', '.kt', '.swift', '.c', '.h', '.cpp', '.hpp', '.php', '.rb', '.lua', '.sql', '.proto', '.graphql', '.tf', '.ps1', '.sh'])
+const EXTENSIONS = new Set(['.cs', '.xaml', '.csproj', '.sln', '.cshtml', '.razor', '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts', '.html', '.css', '.scss', '.sass', '.less', '.vue', '.svelte', '.md', '.mdx', '.txt', '.json', '.xml', '.yml', '.yaml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.props', '.targets', '.py', '.pyi', '.go', '.rs', '.java', '.kt', '.kts', '.swift', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hxx', '.m', '.mm', '.php', '.rb', '.lua', '.pl', '.pm', '.scala', '.sc', '.dart', '.ex', '.exs', '.erl', '.hrl', '.clj', '.cljs', '.cljc', '.hs', '.lhs', '.elm', '.r', '.jl', '.f', '.f90', '.for', '.pas', '.pp', '.asm', '.s', '.sql', '.proto', '.graphql', '.gql', '.tf', '.hcl', '.nix', '.ps1', '.sh', '.bat'])
 const TASKS = [
   { id: 'workspace-boundaries', question: 'Which component validates project-relative paths and prevents traversal or symbolic-link access when tools read files?', targets: ['Codev.Core/WorkspaceFileService.cs'], literalProbe: 'symbolic links' },
   { id: 'auto-command-policy', question: 'Where does Auto mode resolve command approval, and how do saved exact deny rules take precedence?', targets: ['Codev.Core/ProjectCommandPermissionRegistry.cs', 'Codev.Core/ProjectCommandApprovalPolicy.cs'], literalProbe: 'Auto is an explicit trust decision' },
@@ -119,6 +122,35 @@ function safeName(name) {
     !['id_rsa', 'id_ed25519'].includes(lower)
 }
 
+function ordinalIgnoreCaseCompare(left, right) {
+  const a = left.toUpperCase(), b = right.toUpperCase()
+  return a < b ? -1 : a > b ? 1 : left < right ? -1 : left > right ? 1 : 0
+}
+
+async function readLiteralSearchPaths(root) {
+  const paths = [], pending = ['']
+  let scanned = 0
+  while (pending.length && paths.length < MAX_LITERAL_FILES && scanned < MAX_SCANNED_ENTRIES) {
+    const relativeDir = pending.pop()
+    const fullDir = path.join(root, relativeDir)
+    const entries = (await fs.readdir(fullDir, { withFileTypes: true }))
+      .sort((a, b) => ordinalIgnoreCaseCompare(a.name, b.name))
+      .slice(0, MAX_SCANNED_ENTRIES - scanned)
+    for (const entry of entries) {
+      if (paths.length >= MAX_LITERAL_FILES || scanned >= MAX_SCANNED_ENTRIES) break
+      scanned++
+      if (entry.isSymbolicLink()) continue
+      const relative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRS.has(entry.name.toLowerCase())) pending.push(relative)
+        continue
+      }
+      if (entry.isFile() && EXTENSIONS.has(path.extname(entry.name).toLowerCase()) && safeName(entry.name)) paths.push(relative)
+    }
+  }
+  return paths
+}
+
 async function readCorpus(root) {
   const rootInfo = await fs.lstat(root)
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('Source root must be a real directory, not a symbolic link.')
@@ -129,7 +161,7 @@ async function readCorpus(root) {
     const entries = await fs.readdir(fullDir, { withFileTypes: true })
     entries.sort((a, b) => a.name.localeCompare(b.name))
     for (const entry of entries) {
-      if (entry.isSymbolicLink() || entry.name.startsWith('.') || !safeName(entry.name)) continue
+      if (entry.isSymbolicLink() || !safeName(entry.name)) continue
       const relative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
         if (!IGNORED_DIRS.has(entry.name.toLowerCase())) await visit(relative)
@@ -154,7 +186,9 @@ async function readCorpus(root) {
     }
   }
   await visit('')
-  return { chunks, files, fileCount, byteCount }
+  const byPath = new Map(files.map(file => [file.relativePath, file]))
+  const literalFiles = (await readLiteralSearchPaths(root)).map(relative => byPath.get(relative)).filter(Boolean)
+  return { chunks, files, literalFiles, fileCount, byteCount }
 }
 
 async function postJson(route, payload) {
@@ -261,6 +295,24 @@ async function selftest() {
   assert.equal(literal[0].line, 2)
   assert.equal(literalSearch(files, 'SYMBOLIC LINKS')[0].line, 2)
   assert.equal(literalSearch(files, 'missing').length, 0)
+  const literalRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codev-a9-selftest-'))
+  try {
+    const sourceDir = path.join(literalRoot, 'src')
+    await fs.mkdir(sourceDir)
+    await fs.mkdir(path.join(literalRoot, 'obj'))
+    await fs.writeFile(path.join(literalRoot, 'obj', 'ignored.cs'), 'needle')
+    await fs.writeFile(path.join(sourceDir, 'secret-file.cs'), 'needle')
+    await Promise.all(Array.from({ length: 501 }, (_, index) =>
+      fs.writeFile(path.join(sourceDir, `file-${String(index).padStart(3, '0')}.cs`), 'needle')))
+    const literalPaths = await readLiteralSearchPaths(literalRoot)
+    assert.equal(literalPaths.length, MAX_LITERAL_FILES)
+    assert(literalPaths.includes('src/file-000.cs'))
+    assert(!literalPaths.includes('src/file-500.cs'))
+    assert(!literalPaths.includes('src/secret-file.cs'))
+    assert(!literalPaths.includes('obj/ignored.cs'))
+  } finally {
+    await fs.rm(literalRoot, { recursive: true, force: true })
+  }
   const crlfContent = `head\r\n${'x'.repeat(CHUNK_CHARS)}\r\ntarget after a long CRLF line`
   const crlfChunks = chunkText(crlfContent)
   const crlf = literalSearch([{ relativePath: 'Crlf.cs', content: crlfContent, ranges: crlfChunks.map(({ start, end }) => ({ start, end })) }], 'target after')
@@ -299,20 +351,20 @@ async function main() {
   if (!model) throw new Error('Specify a local chat model with --model.')
   if (!Number.isInteger(runs) || runs < 1 || runs > 10) throw new Error('--runs must be an integer from 1 to 10.')
 
+  const revision = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true })
+  const sourceCommit = revision.status === 0 ? revision.stdout.trim() : null
   process.stderr.write(`Reading bounded source corpus from ${root}\n`)
   const corpus = await readCorpus(root)
   if (!corpus.chunks.length) throw new Error('No supported source chunks were found.')
   process.stderr.write(`Embedding ${corpus.chunks.length} chunks with ${embeddingModel}; no model download will be attempted.\n`)
   const indexBuildMs = await buildIndex(corpus.chunks, embeddingModel)
   const benchmarkId = new Date().toISOString()
-  const revision = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true })
-  const sourceCommit = revision.status === 0 ? revision.stdout.trim() : null
   const output = []
   const modes = ['literal-only', 'semantic-only', 'both']
   for (const run of Array.from({ length: runs }, (_, index) => index + 1)) {
     for (const task of TASKS) {
       const queryVector = (await embedBatch(embeddingModel, [task.question]))[0]
-      const literalTop = literalSearch(corpus.files, task.literalProbe, TOP_K)
+      const literalTop = literalSearch(corpus.literalFiles, task.literalProbe, TOP_K)
       const semanticTop = semanticSearch(corpus.chunks, queryVector)
       const retrieval = {
         literal: resultMetrics(literalTop, task),
@@ -320,10 +372,11 @@ async function main() {
         combined: resultMetrics(combineResults(literalTop, semanticTop), task)
       }
       for (const mode of modes) {
-        const result = await runModelTask(model, mode, task, corpus.chunks, corpus.files, embeddingModel, run)
+        const result = await runModelTask(model, mode, task, corpus.chunks, corpus.literalFiles, embeddingModel, run)
         Object.assign(result, {
           benchmarkId, embeddingModel, sourceCommit, sourceFiles: corpus.fileCount,
-          sourceChunks: corpus.chunks.length, sourceBytes: corpus.byteCount, indexBuildMs
+          sourceChunks: corpus.chunks.length, sourceBytes: corpus.byteCount,
+          literalSearchFiles: corpus.literalFiles.length, literalSearchFileCap: MAX_LITERAL_FILES, indexBuildMs
         })
         result.directRetrieval = retrieval
         output.push(result)

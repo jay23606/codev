@@ -43,7 +43,7 @@ To measure the cost of copying a large tracked-plus-untracked source tree before
 
 ## A9 literal-versus-semantic retrieval comparison
 
-This harness measures the V3 question of whether semantic retrieval helps supported local models find Codev implementations. It asks six fixed questions against the current Codev source tree and runs each in **literal-only**, **semantic-only**, and **both** tool modes. Each task/mode/run is appended as one JSONL row with the source commit, corpus size, index-build time, known-target top-k, tool-call validity, answer pass/fail, relevant/irrelevant returned chunks, and task latency. The final summary reports pass and validity rates, average noise, and latency. The task targets are hidden from model prompts.
+This harness measures the V3 question of whether semantic retrieval helps supported local models find Codev implementations. It asks six fixed questions against the current Codev source tree and runs each in **literal-only**, **semantic-only**, and **both** tool modes. Its literal baseline mirrors Codev's bounded file traversal (first 500 supported files from the 10,000-entry scan), case-insensitive substring line matches, 50-result limit, and excerpt truncation; semantic search uses the complete bounded index corpus. Each task/mode/run is appended as one JSONL row with the source commit, corpus size, literal file cap, index-build time, known-target top-k, tool-call validity, answer pass/fail, relevant/irrelevant returned chunks, and task latency. The final summary reports pass and validity rates, average noise, and latency. The task targets are hidden from model prompts.
 
 ```bash
 node bench/a9-retrieval.cjs --selftest
