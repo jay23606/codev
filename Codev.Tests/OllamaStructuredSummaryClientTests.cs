@@ -18,6 +18,7 @@ public sealed class OllamaStructuredSummaryClientTests
             Assert.Equal("/api/chat", request.RequestUri!.AbsolutePath);
             Assert.Equal("object", payload.RootElement.GetProperty("format").GetProperty("type").GetString());
             Assert.Equal("summary", payload.RootElement.GetProperty("format").GetProperty("required")[0].GetString());
+            Assert.Contains("exactly one property named summary", payload.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
             Assert.False(payload.RootElement.GetProperty("stream").GetBoolean());
             return Json("""{"message":{"content":"{\"summary\":\"Preserve the key decision.\"}"}}""");
         }));
@@ -32,6 +33,7 @@ public sealed class OllamaStructuredSummaryClientTests
     [InlineData("not JSON")]
     [InlineData("{\"summary\":\"\"}")]
     [InlineData("{\"other\":\"missing summary\"}")]
+    [InlineData("{\"summary\":\"Keep this.\",\"extra\":\"reject\"}")]
     public async Task Invalid_structured_output_retries_as_plain_text(string malformed)
     {
         var requestCount = 0;

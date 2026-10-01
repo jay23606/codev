@@ -20,7 +20,12 @@ public sealed class OllamaStructuredSummaryClient(HttpClient http, Uri endpoint)
         ArgumentNullException.ThrowIfNull(messages);
         if (messages.Count == 0) throw new ArgumentException("Summary messages are required.", nameof(messages));
 
-        var structured = await SendAsync(model, messages, contextSize, useSchema: true, cancellationToken).ConfigureAwait(false);
+        var structuredMessages = messages.ToArray();
+        structuredMessages[0] = structuredMessages[0] with
+        {
+            Content = structuredMessages[0].Content + " Return only a JSON object matching the supplied schema, with exactly one property named summary. Do not use Markdown fences."
+        };
+        var structured = await SendAsync(model, structuredMessages, contextSize, useSchema: true, cancellationToken).ConfigureAwait(false);
         if (structured is { } content && TryReadSummary(content, out var summary))
             return new OllamaStructuredSummaryResult(summary, UsedStructuredOutput: true);
 
@@ -82,6 +87,7 @@ public sealed class OllamaStructuredSummaryClient(HttpClient http, Uri endpoint)
         {
             using var json = JsonDocument.Parse(content);
             if (json.RootElement.ValueKind != JsonValueKind.Object ||
+                json.RootElement.EnumerateObject().Count() != 1 ||
                 !json.RootElement.TryGetProperty("summary", out var value) || value.ValueKind != JsonValueKind.String)
                 return false;
             return TryReadPlainText(value.GetString(), out summary);
