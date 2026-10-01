@@ -89,6 +89,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     private static readonly TimeSpan TotalShutdownTimeout = TimeSpan.FromSeconds(10);
     private readonly List<McpClient> _clients = [];
     private readonly List<McpOAuthCallbackListener> _oauthListeners = [];
+    private readonly List<IClientTransport> _transports = [];
     private readonly Dictionary<string, McpCodeTaskTool> _tools = new(StringComparer.Ordinal);
     private readonly Dictionary<string, McpCodeTaskPrompt> _prompts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, McpCodeTaskResource> _resources = new(StringComparer.Ordinal);
@@ -168,6 +169,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 try
                 {
                     var transport = transportFactory(server, session);
+                    session._transports.Add(transport);
                     var startupPhaseTimeout = server.OAuthEnabled == true
                         ? Math.Max(server.StartupTimeoutMs ?? McpServerConfigurationStore.DefaultStartupTimeoutMs, (int)OAuthStartupTimeout.TotalMilliseconds)
                         : server.StartupTimeoutMs ?? McpServerConfigurationStore.DefaultStartupTimeoutMs;
@@ -177,6 +179,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                         startupTimeoutMs,
                         cancellationToken,
                         DisposeLateClientAsync).ConfigureAwait(false);
+                    session._transports.Remove(transport); // McpClient now owns the transport lifetime.
                     phase = "catalog";
                     var catalogPhaseTimeout = server.OAuthEnabled == true
                         ? Math.Max(server.CatalogTimeoutMs ?? McpServerConfigurationStore.DefaultCatalogTimeoutMs, (int)OAuthStartupTimeout.TotalMilliseconds)
@@ -224,7 +227,11 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                     session._clients.Add(client);
                     session._connectionLog.Add($"{server.Name}: connected; {added} tool(s), {addedPrompts} prompt(s), {addedResources} resource(s), and {addedResourceTemplates} resource template(s) available.");
                 }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException)
+                {
+                    if (client is not null) await DisposeClientBoundedAsync(client).ConfigureAwait(false);
+                    throw;
+                }
                 catch (TimeoutException)
                 {
                     if (client is not null) await DisposeClientBoundedAsync(client).ConfigureAwait(false);
@@ -398,10 +405,12 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         var disposal = Task.WhenAll(_clients.Select(DisposeClientAsync)
+            .Concat(_transports.Select(DisposeTransportAsync))
             .Concat(_oauthListeners.Select(listener => listener.DisposeAsync().AsTask())));
         try { await disposal.WaitAsync(TotalShutdownTimeout).ConfigureAwait(false); }
         catch (TimeoutException) { _ = ObserveDisposalAsync(disposal); }
         _clients.Clear();
+        _transports.Clear();
         _oauthListeners.Clear();
         _tools.Clear();
         _prompts.Clear();
@@ -420,6 +429,18 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     {
         try { await client.DisposeAsync().ConfigureAwait(false); }
         catch { /* A broken server transport must not prevent other MCP clients from closing. */ }
+    }
+
+    private static async Task DisposeTransportAsync(IClientTransport transport)
+    {
+        try
+        {
+            if (transport is IAsyncDisposable asyncDisposable)
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            else if (transport is IDisposable disposable)
+                disposable.Dispose();
+        }
+        catch { /* Failed transports must not prevent other MCP clients from closing. */ }
     }
 
     private static async Task ObserveDisposalAsync(Task disposal)
@@ -718,7 +739,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 TokenCache = new McpOAuthTokenCache(oauthTokenVault, McpOAuthTokenCache.CreateAccount(server))
             };
         }
-        return new HttpClientTransport(new HttpClientTransportOptions
+        var options = new HttpClientTransportOptions
         {
             Endpoint = new Uri(server.Url, UriKind.Absolute),
             // Prefer the current protocol and fall back for existing SSE-only servers.
@@ -727,7 +748,14 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
             ConnectionTimeout = TimeSpan.FromSeconds(20),
             AdditionalHeaders = headers,
             OAuth = oauthOptions
-        }, NullLoggerFactory.Instance);
+        };
+        // Custom environment-backed headers can carry credentials. Never forward them through
+        // an HTTP redirect, which may point at a different origin.
+        var httpClient = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        return new HttpClientTransport(options, httpClient, NullLoggerFactory.Instance, ownsHttpClient: true);
     }
 
     private static string SafeLabel(string? value) => string.IsNullOrWhiteSpace(value) ? "MCP server" : Bound(value.Trim(), 80);

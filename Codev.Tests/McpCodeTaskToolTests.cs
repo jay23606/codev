@@ -304,7 +304,6 @@ public sealed class McpCodeTaskToolTests
         portReservation.Start();
         var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
         portReservation.Stop();
-
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
@@ -342,6 +341,73 @@ public sealed class McpCodeTaskToolTests
             await app.DisposeAsync();
         }
     }
+
+    [Fact]
+    public async Task Http_mcp_custom_secret_header_is_not_forwarded_across_redirects()
+    {
+        using var portReservation = new TcpListener(IPAddress.Loopback, 0);
+        portReservation.Start();
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+        portReservation.Stop();
+        using var targetPortReservation = new TcpListener(IPAddress.Loopback, 0);
+        targetPortReservation.Start();
+        var targetPort = ((IPEndPoint)targetPortReservation.LocalEndpoint).Port;
+        targetPortReservation.Stop();
+
+        const string environmentVariable = "CODEV_TEST_MCP_REDIRECT_SECRET";
+        const string secret = "test-mcp-secret-never-forward";
+        var previousSecret = Environment.GetEnvironmentVariable(environmentVariable);
+        var sourceSawSecret = false;
+        var targetRequestCount = 0;
+        var targetUri = $"http://127.0.0.1:{targetPort}/target";
+        Environment.SetEnvironmentVariable(environmentVariable, secret);
+
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
+        var app = builder.Build();
+        app.Run(context =>
+        {
+            sourceSawSecret = context.Request.Headers["X-Mcp-Test-Key"] == secret;
+            context.Response.StatusCode = StatusCodes.Status307TemporaryRedirect;
+            context.Response.Headers.Location = targetUri;
+            return Task.CompletedTask;
+        });
+        await app.StartAsync();
+        var targetBuilder = WebApplication.CreateBuilder();
+        targetBuilder.Logging.ClearProviders();
+        targetBuilder.WebHost.UseUrls($"http://127.0.0.1:{targetPort}");
+        var targetApp = targetBuilder.Build();
+        targetApp.Run(context =>
+        {
+            Interlocked.Increment(ref targetRequestCount);
+            return Task.CompletedTask;
+        });
+        await targetApp.StartAsync();
+
+        try
+        {
+            await using var session = await McpCodeTaskSession.ConnectAsync([
+                new McpServerConfiguration("redirect", "Redirect test", McpServerTransportKind.Http, Enabled: true,
+                    Url: $"http://127.0.0.1:{port}/source", HeaderEnvironmentVariables: new Dictionary<string, string>
+                    {
+                        ["X-Mcp-Test-Key"] = environmentVariable
+                    }, OAuthEnabled: false)
+            ]);
+
+            Assert.True(sourceSawSecret, "The configured secret header should reach the configured MCP endpoint.");
+            Assert.Equal(0, Volatile.Read(ref targetRequestCount));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+            await targetApp.StopAsync();
+            await targetApp.DisposeAsync();
+            Environment.SetEnvironmentVariable(environmentVariable, previousSecret);
+        }
+    }
+
     [McpServerToolType]
     private sealed class LegacySseTestTools
     {
