@@ -104,12 +104,16 @@ public sealed class ChildDelegationTests
                 sawGeneration |= viewModel.IsGenerating;
                 foreach (var child in parent.ChildConversations) knownChildren[child.Id] = child;
                 maxRunningChildren = Math.Max(maxRunningChildren, parent.ChildConversations.Count(child => child.IsChildTaskRunning));
-                if (sawGeneration && knownChildren.Count >= 2 && !viewModel.IsGenerating) break;
+                if (sawGeneration && knownChildren.Count >= 2 && !viewModel.IsGenerating &&
+                    knownChildren.Values.All(child => !child.IsChildTaskRunning)) break;
                 await Task.Delay(100);
             }
 
             var output = string.Join("\n", parent.Messages.Select(message => message.Content));
+            Assert.True(sawGeneration && !viewModel.IsGenerating, $"The parent response did not finish. Transcript: {output}");
             Assert.True(knownChildren.Count >= 2, $"The Orchestrator did not start two children. Transcript: {output}");
+            Assert.All(knownChildren.Values, child => Assert.False(child.IsChildTaskRunning,
+                $"Child task '{child.Title}' did not finish before the live-test deadline."));
             Assert.True(maxRunningChildren >= 2, $"The children did not overlap. Transcript: {output}");
             Assert.Equal(knownChildren.Count, knownChildren.Values.Select(child => child.ProjectPath).Distinct(StringComparer.OrdinalIgnoreCase).Count());
             Assert.All(knownChildren.Values, child =>
@@ -123,7 +127,8 @@ public sealed class ChildDelegationTests
                 if (child.Title.Contains("alpha.txt", StringComparison.OrdinalIgnoreCase))
                     Assert.Contains("alpha-value-19", childOutput, StringComparison.Ordinal);
                 else if (child.Title.Contains("beta.txt", StringComparison.OrdinalIgnoreCase))
-                    Assert.Contains("beta-value-27", childOutput, StringComparison.Ordinal);
+                    Assert.True(childOutput.Contains("beta-value-27", StringComparison.Ordinal),
+                        $"The beta child did not report the expected file value. Title: {child.Title}. Transcript: {childOutput}");
                 else
                     Assert.Fail($"Unexpected delegated task title: {child.Title}");
             });
