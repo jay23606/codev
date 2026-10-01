@@ -419,8 +419,8 @@ public sealed class McpCodeTaskToolTests
     public async Task OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization()
     {
         var useNativeCredentialStore = string.Equals(Environment.GetEnvironmentVariable("CODEV_TEST_NATIVE_MCP_OAUTH_VAULT"), "1", StringComparison.Ordinal);
-        if (useNativeCredentialStore && !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
-            throw new InvalidOperationException("The opt-in native MCP credential-vault test currently targets Windows Credential Manager and macOS Keychain.");
+        if (useNativeCredentialStore && !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
+            throw new InvalidOperationException("The opt-in native MCP credential-vault test supports Windows Credential Manager, macOS Keychain, and Linux Secret Service.");
         CloudApiKeyVault? nativeVault = useNativeCredentialStore ? new CloudApiKeyVault() : null;
         IMcpOAuthTokenVault vault = (IMcpOAuthTokenVault?)nativeVault ?? new MemoryMcpOAuthTokenVault();
         string? vaultAccount = null;
