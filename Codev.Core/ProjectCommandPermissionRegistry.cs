@@ -151,7 +151,7 @@ public sealed class ProjectCommandPermissionRegistry
         if (decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny))
             throw new ArgumentOutOfRangeException(nameof(decision), "A saved command rule must allow or deny.");
         if (decision == ProjectCommandPermissionDecision.Allow && !CanCreateAllowRule(normalizedCommand))
-            throw new InvalidOperationException("Commands that invoke Git or reference .git metadata or Codev app data must always ask for approval.");
+            throw new InvalidOperationException("Commands that invoke Git or reference .git metadata or Codev app data cannot be saved as persistent allow rules in Ask or Allowlist modes.");
         return UpdateProjectAsync(projectPath, project =>
         {
             var rules = project.Rules.Where(rule => !string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal) || rule.Decision != decision).ToList();

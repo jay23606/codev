@@ -255,7 +255,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 
 | ID | Feature | Size | Depends on | Status / tier |
 |---|---|---|---|---|
-| B1 | Permission modes and allowlist | M | none | Core · implemented in WPF and Avalonia. On 2026-09-30, focused Windows tests passed 3/3 for Auto command allow/deny, verification, and Git execution; the current Avalonia launch restored the conversation with Auto visible in the footer. Model-generated command/no-dialog interaction and cross-platform security review remain |
+| B1 | Permission modes and allowlist | M | none | Core · implemented in WPF and Avalonia. Auto resolves all command approvals as allow, including verification, destructive shell commands, and compound Git writes; exact saved deny rules still block their matching command, following OpenCode's published Auto rule. Persistent exact allow rules remain unavailable for protected Git/.git/Codev-data commands only in Ask/Allowlist; the disabled control now says `Protected · no saved allow`. 2026-09-30 tests cover Auto allow/deny, verification, and Git execution; model-generated no-dialog interaction and cross-platform security review remain |
 | B2 | Structured tool calls | M | none | Later |
 | B3 | Diff edits alongside whole-file edits | M | none | Done |
 | B4 | Step limit and loop detection | S | none | Core · implemented in WPF, Avalonia, and OpenAI Code task; manual QA remains |

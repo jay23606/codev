@@ -507,7 +507,7 @@ public partial class MainWindow : Window
         Add("Cancel", Codev.ProjectCommandApprovalChoice.Cancel);
         Add("Deny exact command", Codev.ProjectCommandApprovalChoice.DenyExactCommand);
         var canRemember = Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(proposal.Command);
-        Add(canRemember ? "Allow exact command + run" : "Protected · ask every time", Codev.ProjectCommandApprovalChoice.AllowExactCommand, canRemember);
+        Add(canRemember ? "Allow exact command + run" : "Protected · no saved allow", Codev.ProjectCommandApprovalChoice.AllowExactCommand, canRemember);
         Add(proposal.IsVerification ? "Run once & verify" : "Run once", Codev.ProjectCommandApprovalChoice.RunOnce);
         panel.Children.Add(buttons);
         return panel;

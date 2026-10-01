@@ -189,6 +189,15 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
 
         await loaded.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
         Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, "git status --short"));
+
+        // Auto resolves every command prompt as allow, including verification, destructive shell,
+        // and compound Git commands that cannot be persisted as Ask/Allowlist rules.
+        Assert.Equal(ProjectCommandPermissionDecision.Allow,
+            loaded.Evaluate(_project, "cargo check --manifest-path space-invaders-game/signaling/Cargo.toml", "PowerShell", isVerification: true));
+        var removeAndInspect = "Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short";
+        var commitAndPush = "git -C space-invaders-game add game.js; git -C space-invaders-game commit -m \"Improve gameplay\"; git -C space-invaders-game push origin main";
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, removeAndInspect, "PowerShell"));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, commitAndPush, "PowerShell"));
         await loaded.SetRuleAsync(_project, "git status --short", ProjectCommandPermissionDecision.Deny);
         Assert.Equal(ProjectCommandPermissionDecision.Deny, loaded.Evaluate(_project, "git status --short"));
     }
