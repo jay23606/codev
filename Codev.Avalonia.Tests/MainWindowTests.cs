@@ -16,6 +16,34 @@ namespace Codev.Avalonia.Tests;
 public sealed class MainWindowTests
 {
     [AvaloniaFact]
+    public void Attached_project_exposes_a_persistable_auto_command_mode_selector()
+    {
+        var window = new MainWindow
+        {
+            DataContext = new TestProjectPermissionViewModel(
+                HasProject: true,
+                CanPersistProjectCommandPermissions: true,
+                ProjectCommandPermissionModeLabel: "Auto ▾")
+        };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            var selector = Assert.IsType<Button>(window.FindControl<Button>("ProjectCommandModeButton"));
+            Assert.True(selector.IsVisible);
+            Assert.True(selector.IsEnabled);
+            Assert.Equal("Auto ▾", selector.Content?.ToString());
+            var menu = Assert.IsType<MenuFlyout>(selector.Flyout);
+            Assert.Contains(menu.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "Auto · approve unless denied");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Main_window_loads_and_composer_accepts_keyboard_input()
     {
         var window = new MainWindow();
@@ -186,6 +214,9 @@ public sealed class MainWindowTests
             window.Close();
         }
     }
+
+    private sealed record TestProjectPermissionViewModel(bool HasProject,
+        bool CanPersistProjectCommandPermissions, string ProjectCommandPermissionModeLabel);
 
     private static void AssertReadableContrast(TextBox textBox)
     {
