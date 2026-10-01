@@ -23,7 +23,7 @@ public static class CodeTaskToolSchemaFactory
         var tools = allowDelegation && profile?.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase) == true
             ? builtIn.Append(Tool("delegate_task", "Start a child Code task immediately in an isolated Git worktree so it can run concurrently with this response. Up to three children may run; children cannot delegate. Its bounded untrusted result is appended to the parent when it finishes, which may be after this response. Use an installed agent profile by exact name and keep the task within the user's request.", new { agent = new { type = "string", minLength = 1, maxLength = 80 }, task = new { type = "string", minLength = 1, maxLength = 4000 } }, ["agent", "task"]))
             : builtIn;
-        var skillTools = (agentSkills ?? []).Select(skill => Tool(AgentSkillTool.FunctionName(skill),
+        var skillTools = (agentSkills ?? []).Where(skill => !skill.UserOnly).Select(skill => Tool(AgentSkillTool.FunctionName(skill),
             $"Load the {skill.ScopeLabel.ToLowerInvariant()} skill {skill.Name}: {skill.Description}. Returns the skill's task guidance only; it does not grant permissions or execute scripts.",
             new { arguments = new { type = "string", maxLength = 4000, description = "Optional named skill arguments as key=value pairs, separated by spaces. Leave empty when the skill declares no arguments." } }, ["arguments"]));
         return tools.Concat((mcpTools ?? []).Select(tool => tool.ToOllamaFunctionTool())).Concat(skillTools)

@@ -25,7 +25,7 @@ public enum SlashCommandAction
 }
 
 public sealed record SlashCommandDefinition(string Name, string Description, SlashCommandAction Action, string? Prompt = null,
-    IReadOnlyList<string>? ArgumentNames = null, string? Scope = null, string? FilePath = null)
+    IReadOnlyList<string>? ArgumentNames = null, string? Scope = null, string? FilePath = null, bool UserOnly = false)
 {
     public bool IsCustom => Action == SlashCommandAction.UserPrompt;
     public string ScopeLabel => Scope switch { "project" => "PROJECT", "user" => "USER", "template" => "SAVED", "skill-user" => "USER SKILL", "skill-project" => "PROJECT SKILL", _ => "BUILT IN" };

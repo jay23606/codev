@@ -54,6 +54,8 @@ public sealed class CodeTaskToolExecutor(
             return "Rejected: " + error;
         if (agentSkills?.ContainsKey(name) == true && ValidateAgentSkillArguments(arguments) is { } skillError)
             return "Rejected: " + skillError;
+        if (agentSkills?.TryGetValue(name, out var requestedSkill) == true && requestedSkill.UserOnly)
+            return "Denied: this skill is configured for user-only invocation.";
         string Arg(string key) => arguments.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
         if ((name is "create_file" or "write_file" or "apply_patch") &&
             !AgentProfilePolicy.CanEditPath(agentProfile, Arg("relative_path"), files.Root))
@@ -93,6 +95,7 @@ public sealed class CodeTaskToolExecutor(
 
     private async Task<string> ExecuteAgentSkillAsync(SlashCommandDefinition skill, JsonElement arguments, CancellationToken cancellationToken)
     {
+        if (skill.UserOnly) return "Denied: this skill is configured for user-only invocation.";
         if (agentSkillInvocation is null) return "Rejected: agent skill loading is not available for this task.";
         var invocationArguments = arguments.TryGetProperty("arguments", out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString() ?? "" : "";

@@ -157,6 +157,30 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task User_only_skill_is_omitted_from_both_provider_schemas_and_rejected_at_execution()
+    {
+        var skill = new SlashCommandDefinition("/skill-private-review", "Private review workflow.",
+            SlashCommandAction.UserPrompt, Scope: "skill-user", UserOnly: true);
+        var toolName = AgentSkillTool.FunctionName(skill);
+        var shell = ShellCommandResolver.ResolveCurrent();
+
+        Assert.DoesNotContain(toolName, CodeTaskToolSchemaFactory.CreateOllamaTools(shell, agentSkills: [skill])
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("function").GetProperty("name").GetString()));
+        Assert.DoesNotContain(toolName, CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, agentSkills: [skill])
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString()));
+
+        var invoked = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false),
+            agentSkills: new Dictionary<string, SlashCommandDefinition> { [toolName] = skill },
+            agentSkillInvocation: (_, _, _) => { invoked = true; return Task.FromResult("private"); });
+        var result = await ExecuteAsync(executor, toolName, "{\"arguments\":\"\"}");
+
+        Assert.Contains("user-only invocation", result, StringComparison.OrdinalIgnoreCase);
+        Assert.False(invoked);
+    }
+
+    [Fact]
     public void Agent_skills_are_discoverable_in_local_and_hosted_schemas_and_profile_filtered()
     {
         var skill = new SlashCommandDefinition("/skill-review", "Review code carefully.", SlashCommandAction.UserPrompt, Scope: "skill-user");

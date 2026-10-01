@@ -78,6 +78,7 @@ public static partial class CustomSlashCommandService
         if (end < 0) return Fail("Frontmatter is missing its closing --- line.", out error);
 
         string? description = null;
+        var userOnly = false;
         var arguments = new List<string>();
         foreach (var line in lines.Skip(1).Take(end - 1))
         {
@@ -88,6 +89,10 @@ public static partial class CustomSlashCommandService
             var key = trimmed[..colon].Trim();
             var value = trimmed[(colon + 1)..].Trim().Trim('"', '\'');
             if (key.Equals("description", StringComparison.OrdinalIgnoreCase)) description = value;
+            else if (key.Equals("user-only", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!bool.TryParse(value, out userOnly)) return Fail("The user-only frontmatter value must be true or false.", out error);
+            }
             else if (key.Equals("arguments", StringComparison.OrdinalIgnoreCase))
             {
                 if (value.Length > 0) arguments = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
@@ -113,7 +118,7 @@ public static partial class CustomSlashCommandService
             return Fail("Every declared argument must appear as a {{placeholder}} in the prompt body.", out error);
 
         command = new SlashCommandDefinition("/" + name, description, SlashCommandAction.UserPrompt,
-            prompt, arguments, scope);
+            prompt, arguments, scope, UserOnly: userOnly);
         return true;
     }
 

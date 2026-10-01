@@ -109,6 +109,30 @@ public sealed class ProjectSkillCatalogTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public async Task User_only_skill_remains_slash_invocable_but_is_marked_for_model_tool_filtering()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var user = Path.Combine(root, "user-skills");
+            var directory = Path.Combine(user, "private-review");
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(Path.Combine(directory, "SKILL.md"),
+                "---\ndescription: Private review workflow\narguments: area\nuser-only: true\n---\nReview {{area}} privately.");
+
+            var loaded = await ProjectSkillCatalog.LoadAsync(user, null, includeProjectSkills: false);
+            var skill = Assert.Single(loaded.Skills);
+            Assert.True(skill.UserOnly);
+
+            var expanded = await ProjectSkillCatalog.ReadPromptAsync(skill, user, null, projectTrusted: false,
+                "/skill-private-review area=security");
+            Assert.True(expanded.Success, expanded.Error);
+            Assert.Equal("Review security privately.", expanded.Prompt);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Theory]
     [InlineData("Bad Name", "invalid name")]
     [InlineData("invalid", "description")]
