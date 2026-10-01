@@ -208,8 +208,8 @@ Both desktop apps implement model discovery and streamed text chat for both prov
 | Phase | Items | Why first |
 |---|---|---|
 | 0. Validate | V1, V2, V4 | Cheap, and the results change what the rest should be (section 9) |
-| 1. Cheap, high value | X1, D1, A1, A6, B1, B4, C5 | Small changes that make the agent safer and easier to see into |
-| 2. Recover and review | C3, A2, C1, C2, B3 | Rewind, compaction and better review make long agent tasks survivable |
+| 1. Cheap, high value | X1, D1, A1, A6, B1, B4, B15, C5 | Small changes that make the agent safer and easier to see into; B15 is a one-line-per-call-site fix for a verified gap (no `keep_alive` on real chat requests) |
+| 2. Recover and review | C3, A2, C1, C2, B3, B16 | Rewind, compaction and better review make long agent tasks survivable; B16 adds retries against the already-built verification loop (B5), specifically worthwhile for fast, variable models like Qwen3.6-35B-A3B |
 | 3. Smarter context | A3, A5, A8, A9, B2, B6, B9, D2 | Cuts wasted tokens; skills and structured calls make agents more reliable, folder trust (B9) must be in place before any project-provided skill, hook, agent or command file is read, and A9 (promoted 2026-10-01) is what actually lets a project bigger than the context window be worked on at all |
 | 4. Extend | D3, D4, D6, B12, E4, E6, E7 | Extension points, once the basics are solid |
 | 5. Parallel and unattended | D5, D8, B7, E8, D10 | Depends on worktrees, the shared core, and sandbox research |
@@ -257,6 +257,8 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 |---|---|---|---|---|
 | B1 | Permission modes and allowlist | M | none | Core · in progress (shared WPF/Avalonia rules + conservative read-only classifier) |
 | B14 | Provider-use policy rules | S | section 8a | Later |
+| B15 | Keep a conversation's model warm between turns | S | none | Core |
+| B16 | Best-of-N attempts, picked by the verification loop | M | B5, B1 | Later |
 | B2 | Structured tool calls | M | none | Later |
 | B3 | Diff edits alongside whole-file edits | M | none | Done |
 | B4 | Step limit and loop detection | S | none | Core |
@@ -298,6 +300,8 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
   - *Validated ranges.* Reject values outside what the setting accepts, and show only the settings the chosen backend supports (hosted providers expose different parameters from Ollama).
   - *Held fixed for comparisons.* B12's "test before upgrade" must hold these settings fixed between builds (see the V3 finding on sampling settings).
   - *No recommended preset yet.* Which values help is being measured in `bench/` (presence penalty 0, 0.5, 1.0 and 1.5 on Qwen3.6-35B-A3B). Do not ship a default that differs from the model's own until repeated runs show a difference beyond the noise, since scores varied by up to 33 points between runs of one task.
+- **B15 Keep a conversation's model warm between turns (gap found 2026-10-01, not yet fixed).** Checked every `api/chat` call site in the Avalonia app (`MainViewModel.cs`): none of them set `keep_alive`, so Ollama's server-side default (5 minutes) silently applies to ordinary conversation. The only explicit `keep_alive` values in the codebase are `"5m"` on the model-warmup/loading-status path and `0` on the deliberate-unload path (B8) — the actual chat and Code task requests set neither. A pause longer than 5 minutes between messages (reading a long reply, writing the next prompt, stepping away) means the next message pays a full cold-load again: measured at 13-19 seconds for Qwen3.6-35B-A3B in `bench/`, and dense models like Qwen3.8-27B load slower still. Fix: set an explicit `keep_alive` (something like 30-60 minutes, or a setting) on the real chat/Code task requests, not only the warmup path. Small, low-risk, no new UI required unless it becomes user-configurable later.
+- **B16 Best-of-N attempts, picked by the verification loop.** Qwen3.6-35B-A3B's own measured behavior motivates this: it is fast enough that repeating an attempt 2-3 times is cheap (seconds to low minutes, not the many-minutes cost a slow dense model would pay for the same retries), but the same model at the same settings varied by up to 33 percentage points between runs on one task in `bench/`, and by several points on others. B5 (test/lint loop, already Done) already tells a passing attempt from a failing one. The natural next step neither built yet: on a Code task, optionally run N independent attempts (fresh context each time, same prompt) and let B5's existing verification pick whichever one actually passes, rather than accepting the first attempt's claim. Design notes: opt-in and per-task, not a silent default, since it multiplies token cost and time by N; show all N attempts' outcomes, not just the winner, so a user can see when none passed; if none pass, surface the closest/most-passing attempt for the user to continue from rather than silently picking one; this is a reliability lever specifically suited to fast, variable models (the MoE models in `bench/`), and would cost much more on a slow dense model like Qwen3.8-27B without the same benefit, so default N to 1 unless the user or project knowingly opts up.
 
 #### C. Review, Git and recovery
 
@@ -409,8 +413,8 @@ Proposed first triage. This is a recommendation; the maintainer decides.
 
 | Tier | Items |
 |---|---|
-| Core | A1, A2, A6, A7, B1, B4, B9, C1, C3, C5, D1 |
-| Later | A3, A4, A5, A8, A9, A10, A12, B2, B10, B12, B13, B14, C2, C6, D2, D3, D4, D6, D14, A13, D11, E12, E3, E4, E6, E7, E11, and X6 and X7 |
+| Core | A1, A2, A6, A7, B1, B4, B9, B15, C1, C3, C5, D1 |
+| Later | A3, A4, A5, A8, A9, A10, A12, B2, B10, B12, B13, B14, B16, C2, C6, D2, D3, D4, D6, D14, A13, D11, E12, E3, E4, E6, E7, E11, and X6 and X7 |
 | Speculative | A11, B7, C7, D5, D7, D8, D9, D10, D12, D13, E5, E8, E9 |
 
 Why these are Speculative: A11 and D10 add retrieval or indexing that small models may not use well (V3 will tell); B7, C7 and D8 are large and need per-OS research; D5, D7 and E8 depend on a lot of unbuilt infrastructure; D9 leaves the machine; E5 and E9 are nice but rarely decisive. A9 was promoted out of this tier on 2026-10-01: a real file in this project's own source already exceeds a locally realistic context budget, which turns "small models may not use it well" from a reason to wait into a reason to find out quickly.
