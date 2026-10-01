@@ -22,6 +22,7 @@ public sealed class OllamaStructuredPlanClientTests
             Assert.Equal("object", root.GetProperty("format").GetProperty("type").GetString());
             Assert.Equal("steps", root.GetProperty("format").GetProperty("required")[1].GetString());
             Assert.False(root.GetProperty("stream").GetBoolean());
+            Assert.Equal("30m", root.GetProperty("keep_alive").GetString());
             Assert.True(root.GetProperty("think").GetBoolean());
             Assert.Equal(4096, root.GetProperty("options").GetProperty("num_ctx").GetInt32());
             Assert.Contains("JSON object matching", root.GetProperty("messages")[0].GetProperty("content").GetString());

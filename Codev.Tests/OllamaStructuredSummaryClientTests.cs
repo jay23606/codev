@@ -20,6 +20,7 @@ public sealed class OllamaStructuredSummaryClientTests
             Assert.Equal("summary", payload.RootElement.GetProperty("format").GetProperty("required")[0].GetString());
             Assert.Contains("exactly one property named summary", payload.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
             Assert.False(payload.RootElement.GetProperty("stream").GetBoolean());
+            Assert.Equal("30m", payload.RootElement.GetProperty("keep_alive").GetString());
             return Json("""{"message":{"content":"{\"summary\":\"Preserve the key decision.\"}"}}""");
         }));
 

@@ -47,6 +47,7 @@ public sealed class OllamaStructuredSummaryClient(HttpClient http, Uri endpoint)
         {
             ["model"] = model,
             ["messages"] = messages,
+            ["keep_alive"] = OllamaRuntimeClient.ConversationKeepAlive,
             ["stream"] = false,
             ["think"] = false,
             ["options"] = new Dictionary<string, object>

@@ -722,7 +722,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, 180) ?? new Dictionary<string, object>();
             if (conversation.NumCtx > 0) options["num_ctx"] = conversation.NumCtx;
             options["num_predict"] = 180;
-            var payload = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages, ["stream"] = false, ["think"] = false, ["options"] = options };
+            var payload = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages, ["keep_alive"] = Codev.OllamaRuntimeClient.ConversationKeepAlive, ["stream"] = false, ["think"] = false, ["options"] = options };
             using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(endpoint, "api/chat"), payload, timeout.Token);
             if (!response.IsSuccessStatusCode)
                 throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
@@ -780,7 +780,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, 500) ?? new Dictionary<string, object>();
             if (conversation.NumCtx > 0) options["num_ctx"] = conversation.NumCtx;
             options["num_predict"] = 500;
-            var payload = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages, ["stream"] = false, ["think"] = false, ["options"] = options };
+            var payload = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages, ["keep_alive"] = Codev.OllamaRuntimeClient.ConversationKeepAlive, ["stream"] = false, ["think"] = false, ["options"] = options };
             await SetConnectionStatusAsync("Drafting PR title and description with local Ollama…");
             using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(endpoint, "api/chat"), payload, timeout.Token);
             if (!response.IsSuccessStatusCode)
@@ -897,7 +897,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 options["num_predict"] = reviewOutputTokens;
                 var payload = new Dictionary<string, object>
                 {
-                    ["model"] = reviewModel, ["messages"] = messages, ["stream"] = false, ["think"] = false, ["options"] = options
+                    ["model"] = reviewModel, ["messages"] = messages, ["keep_alive"] = Codev.OllamaRuntimeClient.ConversationKeepAlive, ["stream"] = false, ["think"] = false, ["options"] = options
                 };
                 await SetConnectionStatusAsync($"{commandName} · {snapshot.Files.Count} changed files · local second opinion…");
                 using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(reviewEndpoint, "api/chat"), payload, timeout.Token);
@@ -3002,6 +3002,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             {
                 ["model"] = turn.Model,
                 ["messages"] = history,
+                ["keep_alive"] = Codev.OllamaRuntimeClient.ConversationKeepAlive,
                 ["tools"] = tools,
                 ["think"] = turn.ThinkEnabled,
                 ["stream"] = false
@@ -3404,6 +3405,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                         new { role = "user", content = input }
                     },
                     stream = false,
+                    keep_alive = Codev.OllamaRuntimeClient.ConversationKeepAlive,
                     format = "json",
                     think = false,
                     options = new { num_predict = 256 }
@@ -3605,7 +3607,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 }
                 else
                 {
-                var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["think"] = savedTurn.ThinkEnabled, ["stream"] = true };
+                var payload = new Dictionary<string, object> { ["model"] = savedTurn.Model, ["messages"] = history, ["keep_alive"] = Codev.OllamaRuntimeClient.ConversationKeepAlive, ["think"] = savedTurn.ThinkEnabled, ["stream"] = true };
                 if (Codev.OllamaRequestOptions.Build(savedTurn.NumCtx, savedTurn.Temperature, savedTurn.TopP, savedTurn.TopK,
                     savedTurn.PresencePenalty, savedTurn.RepeatPenalty, savedTurn.NumPredict) is { } options) payload["options"] = options;
                 var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
@@ -4717,7 +4719,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 return;
             }
 
-            var payload = new Dictionary<string, object> { ["model"] = model, ["keep_alive"] = "5m", ["stream"] = true };
+            var payload = new Dictionary<string, object> { ["model"] = model, ["keep_alive"] = Codev.OllamaRuntimeClient.ConversationKeepAlive, ["stream"] = true };
             using var request = new HttpRequestMessage(HttpMethod.Post, Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/generate"))
             {
                 Content = JsonContent.Create(payload)

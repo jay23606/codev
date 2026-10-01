@@ -68,6 +68,7 @@ public sealed class LiveLocalModelTests
             Assert.True(string.Equals(expected, await File.ReadAllTextAsync(filePath), StringComparison.Ordinal),
                 $"The requested Auto file edit was not applied. Transcript: {transcript}");
             Assert.False(reviewWasShown, $"Auto mode opened the file review callback. Transcript: {transcript}");
+            Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
             var change = Assert.Single(conversation.FileChanges);
             Assert.Equal("Edit", change.Kind);
             Assert.NotNull(change.CheckpointPath);
@@ -141,6 +142,7 @@ public sealed class LiveLocalModelTests
 
             Assert.False(viewModel.IsGenerating, "The fresh local response did not finish within four minutes.");
             Assert.Contains(expected, freshConversation.Messages[1].Content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
             Assert.True(viewModel.IsQueuePaused);
             Assert.True(viewModel.HasQueuedTurns);
             Assert.Equal("Saved locally · select Resume saved queue to run", savedConversation.Messages[1].Content);
