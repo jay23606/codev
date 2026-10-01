@@ -342,16 +342,16 @@ public static class McpOperationTimeout
         ArgumentNullException.ThrowIfNull(operation);
         if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
         using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCancellation.CancelAfter(timeoutMs);
         var task = operation(timeoutCancellation.Token);
         try
         {
-            return await task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), cancellationToken).ConfigureAwait(false);
+            return await task.WaitAsync(timeoutCancellation.Token).ConfigureAwait(false);
         }
-        catch (TimeoutException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCancellation.IsCancellationRequested)
         {
-            timeoutCancellation.Cancel();
             _ = ObserveLateCompletionAsync(task, cleanupLateResult);
-            throw;
+            throw new TimeoutException($"The MCP operation exceeded its {timeoutMs} ms time limit.");
         }
         catch
         {
