@@ -176,14 +176,19 @@ public sealed class BackgroundCommandManagerTests
 
     private static async Task<BackgroundCommandSnapshot> WaitForExitAsync(BackgroundCommandManager manager, Guid owner, string id)
     {
-        var timeout = DateTimeOffset.UtcNow.AddSeconds(10);
+        // Hosted Windows runners can take several seconds to start PowerShell
+        // while other lifecycle tests are launching processes in parallel.
+        // Keep a finite bound, but avoid treating ordinary runner contention
+        // as a background-process failure.
+        var timeout = DateTimeOffset.UtcNow.AddSeconds(30);
+        BackgroundCommandSnapshot? last = null;
         while (DateTimeOffset.UtcNow < timeout)
         {
-            var snapshot = manager.Read(owner, id);
-            if (snapshot?.Status == "Exited") return snapshot;
+            last = manager.Read(owner, id);
+            if (last?.Status == "Exited") return last;
             await Task.Delay(50);
         }
-        throw new TimeoutException("The background process did not exit within ten seconds.");
+        throw new TimeoutException($"The background process did not exit within thirty seconds (last status: {last?.Status ?? "missing"}, exit code: {last?.ExitCode?.ToString() ?? "unknown"}, output length: {last?.Output.Length ?? 0}).");
     }
 
     private static HashSet<string> ToolNames(IEnumerable<object> schemas)
