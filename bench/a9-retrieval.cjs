@@ -53,7 +53,7 @@ function chunkText(text) {
       if (boundary > start + CHUNK_CHARS / 2) end = boundary
     }
     const value = text.slice(start, end).trim()
-    if (value) chunks.push(value)
+    if (value) chunks.push({ content: value, start, end })
     if (end === text.length) break
     start = Math.max(start + 1, end - CHUNK_OVERLAP)
   }
@@ -67,20 +67,25 @@ function cosine(a, b) {
   return an && bn ? dot / Math.sqrt(an * bn) : -Infinity
 }
 
-function literalSearch(chunks, query, limit = TOP_K) {
+function literalSearch(files, query, limit = 50) {
   if (!query) return []
   const matches = []
-  for (const chunk of chunks) {
-    const lower = chunk.content.toLowerCase()
-    const needle = query.toLowerCase()
-    let count = 0, at = 0
-    while ((at = lower.indexOf(needle, at)) >= 0) { count++; at += needle.length }
-    if (count) {
-      const lines = chunk.content.split(/\r?\n/).filter(line => line.toLowerCase().includes(needle))
-      matches.push({ ...chunk, content: lines.join('\n').slice(0, 2000), score: count })
+  const needle = query.toLowerCase()
+  for (const file of files) {
+    let offset = 0
+    const lines = file.content.split(/\r?\n/)
+    for (let index = 0; index < lines.length; index++) {
+      if (matches.length >= limit) return matches
+      const line = lines[index]
+      if (line.toLowerCase().includes(needle)) {
+        const chunk = file.ranges.findIndex(range => offset >= range.start && offset <= range.end)
+        matches.push({ relativePath: file.relativePath, chunk: Math.max(0, chunk), content: line.trim().slice(0, 320), line: index + 1 })
+        if (matches.length >= limit) return matches
+      }
+      offset += line.length + (index < lines.length - 1 ? 1 : 0)
     }
   }
-  return matches.sort((a, b) => b.score - a.score || a.relativePath.localeCompare(b.relativePath)).slice(0, limit)
+  return matches
 }
 
 function semanticSearch(chunks, vector, limit = TOP_K) {
@@ -111,7 +116,7 @@ function safeName(name) {
 async function readCorpus(root) {
   const rootInfo = await fs.lstat(root)
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('Source root must be a real directory, not a symbolic link.')
-  const chunks = []
+  const chunks = [], files = []
   let fileCount = 0, byteCount = 0
   async function visit(relativeDir) {
     const fullDir = path.join(root, relativeDir)
@@ -134,15 +139,16 @@ async function readCorpus(root) {
       if (byteCount > MAX_BYTES) throw new Error(`Source corpus exceeds the ${MAX_BYTES} byte limit.`)
       const content = await fs.readFile(full, 'utf8')
       if (content.includes('\0')) continue
-      let ordinal = 0
-      for (const piece of chunkText(content)) {
-        chunks.push({ relativePath: relative, chunk: ordinal++, content: piece, embedding: null })
+      const pieces = chunkText(content)
+      files.push({ relativePath: relative, content, ranges: pieces.map(({ start, end }) => ({ start, end })) })
+      for (let ordinal = 0; ordinal < pieces.length; ordinal++) {
+        chunks.push({ relativePath: relative, chunk: ordinal, content: pieces[ordinal].content, embedding: null })
         if (chunks.length > MAX_CHUNKS) throw new Error(`Source corpus exceeds the ${MAX_CHUNKS} chunk limit.`)
       }
     }
   }
   await visit('')
-  return { chunks, fileCount, byteCount }
+  return { chunks, files, fileCount, byteCount }
 }
 
 async function postJson(route, payload) {
@@ -187,10 +193,10 @@ function schemas(mode) {
 
 function formatResults(results) {
   if (!results.length) return 'No matches.'
-  return results.map(item => `${item.relativePath} [chunk ${item.chunk + 1}]\n${item.content}`).join('\n\n').slice(0, 8000)
+  return results.map(item => `${item.relativePath}${Number.isInteger(item.line) ? `:${item.line}` : ` [chunk ${item.chunk + 1}]`}\n${item.content}`).join('\n\n').slice(0, 8000)
 }
 
-async function runModelTask(model, mode, task, chunks, embeddingsModel, run) {
+async function runModelTask(model, mode, task, chunks, files, embeddingsModel, run) {
   const allowed = new Set(schemas(mode).map(tool => tool.function.name))
   const messages = [
     { role: 'system', content: 'You are locating the implementation in a source repository. You receive no project files except through search tools. Use the available tools, then answer with the exact relative path(s) and a concise explanation. Do not guess.' },
@@ -218,7 +224,7 @@ async function runModelTask(model, mode, task, chunks, embeddingsModel, run) {
         continue
       }
       const results = name === 'search_files'
-        ? literalSearch(chunks, args.query)
+        ? literalSearch(files, args.query, 50)
         : semanticSearch(chunks, await embedBatch(embeddingsModel, [args.query]).then(value => value[0]))
       returned.push(...results.map(item => ({ ...item, sourceTool: name })))
       messages.push({ role: 'tool', tool_name: name, content: formatResults(results) })
@@ -239,13 +245,22 @@ async function selftest() {
   const sample = 'class FileIndex {\n  // validates symbolic links and workspace paths\n  void Read() {}\n}'
   const chunked = chunkText(sample)
   assert.equal(chunked.length, 1)
+  const files = [{ relativePath: 'WorkspaceFileService.cs', content: sample, ranges: [{ start: 0, end: sample.length }] }]
   const rows = [
     { relativePath: 'WorkspaceFileService.cs', chunk: 0, content: sample, embedding: [1, 0] },
     { relativePath: 'Other.cs', chunk: 0, content: 'unrelated text', embedding: [0, 1] }
   ]
-  assert.equal(literalSearch(rows, 'symbolic links')[0].relativePath, 'WorkspaceFileService.cs')
+  const literal = literalSearch(files, 'symbolic links')
+  assert.equal(literal[0].relativePath, 'WorkspaceFileService.cs')
+  assert.equal(literal[0].line, 2)
+  assert.equal(literalSearch(files, 'SYMBOLIC LINKS')[0].line, 2)
+  assert.equal(literalSearch(files, 'missing').length, 0)
+  const capped = literalSearch([{ relativePath: 'Many.cs', content: Array(60).fill('needle').join('\n'), ranges: [{ start: 0, end: 1000 }] }], 'needle', 50)
+  assert.equal(capped.length, 50)
+  assert.equal(capped[49].line, 50)
+  assert.equal(formatResults(literal).startsWith('WorkspaceFileService.cs:2\n'), true)
   assert.equal(semanticSearch(rows, [0.9, 0.1])[0].relativePath, 'WorkspaceFileService.cs')
-  const combined = combineResults(literalSearch(rows, 'symbolic links'), semanticSearch(rows, [0.9, 0.1]))
+  const combined = combineResults(literal, semanticSearch(rows, [0.9, 0.1]))
   assert.equal(combined.length, 2)
   assert.equal(combined.filter(item => item.relativePath === 'WorkspaceFileService.cs').length, 1)
   assert.equal(cosine([1, 0], [0, 1]), 0)
@@ -287,7 +302,7 @@ async function main() {
   for (const run of Array.from({ length: runs }, (_, index) => index + 1)) {
     for (const task of TASKS) {
       const queryVector = (await embedBatch(embeddingModel, [task.question]))[0]
-      const literalTop = literalSearch(corpus.chunks, task.literalProbe)
+      const literalTop = literalSearch(corpus.files, task.literalProbe, TOP_K)
       const semanticTop = semanticSearch(corpus.chunks, queryVector)
       const retrieval = {
         literal: resultMetrics(literalTop, task),
@@ -295,7 +310,7 @@ async function main() {
         combined: resultMetrics(combineResults(literalTop, semanticTop), task)
       }
       for (const mode of modes) {
-        const result = await runModelTask(model, mode, task, corpus.chunks, embeddingModel, run)
+        const result = await runModelTask(model, mode, task, corpus.chunks, corpus.files, embeddingModel, run)
         Object.assign(result, {
           benchmarkId, embeddingModel, sourceCommit, sourceFiles: corpus.fileCount,
           sourceChunks: corpus.chunks.length, sourceBytes: corpus.byteCount, indexBuildMs
