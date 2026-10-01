@@ -599,6 +599,44 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Background_command_uses_the_normal_command_approval_gate()
+    {
+        await using var manager = new BackgroundCommandManager();
+        CodeTaskCommandProposal? reviewed = null;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false),
+            proposal => { reviewed = proposal; return Task.FromResult(false); },
+            backgroundCommands: manager);
+
+        var result = await ExecuteAsync(executor, "start_background_command", "{\"command\":\"sleep 30\"}");
+
+        Assert.Contains("not started", result, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(reviewed);
+        Assert.True(reviewed!.IsBackground);
+        Assert.Empty(manager.List(_conversation.Id));
+    }
+
+    [Fact]
+    public async Task Approved_background_command_starts_and_can_be_read_and_stopped()
+    {
+        await using var manager = new BackgroundCommandManager();
+        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(true),
+            backgroundCommands: manager);
+
+        var result = await ExecuteAsync(executor, "start_background_command", JsonSerializer.Serialize(new { command }));
+        var snapshot = Assert.Single(manager.List(_conversation.Id));
+        var read = await ExecuteAsync(executor, "read_background_command", JsonSerializer.Serialize(new { id = snapshot.Id }));
+        var stopped = await ExecuteAsync(executor, "stop_background_command", JsonSerializer.Serialize(new { id = snapshot.Id }));
+
+        Assert.Contains(snapshot.Id, result, StringComparison.Ordinal);
+        Assert.Contains(command, read, StringComparison.Ordinal);
+        Assert.Contains("Stopped", stopped, StringComparison.Ordinal);
+        Assert.Equal("Exited", manager.Read(_conversation.Id, snapshot.Id)!.Status);
+    }
+
+    [Fact]
     public async Task Verification_command_requires_approval_and_reports_success()
     {
         CodeTaskCommandProposal? reviewed = null;

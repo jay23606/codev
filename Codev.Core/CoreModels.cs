@@ -130,8 +130,11 @@ public sealed record ChatToolOutput(string Header, string Content, string? Comma
     public bool HasCommand => Activity is not ("mcp_tool" or "mcp_prompt" or "mcp_resource" or "mcp_resource_template") && !string.IsNullOrWhiteSpace(Command);
 
     [System.Text.Json.Serialization.JsonIgnore]
-    public string Summary => HasCommand ? $"Ran {Command}" : Activity switch
+    public string Summary => Activity switch
     {
+        "background_command_started" => $"Started background command · {Command}",
+        "background_command_output" => $"Read background command output · {Command}",
+        _ when HasCommand => $"Ran {Command}",
         "created_file" => $"Created file · {Path}",
         "edited_file" => $"Edited file · {Path}",
         "applied_patch" => $"Applied patch · {Path}",
@@ -157,8 +160,11 @@ public static class ToolOutputSummary
         var editedFileCount = outputs.Count(output => output.Activity is "edited_file" or "applied_patch");
         foreach (var output in outputs)
         {
-            var activity = output.HasCommand ? "ran commands" : output.Activity switch
+            var activity = output.Activity switch
             {
+                "background_command_started" => "started background commands",
+                "background_command_output" => "read background command output",
+                _ when output.HasCommand => "ran commands",
                 "created_file" => createdFileCount == 1 ? "created a file" : "created files",
                 "edited_file" or "applied_patch" => editedFileCount == 1 ? "edited a file" : "edited files",
                 "read_file" => "read files",

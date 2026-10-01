@@ -20,13 +20,16 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
         if (decision == ProjectCommandPermissionDecision.Deny)
             return Result(CommandApprovalOutcome.Denied, "Project command permission denied this exact command; it was not run.");
 
+        if (proposal.IsBackground && mode == ProjectCommandPermissionMode.ReadOnly)
+            return Result(CommandApprovalOutcome.Rejected, "Read-only command mode does not allow long-running shell processes.");
+
         if (proposal.ProfileApprovalSatisfied && decision == ProjectCommandPermissionDecision.Ask)
             return Result(CommandApprovalOutcome.Approved,
                 "The selected agent profile approved this command once; the project permission mode was left unchanged.");
 
         if (decision == ProjectCommandPermissionDecision.Allow)
         {
-            if (permissions.ShouldUseBoundedFileInspection(proposal.ProjectPath, proposal.Command, decision,
+            if (!proposal.IsBackground && permissions.ShouldUseBoundedFileInspection(proposal.ProjectPath, proposal.Command, decision,
                     proposal.IsVerification, proposal.ShellName, contextExclusions))
                 return Result(CommandApprovalOutcome.ApprovedReadOnly,
                     mode == ProjectCommandPermissionMode.Auto

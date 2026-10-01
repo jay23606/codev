@@ -38,6 +38,42 @@ public sealed class ProjectCommandApprovalPolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_starts_background_commands_without_a_prompt_even_for_read_only_shell_text()
+    {
+        await _permissions.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+        var callsToApprovalUi = 0;
+        var proposal = new CodeTaskCommandProposal("Get-Location", _project, "PowerShell", IsBackground: true);
+
+        var result = await new ProjectCommandApprovalPolicy(_permissions).ApproveAsync(proposal, requestApproval: _ =>
+        {
+            callsToApprovalUi++;
+            return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+        });
+
+        Assert.Equal(CommandApprovalOutcome.Approved, result.Outcome);
+        Assert.DoesNotContain("bounded file APIs", result.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(0, callsToApprovalUi);
+    }
+
+    [Fact]
+    public async Task Read_only_mode_rejects_background_commands_without_launching_a_shell()
+    {
+        await _permissions.SetModeAsync(_project, ProjectCommandPermissionMode.ReadOnly);
+        var callsToApprovalUi = 0;
+
+        var result = await new ProjectCommandApprovalPolicy(_permissions).ApproveAsync(
+            new CodeTaskCommandProposal("sleep 20", _project, "PowerShell", IsBackground: true), requestApproval: _ =>
+            {
+                callsToApprovalUi++;
+                return Task.FromResult(ProjectCommandApprovalChoice.RunOnce);
+            });
+
+        Assert.Equal(CommandApprovalOutcome.Rejected, result.Outcome);
+        Assert.Contains("does not allow long-running", result.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(0, callsToApprovalUi);
+    }
+
+    [Fact]
     public async Task Exact_deny_blocks_auto_without_requesting_approval()
     {
         const string command = "dotnet test Codev.Tests/Codev.Tests.csproj";

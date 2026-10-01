@@ -86,6 +86,24 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Background_command_status_panel_starts_collapsed()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            var expander = Assert.IsType<Expander>(window.FindControl<Expander>("BackgroundCommandsExpander"));
+            Assert.False(expander.IsExpanded);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Verification_approval_is_rendered_inline_and_run_once_resolves_the_request()
     {
         var window = new MainWindow();
@@ -115,6 +133,28 @@ public sealed class MainWindowTests
         {
             window.Close();
         }
+    }
+
+    [AvaloniaFact]
+    public async Task Background_command_review_shows_lifetime_warning_and_exact_command()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var proposal = new CodeTaskCommandProposal("npm run dev", Path.GetTempPath(), "PowerShell", IsBackground: true);
+            var request = typeof(MainWindow).GetMethod("ApproveAgentCommandAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var pending = Assert.IsAssignableFrom<Task<ProjectCommandApprovalChoice>>(request.Invoke(window, [proposal]));
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text => text.Text?.Contains("may open a network port", StringComparison.Ordinal) == true);
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBox>(), box => box.Text == proposal.Command && box.IsReadOnly);
+            var runOnce = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Run once");
+            await Dispatcher.UIThread.InvokeAsync(() => runOnce.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            Assert.Equal(ProjectCommandApprovalChoice.RunOnce, await pending);
+        }
+        finally { window.Close(); }
     }
 
     [AvaloniaFact]

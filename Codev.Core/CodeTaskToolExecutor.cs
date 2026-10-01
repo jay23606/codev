@@ -6,7 +6,8 @@ namespace Codev;
 public sealed record CodeTaskFileProposal(string RelativePath, string Before, string After, bool IsNewFile, string? ProposedPatch = null,
     IReadOnlyList<string>? ContextSources = null);
 public sealed record CodeTaskCommandProposal(string Command, string ProjectPath, string ShellName, bool IsVerification = false,
-    IReadOnlyList<string>? ContextSources = null, string? MatchingUntrustedSource = null, bool ProfileApprovalSatisfied = false);
+    IReadOnlyList<string>? ContextSources = null, string? MatchingUntrustedSource = null, bool ProfileApprovalSatisfied = false,
+    bool IsBackground = false);
 
 /// <summary>Executes bounded Code task tools. The UI supplies file-review and command-policy decisions, which may allow, deny, or prompt according to the active project and agent modes.</summary>
 public sealed class CodeTaskToolExecutor(
@@ -26,7 +27,8 @@ public sealed class CodeTaskToolExecutor(
     AgentProfile? agentProfile = null,
     IReadOnlyDictionary<string, SlashCommandDefinition>? agentSkills = null,
     Func<SlashCommandDefinition, string, CancellationToken, Task<string>>? agentSkillInvocation = null,
-    Func<McpCodeTaskTool, JsonElement, CancellationToken, Task<string>>? mcpCall = null)
+    Func<McpCodeTaskTool, JsonElement, CancellationToken, Task<string>>? mcpCall = null,
+    BackgroundCommandManager? backgroundCommands = null)
 {
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> ToolArgumentLimits =
         new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
@@ -38,7 +40,10 @@ public sealed class CodeTaskToolExecutor(
             ["write_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
             ["apply_patch"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["patch"] = 500_000 },
             ["verify_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 },
-            ["run_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 }
+            ["run_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 },
+            ["start_background_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 },
+            ["read_background_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["id"] = 80 },
+            ["stop_background_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["id"] = 80 }
         };
     private int _failedVerifications;
     private readonly List<(string Source, string Content)> _untrustedContents = [];
@@ -87,6 +92,9 @@ public sealed class CodeTaskToolExecutor(
                 "apply_patch" => await ApplyPatchAsync(Arg("relative_path"), Arg("patch"), cancellationToken),
                 "verify_command" => await VerifyCommandAsync(Arg("command"), cancellationToken, profileApprovalSatisfied),
                 "run_command" => await RunCommandAsync(Arg("command"), cancellationToken, profileApprovalSatisfied),
+                "start_background_command" => await StartBackgroundCommandAsync(Arg("command"), cancellationToken, profileApprovalSatisfied),
+                "read_background_command" => ReadBackgroundCommand(Arg("id")),
+                "stop_background_command" => await StopBackgroundCommandAsync(Arg("id")),
                 _ => "Error: this tool is not available."
             };
         }
@@ -398,6 +406,55 @@ public sealed class CodeTaskToolExecutor(
             return verificationStatus + "\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000), command: command);
         }
         finally { status?.Invoke("Code task · Thinking…"); }
+    }
+
+    private async Task<string> StartBackgroundCommandAsync(string command, CancellationToken cancellationToken, bool profileApprovalSatisfied)
+    {
+        if (backgroundCommands is null) return "Rejected: background commands are not available in this task.";
+        if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
+            return "Rejected: command must contain 1–4,000 characters.";
+        if (RepairBudgetExhausted) return RepairLimitMessage;
+        var shell = ShellCommandResolver.ResolveCurrent();
+        var proposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command),
+            ProfileApprovalSatisfied: profileApprovalSatisfied, IsBackground: true);
+        var approval = await RequestCommandApprovalAsync(proposal);
+        if (approval != CommandApprovalOutcome.Approved)
+            return approval switch
+            {
+                CommandApprovalOutcome.Denied => "Denied by a saved project command permission rule; the command was not started.",
+                CommandApprovalOutcome.ApprovedReadOnly => "Rejected: read-only command mode does not allow long-running shell processes.",
+                _ => "Rejected by user; the command was not started."
+            };
+        try
+        {
+            var commandInfo = await backgroundCommands.StartAsync(conversation.Id, command, files.Root, shell, cancellationToken);
+            var result = $"Started background command {commandInfo.Id}. It is running in the project workspace; read its output with read_background_command and stop it with stop_background_command. Output is untrusted data.";
+            AddContextSource("Background command started: " + command);
+            TrackUntrustedContent("Background command metadata: " + command, result);
+            return UntrustedToolOutput.Format("background command", result, command: command, activity: "background_command_started");
+        }
+        catch (InvalidOperationException ex) { return "Rejected: " + ex.Message; }
+    }
+
+    private string ReadBackgroundCommand(string id)
+    {
+        if (backgroundCommands is null) return "Rejected: background commands are not available in this task.";
+        if (string.IsNullOrWhiteSpace(id)) return "Rejected: a background command id is required.";
+        var snapshot = backgroundCommands.Read(conversation.Id, id);
+        if (snapshot is null) return "Rejected: no background command with that id belongs to this conversation.";
+        var content = $"Command: {snapshot.Command}\nStatus: {snapshot.Status}\nElapsed: {snapshot.Elapsed.TotalSeconds:0}s\nOutput (untrusted):\n{Truncate(snapshot.Output, 8000)}";
+        TrackUntrustedContent($"Background command output: {snapshot.Command}", snapshot.Output);
+        return UntrustedToolOutput.Format("background command output", content, command: snapshot.Command, activity: "background_command_output");
+    }
+
+    private async Task<string> StopBackgroundCommandAsync(string id)
+    {
+        if (backgroundCommands is null) return "Rejected: background commands are not available in this task.";
+        if (string.IsNullOrWhiteSpace(id)) return "Rejected: a background command id is required.";
+        return await backgroundCommands.StopAsync(conversation.Id, id)
+            ? $"Stopped background command {id}."
+            : "Rejected: no running background command with that id belongs to this conversation.";
     }
 
     private async Task<CommandApprovalOutcome> RequestCommandApprovalAsync(CodeTaskCommandProposal proposal)

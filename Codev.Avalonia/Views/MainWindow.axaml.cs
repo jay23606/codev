@@ -45,7 +45,11 @@ public partial class MainWindow : Window
         Opened += (_, _) => ScheduleScrollToLatest();
         Closed += async (_, _) =>
         {
-            if (DataContext is ViewModels.MainViewModel viewModel) await viewModel.SavePendingDraftAsync();
+            if (DataContext is ViewModels.MainViewModel viewModel)
+            {
+                await viewModel.SavePendingDraftAsync();
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            }
         };
     }
 
@@ -456,7 +460,7 @@ public partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 7 };
         var permissionMode = (DataContext as ViewModels.MainViewModel)?.GetProjectCommandPermissionMode(proposal.ProjectPath)
             ?? Codev.ProjectCommandPermissionMode.AskEveryTime;
-        panel.Children.Add(new TextBlock { Text = proposal.IsVerification ? "Review verification command" : "Review project command", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
+        panel.Children.Add(new TextBlock { Text = proposal.IsBackground ? "Review background command" : proposal.IsVerification ? "Review verification command" : "Review project command", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
         panel.Children.Add(new TextBlock
         {
             Text = $"Runs through {proposal.ShellName} with your account permissions; Codev cannot sandbox it to the project folder. Verify the exact command against your request.",
@@ -482,6 +486,8 @@ public partial class MainWindow : Window
             BorderBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#555555" : "#B8B5AF"))
         };
         panel.Children.Add(command);
+        if (proposal.IsBackground)
+            panel.Children.Add(new TextBlock { Text = "This process can keep running after the response and may open a network port. Stop it from the Background commands list or close Codev. Output is captured with a size limit.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Foreground = secondaryForeground });
         panel.Children.Add(new TextBlock
         {
             Text = permissionMode == Codev.ProjectCommandPermissionMode.Auto

@@ -386,6 +386,18 @@
             <Border Grid.Row="4" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,8,22,8">
                 <Grid>
                     <StackPanel MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Stretch" Spacing="4">
+                        <Expander x:Name="BackgroundCommandsExpander" Header="{Binding BackgroundCommandsHeader}" IsExpanded="False" IsVisible="{Binding HasBackgroundCommands}" ToolTip.Tip="Commands started in the background remain visible here until they exit or you stop them.">
+                            <ItemsControl ItemsSource="{Binding BackgroundCommands}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="core:BackgroundCommandSnapshot">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,2">
+                                            <TextBlock Text="{Binding DisplayLabel}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding Command}" />
+                                            <Button Grid.Column="1" Content="Stop" Classes="soft" Padding="8,3" IsEnabled="{Binding IsRunning}" Command="{Binding $parent[Window].DataContext.StopBackgroundCommand}" CommandParameter="{Binding}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
                         <Grid ColumnDefinitions="*,Auto">
                         <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="64" MaxHeight="180" TextWrapping="Wrap" FontFamily="{Binding UiFontFamily}" FontSize="{Binding UiFontSize}" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
                             <Button Grid.Column="1" Classes="composer-send" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="21" Width="36" Height="34" VerticalAlignment="Bottom" Margin="-49,0,8,9" Command="{Binding SendCommand}" />

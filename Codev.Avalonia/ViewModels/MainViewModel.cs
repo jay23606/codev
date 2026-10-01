@@ -49,6 +49,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
     private readonly Codev.ProjectCommandPermissionRegistry _projectCommandPermissions = Codev.ProjectCommandPermissionRegistry.Load(ProjectCommandPermissionsPath);
     private readonly Codev.ProjectCommandApprovalPolicy _projectCommandApprovalPolicy;
+    private readonly Codev.BackgroundCommandManager _backgroundCommands = new();
+    private readonly DispatcherTimer _backgroundCommandTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly Codev.McpServerConfigurationStore _mcpServerConfigurations = new(McpServerConfigurationPath);
     private readonly Codev.ProjectMcpToolPermissionRegistry _projectMcpPermissions = Codev.ProjectMcpToolPermissionRegistry.Load(ProjectMcpPermissionsPath);
     private Codev.Conversation? _active;
@@ -146,6 +148,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public ObservableCollection<string> SelectedContextFiles { get; } = [];
     public ObservableCollection<Codev.GitDiffComment> PendingDiffComments { get; } = [];
     public ObservableCollection<Codev.TaskChecklistItem> TaskChecklistItems { get; } = [];
+    public ObservableCollection<Codev.BackgroundCommandSnapshot> BackgroundCommands { get; } = [];
+    public bool HasBackgroundCommands => BackgroundCommands.Count > 0;
+    public string BackgroundCommandsHeader => $"Background commands · {BackgroundCommands.Count}";
     public ObservableCollection<ContextSizeChoice> ContextSizes { get; } = [];
     public ObservableCollection<OutputStyleChoice> OutputStyles { get; } =
     [
@@ -173,6 +178,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public ICommand RemoveDiffCommentCommand { get; }
     public ICommand RewindConversationCommand { get; }
     public ICommand EditPromptCommand { get; }
+    public ICommand StopBackgroundCommand { get; }
     public ObservableCollection<ModelChoice> Models { get; } =
     [
     ];
@@ -180,6 +186,16 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public MainViewModel()
     {
         _projectCommandApprovalPolicy = new Codev.ProjectCommandApprovalPolicy(_projectCommandPermissions);
+        _backgroundCommands.Changed += (_, _) => Dispatcher.UIThread.Post(RefreshBackgroundCommands);
+        _backgroundCommandTimer.Tick += (_, _) =>
+        {
+            if (BackgroundCommands.Any(command => command.IsRunning)) RefreshBackgroundCommands();
+        };
+        _backgroundCommandTimer.Start();
+        StopBackgroundCommand = new RelayCommand(value =>
+        {
+            if (value is Codev.BackgroundCommandSnapshot command) _ = StopBackgroundCommandAsync(command);
+        });
         NewConversationCommand = new RelayCommand(_ => NewConversation());
         SelectConversationCommand = new RelayCommand(value => { if (value is Codev.Conversation conversation) SelectConversation(conversation); });
         TogglePinCommand = new RelayCommand(_ => TogglePin(), _ => ActiveConversation is not null);
@@ -1360,6 +1376,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             return false;
         }
 
+        await _backgroundCommands.StopConversationAsync(conversation.Id);
+
         var wasActive = ReferenceEquals(ActiveConversation, conversation);
         _conversations.Remove(conversation);
         if (wasActive)
@@ -1399,6 +1417,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var previousModel = Model;
         var previousProvider = Provider;
         ActiveConversation = conversation;
+        RefreshBackgroundCommands();
         _ = RefreshAgentProfilesAsync();
         _model = conversation.Model;
         _provider = conversation.Provider;
@@ -1475,6 +1494,27 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(PinLabel));
         OnPropertyChanged(nameof(ArchiveLabel));
         PersistLastActiveConversationId(conversation.Id);
+    }
+
+    private async Task StopBackgroundCommandAsync(Codev.BackgroundCommandSnapshot command)
+    {
+        await _backgroundCommands.StopAsync(command.ConversationId, command.Id);
+        RefreshBackgroundCommands();
+    }
+
+    private void RefreshBackgroundCommands()
+    {
+        var current = ActiveConversation is { } conversation ? _backgroundCommands.List(conversation.Id) : Array.Empty<Codev.BackgroundCommandSnapshot>();
+        BackgroundCommands.Clear();
+        foreach (var command in current) BackgroundCommands.Add(command);
+        OnPropertyChanged(nameof(HasBackgroundCommands));
+        OnPropertyChanged(nameof(BackgroundCommandsHeader));
+    }
+
+    public async Task StopBackgroundCommandsAndShutdownAsync()
+    {
+        _backgroundCommandTimer.Stop();
+        await _backgroundCommands.DisposeAsync();
     }
 
     public void SetProjectFolder(string path)
@@ -2376,6 +2416,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         if (ActiveConversation is not { } conversation) return;
         conversation.IsArchived = !conversation.IsArchived;
+        if (conversation.IsArchived) _ = _backgroundCommands.StopConversationAsync(conversation.Id);
         OnPropertyChanged(nameof(ArchiveLabel));
         Persist();
         RebuildLists();
@@ -2784,7 +2825,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var agentSkills = await LoadAgentSkillsAsync(conversation, cancellationToken);
         var agentSkillTools = agentSkills.ToDictionary(Codev.AgentSkillTool.FunctionName, StringComparer.Ordinal);
         var tools = Codev.CodeTaskToolSchemaFactory.CreateOllamaTools(shell, mcpSession.Tools.Values, agentProfile,
-            allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills);
+            allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true);
         var repeatedCalls = new Codev.RepeatedToolCallGuard();
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
@@ -2798,7 +2839,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
             agentProfile: agentProfile,
             agentSkills: agentSkillTools,
-            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token));
+            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
+            backgroundCommands: _backgroundCommands);
         var transcript = new System.Text.StringBuilder(mcpSession.ToConnectionTranscript());
         var initialMessageCount = history.Count;
         var maxSteps = Math.Clamp(agentProfile?.MaxSteps ?? Codev.CodeTaskLimits.MaxModelStepsPerTurn, 1, Codev.CodeTaskLimits.MaxModelStepsPerTurn);
@@ -2917,7 +2959,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var agentSkills = await LoadAgentSkillsAsync(conversation, cancellationToken);
         var agentSkillTools = agentSkills.ToDictionary(Codev.AgentSkillTool.FunctionName, StringComparer.Ordinal);
         var toolSchemas = Codev.CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(Codev.ShellCommandResolver.ResolveCurrent(), mcpSession.Tools.Values,
-            agentProfile, allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills);
+            agentProfile, allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true);
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
             _ => Task.FromResult(false), status: message => _ = SetConnectionStatusAsync(message),
@@ -2929,7 +2971,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
             agentProfile: agentProfile,
             agentSkills: agentSkillTools,
-            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token));
+            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
+            backgroundCommands: _backgroundCommands);
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var client = new Codev.CloudModelApiClient(_http);
         var runner = new Codev.OpenAiCodeTaskRunner(client);

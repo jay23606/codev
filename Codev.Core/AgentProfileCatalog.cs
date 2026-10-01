@@ -52,7 +52,7 @@ public static class AgentProfilePolicy
                     : pattern.Equals(toolName, StringComparison.OrdinalIgnoreCase);
             if (matches) permission = rule;
         }
-        if ((toolName is "run_command" or "verify_command") && command is not null)
+        if ((toolName is "run_command" or "verify_command" or "start_background_command") && command is not null)
         {
             foreach (var (pattern, rule) in profile.CommandPermissions ?? new Dictionary<string, AgentToolPermission>())
                 if (AgentProfileCatalog.CommandPatternMatches(pattern, command)) permission = rule;
@@ -98,11 +98,11 @@ public static class AgentProfileCatalog
             "Inspect relevant files, make focused changes, and verify the result. Respect the user's request and Codev's permission decisions.", AgentToolPermission.Allow),
         BuiltIn("Debug", "Reproduce a problem, test explanations, then make a focused fix.",
             "Start by reproducing the reported problem. State a testable explanation, inspect relevant evidence, change one thing at a time, and verify the fix. Do not hide or work around a failing check.", AgentToolPermission.Allow,
-            ("run_command", AgentToolPermission.Ask), ("verify_command", AgentToolPermission.Ask)),
+            ("run_command", AgentToolPermission.Ask), ("verify_command", AgentToolPermission.Ask), ("start_background_command", AgentToolPermission.Ask)),
         BuiltIn("Ask", "Inspect and explain without changing files or running shell commands.",
             "Answer by inspecting the selected project as needed. Do not edit or create files, apply patches, or run shell commands. MCP calls require their normal approval policy.", AgentToolPermission.Allow,
             ("create_file", AgentToolPermission.Deny), ("write_file", AgentToolPermission.Deny), ("apply_patch", AgentToolPermission.Deny),
-            ("run_command", AgentToolPermission.Deny), ("verify_command", AgentToolPermission.Deny), ("mcp:*", AgentToolPermission.Ask)),
+            ("run_command", AgentToolPermission.Deny), ("verify_command", AgentToolPermission.Deny), ("start_background_command", AgentToolPermission.Deny), ("mcp:*", AgentToolPermission.Ask)),
         BuiltIn("Orchestrator", "Delegate bounded subtasks to isolated child conversations.",
             "Break the user's task into bounded, independent subtasks and delegate them using delegate_task. Each child starts immediately in its own Git worktree and runs concurrently with this response; up to three children may run. Children cannot create more children. The parent may finish before child results arrive; use returned results in a follow-up when needed. Do not claim a child is complete until its result appears.",
             AgentToolPermission.Deny, ("delegate_task", AgentToolPermission.Allow)),
