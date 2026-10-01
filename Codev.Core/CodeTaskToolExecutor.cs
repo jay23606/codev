@@ -28,7 +28,8 @@ public sealed class CodeTaskToolExecutor(
     IReadOnlyDictionary<string, SlashCommandDefinition>? agentSkills = null,
     Func<SlashCommandDefinition, string, CancellationToken, Task<string>>? agentSkillInvocation = null,
     Func<McpCodeTaskTool, JsonElement, CancellationToken, Task<string>>? mcpCall = null,
-    BackgroundCommandManager? backgroundCommands = null)
+    BackgroundCommandManager? backgroundCommands = null,
+    Func<string, CancellationToken, Task<string>>? afterFileWrite = null)
 {
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> ToolArgumentLimits =
         new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
@@ -277,11 +278,17 @@ public sealed class CodeTaskToolExecutor(
         if (!await reviewFile(new CodeTaskFileProposal(relativePath, "", content, IsNewFile: true, ContextSources: _contextSources.ToArray())))
             return "Rejected by user; no file was created.";
         await files.CreateFileAtomicAsync(relativePath, content, cancellationToken);
-        var created = await files.ReadFileSnapshotAsync(relativePath, cancellationToken);
-        ConversationFileChangeHistoryService.Record(conversation, new FileChangeRecord(relativePath, null, DateTimeOffset.Now, "Create", PreviousFileExisted: false,
-            TurnUserMessageIndex: turnUserMessageIndex, ResultFileExisted: true, ResultSha256: created.Sha256));
+        var formatterResult = "";
+        FileSnapshot created;
+        try { formatterResult = await RunAfterFileWriteAsync(relativePath, cancellationToken); }
+        finally
+        {
+            created = await files.ReadFileSnapshotAsync(relativePath, CancellationToken.None);
+            ConversationFileChangeHistoryService.Record(conversation, new FileChangeRecord(relativePath, null, DateTimeOffset.Now, "Create", PreviousFileExisted: false,
+                TurnUserMessageIndex: turnUserMessageIndex, ResultFileExisted: true, ResultSha256: created.Sha256));
+        }
         return FormatFileChangeOutput("project file created", "Created the new project file.", relativePath,
-            "created_file", content);
+            "created_file", created.Content, formatterResult);
     }
 
     private async Task<string> WriteFileAsync(string relativePath, string content, CancellationToken cancellationToken)
@@ -312,15 +319,34 @@ public sealed class CodeTaskToolExecutor(
             return "Rejected by user; the file was left unchanged.";
         var checkpoint = await files.CreateCheckpointAsync(relativePath, conversation.Id, cancellationToken, original.Sha256);
         await files.WriteFileAtomicAsync(relativePath, content, cancellationToken, original.Sha256);
-        var written = await files.ReadFileSnapshotAsync(relativePath, cancellationToken);
-        if (checkpoint is not null) ConversationFileChangeHistoryService.Record(conversation, new FileChangeRecord(relativePath, checkpoint, DateTimeOffset.Now, "Edit",
-            TurnUserMessageIndex: turnUserMessageIndex, ResultFileExisted: true, ResultSha256: written.Sha256));
+        var formatterResult = "";
+        FileSnapshot written;
+        try { formatterResult = await RunAfterFileWriteAsync(relativePath, cancellationToken); }
+        finally
+        {
+            written = await files.ReadFileSnapshotAsync(relativePath, CancellationToken.None);
+            if (checkpoint is not null) ConversationFileChangeHistoryService.Record(conversation, new FileChangeRecord(relativePath, checkpoint, DateTimeOffset.Now, "Edit",
+                TurnUserMessageIndex: turnUserMessageIndex, ResultFileExisted: true, ResultSha256: written.Sha256));
+        }
         return FormatFileChangeOutput("project file updated", "Applied the change. A local checkpoint was saved before the change.", relativePath,
-            proposedPatch is null ? "edited_file" : "applied_patch", content);
+            proposedPatch is null ? "edited_file" : "applied_patch", written.Content, formatterResult);
     }
 
-    private static string FormatFileChangeOutput(string source, string message, string relativePath, string activity, string proposedContent)
+    private async Task<string> RunAfterFileWriteAsync(string relativePath, CancellationToken cancellationToken)
     {
+        if (afterFileWrite is null) return "";
+        try { return await afterFileWrite(relativePath, cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return UntrustedToolOutput.Format("project formatter error", $"Formatter hook failed ({ex.GetType().Name}); the accepted file change remains checkpointed.", relativePath, activity: "formatter");
+        }
+    }
+
+    private static string FormatFileChangeOutput(string source, string message, string relativePath, string activity, string proposedContent,
+        string formatterResult = "")
+    {
+        if (!string.IsNullOrWhiteSpace(formatterResult)) message += "\n" + formatterResult;
         var warnings = InstructionFollowingContentDetector.Detect(proposedContent);
         if (warnings.Count > 0)
             message += "\nAdvisory: the proposed file content matched instruction-risk patterns (" + string.Join(", ", warnings) +

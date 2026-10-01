@@ -534,6 +534,28 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Post_write_formatter_result_is_checkpointed_with_the_preformatted_contents()
+    {
+        var filePath = Path.Combine(_root, "Program.cs");
+        await File.WriteAllTextAsync(filePath, "class Old {}\n");
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(true), _ => Task.FromResult(false),
+            afterFileWrite: async (relativePath, token) =>
+            {
+                Assert.Equal("Program.cs", relativePath);
+                await File.WriteAllTextAsync(filePath, "class New { }\n", token);
+                return "formatter completed";
+            });
+
+        var result = await ExecuteAsync(executor, "write_file", """{"relative_path":"Program.cs","content":"class New {}\n"}""");
+
+        Assert.Contains("formatter completed", result);
+        var change = Assert.Single(_conversation.FileChanges);
+        Assert.Equal(FileSnapshot.ComputeSha256("class New { }\n"), change.ResultSha256);
+        Assert.Equal("class Old {}\n", await new WorkspaceFileService(_root).ReadCheckpointAsync("Program.cs", _conversation.Id, change.CheckpointPath!));
+    }
+
+    [Fact]
     public async Task Strict_patch_is_reviewed_then_checkpointed_and_applied()
     {
         var filePath = Path.Combine(_root, "Program.cs");

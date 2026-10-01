@@ -2454,6 +2454,72 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ProjectFormatters_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || !viewModel.IsProjectTrusted ||
+            viewModel.ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath) return;
+        string text;
+        try { text = await Codev.ProjectFormatterCatalog.ReadConfigurationTextAsync(projectPath, isTrusted: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            viewModel.ReportContextActionStatus($"Could not read formatter configuration ({ex.GetType().Name}).");
+            return;
+        }
+
+        var editor = new TextBox
+        {
+            Text = text,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+            FontFamily = new global::Avalonia.Media.FontFamily("monospace"),
+            FontSize = 12,
+            MinHeight = 260,
+            Watermark = Codev.ProjectFormatterCatalog.EmptyConfiguration
+        };
+        var status = new TextBlock { Text = "Formatters are disabled until configured. A formatter runs only after an accepted file change and still follows this project's command permission mode.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 11 };
+        var save = new Button { Content = "Validate and save", Classes = { "soft" } };
+        var close = new Button { Content = "Close", Classes = { "soft" } };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { save, close } };
+        var layout = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto"), RowSpacing = 9 };
+        layout.Children.Add(new TextBlock { Text = "Trusted project formatter configuration · .codev/formatters.json", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        Grid.SetRow(editor, 1);
+        layout.Children.Add(editor);
+        Grid.SetRow(status, 2);
+        layout.Children.Add(status);
+        Grid.SetRow(buttons, 3);
+        layout.Children.Add(buttons);
+        var dialog = new Window
+        {
+            Title = "Project formatters",
+            Width = 760,
+            Height = Math.Min(540, Math.Max(400, Bounds.Height - 80)),
+            MinWidth = 560,
+            MinHeight = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = layout
+        };
+        close.Click += (_, _) => dialog.Close();
+        save.Click += async (_, _) =>
+        {
+            if (!Codev.ProjectFormatterCatalog.ValidateJson(editor.Text ?? "", out _, out var error))
+            {
+                status.Text = error;
+                return;
+            }
+            try
+            {
+                await Codev.ProjectFormatterCatalog.SaveAsync(projectPath, editor.Text ?? "", viewModel.IsProjectTrusted);
+                status.Text = "Formatter configuration saved. Formatters remain governed by this project's permission mode.";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            {
+                status.Text = $"Could not save formatter configuration ({ex.GetType().Name}).";
+            }
+        };
+        await dialog.ShowDialog(this);
+    }
+
     private async void ProjectCommandPermissions_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath) return;

@@ -14,6 +14,8 @@ Codev is a standalone desktop coding workspace for local and hosted language mod
 
 Avalonia Code tasks include reusable built-in and Markdown agent profiles. See [custom agent profiles](docs/custom-agent-profiles.md) for the profile format and permission behavior.
 
+Trusted Avalonia projects can opt into formatters that run after accepted Code task file changes. See [project formatters](docs/project-formatters.md) for setup, command permissions, and limits.
+
 ## First preview
 
 - A chat-first desktop layout, with dark mode as the default and light mode available

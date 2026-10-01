@@ -173,6 +173,7 @@
                                     <MenuItem Header="{Binding FileChangesLabel}" IsEnabled="{Binding CanReviewFileChanges}" Click="ReviewFileChanges_Click" />
                                     <MenuItem Header="{Binding ProjectTrustLabel}" IsEnabled="{Binding CanManageProjectTrust}" Click="ToggleProjectTrust_Click" ToolTip.Tip="{Binding ProjectTrustTooltip}" />
                                     <MenuItem Header="Command permissions…" IsEnabled="{Binding HasProject}" Click="ProjectCommandPermissions_Click" ToolTip.Tip="Choose whether exact saved command rules may skip approval for this project" />
+                                    <MenuItem Header="Project formatters…" IsEnabled="{Binding IsProjectTrusted}" Click="ProjectFormatters_Click" ToolTip.Tip="Configure opt-in formatters that run after accepted file changes" />
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>
@@ -277,6 +278,7 @@
                                 <Separator />
                                 <MenuItem Header="{Binding TaskChecklistLabel}" IsVisible="{Binding ShouldShowTaskChecklist}" Click="TaskChecklist_Click" />
                                 <MenuItem Header="Command permissions…" IsEnabled="{Binding HasProject}" Click="ProjectCommandPermissions_Click" ToolTip.Tip="Choose Auto, allowlist, read-only, or ask-every-time approval for this workspace" />
+                                <MenuItem Header="Project formatters…" IsEnabled="{Binding IsProjectTrusted}" Click="ProjectFormatters_Click" ToolTip.Tip="Configure opt-in formatters that run after accepted file changes" />
                             </MenuFlyout>
                         </Button.Flyout>
                     </Button>

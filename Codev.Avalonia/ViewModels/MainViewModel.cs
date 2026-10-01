@@ -1103,6 +1103,33 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false));
     }
 
+    private async Task<string> RunProjectFormatterAfterWriteAsync(Codev.Conversation conversation,
+        Codev.WorkspaceFileService files, string relativePath, CancellationToken cancellationToken)
+    {
+        if (conversation.ProjectPath is not { Length: > 0 } projectPath || !_projectFolderTrust.IsTrusted(projectPath)) return "";
+        var loaded = await Codev.ProjectFormatterCatalog.LoadAsync(projectPath, isTrusted: true, cancellationToken);
+        if (loaded.Warning is { Length: > 0 } warning)
+        {
+            _ = SetConnectionStatusAsync("Project formatter: " + warning);
+            return Codev.UntrustedToolOutput.Format("project formatter warning", warning, Codev.ProjectFormatterCatalog.RelativeConfigPath,
+                activity: "formatter");
+        }
+        var formatter = Codev.ProjectFormatterCatalog.ForPath(loaded.Formatters, relativePath);
+        if (formatter is null) return "";
+
+        var fullPath = files.ResolvePath(relativePath);
+        var result = await Codev.ProjectFormatterCatalog.RunAsync(formatter, fullPath, relativePath, projectPath,
+            proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)),
+            message => _ = SetConnectionStatusAsync(message), cancellationToken,
+            isStillTrusted: () => _projectFolderTrust.IsTrusted(projectPath) &&
+                string.Equals(Path.GetFullPath(projectPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    Path.GetFullPath(files.Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+        var output = string.IsNullOrWhiteSpace(result.Output) ? result.Message : result.Message + "\n" + result.Output;
+        return Codev.UntrustedToolOutput.Format(result.Succeeded ? "formatter completed" : "formatter result", output,
+            Codev.ProjectFormatterCatalog.DisplayCommand(formatter, relativePath), activity: "formatter");
+    }
+
     private async Task EnableCodeTaskWithWorkspaceAsync(Codev.Conversation conversation)
     {
         try
@@ -2862,7 +2889,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentProfile: agentProfile,
             agentSkills: agentSkillTools,
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
-            backgroundCommands: _backgroundCommands);
+            backgroundCommands: _backgroundCommands,
+            afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token));
         var transcript = new System.Text.StringBuilder(mcpSession.ToConnectionTranscript());
         var initialMessageCount = history.Count;
         var maxSteps = Math.Clamp(agentProfile?.MaxSteps ?? Codev.CodeTaskLimits.MaxModelStepsPerTurn, 1, Codev.CodeTaskLimits.MaxModelStepsPerTurn);
@@ -2994,7 +3022,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentProfile: agentProfile,
             agentSkills: agentSkillTools,
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
-            backgroundCommands: _backgroundCommands);
+            backgroundCommands: _backgroundCommands,
+            afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token));
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var client = new Codev.CloudModelApiClient(_http);
         var runner = new Codev.OpenAiCodeTaskRunner(client);
