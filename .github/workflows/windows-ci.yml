@@ -79,6 +79,11 @@ jobs:
       - name: Run portable tests
         run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-portable-tests.trx"
 
+      - name: Run native Windows MCP OAuth credential-vault smoke
+        env:
+          CODEV_TEST_NATIVE_MCP_OAUTH_VAULT: '1'
+        run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
+
       - name: Run Windows UI tests
         run: dotnet test Codev.Windows.Tests\Codev.Windows.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-windows-tests.trx"
 
