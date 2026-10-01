@@ -48,6 +48,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly Codev.GitChildWorktreeManager _childWorktrees = new(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
     private readonly Codev.ProjectCommandPermissionRegistry _projectCommandPermissions = Codev.ProjectCommandPermissionRegistry.Load(ProjectCommandPermissionsPath);
+    private readonly Codev.ProjectCommandApprovalPolicy _projectCommandApprovalPolicy;
     private readonly Codev.McpServerConfigurationStore _mcpServerConfigurations = new(McpServerConfigurationPath);
     private readonly Codev.ProjectMcpToolPermissionRegistry _projectMcpPermissions = Codev.ProjectMcpToolPermissionRegistry.Load(ProjectMcpPermissionsPath);
     private Codev.Conversation? _active;
@@ -178,6 +179,7 @@ public sealed class MainViewModel : ViewModelBase
 
     public MainViewModel()
     {
+        _projectCommandApprovalPolicy = new Codev.ProjectCommandApprovalPolicy(_projectCommandPermissions);
         NewConversationCommand = new RelayCommand(_ => NewConversation());
         SelectConversationCommand = new RelayCommand(value => { if (value is Codev.Conversation conversation) SelectConversation(conversation); });
         TogglePinCommand = new RelayCommand(_ => TogglePin(), _ => ActiveConversation is not null);
@@ -966,73 +968,15 @@ public sealed class MainViewModel : ViewModelBase
     private async Task<Codev.CommandApprovalOutcome> ApproveCommandWithProjectPolicyAsync(Codev.CodeTaskCommandProposal proposal,
         IReadOnlyList<string> contextExclusions)
     {
-        var decision = _projectCommandPermissions.Evaluate(proposal.ProjectPath, proposal.Command, proposal.ShellName,
-            allowReadOnly: !proposal.IsVerification, contextExclusions: contextExclusions, isVerification: proposal.IsVerification);
-        if (decision == Codev.ProjectCommandPermissionDecision.Deny)
+        var result = await _projectCommandApprovalPolicy.ApproveAsync(proposal, contextExclusions, ApproveProjectCommandAsync);
+        if (result.RulesChanged)
         {
-            _ = SetConnectionStatusAsync("Project command permission denied this exact command; it was not run.");
-            return Codev.CommandApprovalOutcome.Denied;
+            OnPropertyChanged(nameof(ProjectCommandPermissionMode));
+            OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
+            OnPropertyChanged(nameof(ProjectCommandPermissionRules));
         }
-        if (proposal.ProfileApprovalSatisfied && decision == Codev.ProjectCommandPermissionDecision.Ask)
-        {
-            _ = SetConnectionStatusAsync("The selected agent profile approved this command once; the project permission mode was left unchanged.");
-            return Codev.CommandApprovalOutcome.Approved;
-        }
-        if (decision == Codev.ProjectCommandPermissionDecision.Allow)
-        {
-            var mode = _projectCommandPermissions.GetMode(proposal.ProjectPath);
-            if (_projectCommandPermissions.ShouldUseBoundedFileInspection(proposal.ProjectPath, proposal.Command, decision,
-                    proposal.IsVerification, proposal.ShellName, contextExclusions))
-            {
-                _ = SetConnectionStatusAsync(mode == Codev.ProjectCommandPermissionMode.Auto
-                    ? "Auto mode · recognized read-only inspection; running through bounded file APIs without launching a shell."
-                    : "Recognized read-only command; running through Codev's bounded file inspection, without launching a shell.");
-                return Codev.CommandApprovalOutcome.ApprovedReadOnly;
-            }
-            _ = SetConnectionStatusAsync(mode == Codev.ProjectCommandPermissionMode.Auto
-                ? "Auto mode · running command without approval. Commands are unsandboxed and have your account permissions."
-                : "Exact project allowlist match; running the previously approved command.");
-            return Codev.CommandApprovalOutcome.Approved;
-        }
-
-        var choice = await (ApproveProjectCommandAsync?.Invoke(proposal) ?? Task.FromResult(Codev.ProjectCommandApprovalChoice.Cancel));
-        switch (choice)
-        {
-            case Codev.ProjectCommandApprovalChoice.RunOnce:
-                return Codev.CommandApprovalOutcome.Approved;
-            case Codev.ProjectCommandApprovalChoice.AllowExactCommand:
-                try
-                {
-                    await _projectCommandPermissions.SetRuleAsync(proposal.ProjectPath, proposal.Command,
-                        Codev.ProjectCommandPermissionDecision.Allow);
-                    OnPropertyChanged(nameof(ProjectCommandPermissionMode));
-                    OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
-                    OnPropertyChanged(nameof(ProjectCommandPermissionRules));
-                    _ = SetConnectionStatusAsync("Exact command saved and approved for this run; the current permission mode was kept.");
-                    return Codev.CommandApprovalOutcome.Approved;
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-                {
-                    _ = SetConnectionStatusAsync($"Could not save the project allow rule ({ex.GetType().Name}); command was not run.");
-                    return Codev.CommandApprovalOutcome.Rejected;
-                }
-            case Codev.ProjectCommandApprovalChoice.DenyExactCommand:
-                try
-                {
-                    await _projectCommandPermissions.SetRuleAsync(proposal.ProjectPath, proposal.Command,
-                        Codev.ProjectCommandPermissionDecision.Deny);
-                    OnPropertyChanged(nameof(ProjectCommandPermissionRules));
-                    _ = SetConnectionStatusAsync("Exact command denied for this project; it was not run.");
-                    return Codev.CommandApprovalOutcome.Denied;
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-                {
-                    _ = SetConnectionStatusAsync($"Could not save the project deny rule ({ex.GetType().Name}); command was not run.");
-                    return Codev.CommandApprovalOutcome.Rejected;
-                }
-            default:
-                return Codev.CommandApprovalOutcome.Rejected;
-        }
+        if (result.StatusMessage.Length > 0) _ = SetConnectionStatusAsync(result.StatusMessage);
+        return result.Outcome;
     }
 
     private async void ToggleCodeTaskMode()
