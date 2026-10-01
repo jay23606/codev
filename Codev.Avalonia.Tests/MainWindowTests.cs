@@ -188,7 +188,12 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public async Task Agent_profile_editor_validates_then_saves_and_reloads_user_profile()
     {
-        var root = Path.Combine(Path.GetTempPath(), "Codev-agent-profile-editor-ui", Guid.NewGuid().ToString("N"));
+        // macOS commonly exposes /tmp as a symlink to /private/var/tmp. The
+        // profile store intentionally rejects symlinked path components, so
+        // use the canonical temp path in this fixture.
+        var tempRoot = Path.GetTempPath();
+        if (OperatingSystem.IsMacOS()) tempRoot = new DirectoryInfo(tempRoot).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? tempRoot;
+        var root = Path.Combine(tempRoot, "Codev-agent-profile-editor-ui", Guid.NewGuid().ToString("N"));
         var profileStore = new UserAgentProfileStore(root);
         var profileService = new TestAgentProfileEditorService(profileStore);
         var editor = new AgentProfileEditorWindow(profileService, await profileService.GetUserAgentProfileDocumentsAsync());
