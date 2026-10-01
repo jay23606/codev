@@ -13,8 +13,10 @@ public sealed class OllamaStructuredPlanClientTests
     [Fact]
     public async Task Sends_schema_and_returns_a_formatted_plan_with_token_count()
     {
+        var payloadCallbackCompleted = false;
         using var http = new HttpClient(new StubHandler(request =>
         {
+            Assert.True(payloadCallbackCompleted, "The last-request context callback should complete before sending the request.");
             using var payload = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
             var root = payload.RootElement;
             Assert.Equal("object", root.GetProperty("format").GetProperty("type").GetString());
@@ -27,7 +29,12 @@ public sealed class OllamaStructuredPlanClientTests
         }));
 
         var result = await new OllamaStructuredPlanClient(http, Endpoint).CreatePlanAsync("local-model", Messages,
-            new Dictionary<string, object> { ["num_ctx"] = 4096 }, think: true);
+            new Dictionary<string, object> { ["num_ctx"] = 4096 }, think: true, onRequestPayload: body =>
+            {
+                Assert.Contains("\"format\"", body, StringComparison.Ordinal);
+                payloadCallbackCompleted = true;
+                return Task.CompletedTask;
+            });
 
         Assert.True(result.UsedStructuredOutput);
         Assert.Equal(123, result.PromptTokens);
