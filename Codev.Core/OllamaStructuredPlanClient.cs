@@ -36,7 +36,7 @@ public sealed class OllamaStructuredPlanClient(HttpClient http, Uri endpoint)
         """).RootElement.Clone();
 
     public async Task<OllamaStructuredPlanResult> CreatePlanAsync(string model, IReadOnlyList<ChatMessage> messages,
-        IReadOnlyDictionary<string, object>? options, bool think, Action<string>? onRequestPayload = null,
+        IReadOnlyDictionary<string, object>? options, bool think, Func<string, Task>? onRequestPayload = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
@@ -69,7 +69,7 @@ public sealed class OllamaStructuredPlanClient(HttpClient http, Uri endpoint)
 
     private async Task<OllamaPlanResponse> SendAsync(string model, IReadOnlyList<ChatMessage> messages,
         IReadOnlyDictionary<string, object>? options, bool think, bool useSchema,
-        Action<string>? onRequestPayload, CancellationToken cancellationToken)
+        Func<string, Task>? onRequestPayload, CancellationToken cancellationToken)
     {
         var payload = new Dictionary<string, object>
         {
@@ -82,7 +82,7 @@ public sealed class OllamaStructuredPlanClient(HttpClient http, Uri endpoint)
         if (useSchema) payload["format"] = PlanSchema;
 
         var body = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
-        onRequestPayload?.Invoke(body);
+        if (onRequestPayload is not null) await onRequestPayload(body).ConfigureAwait(false);
         using var request = new HttpRequestMessage(HttpMethod.Post, OllamaEndpoint.ApiUri(endpoint, "api/chat"))
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json")
