@@ -158,11 +158,17 @@ public sealed class MainWindowTests
 
             Assert.True(viewModel.IsQueuePaused);
             Assert.Equal("Saved locally · select Resume saved queue to run", viewModel.Messages[1].Content);
-            Assert.Contains("Resume saved queue", viewModel.QueueStatusLabel, StringComparison.Ordinal);
+            Assert.Contains("Resume to continue", viewModel.QueueStatusLabel, StringComparison.Ordinal);
             var resume = Assert.Single(window.GetVisualDescendants().OfType<Button>(),
                 button => button.Content?.ToString() == "Resume saved queue");
             Assert.True(resume.IsVisible);
             Assert.True(resume.IsEnabled);
+
+            viewModel.Draft = "A follow-up must stay behind this conversation's saved turn.";
+            viewModel.SendCommand.Execute(null);
+            Assert.False(viewModel.IsGenerating);
+            Assert.Equal("Saved locally · select Resume saved queue to run", viewModel.Messages[3].Content);
+            Assert.Equal(2, viewModel.ActiveConversation!.PendingTurns.Count);
         }
         finally
         {

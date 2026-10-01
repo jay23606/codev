@@ -523,9 +523,18 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public bool IsQueuePaused => _queuePaused;
     public bool CanClearConversation => Codev.ConversationHistoryClearService.CanClear(ActiveConversation,
         ActiveConversation is { } conversation && IsConversationBusy(conversation));
-    public string QueueStatusLabel => HasQueuedTurns
-        ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · select Resume saved queue" : $"{_requestQueue.Count} request(s) queued"
-        : "";
+    public string QueueStatusLabel
+    {
+        get
+        {
+            if (!HasQueuedTurns) return "";
+            if (!_queuePaused) return $"{_requestQueue.Count} request(s) queued";
+            var savedCount = _requestQueue.Count(turn => turn.PausedForRecovery);
+            var readyCount = _requestQueue.Count(IsRunnableWhileRecoveryPaused);
+            if (readyCount > 0) return $"{savedCount} saved · {readyCount} ready";
+            return IsGenerating ? $"{savedCount} saved · response running" : $"{savedCount} saved · Resume to continue";
+        }
+    }
     public bool IsGenerating
     {
         get => _isGenerating;
@@ -2571,11 +2580,13 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         conversation.PendingRequestCount++;
         OnPropertyChanged(nameof(CanReviewFileChanges));
         ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
+        var waitsForSavedTurn = _queuePaused && _requestQueue.Any(turn => turn.PausedForRecovery &&
+            ReferenceEquals(turn.Conversation, conversation));
         var turn = new QueuedChatTurn(conversation, queuedTurn);
         _requestQueue.Enqueue(turn);
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
-        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", QueuedMessageStatus());
+        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", QueuedMessageStatus(waitsForSavedTurn));
         if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
         OnPropertyChanged(nameof(QueueStatusLabel));
         OnPropertyChanged(nameof(HasQueuedTurns));
@@ -2585,7 +2596,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(MessageCountLabel));
         Persist();
         RebuildLists();
-        if (!_queuePaused) _ = ProcessQueuedTurnsAsync();
+        _ = ProcessQueuedTurnsAsync();
         await Task.CompletedTask;
     }
 
@@ -2805,13 +2816,13 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     private async Task ProcessQueuedTurnsAsync()
     {
-        if (_queueProcessorRunning || _queuePaused || _requestQueue.Count == 0) return;
+        if (_queueProcessorRunning || _requestQueue.Count == 0 || !HasRunnableQueuedTurn()) return;
         _queueProcessorRunning = true;
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         try
         {
-            while (!_queuePaused && _requestQueue.TryDequeue(out var turn))
+            while (TryDequeueRunnableTurn(out var turn))
             {
                 var userIndex = turn.Turn.AssistantIndex - 1;
                 if (userIndex >= 0 && userIndex < turn.Conversation.Messages.Count && turn.Conversation.Messages[userIndex].IsQueued)
@@ -3629,7 +3640,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         foreach (var item in restored)
         {
             item.Conversation.PendingRequestCount++;
-            _requestQueue.Enqueue(new QueuedChatTurn(item.Conversation, item.Turn));
+            _requestQueue.Enqueue(new QueuedChatTurn(item.Conversation, item.Turn, PausedForRecovery: true));
             var assistantIndex = item.Turn.AssistantIndex;
             if (assistantIndex < item.Conversation.Messages.Count &&
                 item.Conversation.Messages[assistantIndex].Content == "Queued locally · waiting for the current response")
@@ -3655,9 +3666,43 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         Persist();
     }
 
-    private string QueuedMessageStatus() => _queuePaused
+    private string QueuedMessageStatus(bool waitsForSavedTurn = false) => waitsForSavedTurn
         ? SavedQueueMessageStatus
         : "Queued locally · waiting for the current response";
+
+    private bool HasRunnableQueuedTurn()
+    {
+        if (!_queuePaused) return _requestQueue.Count > 0;
+        return _requestQueue.Any(IsRunnableWhileRecoveryPaused);
+    }
+
+    private bool IsRunnableWhileRecoveryPaused(QueuedChatTurn candidate) =>
+        !candidate.PausedForRecovery && !_requestQueue.Any(saved => saved.PausedForRecovery &&
+            ReferenceEquals(saved.Conversation, candidate.Conversation) &&
+            saved.Turn.AssistantIndex < candidate.Turn.AssistantIndex);
+
+    private bool TryDequeueRunnableTurn(out QueuedChatTurn turn)
+    {
+        if (!_queuePaused)
+            return _requestQueue.TryDequeue(out turn!);
+
+        var candidate = _requestQueue.FirstOrDefault(IsRunnableWhileRecoveryPaused);
+        if (candidate is null)
+        {
+            turn = null!;
+            return false;
+        }
+
+        var remaining = _requestQueue.Count;
+        turn = null!;
+        for (var index = 0; index < remaining; index++)
+        {
+            var item = _requestQueue.Dequeue();
+            if (turn is null && ReferenceEquals(item, candidate)) turn = item;
+            else _requestQueue.Enqueue(item);
+        }
+        return turn is not null;
+    }
 
     private const string SavedQueueMessageStatus = "Saved locally · select Resume saved queue to run";
 
@@ -3690,7 +3735,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             Messages.Clear();
             foreach (var message in conversation.Messages) Messages.Add(message);
         }
-        if (_requestQueue.Count == 0) _queuePaused = false;
+        if (!_requestQueue.Any(turn => turn.PausedForRecovery)) _queuePaused = false;
         OnPropertyChanged(nameof(HasQueuedTurns));
         OnPropertyChanged(nameof(CanReviewFileChanges));
         ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
@@ -3702,6 +3747,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         ((RelayCommand)CancelQueuedCommand).NotifyCanExecuteChanged();
         Persist();
         RebuildLists();
+        _ = ProcessQueuedTurnsAsync();
     }
 
     public bool SetQueueEnabled(bool enabled)
@@ -4675,7 +4721,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         [property: JsonPropertyName("content")] string Content,
         [property: JsonPropertyName("tool_calls"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? ToolCalls = null,
         [property: JsonPropertyName("tool_name"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolName = null);
-    private sealed record QueuedChatTurn(Codev.Conversation Conversation, Codev.PersistedQueuedTurn Turn);
+    private sealed record QueuedChatTurn(Codev.Conversation Conversation, Codev.PersistedQueuedTurn Turn,
+        bool PausedForRecovery = false);
     private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;
 }
 
