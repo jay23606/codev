@@ -684,7 +684,12 @@ public partial class MainWindow : Window
     private async void Settings_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        viewModel.RefreshSemanticIndexStatus();
         var endpoint = new TextBox { Text = viewModel.OllamaEndpointDisplay, MinWidth = 380 };
+        var embeddingModel = new TextBox { Text = viewModel.EmbeddingModel, MinWidth = 220 };
+        var semanticStatus = new TextBlock { Text = viewModel.SemanticIndexStatus, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var buildSemanticIndex = new Button { Content = "Build / update current project index", IsEnabled = viewModel.CanBuildSemanticIndex };
+        var deleteSemanticIndex = new Button { Content = "Delete current project index", IsEnabled = viewModel.HasSemanticIndexForProject };
         var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
         var save = new Button { Content = "Save and reconnect", MinWidth = 150 };
         var close = new Button { Content = "Close", MinWidth = 80 };
@@ -705,12 +710,33 @@ public partial class MainWindow : Window
                     new TextBlock { Text = "Ollama server URL" },
                     endpoint,
                     new TextBlock { Text = "Default: http://127.0.0.1:11434. A non-local server receives prompts and any project context you choose to include. Credentials in the URL are not supported.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxWidth = 440 },
+                    new Separator(),
+                    new TextBlock { Text = "Local semantic search · Ollama embeddings model" },
+                    embeddingModel,
+                    new TextBlock { Text = "Indexes the attached project only when you click Build. The directory must be trusted. Source text and vectors stay on this machine. Uses an installed model such as nomic-embed-text; downloads are never automatic. Rebuild after project changes; updates process only changed chunks.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxWidth = 550 },
+                    new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 8, Children = { buildSemanticIndex, deleteSemanticIndex } },
+                    semanticStatus,
                     status,
                     buttons
                 }
             }
         };
         close.Click += (_, _) => dialog.Close();
+        embeddingModel.TextChanged += (_, _) => viewModel.EmbeddingModel = embeddingModel.Text ?? "";
+        buildSemanticIndex.Click += async (_, _) =>
+        {
+            buildSemanticIndex.IsEnabled = deleteSemanticIndex.IsEnabled = false;
+            await viewModel.UpdateSemanticIndexAsync();
+            semanticStatus.Text = viewModel.SemanticIndexStatus;
+            deleteSemanticIndex.IsEnabled = viewModel.HasSemanticIndexForProject;
+            buildSemanticIndex.IsEnabled = viewModel.CanBuildSemanticIndex;
+        };
+        deleteSemanticIndex.Click += (_, _) =>
+        {
+            viewModel.DeleteSemanticIndexForProject();
+            semanticStatus.Text = viewModel.SemanticIndexStatus;
+            deleteSemanticIndex.IsEnabled = viewModel.HasSemanticIndexForProject;
+        };
         save.Click += async (_, _) =>
         {
             if (!Codev.OllamaEndpoint.TryParse(endpoint.Text, out var parsed, out var error))

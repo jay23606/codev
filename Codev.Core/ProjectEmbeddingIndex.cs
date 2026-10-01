@@ -1,0 +1,196 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+namespace Codev;
+
+public sealed record ProjectEmbeddingChunk(string RelativePath, int Chunk, string Content, string Hash, float[] Embedding);
+public sealed record ProjectEmbeddingIndexData(string Model, List<ProjectEmbeddingChunk> Chunks);
+public sealed record SemanticSearchResult(string RelativePath, int Chunk, double Score, string Content);
+
+/// <summary>Opt-in, per-project local vector index stored under the caller's Codev data directory.</summary>
+public sealed class ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileService files, OllamaEmbeddingClient client, string model)
+{
+    public const int ChunkCharacters = 1800;
+    public const int ChunkOverlap = 240;
+    public const int MaxIndexedFiles = 8000;
+    public const long MaxIndexedBytes = 80L * 1024 * 1024;
+    public const int MaxSearchResults = 8;
+    public const int MaxStoredChunks = 40_000;
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private readonly string _indexPath = GetIndexPath(dataDirectory, files.Root);
+
+    public static string GetIndexPath(string dataDirectory, string projectPath)
+    {
+        var root = Path.GetFullPath(projectPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var identity = OperatingSystem.IsWindows() ? root.ToUpperInvariant() : root;
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
+        return Path.Combine(dataDirectory, "Codev", "embeddings", key + ".json");
+    }
+
+    public static bool HasIndex(string dataDirectory, string projectPath) => File.Exists(GetIndexPath(dataDirectory, projectPath));
+
+    public static void Delete(string dataDirectory, string projectPath)
+    {
+        var path = GetIndexPath(dataDirectory, projectPath);
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    public async Task<int> UpdateAsync(IProgress<(int Done, int Total)>? progress = null, CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? additionalExclusions = null, Func<bool>? canContinue = null)
+    {
+        EnsureCanContinue(canContinue, cancellationToken);
+        var previous = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        var oldByKey = previous?.Chunks.GroupBy(Key, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, ProjectEmbeddingChunk>(StringComparer.OrdinalIgnoreCase);
+        var oldByContent = previous?.Model == model
+            ? previous.Chunks.GroupBy(chunk => chunk.Hash + "\0" + chunk.Content, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal)
+            : new Dictionary<string, ProjectEmbeddingChunk>(StringComparer.OrdinalIgnoreCase);
+        var updated = new List<ProjectEmbeddingChunk>();
+        var inputs = new List<(string Path, int Chunk, string Content, string Hash)>();
+        long totalBytes = 0;
+        var candidates = files.ListContextFiles(MaxIndexedFiles).Where(path => !IsExcluded(path, additionalExclusions)).ToArray();
+        if (files.ListContextFiles(MaxIndexedFiles + 1).Count > MaxIndexedFiles)
+            throw new InvalidOperationException($"This project exceeds the semantic-index limit of {MaxIndexedFiles:N0} files.");
+        foreach (var relative in candidates)
+        {
+            EnsureCanContinue(canContinue, cancellationToken);
+            string content;
+            try
+            {
+                var full = files.ResolvePath(relative);
+                var info = new FileInfo(full);
+                if (!info.Exists || info.Length > 500_000) continue;
+                totalBytes += info.Length;
+                if (totalBytes > MaxIndexedBytes) break;
+                content = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
+                if (content.Contains('\0')) continue;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { continue; }
+
+            var ordinal = 0;
+            foreach (var chunk in Chunk(content))
+            {
+                var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(chunk)));
+                var key = relative + "\0" + ordinal;
+                if (previous?.Model == model && oldByKey.TryGetValue(key, out var cached) && cached.Hash == hash && cached.Content == chunk)
+                    updated.Add(cached);
+                else if (previous?.Model == model && oldByContent.TryGetValue(hash + "\0" + chunk, out var moved))
+                    updated.Add(moved with { Chunk = ordinal });
+                else inputs.Add((relative, ordinal, chunk, hash));
+                ordinal++;
+            }
+        }
+
+        var total = inputs.Count;
+        if (updated.Count + inputs.Count > MaxStoredChunks)
+            throw new InvalidOperationException($"This project exceeds the semantic-index limit of {MaxStoredChunks:N0} chunks. Narrow context exclusions and retry.");
+        progress?.Report((0, total));
+        for (var offset = 0; offset < inputs.Count; offset += 32)
+        {
+            EnsureCanContinue(canContinue, cancellationToken);
+            var batch = inputs.Skip(offset).Take(32).ToArray();
+            var vectors = await client.EmbedAsync(batch.Select(item => $"File: {item.Path}\n\n{item.Content}").ToArray(), cancellationToken).ConfigureAwait(false);
+            for (var index = 0; index < batch.Length; index++)
+                updated.Add(new ProjectEmbeddingChunk(batch[index].Path, batch[index].Chunk, batch[index].Content, batch[index].Hash, vectors[index]));
+            progress?.Report((Math.Min(offset + batch.Length, total), total));
+        }
+
+        EnsureCanContinue(canContinue, cancellationToken);
+        updated = updated.OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase).ThenBy(item => item.Chunk).ToList();
+        Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
+        await AtomicTextFile.WriteAsync(_indexPath, JsonSerializer.Serialize(new ProjectEmbeddingIndexData(model, updated)), cancellationToken).ConfigureAwait(false);
+        return updated.Count;
+    }
+
+    private static void EnsureCanContinue(Func<bool>? canContinue, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (canContinue is not null && !canContinue())
+            throw new UnauthorizedAccessException("Project trust was revoked while building the semantic index. No updated index was saved.");
+    }
+
+    public async Task<IReadOnlyList<SemanticSearchResult>> SearchAsync(string query, int limit = MaxSearchResults, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query) || query.Length > 1000) throw new ArgumentException("Search query must contain 1–1,000 characters.", nameof(query));
+        var index = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        if (index is null || index.Chunks.Count == 0) return [];
+        if (!string.Equals(index.Model, model, StringComparison.Ordinal)) throw new InvalidOperationException("The index uses a different embedding model. Rebuild it in Settings before searching.");
+        var queryVector = (await client.EmbedAsync([query], cancellationToken).ConfigureAwait(false))[0];
+        return index.Chunks.Where(chunk => IsStillReadable(chunk.RelativePath))
+            .Select(chunk => new SemanticSearchResult(chunk.RelativePath, chunk.Chunk, Cosine(queryVector, chunk.Embedding), chunk.Content))
+            .Where(result => double.IsFinite(result.Score)).OrderByDescending(result => result.Score).ThenBy(result => result.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Clamp(limit, 1, MaxSearchResults)).ToArray();
+    }
+
+    public async Task<int> CountAsync(CancellationToken cancellationToken = default) => (await LoadAsync(cancellationToken).ConfigureAwait(false))?.Chunks.Count ?? 0;
+    public async Task<string> GetModelAsync(CancellationToken cancellationToken = default) => (await LoadAsync(cancellationToken).ConfigureAwait(false))?.Model ?? model;
+
+    private async Task<ProjectEmbeddingIndexData?> LoadAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_indexPath)) return null;
+        var info = new FileInfo(_indexPath);
+        if (info.Length > 256L * 1024 * 1024) throw new InvalidDataException("The semantic index is larger than the supported 256 MB limit.");
+        var json = await File.ReadAllTextAsync(_indexPath, cancellationToken).ConfigureAwait(false);
+        var index = JsonSerializer.Deserialize<ProjectEmbeddingIndexData>(json, JsonOptions)
+            ?? throw new InvalidDataException("The semantic index is empty or invalid. Rebuild it in Settings.");
+        if (index.Chunks.Count > MaxStoredChunks || index.Chunks.Any(chunk => chunk.Embedding.Length is 0 or > 16_384 || chunk.Content.Length > ChunkCharacters || chunk.RelativePath.Length > 240))
+            throw new InvalidDataException("The semantic index contains invalid or oversized entries. Delete and rebuild it in Settings.");
+        return index;
+    }
+
+    private bool IsStillReadable(string relativePath)
+    {
+        try { return !files.IsContextExcluded(relativePath) && files.IsSupportedContextFile(relativePath) && File.Exists(files.ResolvePath(relativePath)); }
+        catch { return false; }
+    }
+
+    private static bool IsExcluded(string path, IReadOnlyList<string>? exclusions)
+    {
+        if (exclusions is null) return false;
+        var normalized = path.Replace('\\', '/');
+        foreach (var raw in exclusions)
+        {
+            if (!WorkspaceFileService.IsValidContextExclusion(raw)) continue;
+            var rule = raw.Trim().Replace('\\', '/').Trim('/');
+            if (rule.Contains('*') || rule.Contains('?'))
+            {
+                if (!rule.Contains('/') && System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(rule, Path.GetFileName(normalized), ignoreCase: true)) return true;
+            }
+            else if (rule.Contains('/')
+                ? normalized.Equals(rule, StringComparison.OrdinalIgnoreCase) || normalized.StartsWith(rule + "/", StringComparison.OrdinalIgnoreCase)
+                : normalized.Split('/').Any(segment => segment.Equals(rule, StringComparison.OrdinalIgnoreCase))) return true;
+        }
+        return false;
+    }
+
+    private static string Key(ProjectEmbeddingChunk chunk) => chunk.RelativePath + "\0" + chunk.Chunk;
+    private static IEnumerable<string> Chunk(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) yield break;
+        var start = 0;
+        while (start < content.Length)
+        {
+            var end = Math.Min(content.Length, start + ChunkCharacters);
+            if (end < content.Length)
+            {
+                var boundary = content.LastIndexOf('\n', end - 1, end - start);
+                if (boundary > start + ChunkCharacters / 2) end = boundary;
+            }
+            var value = content[start..end].Trim();
+            if (value.Length > 0) yield return value;
+            if (end == content.Length) break;
+            start = Math.Max(start + 1, end - ChunkOverlap);
+        }
+    }
+
+    private static double Cosine(float[] left, float[] right)
+    {
+        if (left.Length != right.Length) return double.NaN;
+        double dot = 0, leftNorm = 0, rightNorm = 0;
+        for (var i = 0; i < left.Length; i++) { dot += left[i] * right[i]; leftNorm += left[i] * left[i]; rightNorm += right[i] * right[i]; }
+        return leftNorm == 0 || rightNorm == 0 ? double.NaN : dot / Math.Sqrt(leftNorm * rightNorm);
+    }
+}

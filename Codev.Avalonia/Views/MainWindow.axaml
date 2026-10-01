@@ -148,7 +148,7 @@
                 </ScrollViewer>
                 <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
                     <Button Classes="nav" Content="☁  Connect hosted models…" Click="ConfigureCloudProvider_Click" ToolTip.Tip="Connect OpenAI or Anthropic using an API key; cloud requests require an explicit acknowledgement" />
-                    <Button Classes="nav" Content="⚙  Settings…" Click="Settings_Click" ToolTip.Tip="Configure the Ollama server endpoint" />
+                    <Button Classes="nav" Content="⚙  Settings…" Click="Settings_Click" ToolTip.Tip="Configure Ollama and local semantic indexes" />
                     <Button Classes="nav" Content="🔌  MCP servers…" Click="McpServers_Click" ToolTip.Tip="Configure external MCP tools for Code tasks" />
                     <Button Classes="nav" Content="⇧⇩  Chat backups…" ToolTip.Tip="Import or export conversation backups">
                         <Button.Flyout>
@@ -457,6 +457,7 @@
                                             <MenuItem Header="Add files to context…" IsEnabled="{Binding HasProject}" Click="AddContextFiles_Click" />
                                             <Separator />
                                             <MenuItem Header="Include repository map" ToggleType="CheckBox" IsChecked="{Binding IncludeRepoMap, Mode=TwoWay}" IsEnabled="{Binding CanIncludeRepoMap}" />
+                                            <MenuItem Header="Use semantic search" ToggleType="CheckBox" IsChecked="{Binding EnableSemanticSearch, Mode=TwoWay}" IsEnabled="{Binding CanUseSemanticSearch}" ToolTip.Tip="Adds an optional local embeddings search tool to this trusted project Code task. Build the project index in Settings first." />
                                             <MenuItem Header="Clear selected files" IsVisible="{Binding HasSelectedContextFiles}" Command="{Binding ClearContextFilesCommand}" />
                                         </MenuFlyout>
                                     </Button.Flyout>

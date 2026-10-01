@@ -29,6 +29,7 @@ public static class ConversationPersistence
             AllowHostedCodeTask = conversation.AllowHostedCodeTask,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,
+            EnableSemanticSearch = conversation.EnableSemanticSearch,
             NumCtx = conversation.NumCtx,
             Temperature = ConversationSamplingSettings.NormalizeTemperature(conversation.Temperature),
             TopP = ConversationSamplingSettings.NormalizeProbability(conversation.TopP),

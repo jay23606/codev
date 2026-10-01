@@ -29,6 +29,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private readonly string UserSlashCommandsPath;
     private readonly string UserSkillsPath;
     private readonly string UserAgentProfilesPath;
+    private readonly string SemanticIndexDirectory;
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
     private readonly Codev.ProjectFolderTrustRegistry _projectFolderTrust;
@@ -93,6 +94,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private int _uiFontSize = 14;
     private bool _pinnedConversationsExpanded = true;
     private bool _recentConversationsExpanded = true;
+    private string _embeddingModel = "nomic-embed-text";
+    private bool _semanticIndexBusy;
+    private string _semanticIndexStatus = "";
 
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
@@ -186,6 +190,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         UserSlashCommandsPath = Path.Combine(appData, "commands");
         UserSkillsPath = Path.Combine(appData, "skills");
         UserAgentProfilesPath = Path.Combine(appData, "agents");
+        SemanticIndexDirectory = dataRoot;
         _projectFolderTrust = Codev.ProjectFolderTrustRegistry.Load(ProjectTrustPath);
         _conversationWorkspaces = new Codev.ConversationWorkspaceManager(dataRoot);
         _childWorktrees = new Codev.GitChildWorktreeManager(dataRoot);
@@ -310,6 +315,10 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 OnPropertyChanged(nameof(ThinkEnabled));
                 OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
                 OnPropertyChanged(nameof(CanIncludeRepoMap));
+                OnPropertyChanged(nameof(CanUseSemanticSearch));
+                OnPropertyChanged(nameof(CanBuildSemanticIndex));
+                OnPropertyChanged(nameof(EnableSemanticSearch));
+                OnPropertyChanged(nameof(HasSemanticIndexForProject));
                 OnPropertyChanged(nameof(SelectedModel));
                 OnPropertyChanged(nameof(ContextSize));
                 RefreshContextSizes(Model);
@@ -402,6 +411,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         : "View request context";
     public bool CanIncludeRepoMap => HasProject && (SelectedContextFiles.Count > 0 || IsProjectTrusted) && (!IsHostedModel || IncludeProjectContextForHosted);
     public string RepoMapEstimateLabel => IncludeRepoMap && CanIncludeRepoMap ? "Repo map: up to ≈2,000 tokens." : "";
+    public bool CanUseSemanticSearch => HasProject && IsProjectTrusted && IsCodeTask && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) && (!IsHostedModel || IncludeProjectContextForHosted);
+    public bool CanBuildSemanticIndex => HasProject && IsProjectTrusted && Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint);
+    public string EmbeddingModel { get => _embeddingModel; set { var normalized = string.IsNullOrWhiteSpace(value) ? "nomic-embed-text" : value.Trim(); if (_embeddingModel == normalized) return; _embeddingModel = normalized; PersistSettings(); OnPropertyChanged(); } }
+    public bool IsSemanticIndexBusy => _semanticIndexBusy;
+    public string SemanticIndexStatus { get => _semanticIndexStatus; private set => SetProperty(ref _semanticIndexStatus, value); }
+    public bool HasSemanticIndexForProject => HasProject && Codev.ProjectEmbeddingIndex.HasIndex(SemanticIndexDirectory, ActiveConversation!.ProjectPath!);
 
     public string? GetLastPromptContextDetails() => ActiveConversation is { } conversation &&
         _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot) ? snapshot.ToDisplayText() : null;
@@ -1456,6 +1471,70 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
     }
 
+    public bool EnableSemanticSearch
+    {
+        get => ActiveConversation?.EnableSemanticSearch ?? false;
+        set
+        {
+            if (ActiveConversation is not { } conversation || conversation.EnableSemanticSearch == value) return;
+            if (value && !CanUseSemanticSearch) return;
+            conversation.EnableSemanticSearch = value;
+            OnPropertyChanged();
+            Persist();
+        }
+    }
+
+    public async Task UpdateSemanticIndexAsync()
+    {
+        if (ActiveConversation is not { ProjectPath: { Length: > 0 } path } conversation || !_projectFolderTrust.IsTrusted(path))
+        { SemanticIndexStatus = "Attach and trust a project to build its local index."; return; }
+        if (!Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint))
+        { SemanticIndexStatus = "Semantic embeddings are restricted to a local Ollama server."; return; }
+        _semanticIndexBusy = true; OnPropertyChanged(nameof(IsSemanticIndexBusy));
+        try
+        {
+            var files = new Codev.WorkspaceFileService(path);
+            var index = CreateProjectEmbeddingIndex(files);
+            SemanticIndexStatus = $"Indexing with {EmbeddingModel}…";
+            var progress = new Progress<(int Done, int Total)>(value => SemanticIndexStatus = value.Total == 0
+                ? "Checking files and existing index…" : $"Indexing · {value.Done:N0}/{value.Total:N0} changed chunks · {EmbeddingModel}");
+            var count = await index.UpdateAsync(progress, additionalExclusions: GetProjectExclusions(path),
+                canContinue: () => _projectFolderTrust.IsTrusted(path));
+            SemanticIndexStatus = $"Index ready · {count:N0} chunks · {EmbeddingModel}";
+            OnPropertyChanged(nameof(HasSemanticIndexForProject));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or IOException or UnauthorizedAccessException or JsonException)
+        { SemanticIndexStatus = ex is HttpRequestException ? $"Embedding model unavailable. Install {EmbeddingModel} with Ollama, then retry. ({ex.Message})" : ex.Message; }
+        finally { _semanticIndexBusy = false; OnPropertyChanged(nameof(IsSemanticIndexBusy)); }
+    }
+
+    public void RefreshSemanticIndexStatus()
+    {
+        if (!HasProject) return;
+        SemanticIndexStatus = HasSemanticIndexForProject ? "A local semantic index exists for this project." : "No semantic index for this project yet.";
+        OnPropertyChanged(nameof(HasSemanticIndexForProject));
+    }
+
+    public void DeleteSemanticIndexForProject()
+    {
+        if (ActiveConversation?.ProjectPath is not { Length: > 0 } path) return;
+        Codev.ProjectEmbeddingIndex.Delete(SemanticIndexDirectory, path);
+        SemanticIndexStatus = "Local semantic index deleted.";
+        OnPropertyChanged(nameof(HasSemanticIndexForProject));
+    }
+
+    private Codev.ProjectEmbeddingIndex CreateProjectEmbeddingIndex(Codev.WorkspaceFileService files) =>
+        new(SemanticIndexDirectory, files, new Codev.OllamaEmbeddingClient(_http, _ollamaEndpoint, EmbeddingModel), EmbeddingModel);
+
+    private IReadOnlyList<string> GetProjectExclusions(string projectPath)
+    {
+        var exclusions = new List<string>();
+        foreach (var conversation in _conversations.Where(item => string.Equals(item.ProjectPath, projectPath, StringComparison.OrdinalIgnoreCase)))
+            foreach (var turn in conversation.PendingTurns ?? [])
+                exclusions.AddRange(turn.ContextExclusions ?? []);
+        return exclusions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     private void SelectConversation(Codev.Conversation conversation)
     {
         var previousModel = Model;
@@ -1518,6 +1597,10 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(CodeTaskLabel));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(CanBuildSemanticIndex));
+        OnPropertyChanged(nameof(CanUseSemanticSearch));
+        OnPropertyChanged(nameof(EnableSemanticSearch));
+        OnPropertyChanged(nameof(HasSemanticIndexForProject));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         NotifyCodeTaskAvailabilityProperties();
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -1580,6 +1663,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(ProjectCommandPermissionRules));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(CanBuildSemanticIndex));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         NotifyCodeTaskAvailabilityProperties();
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -1798,7 +1882,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             TopP: child.TopP, TopK: child.TopK, PresencePenalty: child.PresencePenalty, RepeatPenalty: child.RepeatPenalty,
             NumPredict: child.NumPredict, OpenAiReasoningEffort: child.OpenAiReasoningEffort,
             OpenAiVerbosity: child.OpenAiVerbosity, OpenAiReasoningMode: child.OpenAiReasoningMode,
-            AgentProfileName: target.Name);
+            AgentProfileName: target.Name, EnableSemanticSearch: child.EnableSemanticSearch);
         child.PendingTurns.Add(queuedTurn);
         child.PendingRequestCount++;
         parent.ChildConversationsExpanded = true;
@@ -2356,6 +2440,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         _ = RefreshAgentProfilesAsync();
         OnPropertyChanged(nameof(IsProjectTrusted));
+        OnPropertyChanged(nameof(CanBuildSemanticIndex));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ProjectTrustRoot));
@@ -2574,7 +2659,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             conversation.TopP, conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, conversation.NumPredict,
             OpenAiReasoningEffort: conversation.OpenAiReasoningEffort, OpenAiVerbosity: conversation.OpenAiVerbosity,
             OpenAiReasoningMode: conversation.OpenAiReasoningMode,
-            AgentProfileName: conversation.AgentProfileName);
+            AgentProfileName: conversation.AgentProfileName, EnableSemanticSearch: conversation.EnableSemanticSearch);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -2884,8 +2969,11 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             message => _ = SetConnectionStatusAsync(message), cancellationToken, _cloudApiKeyVault);
         var agentSkills = await LoadAgentSkillsAsync(conversation, cancellationToken);
         var agentSkillTools = agentSkills.ToDictionary(Codev.AgentSkillTool.FunctionName, StringComparer.Ordinal);
+        var semanticIndex = turn.EnableSemanticSearch && !string.IsNullOrWhiteSpace(turn.ProjectPath)
+            ? CreateProjectEmbeddingIndex(files) : null;
         var tools = Codev.CodeTaskToolSchemaFactory.CreateOllamaTools(shell, mcpSession.Tools.Values, agentProfile,
-            allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true);
+            allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true,
+            allowSemanticSearch: semanticIndex is not null && Codev.ProjectEmbeddingIndex.HasIndex(SemanticIndexDirectory, files.Root));
         var repeatedCalls = new Codev.RepeatedToolCallGuard();
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
@@ -2901,7 +2989,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentSkills: agentSkillTools,
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
             backgroundCommands: _backgroundCommands,
-            afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token));
+            afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
+            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchAsync(query, cancellationToken: token));
         var transcript = new System.Text.StringBuilder(mcpSession.ToConnectionTranscript());
         var initialMessageCount = history.Count;
         var maxSteps = Math.Clamp(agentProfile?.MaxSteps ?? Codev.CodeTaskLimits.MaxModelStepsPerTurn, 1, Codev.CodeTaskLimits.MaxModelStepsPerTurn);
@@ -3019,8 +3108,11 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             message => _ = SetConnectionStatusAsync(message), cancellationToken, _cloudApiKeyVault);
         var agentSkills = await LoadAgentSkillsAsync(conversation, cancellationToken);
         var agentSkillTools = agentSkills.ToDictionary(Codev.AgentSkillTool.FunctionName, StringComparer.Ordinal);
+        var semanticIndex = turn.EnableSemanticSearch && !string.IsNullOrWhiteSpace(turn.ProjectPath)
+            ? CreateProjectEmbeddingIndex(files) : null;
         var toolSchemas = Codev.CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(Codev.ShellCommandResolver.ResolveCurrent(), mcpSession.Tools.Values,
-            agentProfile, allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true);
+            agentProfile, allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true,
+            allowSemanticSearch: semanticIndex is not null && Codev.ProjectEmbeddingIndex.HasIndex(SemanticIndexDirectory, files.Root));
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
             _ => Task.FromResult(false), status: message => _ = SetConnectionStatusAsync(message),
@@ -3034,7 +3126,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentSkills: agentSkillTools,
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
             backgroundCommands: _backgroundCommands,
-            afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token));
+            afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
+            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchAsync(query, cancellationToken: token));
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var client = new Codev.CloudModelApiClient(_http);
         var runner = new Codev.OpenAiCodeTaskRunner(client);
@@ -3902,6 +3995,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             _uiFontSize = Codev.AvaloniaUiSettings.NormalizeFontSize(settings.FontSize);
             _pinnedConversationsExpanded = settings.PinnedConversationsExpanded;
             _recentConversationsExpanded = settings.RecentConversationsExpanded;
+            _embeddingModel = Codev.AvaloniaUiSettings.NormalizeEmbeddingModel(settings.EmbeddingModel);
             if (Codev.OllamaEndpoint.TryParse(settings.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
             var templates = settings.PromptTemplates ?? LoadLegacyPromptTemplates();
             foreach (var template in Codev.PromptTemplateCatalog.Normalize(templates)) PromptTemplates.Add(template);
@@ -3949,7 +4043,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString(),
             PromptTemplates.ToList(), SamplingPresets.ToList(), _readingWidth, _autoConnectProvider, _uiFontFamily, _uiFontSize,
-            _pinnedConversationsExpanded, _recentConversationsExpanded);
+            _pinnedConversationsExpanded, _recentConversationsExpanded, _embeddingModel);
         var revision = Interlocked.Increment(ref _settingsRevision);
         _settingsPersistenceTask = Task.Run(async () =>
         {
@@ -4014,6 +4108,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         _ollamaEndpoint = endpoint;
         OnPropertyChanged(nameof(OllamaEndpointDisplay));
         OnPropertyChanged(nameof(ProviderStatusLabel));
+        OnPropertyChanged(nameof(CanBuildSemanticIndex));
+        OnPropertyChanged(nameof(CanUseSemanticSearch));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
         PersistSettings();

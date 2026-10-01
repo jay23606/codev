@@ -81,6 +81,7 @@ public sealed class ConversationPersistenceTests
             AllowHostedCodeTask = true,
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
+            EnableSemanticSearch = true,
             LastPromptTokens = 321,
             LastPromptOutputTokens = 123,
             LastPromptContext = 4096,
@@ -137,6 +138,7 @@ public sealed class ConversationPersistenceTests
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.True(snapshot.AllowHostedCodeTask);
         Assert.True(snapshot.IncludeRepoMap);
+        Assert.True(snapshot.EnableSemanticSearch);
         Assert.Equal(321, snapshot.LastPromptTokens);
         Assert.Equal(123, snapshot.LastPromptOutputTokens);
         Assert.Equal(CloudModelProviders.OpenAI, snapshot.LastPromptProvider);

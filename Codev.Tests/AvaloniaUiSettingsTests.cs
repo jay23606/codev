@@ -25,6 +25,7 @@ public sealed class AvaloniaUiSettingsTests
         Assert.Equal(800, settings.ReadingWidth);
         Assert.True(settings.PinnedConversationsExpanded);
         Assert.True(settings.RecentConversationsExpanded);
+        Assert.Equal("nomic-embed-text", settings.EmbeddingModel);
     }
 
     [Theory]
@@ -48,7 +49,7 @@ public sealed class AvaloniaUiSettingsTests
             [new PromptTemplate("Review", "Review this project carefully.")],
             [new SamplingPreset("Precise", Temperature: 0.25, TopP: 0.9, NumPredict: 2048)], 960,
             AutoConnectProvider: "openai", FontFamily: "Segoe UI", FontSize: 18,
-            PinnedConversationsExpanded: false, RecentConversationsExpanded: true);
+            PinnedConversationsExpanded: false, RecentConversationsExpanded: true, EmbeddingModel: "custom-embed-model");
 
         var restored = AvaloniaUiSettings.Deserialize(AvaloniaUiSettings.Serialize(original));
 
@@ -60,6 +61,7 @@ public sealed class AvaloniaUiSettingsTests
         Assert.Equal(original.FontSize, restored.FontSize);
         Assert.Equal(original.PinnedConversationsExpanded, restored.PinnedConversationsExpanded);
         Assert.Equal(original.RecentConversationsExpanded, restored.RecentConversationsExpanded);
+        Assert.Equal("custom-embed-model", restored.EmbeddingModel);
     }
 
     [Theory]
