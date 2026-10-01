@@ -364,20 +364,11 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     {
         var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "command-permissions.json"));
         await registry.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
         var approvalDialogShown = false;
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
             _ => Task.FromResult(false), _ => { approvalDialogShown = true; return Task.FromResult(false); },
-            permissionApproval: proposal =>
-            {
-                var decision = registry.Evaluate(proposal.ProjectPath, proposal.Command, proposal.ShellName,
-                    allowReadOnly: !proposal.IsVerification, isVerification: proposal.IsVerification);
-                return Task.FromResult(decision switch
-                {
-                    ProjectCommandPermissionDecision.Allow => CommandApprovalOutcome.Approved,
-                    ProjectCommandPermissionDecision.Deny => CommandApprovalOutcome.Denied,
-                    _ => CommandApprovalOutcome.Rejected
-                });
-            });
+            permissionApproval: async proposal => (await approvalPolicy.ApproveAsync(proposal)).Outcome);
 
         var result = await ExecuteAsync(executor, "verify_command", "{\"command\":\"dotnet --version\"}");
 
@@ -390,16 +381,11 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     {
         var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-protected-command-permissions.json"));
         await registry.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
         var approvalDialogShown = false;
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
             _ => Task.FromResult(false), _ => { approvalDialogShown = true; return Task.FromResult(false); },
-            permissionApproval: proposal => Task.FromResult(registry.Evaluate(proposal.ProjectPath, proposal.Command,
-                    proposal.ShellName, allowReadOnly: !proposal.IsVerification, isVerification: proposal.IsVerification) switch
-                {
-                    ProjectCommandPermissionDecision.Allow => CommandApprovalOutcome.Approved,
-                    ProjectCommandPermissionDecision.Deny => CommandApprovalOutcome.Denied,
-                    _ => CommandApprovalOutcome.Rejected
-                }));
+            permissionApproval: async proposal => (await approvalPolicy.ApproveAsync(proposal)).Outcome);
 
         var result = await ExecuteAsync(executor, "run_command", "{\"command\":\"git --version\"}");
 
