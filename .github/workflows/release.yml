@@ -12,8 +12,8 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    name: Build and publish Windows release
+  windows-wpf:
+    name: Build Windows WPF app
     runs-on: windows-latest
     steps:
       - name: Check out repository
@@ -32,28 +32,148 @@ jobs:
 
       - name: Zip the published app
         shell: pwsh
-        run: Compress-Archive -Path artifacts\win-x64\* -DestinationPath artifacts\Codev-win-x64.zip
+        run: Compress-Archive -Path artifacts\win-x64\* -DestinationPath Codev-win-x64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-wpf-win-x64
+          path: Codev-win-x64.zip
+
+  avalonia-windows:
+    name: Build Avalonia preview (win-x64)
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Codev.Avalonia\Codev.Avalonia.csproj
+
+      - name: Publish self-contained Avalonia app
+        run: dotnet publish Codev.Avalonia\Codev.Avalonia.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\avalonia-win-x64
+
+      - name: Zip the published app
+        shell: pwsh
+        run: Compress-Archive -Path artifacts\avalonia-win-x64\* -DestinationPath Codev-Avalonia-preview-win-x64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-avalonia-win-x64
+          path: Codev-Avalonia-preview-win-x64.zip
+
+  avalonia-linux:
+    name: Build Avalonia preview (linux-x64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Codev.Avalonia/Codev.Avalonia.csproj
+
+      - name: Publish self-contained Avalonia app
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime linux-x64 --self-contained true -p:PublishSingleFile=true --output artifacts/avalonia-linux-x64
+
+      - name: Zip the published app
+        run: |
+          chmod +x artifacts/avalonia-linux-x64/Codev.Avalonia
+          cd artifacts/avalonia-linux-x64
+          zip -r ../../Codev-Avalonia-preview-linux-x64.zip .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-avalonia-linux-x64
+          path: Codev-Avalonia-preview-linux-x64.zip
+
+  avalonia-macos:
+    name: Build Avalonia preview (osx-arm64, osx-x64)
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore (arm64)
+        run: dotnet restore Codev.Avalonia/Codev.Avalonia.csproj
+
+      - name: Publish self-contained Avalonia app (osx-arm64)
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime osx-arm64 --self-contained true -p:PublishSingleFile=true --output artifacts/avalonia-osx-arm64
+
+      - name: Publish self-contained Avalonia app (osx-x64)
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime osx-x64 --self-contained true -p:PublishSingleFile=true --output artifacts/avalonia-osx-x64
+
+      - name: Zip the published apps
+        run: |
+          chmod +x artifacts/avalonia-osx-arm64/Codev.Avalonia
+          chmod +x artifacts/avalonia-osx-x64/Codev.Avalonia
+          (cd artifacts/avalonia-osx-arm64 && zip -r ../../Codev-Avalonia-preview-osx-arm64.zip .)
+          (cd artifacts/avalonia-osx-x64 && zip -r ../../Codev-Avalonia-preview-osx-x64.zip .)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-avalonia-macos
+          path: |
+            Codev-Avalonia-preview-osx-arm64.zip
+            Codev-Avalonia-preview-osx-x64.zip
+
+  publish-release:
+    name: Create GitHub release
+    needs: [windows-wpf, avalonia-windows, avalonia-linux, avalonia-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: List downloaded assets
+        run: ls -la artifacts
 
       - name: Determine release tag
         id: tag
-        shell: pwsh
         run: |
-          $tag = "${{ inputs.tag }}"
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            $date = Get-Date -Format "yyyy.MM.dd"
-            $sha = "${{ github.sha }}".Substring(0, 7)
-            $tag = "v$date-$sha"
-          }
-          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          tag="${{ inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag="v$(date -u +%Y.%m.%d)-$(echo "${{ github.sha }}" | cut -c1-7)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: pwsh
         run: |
-          gh release create "${{ steps.tag.outputs.tag }}" `
-            artifacts\Codev-win-x64.zip `
-            --repo ${{ github.repository }} `
-            --title "${{ steps.tag.outputs.tag }}" `
-            --notes "Self-contained Windows (x64) build of the WPF app, published from commit ${{ github.sha }}. See DESIGN.md for what's implemented; cross-platform (Avalonia) builds are not yet published here." `
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            artifacts/*.zip \
+            --repo ${{ github.repository }} \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --notes "Built from commit ${{ github.sha }}.
+
+          **\`Codev-win-x64.zip\`** is the full-featured WPF app for Windows 10/11. This is the recommended download.
+
+          The **\`Codev-Avalonia-preview-*.zip\`** builds are an early, incomplete preview of the cross-platform app (Windows, macOS Apple Silicon/Intel, Linux x64). As of this release they are missing, compared to the WPF app: Code task (agent file edits and shell commands), Git integration, hosted OpenAI/Anthropic providers, and other items still listed as in-progress in DESIGN.md's X6 entry. Expect rough edges and missing features; this is for people who want to try the cross-platform direction early, not a WPF replacement yet.
+
+          None of these builds are code-signed. Windows will show a SmartScreen warning; macOS Gatekeeper will block the app until you right-click → Open (or run \`xattr -dr com.apple.quarantine <path>\`) the first time; on Linux and macOS, mark the binary executable first (\`chmod +x\`)." \
             --latest
