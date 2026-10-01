@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (leave blank to auto-generate from date + short SHA)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Codev.csproj
+
+      - name: Publish self-contained Windows app
+        run: dotnet publish Codev.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\win-x64
+
+      - name: Zip the published app
+        shell: pwsh
+        run: Compress-Archive -Path artifacts\win-x64\* -DestinationPath artifacts\Codev-win-x64.zip
+
+      - name: Determine release tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $date = Get-Date -Format "yyyy.MM.dd"
+            $sha = "${{ github.sha }}".Substring(0, 7)
+            $tag = "v$date-$sha"
+          }
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" `
+            artifacts\Codev-win-x64.zip `
+            --repo ${{ github.repository }} `
+            --title "${{ steps.tag.outputs.tag }}" `
+            --notes "Self-contained Windows (x64) build of the WPF app, published from commit ${{ github.sha }}. See DESIGN.md for what's implemented; cross-platform (Avalonia) builds are not yet published here." `
+            --latest
