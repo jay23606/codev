@@ -2,6 +2,14 @@
 
 [![Windows CI](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml/badge.svg?branch=main)](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml)
 
+## Why
+
+Claude Desktop and the Codex app are the closest things to what Codev wants to be: a standalone, chat-first desktop app for coding with an AI assistant, not a terminal tool or an editor extension. Both require a paid hosted model. The tools that *do* run fully local and free (Aider, OpenCode, Cline, Gemini CLI, and others) are terminal-first or editor-extension-first; none of them is a dedicated desktop app built around that same chat-and-review experience. Codev exists to fill that specific gap: the Claude/Codex-style desktop UX, pointed at a local Ollama model instead of a subscription, with no editor dependency.
+
+This only became realistic recently. Reasoning-capable, agentic mixture-of-experts models in the 30B-parameter class now run at usable speed on ordinary consumer hardware — [measured results for this project](comparison.html) show a 35B model at roughly 26 tokens/second on a CPU-only laptop with 62 GB RAM. That performance bar wasn't clearable even two years ago.
+
+## What it is
+
 Codev is a standalone desktop coding workspace for local language models. The full-featured app runs on Windows today; a cross-platform Avalonia version for Windows, macOS and Linux is in progress and shares its core logic (see [Run](#run) and [Repository layout](#repository-layout)). It connects directly to Ollama on `127.0.0.1` by default; a different server can be configured explicitly in Settings, with a warning before using a non-local endpoint. No VS Code dependency is required.
 
 ## First preview
