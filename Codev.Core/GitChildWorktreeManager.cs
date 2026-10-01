@@ -12,6 +12,9 @@ public sealed record GitChildWorktreeReview(string Branch, string BaseBranch, st
 /// <summary>Creates dedicated Git worktrees for child conversations without touching the user's checkout.</summary>
 public sealed class GitChildWorktreeManager
 {
+    // Git shares worktree metadata under the common .git directory. Concurrent `worktree add`
+    // processes can race while creating their commondir files, even for distinct branches.
+    private static readonly SemaphoreSlim WorktreeAddGate = new(1, 1);
     private readonly string _codevRoot;
     private readonly string _worktreeRoot;
 
@@ -49,12 +52,17 @@ public sealed class GitChildWorktreeManager
         var id = childConversationId.ToString("N");
         var branch = $"codev/child-{id}";
         var worktreePath = Path.Combine(_worktreeRoot, id);
-        if (Directory.Exists(worktreePath) || File.Exists(worktreePath))
-            throw new IOException("A worktree folder already exists for this child conversation.");
+        await WorktreeAddGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (Directory.Exists(worktreePath) || File.Exists(worktreePath))
+                throw new IOException("A worktree folder already exists for this child conversation.");
 
-        var add = await RunGitAsync(repositoryRoot, ["worktree", "add", "-b", branch, worktreePath, commit], cancellationToken);
-        EnsureSuccess(add, "Git could not create the isolated child worktree.");
-        RejectLink(worktreePath, "Git created a linked worktree folder; Codev will not use it.");
+            var add = await RunGitAsync(repositoryRoot, ["worktree", "add", "-b", branch, worktreePath, commit], cancellationToken);
+            EnsureSuccess(add, "Git could not create the isolated child worktree.");
+            RejectLink(worktreePath, "Git created a linked worktree folder; Codev will not use it.");
+        }
+        finally { WorktreeAddGate.Release(); }
         return new GitChildWorktree(parentConversationId, childConversationId, repositoryRoot, worktreePath, branch, commit);
     }
 
