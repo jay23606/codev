@@ -41,8 +41,9 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
-                var running = _entries.Values.Count(item => item.Status == "Running");
-                var conversationRunning = _entries.Values.Count(item => item.ConversationId == conversationId && item.Status == "Running");
+                // A process still consumes a slot while its process tree is being torn down.
+                var running = _entries.Values.Count(IsActive);
+                var conversationRunning = _entries.Values.Count(item => item.ConversationId == conversationId && IsActive(item));
                 if (running >= MaxRunningTotal) throw new InvalidOperationException($"At most {MaxRunningTotal} background commands can run at once.");
                 if (conversationRunning >= MaxRunningPerConversation) throw new InvalidOperationException($"At most {MaxRunningPerConversation} background commands can run in one conversation.");
                 while (_entries.Count >= MaxRetainedEntries)
@@ -101,8 +102,11 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
     public async Task StopConversationAsync(Guid conversationId)
     {
         Entry[] entries;
-        lock (_gate) entries = _entries.Values.Where(item => item.ConversationId == conversationId && item.Status == "Running").ToArray();
-        foreach (var entry in entries) lock (_gate) entry.Status = "Stopping";
+        lock (_gate)
+        {
+            entries = _entries.Values.Where(item => item.ConversationId == conversationId && item.Status == "Running").ToArray();
+            foreach (var entry in entries) entry.Status = "Stopping";
+        }
         if (entries.Length > 0) Changed?.Invoke(this, EventArgs.Empty);
         await Task.WhenAll(entries.Select(KillAndWaitAsync));
     }
@@ -192,6 +196,8 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
         return new BackgroundCommandSnapshot(entry.Id, entry.ConversationId, entry.Command, entry.WorkingDirectory,
             entry.Status, entry.StartedAt, DateTimeOffset.UtcNow - entry.StartedAt, output, entry.ExitCode);
     }
+
+    private static bool IsActive(Entry entry) => entry.Status is "Running" or "Stopping";
 
     private sealed class Entry(string id, Guid conversationId, string command, string workingDirectory, Process process, DateTimeOffset startedAt)
     {

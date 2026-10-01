@@ -123,6 +123,39 @@ public sealed class BackgroundCommandManagerTests
         finally { await manager.StopConversationAsync(owner); }
     }
 
+    [Fact]
+    public async Task Stopping_commands_keep_their_running_slots_until_the_process_tree_exits()
+    {
+        await using var manager = new BackgroundCommandManager();
+        var owner = Guid.NewGuid();
+        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        for (var i = 0; i < BackgroundCommandManager.MaxRunningPerConversation; i++)
+            await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+
+        using var stoppingReached = new ManualResetEventSlim();
+        using var resumeShutdown = new ManualResetEventSlim();
+        manager.Changed += (_, _) =>
+        {
+            if (!manager.List(owner).Any(item => item.Status == "Stopping")) return;
+            stoppingReached.Set();
+            resumeShutdown.Wait(TimeSpan.FromSeconds(10));
+        };
+
+        var shutdown = Task.Run(() => manager.StopConversationAsync(owner));
+        try
+        {
+            Assert.True(stoppingReached.Wait(TimeSpan.FromSeconds(5)), "Shutdown did not enter the stopping state.");
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent()));
+            Assert.Contains("At most 3 background commands", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            resumeShutdown.Set();
+            await shutdown;
+        }
+    }
+
     private static async Task<BackgroundCommandSnapshot> WaitForExitAsync(BackgroundCommandManager manager, Guid owner, string id)
     {
         var timeout = DateTimeOffset.UtcNow.AddSeconds(10);
