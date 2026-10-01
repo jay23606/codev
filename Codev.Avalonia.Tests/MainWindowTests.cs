@@ -104,6 +104,27 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Expanded_background_command_panel_shows_elapsed_time_and_stop_action()
+    {
+        var command = new BackgroundCommandSnapshot("ab12cd34ef56", Guid.NewGuid(), "npm run dev", Path.GetTempPath(),
+            "Running", DateTimeOffset.UtcNow.AddSeconds(-74), TimeSpan.FromSeconds(74), "", null);
+        var window = new MainWindow { DataContext = new TestBackgroundCommandViewModel(command) };
+        try
+        {
+            window.Show();
+            var expander = Assert.IsType<Expander>(window.FindControl<Expander>("BackgroundCommandsExpander"));
+            expander.IsExpanded = true;
+            window.UpdateLayout();
+
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), text => text.Text?.Contains("01:14", StringComparison.Ordinal) == true);
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), text => text.Text?.Contains("npm run dev", StringComparison.Ordinal) == true);
+            var stop = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Stop");
+            Assert.True(stop.IsEnabled);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
     public async Task Verification_approval_is_rendered_inline_and_run_once_resolves_the_request()
     {
         var window = new MainWindow();
@@ -306,6 +327,21 @@ public sealed class MainWindowTests
 
     private sealed record TestProjectPermissionViewModel(bool HasProject,
         bool CanPersistProjectCommandPermissions, string ProjectCommandPermissionModeLabel);
+
+    private sealed class TestBackgroundCommandViewModel(BackgroundCommandSnapshot command)
+    {
+        public System.Collections.ObjectModel.ObservableCollection<BackgroundCommandSnapshot> BackgroundCommands { get; } = [command];
+        public bool HasBackgroundCommands => true;
+        public string BackgroundCommandsHeader => "Background commands · 1";
+        public System.Windows.Input.ICommand StopBackgroundCommand { get; } = new NoopCommand();
+    }
+
+    private sealed class NoopCommand : System.Windows.Input.ICommand
+    {
+        public event EventHandler? CanExecuteChanged { add { } remove { } }
+        public bool CanExecute(object? parameter) => true;
+        public void Execute(object? parameter) { }
+    }
 
     private sealed class TestAgentProfileEditorService(UserAgentProfileStore store) : Codev.Avalonia.ViewModels.IUserAgentProfileEditorService
     {
