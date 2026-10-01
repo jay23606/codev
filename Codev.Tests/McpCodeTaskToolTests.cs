@@ -248,17 +248,23 @@ public sealed class McpCodeTaskToolTests
     [Fact]
     public async Task Mcp_phase_timeout_returns_promptly_and_cancels_the_underlying_operation()
     {
-        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var operationStopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var operationToken = CancellationToken.None;
 
         var error = await Assert.ThrowsAsync<TimeoutException>(() => McpOperationTimeout.RunAsync(async token =>
         {
-            using var registration = token.Register(() => canceled.TrySetResult());
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
-            return true;
+            operationToken = token;
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return true;
+            }
+            finally { operationStopped.TrySetResult(); }
         }, 30));
 
         Assert.IsType<TimeoutException>(error);
-        await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(operationToken.IsCancellationRequested);
+        await operationStopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
