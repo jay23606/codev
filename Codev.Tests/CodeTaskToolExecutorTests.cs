@@ -418,6 +418,24 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_policy_runs_compound_shell_command_without_showing_approval_dialog()
+    {
+        var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-compound-command-permissions.json"));
+        await registry.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
+        var approvalDialogShown = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => { approvalDialogShown = true; return Task.FromResult(false); },
+            permissionApproval: async proposal => (await approvalPolicy.ApproveAsync(proposal)).Outcome);
+
+        var result = await ExecuteAsync(executor, "run_command", "{\"command\":\"echo first; echo second\"}");
+
+        Assert.Contains("first", result, StringComparison.Ordinal);
+        Assert.Contains("second", result, StringComparison.Ordinal);
+        Assert.False(approvalDialogShown);
+    }
+
+    [Fact]
     public async Task Read_only_permission_executes_inspection_without_launching_the_shell()
     {
         File.WriteAllText(Path.Combine(_root, "README.md"), "safe inspection output");
