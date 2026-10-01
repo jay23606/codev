@@ -2613,25 +2613,13 @@ public sealed class MainViewModel : ViewModelBase
             }
             else
             {
-                var payload = new Dictionary<string, object>
-                {
-                    ["model"] = conversation.Model,
-                    ["messages"] = sourceMessages,
-                    ["stream"] = false,
-                    ["think"] = false,
-                    ["options"] = new Dictionary<string, object>
-                    {
-                        ["num_predict"] = 1500,
-                        ["num_ctx"] = conversation.NumCtx > 0 ? conversation.NumCtx : 32768
-                    }
-                };
-                using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"), payload, timeout.Token);
-                if (!response.IsSuccessStatusCode)
-                    throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
-                using var result = await System.Text.Json.JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
-                if (!result.RootElement.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var content))
-                    throw new InvalidOperationException("Ollama returned no summary text.");
-                summary.Append(content.GetString());
+                ReportContextActionStatus("Compaction · requesting a schema-constrained Ollama summary…");
+                var result = await new Codev.OllamaStructuredSummaryClient(_http, _ollamaEndpoint)
+                    .SummarizeAsync(conversation.Model, sourceMessages, conversation.NumCtx, timeout.Token);
+                summary.Append(result.Summary);
+                ReportContextActionStatus(result.UsedStructuredOutput
+                    ? "Compaction summary generated with Ollama JSON Schema output."
+                    : "Compaction summary generated with the validated plain-text fallback; this model or Ollama endpoint did not return the requested JSON shape.");
             }
 
             if (string.IsNullOrWhiteSpace(summary.ToString())) throw new InvalidOperationException("The selected model returned an empty summary.");
