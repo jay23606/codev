@@ -14,6 +14,7 @@
     <Page Remove="artifacts\**\*.xaml" />
     <ApplicationDefinition Remove="artifacts\**\*.xaml" />
     <Compile Remove="Codev.Tests\**\*.cs" />
+    <Compile Remove="Codev.Avalonia.Tests\**\*.cs" />
     <Compile Remove="Codev.Windows.Tests\**\*.cs" />
     <Compile Remove="Codev.Avalonia\**\*.cs" />
     <Compile Remove="Codev.Core\**\*.cs" />
