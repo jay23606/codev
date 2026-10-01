@@ -9,6 +9,7 @@ using Avalonia.VisualTree;
 using Codev;
 using Codev.Avalonia.Views;
 using System.Reflection;
+using System.Text.Json;
 
 namespace Codev.Avalonia.Tests;
 
@@ -80,6 +81,74 @@ public sealed class MainWindowTests
             await Dispatcher.UIThread.InvokeAsync(() => runOnce.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
 
             Assert.Equal(ProjectCommandApprovalChoice.RunOnce, await pending);
+            Assert.False(panel.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Mcp_approval_is_rendered_inline_and_run_once_resolves_the_request()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            using var schema = JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}""");
+            using var arguments = JsonDocument.Parse("""{"query":"codev"}""");
+            var tool = new McpCodeTaskTool("mcp_github_search", "github", "GitHub", "search", "Search repositories.", schema.RootElement.Clone(), null);
+            var request = typeof(MainWindow).GetMethod("ApproveAgentMcpToolAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var pending = Assert.IsAssignableFrom<Task<ProjectCommandApprovalChoice>>(request.Invoke(window, [tool, arguments.RootElement]));
+
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            var panel = Assert.IsType<Border>(window.FindControl<Border>("InlineApprovalPanel"));
+            Assert.True(panel.IsVisible);
+            var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text => text.Text?.Contains("GitHub · search", StringComparison.Ordinal) == true);
+            var argumentsBox = Assert.Single(content.GetVisualDescendants().OfType<TextBox>(), box => box.Text == arguments.RootElement.GetRawText());
+            AssertReadableContrast(argumentsBox);
+            var runOnce = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Run once");
+
+            await Dispatcher.UIThread.InvokeAsync(() => runOnce.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+
+            Assert.Equal(ProjectCommandApprovalChoice.RunOnce, await pending);
+            Assert.False(panel.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Agent_profile_one_call_approval_is_inline_and_allow_once_resolves_the_request()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var profile = new AgentProfile("Review", "Review before tool calls.", null, null, null,
+                AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "", "user", "review.md");
+            using var arguments = JsonDocument.Parse("""{"path":"README.md"}""");
+            var request = typeof(MainWindow).GetMethod("ConfirmAgentProfileToolAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var pending = Assert.IsAssignableFrom<Task<bool>>(request.Invoke(window, [profile, "read_file", arguments.RootElement]));
+
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            var panel = Assert.IsType<Border>(window.FindControl<Border>("InlineApprovalPanel"));
+            Assert.True(panel.IsVisible);
+            var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text => text.Text?.Contains("Review asks before read file", StringComparison.Ordinal) == true);
+            var argumentsBox = Assert.Single(content.GetLogicalDescendants().OfType<TextBox>(), box => box.Text == arguments.RootElement.GetRawText());
+            AssertReadableContrast(argumentsBox);
+            var allow = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Allow once");
+
+            await Dispatcher.UIThread.InvokeAsync(() => allow.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+
+            Assert.True(await pending);
             Assert.False(panel.IsVisible);
         }
         finally
