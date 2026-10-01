@@ -418,6 +418,12 @@ public sealed class McpCodeTaskToolTests
     [Fact]
     public async Task OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization()
     {
+        var useNativeCredentialStore = string.Equals(Environment.GetEnvironmentVariable("CODEV_TEST_NATIVE_MCP_OAUTH_VAULT"), "1", StringComparison.Ordinal);
+        if (useNativeCredentialStore && !OperatingSystem.IsWindows())
+            throw new InvalidOperationException("The opt-in native MCP credential-vault test currently targets Windows Credential Manager.");
+        CloudApiKeyVault? nativeVault = useNativeCredentialStore ? new CloudApiKeyVault() : null;
+        IMcpOAuthTokenVault vault = (IMcpOAuthTokenVault?)nativeVault ?? new MemoryMcpOAuthTokenVault();
+        string? vaultAccount = null;
         using var portReservation = new TcpListener(IPAddress.Loopback, 0);
         portReservation.Start();
         var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
@@ -518,7 +524,8 @@ public sealed class McpCodeTaskToolTests
 
         var configuration = new McpServerConfiguration("oauth-test", "OAuth test", McpServerTransportKind.Http,
             Enabled: true, Url: mcpUri.AbsoluteUri, OAuthEnabled: true, OAuthClientId: "codev-oauth-test-client", OAuthScopes: ["mcp"]);
-        var vault = new MemoryMcpOAuthTokenVault();
+        vaultAccount = McpOAuthTokenCache.CreateAccount(configuration);
+        if (nativeVault is not null) await nativeVault.RemoveTokensAsync(vaultAccount);
         var openBrowser = (Uri authorizationUri, CancellationToken cancellationToken) =>
         {
             Interlocked.Increment(ref browserLaunches);
@@ -554,7 +561,7 @@ public sealed class McpCodeTaskToolTests
                 Assert.Contains("OAuth echo: first", await session.CallAsync(tool.FunctionName, arguments.RootElement));
             }
 
-            var account = McpOAuthTokenCache.CreateAccount(configuration);
+            var account = vaultAccount!;
             var savedText = await vault.GetTokensAsync(account);
             Assert.NotNull(savedText);
             var saved = JsonSerializer.Deserialize<TokenContainer>(savedText!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -586,8 +593,16 @@ public sealed class McpCodeTaskToolTests
         }
         finally
         {
-            await app.StopAsync();
-            await app.DisposeAsync();
+            try
+            {
+                await app.StopAsync();
+                await app.DisposeAsync();
+            }
+            finally
+            {
+                if (nativeVault is not null && vaultAccount is not null)
+                    await nativeVault.RemoveTokensAsync(vaultAccount);
+            }
         }
     }
 
