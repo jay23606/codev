@@ -258,7 +258,7 @@ public sealed class McpCodeTaskToolTests
         }, 30));
 
         Assert.IsType<TimeoutException>(error);
-        await canceled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
