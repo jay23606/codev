@@ -41,13 +41,13 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring xvfb
           keyring_home="$(mktemp -d)"
           runtime_dir="$(mktemp -d)"
           chmod 700 "$keyring_home" "$runtime_dir"
           HOME="$keyring_home" XDG_RUNTIME_DIR="$runtime_dir" dbus-run-session -- bash -euo pipefail -c '
             od -An -N32 -tx1 /dev/urandom | tr -d "[:space:]" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
-            CODEV_TEST_NATIVE_MCP_OAUTH_VAULT=1 dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
+            CODEV_TEST_NATIVE_MCP_OAUTH_VAULT=1 xvfb-run -a dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
           '
 
       - name: Run native macOS MCP OAuth Keychain smoke
