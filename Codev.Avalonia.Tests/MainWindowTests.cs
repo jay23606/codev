@@ -46,6 +46,44 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Project_formatter_menu_is_available_only_for_trusted_projects()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-project-formatter-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        var viewModel = new MainViewModel(Path.Combine(root, "app-data"));
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            viewModel.SetProjectFolder(project);
+            window.Show();
+            window.UpdateLayout();
+            var actions = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Project actions…");
+            var menu = Assert.IsType<MenuFlyout>(actions.Flyout);
+            menu.ShowAt(actions);
+            window.UpdateLayout();
+            var formatterItem = Assert.Single(menu.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "Project formatters…");
+            Assert.False(formatterItem.IsEnabled);
+
+            await viewModel.TrustProjectFolderAsync(project);
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.True(formatterItem.IsEnabled);
+
+            await viewModel.ToggleProjectFolderTrustAsync();
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.False(formatterItem.IsEnabled);
+        }
+        finally
+        {
+            window.Close();
+            await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            var persistence = typeof(MainViewModel).GetField("_persistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task;
+            if (persistence is not null) await persistence.WaitAsync(TimeSpan.FromSeconds(5));
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public void Main_window_loads_and_composer_accepts_keyboard_input()
     {
         var window = new MainWindow();
