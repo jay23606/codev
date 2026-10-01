@@ -43,7 +43,12 @@ jobs:
         run: dotnet restore Codev.Tests/Codev.Tests.csproj
 
       - name: Run portable tests
+        if: matrix.rid != 'osx-x64'
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
+
+      - name: Run portable tests with hang diagnostics on macOS Intel
+        if: matrix.rid == 'osx-x64'
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 3m --blame-hang-dump-type none --logger "console;verbosity=normal"
 
       - name: Publish self-contained Avalonia app
         run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish/${{ matrix.rid }}
