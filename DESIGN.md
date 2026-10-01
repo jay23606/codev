@@ -107,8 +107,8 @@ The **foundation milestone** is complete. Avalonia now implements a substantial 
 - [x] Sidebar session summaries show each conversation's model, latest prompt/context use, project, changed-file count, and last activity.
 - [x] Conversation list serves as a session switcher; the active request can be stopped and queued requests can be canceled per conversation.
 - [x] Pause/resume queued requests between model turns; an in-progress local generation completes before the queue pauses.
-- More than one independent agent task at once, subject to available RAM and model-load limits; communicate when local hardware serializes inference.
-- Optional Git worktree per task so parallel edits cannot collide in the same checkout.
+- [x] Run up to three independent child tasks concurrently from a root conversation using the Orchestrator profile. Delegation requires a trusted Git project; hosted OpenAI also requires hosted Code task and workspace-sharing consent. Children cannot delegate further, and local model/backend capacity still controls practical concurrency.
+- [x] Isolate every child task in its own Codev-managed Git worktree and branch; review and merge changes explicitly. Integration tests create two worktrees concurrently and verify independent paths/branches and an unchanged parent checkout.
 - Per-session model, context use, project, progress, changed files, and last activity visible from the workspace/session list.
 - [x] Optional completion toasts for responses that finish while the user is away from that conversation; toast clicks return to the conversation.
 - [x] Queued turns and conversation history use flushed same-directory atomic JSON replacement; on restart queued turns stay paused behind **Resume saved queue**. A turn is removed from the recovery journal only after Codev confirms the removal was saved and just before execution, so an in-progress model/tool action is marked interrupted rather than replayed after a crash. Normal close waits for active work to cancel and saves the remaining queue for recovery.

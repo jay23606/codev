@@ -38,6 +38,48 @@ public sealed class GitChildWorktreeManagerTests
         finally { try { Directory.Delete(temp, recursive: true); } catch { } }
     }
 
+    [Fact]
+    public async Task Creates_concurrent_child_worktrees_with_independent_branches_and_files()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "codev-child-worktree-tests", Guid.NewGuid().ToString("N"));
+        var repo = Path.Combine(temp, "repo");
+        var appData = Path.Combine(temp, "appdata");
+        Directory.CreateDirectory(repo);
+        try
+        {
+            await InitializeRepositoryAsync(repo);
+            var manager = new GitChildWorktreeManager(appData);
+            var parentId = Guid.NewGuid();
+            var firstId = Guid.NewGuid();
+            var secondId = Guid.NewGuid();
+
+            var children = await Task.WhenAll(
+                manager.CreateAsync(repo, parentId, firstId),
+                manager.CreateAsync(repo, parentId, secondId));
+
+            Assert.Equal(2, children.Select(child => child.WorktreePath).Distinct().Count());
+            Assert.Equal(2, children.Select(child => child.Branch).Distinct(StringComparer.Ordinal).Count());
+            Assert.All(children, child =>
+            {
+                Assert.True(manager.IsManagedWorktreePath(child.WorktreePath));
+                Assert.Equal(parentId, child.ParentConversationId);
+                Assert.Contains(child.Branch, new[] { "codev/child-" + firstId.ToString("N"), "codev/child-" + secondId.ToString("N") });
+            });
+
+            await File.WriteAllTextAsync(Path.Combine(children[0].WorktreePath, "first.txt"), "first child\n");
+            await File.WriteAllTextAsync(Path.Combine(children[1].WorktreePath, "second.txt"), "second child\n");
+
+            Assert.True(File.Exists(Path.Combine(children[0].WorktreePath, "first.txt")));
+            Assert.False(File.Exists(Path.Combine(children[0].WorktreePath, "second.txt")));
+            Assert.True(File.Exists(Path.Combine(children[1].WorktreePath, "second.txt")));
+            Assert.False(File.Exists(Path.Combine(children[1].WorktreePath, "first.txt")));
+            Assert.False(File.Exists(Path.Combine(repo, "first.txt")));
+            Assert.False(File.Exists(Path.Combine(repo, "second.txt")));
+            Assert.False((await new GitRepositoryService(repo).GetStatusAsync()).HasChanges);
+        }
+        finally { try { Directory.Delete(temp, recursive: true); } catch { } }
+    }
+
     private static string Normalize(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
 
     [Fact]
