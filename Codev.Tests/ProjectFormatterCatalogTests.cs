@@ -89,6 +89,36 @@ public sealed class ProjectFormatterCatalogTests : IDisposable
         Assert.Contains("deny rule", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Auto_approves_formatter_without_prompt_but_exact_deny_still_blocks()
+    {
+        Assert.True(ProjectFormatterCatalog.ValidateJson(ValidJson, out var formatters, out var error), error);
+        var formatter = Assert.Single(formatters);
+        var permissions = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "permissions.json"));
+        await permissions.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        var proposal = new CodeTaskCommandProposal(ProjectFormatterCatalog.DisplayCommand(formatter, "src/app.ts"), _root, "formatter process");
+        var approvalUiCalls = 0;
+        var policy = new ProjectCommandApprovalPolicy(permissions);
+        var auto = await policy.ApproveAsync(proposal, requestApproval: _ =>
+        {
+            approvalUiCalls++;
+            return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+        });
+
+        Assert.Equal(CommandApprovalOutcome.Approved, auto.Outcome);
+        Assert.Equal(0, approvalUiCalls);
+
+        await permissions.SetRuleAsync(_root, proposal.Command, ProjectCommandPermissionDecision.Deny);
+        var denied = await policy.ApproveAsync(proposal, requestApproval: _ =>
+        {
+            approvalUiCalls++;
+            return Task.FromResult(ProjectCommandApprovalChoice.RunOnce);
+        });
+
+        Assert.Equal(CommandApprovalOutcome.Denied, denied.Outcome);
+        Assert.Equal(0, approvalUiCalls);
+    }
+
     private const string ValidJson = """
         {
           "formatters": [
