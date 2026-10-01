@@ -95,6 +95,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private bool _pinnedConversationsExpanded = true;
     private bool _recentConversationsExpanded = true;
     private string _embeddingModel = "nomic-embed-text";
+    private Codev.ProjectCommandPermissionMode _defaultProjectCommandPermissionMode = Codev.ProjectCommandPermissionMode.Auto;
     private bool _semanticIndexBusy;
     private string _semanticIndexStatus = "";
 
@@ -372,8 +373,15 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public bool IsProjectTrusted => ActiveConversation?.ProjectPath is { Length: > 0 } path && _projectFolderTrust.IsTrusted(path);
     public string? ProjectTrustRoot => ActiveConversation?.ProjectPath is { Length: > 0 } path ? _projectFolderTrust.FindTrustedRoot(path) : null;
     public bool IsProjectTrustInherited => IsProjectTrusted && ActiveConversation?.ProjectPath is { } path && !_projectFolderTrust.IsDirectTrustRoot(path);
-    public Codev.ProjectCommandPermissionMode ProjectCommandPermissionMode => ActiveConversation?.ProjectPath is { Length: > 0 } path
-        ? _projectCommandPermissions.GetMode(path) : Codev.ProjectCommandPermissionMode.AskEveryTime;
+    public Codev.ProjectCommandPermissionMode ProjectCommandPermissionMode
+    {
+        get
+        {
+            if (ActiveConversation?.ProjectPath is not { Length: > 0 } path) return _defaultProjectCommandPermissionMode;
+            if (_projectCommandPermissions.HasProjectSettings(path)) return _projectCommandPermissions.GetMode(path);
+            return _projectCommandPermissions.CanPersist ? _defaultProjectCommandPermissionMode : Codev.ProjectCommandPermissionMode.AskEveryTime;
+        }
+    }
     public Codev.ProjectCommandPermissionMode GetProjectCommandPermissionMode(string projectPath) =>
         _projectCommandPermissions.GetMode(projectPath);
     public string ProjectCommandPermissionModeLabel => ProjectCommandPermissionMode switch
@@ -999,8 +1007,17 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     public async Task SetProjectCommandPermissionModeAsync(Codev.ProjectCommandPermissionMode mode)
     {
-        if (ActiveConversation?.ProjectPath is not { Length: > 0 } path) return;
-        await _projectCommandPermissions.SetModeAsync(path, mode);
+        if (ActiveConversation?.ProjectPath is not { Length: > 0 } path)
+        {
+            _defaultProjectCommandPermissionMode = Codev.AvaloniaUiSettings.NormalizeDefaultProjectCommandPermissionMode(mode);
+            PersistSettings();
+        }
+        else
+        {
+            _defaultProjectCommandPermissionMode = Codev.AvaloniaUiSettings.NormalizeDefaultProjectCommandPermissionMode(mode);
+            await _projectCommandPermissions.SetModeAsync(path, mode);
+            PersistSettings();
+        }
         OnPropertyChanged(nameof(ProjectCommandPermissionMode));
         OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
     }
@@ -1164,9 +1181,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 var workspace = _conversationWorkspaces.GetOrCreateWorkspace(conversation.Id);
                 await _projectFolderTrust.TrustAsync(workspace);
                 SetProjectFolder(workspace);
-                if (_projectCommandPermissions.CanPersist && !_projectCommandPermissions.HasProjectSettings(workspace))
-                    await _projectCommandPermissions.SetModeAsync(workspace, Codev.ProjectCommandPermissionMode.Auto);
             }
+            if (!string.IsNullOrWhiteSpace(conversation.ProjectPath))
+                await EnsureProjectCommandPermissionModeAsync(conversation.ProjectPath);
             SetConversationMode(ConversationMode.CodeTask);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
@@ -2963,6 +2980,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         System.Text.StringBuilder thinking, CancellationToken cancellationToken, IReadOnlyList<string> initialContextSources,
         IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile)
     {
+        await _managedWorkspacePermissionDefaultsTask;
+        if (!string.IsNullOrWhiteSpace(turn.ProjectPath)) await EnsureProjectCommandPermissionModeAsync(turn.ProjectPath);
         var shell = Codev.ShellCommandResolver.ResolveCurrent();
         var mcpServers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
         await using var mcpSession = await Codev.McpCodeTaskSession.ConnectAsync(mcpServers,
@@ -3103,6 +3122,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile)
     {
         if (string.IsNullOrWhiteSpace(turn.ProjectPath)) throw new InvalidOperationException("OpenAI Code task requires a trusted workspace.");
+        await _managedWorkspacePermissionDefaultsTask;
+        await EnsureProjectCommandPermissionModeAsync(turn.ProjectPath);
         var files = new Codev.WorkspaceFileService(turn.ProjectPath, turn.ContextExclusions);
         var mcpServers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
         await using var mcpSession = await Codev.McpCodeTaskSession.ConnectAsync(mcpServers,
@@ -3300,10 +3321,15 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private async Task InitializeManagedWorkspacePermissionDefaultsAsync()
     {
         if (!_projectCommandPermissions.CanPersist) return;
-        foreach (var path in _conversationWorkspaces.FindExistingConversationWorkspaces(_conversations))
+        var paths = _conversations.Select(conversation => conversation.ProjectPath)
+            .Concat(_conversationWorkspaces.FindExistingConversationWorkspaces(_conversations))
+            .Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+            .Select(path => Path.GetFullPath(path!))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (var path in paths)
         {
-            if (_projectCommandPermissions.HasProjectSettings(path!)) continue;
-            try { await _projectCommandPermissions.SetModeAsync(path!, Codev.ProjectCommandPermissionMode.Auto); }
+            if (_projectCommandPermissions.HasProjectSettings(path)) continue;
+            try { await _projectCommandPermissions.SetModeAsync(path, _defaultProjectCommandPermissionMode); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException) { }
         }
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -3312,6 +3338,19 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
             OnPropertyChanged(nameof(CodeTaskTooltip));
         });
+    }
+
+    private async Task EnsureProjectCommandPermissionModeAsync(string projectPath)
+    {
+        if (!_projectCommandPermissions.CanPersist || _projectCommandPermissions.HasProjectSettings(projectPath)) return;
+        try
+        {
+            await _projectCommandPermissions.SetModeAsync(projectPath, _defaultProjectCommandPermissionMode);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            await SetConnectionStatusAsync($"Could not save the default command mode for this project ({ex.GetType().Name}); commands will ask for approval.");
+        }
     }
 
     private async Task RecordPromptOutputTokenUsageAsync(Codev.Conversation conversation, string provider, string model, int outputTokens)
@@ -3998,6 +4037,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             _pinnedConversationsExpanded = settings.PinnedConversationsExpanded;
             _recentConversationsExpanded = settings.RecentConversationsExpanded;
             _embeddingModel = Codev.AvaloniaUiSettings.NormalizeEmbeddingModel(settings.EmbeddingModel);
+            _defaultProjectCommandPermissionMode = Codev.AvaloniaUiSettings.NormalizeDefaultProjectCommandPermissionMode(settings.DefaultProjectCommandPermissionMode);
             if (Codev.OllamaEndpoint.TryParse(settings.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
             var templates = settings.PromptTemplates ?? LoadLegacyPromptTemplates();
             foreach (var template in Codev.PromptTemplateCatalog.Normalize(templates)) PromptTemplates.Add(template);
@@ -4045,7 +4085,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString(),
             PromptTemplates.ToList(), SamplingPresets.ToList(), _readingWidth, _autoConnectProvider, _uiFontFamily, _uiFontSize,
-            _pinnedConversationsExpanded, _recentConversationsExpanded, _embeddingModel);
+            _pinnedConversationsExpanded, _recentConversationsExpanded, _embeddingModel, _defaultProjectCommandPermissionMode);
         var revision = Interlocked.Increment(ref _settingsRevision);
         _settingsPersistenceTask = Task.Run(async () =>
         {

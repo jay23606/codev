@@ -6,7 +6,8 @@ namespace Codev;
 public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, List<PromptTemplate>? PromptTemplates = null,
     List<SamplingPreset>? SamplingPresets = null, int ReadingWidth = 800, string? AutoConnectProvider = null,
     string FontFamily = "Inter", int FontSize = 14, bool PinnedConversationsExpanded = true,
-    bool RecentConversationsExpanded = true, string EmbeddingModel = "nomic-embed-text")
+    bool RecentConversationsExpanded = true, string EmbeddingModel = "nomic-embed-text",
+    ProjectCommandPermissionMode DefaultProjectCommandPermissionMode = ProjectCommandPermissionMode.Auto)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     public static AvaloniaUiSettings Default { get; } = new("dark", Codev.OllamaEndpoint.Default.ToString());
@@ -27,7 +28,8 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, Lis
             value.SamplingPresets is null ? null : SamplingPresetCatalog.Normalize(value.SamplingPresets).ToList(),
             NormalizeReadingWidth(value.ReadingWidth), NormalizeAutoConnectProvider(value.AutoConnectProvider),
             NormalizeFontFamily(value.FontFamily), NormalizeFontSize(value.FontSize), value.PinnedConversationsExpanded,
-            value.RecentConversationsExpanded, NormalizeEmbeddingModel(value.EmbeddingModel));
+            value.RecentConversationsExpanded, NormalizeEmbeddingModel(value.EmbeddingModel),
+            NormalizeDefaultProjectCommandPermissionMode(value.DefaultProjectCommandPermissionMode));
     }
 
     public static string Serialize(AvaloniaUiSettings settings) => JsonSerializer.Serialize(settings);
@@ -61,6 +63,9 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, Lis
 
     public static string NormalizeEmbeddingModel(string? value) => string.IsNullOrWhiteSpace(value) || value.Length > 120 || value.Any(char.IsControl)
         ? "nomic-embed-text" : value.Trim();
+
+    public static ProjectCommandPermissionMode NormalizeDefaultProjectCommandPermissionMode(ProjectCommandPermissionMode value) =>
+        Enum.IsDefined(value) ? value : ProjectCommandPermissionMode.Auto;
 
     private static string? NormalizeAutoConnectProvider(string? value) => value?.ToLowerInvariant() switch
     {

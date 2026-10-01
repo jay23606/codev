@@ -46,23 +46,77 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Footer_auto_default_is_visible_without_project_and_inherited_by_new_code_task_workspace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var appData = Path.Combine(root, "Codev");
+        Directory.CreateDirectory(appData);
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-settings.json"),
+            AvaloniaUiSettings.Serialize(AvaloniaUiSettings.Default with { DefaultProjectCommandPermissionMode = ProjectCommandPermissionMode.Auto }));
+        var viewModel = new MainViewModel(root);
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            var selector = Assert.IsType<Button>(window.FindControl<Button>("ProjectCommandModeButton"));
+            Assert.True(selector.IsVisible);
+            Assert.Equal("Auto ▾", selector.Content?.ToString());
+            var menu = Assert.IsType<MenuFlyout>(selector.Flyout);
+            menu.ShowAt(selector);
+            var askItem = Assert.Single(menu.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "Ask every time");
+            await Dispatcher.UIThread.InvokeAsync(() => askItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)));
+            var settingsPath = Path.Combine(appData, "avalonia-settings.json");
+            var settingsDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while (DateTimeOffset.UtcNow < settingsDeadline)
+            {
+                if (File.Exists(settingsPath) && AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).DefaultProjectCommandPermissionMode == ProjectCommandPermissionMode.AskEveryTime) break;
+                await Task.Delay(20);
+            }
+            Assert.True(File.Exists(settingsPath));
+            Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).DefaultProjectCommandPermissionMode);
+
+            var conversation = viewModel.ActiveConversation!;
+            var enableCodeTask = typeof(MainViewModel).GetMethod("EnableCodeTaskWithWorkspaceAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            await Assert.IsAssignableFrom<Task>(enableCodeTask.Invoke(viewModel, [conversation]));
+            Assert.NotNull(conversation.ProjectPath);
+            Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, viewModel.ProjectCommandPermissionMode);
+            var registryPath = Path.Combine(appData, "avalonia-command-permissions.json");
+            Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, ProjectCommandPermissionRegistry.Load(registryPath).GetMode(conversation.ProjectPath!));
+        }
+        finally
+        {
+            window.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Footer_auto_selection_persists_and_skips_inline_command_approval()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
-        var appData = Path.Combine(root, "app-data");
+        var appData = Path.Combine(root, "Codev");
         var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(appData);
         Directory.CreateDirectory(project);
+        var settings = AvaloniaUiSettings.Default with { DefaultProjectCommandPermissionMode = ProjectCommandPermissionMode.AskEveryTime };
+        var settingsPath = Path.Combine(appData, "avalonia-settings.json");
+        await File.WriteAllTextAsync(settingsPath, AvaloniaUiSettings.Serialize(settings));
         MainViewModel? viewModel = null;
         MainWindow? window = null;
         try
         {
-            viewModel = new MainViewModel(appData);
+            viewModel = new MainViewModel(root);
             viewModel.SetProjectFolder(project);
             window = new MainWindow { DataContext = viewModel };
             window.Show();
             window.UpdateLayout();
 
             var selector = Assert.IsType<Button>(window.FindControl<Button>("ProjectCommandModeButton"));
+            Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, viewModel.ProjectCommandPermissionMode);
             Assert.Equal("Ask every time ▾", selector.Content?.ToString());
             var menu = Assert.IsType<MenuFlyout>(selector.Flyout);
             menu.ShowAt(selector);
@@ -82,6 +136,9 @@ public sealed class MainWindowTests
                 await Task.Delay(20);
             Assert.Equal(ProjectCommandPermissionMode.Auto, ProjectCommandPermissionRegistry.Load(permissionPath).GetMode(project));
 
+            var savedDefault = AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).DefaultProjectCommandPermissionMode;
+            Assert.Equal(ProjectCommandPermissionMode.Auto, savedDefault);
+
             var approvePolicy = typeof(MainViewModel).GetMethod("ApproveCommandWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var proposal = new CodeTaskCommandProposal("cargo check --manifest-path signaling/Cargo.toml", project, "PowerShell", IsVerification: true);
             var pendingApproval = Assert.IsAssignableFrom<Task<CommandApprovalOutcome>>(approvePolicy.Invoke(viewModel, [proposal, Array.Empty<string>()]));
@@ -93,24 +150,14 @@ public sealed class MainWindowTests
             await StopAndFlushAsync(viewModel);
             viewModel = null;
 
-            var restored = new MainViewModel(appData);
+            var restored = new MainViewModel(root);
             try
             {
                 Assert.Equal(project, restored.ActiveConversation?.ProjectPath);
                 Assert.Equal(ProjectCommandPermissionMode.Auto, restored.ProjectCommandPermissionMode);
-                var restoredWindow = new MainWindow { DataContext = restored };
-                try
-                {
-                    restoredWindow.Show();
-                    restoredWindow.UpdateLayout();
-                    Assert.Equal("Auto ▾", restoredWindow.FindControl<Button>("ProjectCommandModeButton")?.Content?.ToString());
-                }
-                finally { restoredWindow.Close(); }
             }
-            finally
-            {
-                await StopAndFlushAsync(restored);
-            }
+            finally { await StopAndFlushAsync(restored); }
+
         }
         finally
         {

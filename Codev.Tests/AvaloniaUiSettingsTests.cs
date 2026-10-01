@@ -26,6 +26,7 @@ public sealed class AvaloniaUiSettingsTests
         Assert.True(settings.PinnedConversationsExpanded);
         Assert.True(settings.RecentConversationsExpanded);
         Assert.Equal("nomic-embed-text", settings.EmbeddingModel);
+        Assert.Equal(ProjectCommandPermissionMode.Auto, settings.DefaultProjectCommandPermissionMode);
     }
 
     [Theory]
@@ -62,6 +63,27 @@ public sealed class AvaloniaUiSettingsTests
         Assert.Equal(original.PinnedConversationsExpanded, restored.PinnedConversationsExpanded);
         Assert.Equal(original.RecentConversationsExpanded, restored.RecentConversationsExpanded);
         Assert.Equal("custom-embed-model", restored.EmbeddingModel);
+        Assert.Equal(original.DefaultProjectCommandPermissionMode, restored.DefaultProjectCommandPermissionMode);
+    }
+
+    [Theory]
+    [InlineData(ProjectCommandPermissionMode.Auto)]
+    [InlineData(ProjectCommandPermissionMode.AskEveryTime)]
+    [InlineData(ProjectCommandPermissionMode.Allowlist)]
+    [InlineData(ProjectCommandPermissionMode.ReadOnly)]
+    public void Default_command_mode_round_trips(ProjectCommandPermissionMode mode)
+    {
+        var settings = new AvaloniaUiSettings("dark", OllamaEndpoint.Default.ToString(), DefaultProjectCommandPermissionMode: mode);
+
+        Assert.Equal(mode, AvaloniaUiSettings.Deserialize(AvaloniaUiSettings.Serialize(settings)).DefaultProjectCommandPermissionMode);
+    }
+
+    [Fact]
+    public void Invalid_default_command_mode_falls_back_to_auto()
+    {
+        var settings = AvaloniaUiSettings.Deserialize("{\"DefaultProjectCommandPermissionMode\":999}");
+
+        Assert.Equal(ProjectCommandPermissionMode.Auto, settings.DefaultProjectCommandPermissionMode);
     }
 
     [Theory]
