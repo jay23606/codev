@@ -1,6 +1,6 @@
 # Local model benchmark
 
-A small, self-contained benchmark for comparing Ollama models on coding work. It produced [`comparison.html`](../comparison.html). Every answer is checked automatically against hidden tests, so no one has to judge output by eye.
+A small, self-contained benchmark for comparing Ollama models on coding work. It produced [`comparison.html`](https://raw.githack.com/jay23606/codev/main/comparison.html) (rendered via githack, since GitHub shows raw HTML source for files in the repo rather than rendering them). Every answer is checked automatically against hidden tests, so no one has to judge output by eye.
 
 ## Tasks
 

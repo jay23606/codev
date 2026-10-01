@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (leave blank to auto-generate from date + short SHA)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows-wpf:
+    name: Build Windows WPF app
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Codev.csproj
+
+      - name: Publish self-contained Windows app
+        run: dotnet publish Codev.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\win-x64
+
+      - name: Zip the published app
+        shell: pwsh
+        run: Compress-Archive -Path artifacts\win-x64\* -DestinationPath Codev-win-x64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-wpf-win-x64
+          path: Codev-win-x64.zip
+
+  avalonia-windows:
+    name: Build Avalonia preview (win-x64)
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Codev.Avalonia\Codev.Avalonia.csproj
+
+      - name: Publish self-contained Avalonia app
+        run: dotnet publish Codev.Avalonia\Codev.Avalonia.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\avalonia-win-x64
+
+      - name: Zip the published app
+        shell: pwsh
+        run: Compress-Archive -Path artifacts\avalonia-win-x64\* -DestinationPath Codev-Avalonia-preview-win-x64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-avalonia-win-x64
+          path: Codev-Avalonia-preview-win-x64.zip
+
+  avalonia-linux:
+    name: Build Avalonia preview (linux-x64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Codev.Avalonia/Codev.Avalonia.csproj
+
+      - name: Publish self-contained Avalonia app
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime linux-x64 --self-contained true -p:PublishSingleFile=true --output artifacts/avalonia-linux-x64
+
+      - name: Zip the published app
+        run: |
+          chmod +x artifacts/avalonia-linux-x64/Codev.Avalonia
+          cd artifacts/avalonia-linux-x64
+          zip -r ../../Codev-Avalonia-preview-linux-x64.zip .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-avalonia-linux-x64
+          path: Codev-Avalonia-preview-linux-x64.zip
+
+  avalonia-macos:
+    name: Build Avalonia preview (osx-arm64, osx-x64)
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore (arm64)
+        run: dotnet restore Codev.Avalonia/Codev.Avalonia.csproj
+
+      - name: Publish self-contained Avalonia app (osx-arm64)
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime osx-arm64 --self-contained true -p:PublishSingleFile=true --output artifacts/avalonia-osx-arm64
+
+      - name: Publish self-contained Avalonia app (osx-x64)
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime osx-x64 --self-contained true -p:PublishSingleFile=true --output artifacts/avalonia-osx-x64
+
+      - name: Zip the published apps
+        run: |
+          chmod +x artifacts/avalonia-osx-arm64/Codev.Avalonia
+          chmod +x artifacts/avalonia-osx-x64/Codev.Avalonia
+          (cd artifacts/avalonia-osx-arm64 && zip -r ../../Codev-Avalonia-preview-osx-arm64.zip .)
+          (cd artifacts/avalonia-osx-x64 && zip -r ../../Codev-Avalonia-preview-osx-x64.zip .)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-avalonia-macos
+          path: |
+            Codev-Avalonia-preview-osx-arm64.zip
+            Codev-Avalonia-preview-osx-x64.zip
+
+  publish-release:
+    name: Create GitHub release
+    needs: [windows-wpf, avalonia-windows, avalonia-linux, avalonia-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: List downloaded assets
+        run: ls -la artifacts
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          tag="${{ inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag="v$(date -u +%Y.%m.%d)-$(echo "${{ github.sha }}" | cut -c1-7)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            artifacts/*.zip \
+            --repo ${{ github.repository }} \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --notes "Built from commit ${{ github.sha }}.
+
+          **\`Codev-win-x64.zip\`** is the legacy WPF app for Windows 10/11. Avalonia is the active cross-platform product and parity target.
+
+          The **\`Codev-Avalonia-preview-*.zip\`** builds are the cross-platform Avalonia app (Windows, macOS Apple Silicon/Intel, Linux x64). They include local Ollama and optional hosted models, Code tasks with file and command tools, and Git workflows. Feature development and platform interaction checks remain in progress; see DESIGN.md for current status.
+
+          None of these builds are code-signed. Windows will show a SmartScreen warning; macOS Gatekeeper will block the app until you right-click → Open (or run \`xattr -dr com.apple.quarantine <path>\`) the first time; on Linux and macOS, mark the binary executable first (\`chmod +x\`)." \
+            --latest
