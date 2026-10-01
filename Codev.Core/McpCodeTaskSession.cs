@@ -60,8 +60,9 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
             UntrustedToolOutput.Format("MCP connection diagnostics", line, activity: "mcp_connection")));
 
     public static Task<McpCodeTaskSession> ConnectAsync(IEnumerable<McpServerConfiguration> configurations,
-        Action<string>? status = null, CancellationToken cancellationToken = default, IMcpOAuthTokenVault? oauthTokenVault = null)
-        => ConnectCoreAsync(configurations, (server, session) => session.CreateTransport(server, status, oauthTokenVault), status, cancellationToken);
+        Action<string>? status = null, CancellationToken cancellationToken = default, IMcpOAuthTokenVault? oauthTokenVault = null,
+        Func<Uri, CancellationToken, Task>? oauthBrowserOpener = null)
+        => ConnectCoreAsync(configurations, (server, session) => session.CreateTransport(server, status, oauthTokenVault, oauthBrowserOpener), status, cancellationToken);
 
     public static async Task<McpCodeTaskSession> ConnectWithTransportFactoryAsync(IEnumerable<McpServerConfiguration> configurations,
         Func<McpServerConfiguration, IClientTransport> transportFactory, Action<string>? status = null, CancellationToken cancellationToken = default)
@@ -268,7 +269,8 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
         return Math.Max(1, Math.Min(requestedTimeoutMs, (int)Math.Ceiling(remaining.TotalMilliseconds)));
     }
 
-    private IClientTransport CreateTransport(McpServerConfiguration server, Action<string>? status, IMcpOAuthTokenVault? oauthTokenVault)
+    private IClientTransport CreateTransport(McpServerConfiguration server, Action<string>? status, IMcpOAuthTokenVault? oauthTokenVault,
+        Func<Uri, CancellationToken, Task>? oauthBrowserOpener)
     {
         if (server.Transport == McpServerTransportKind.Stdio)
         {
@@ -304,7 +306,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 ? null
                 : Environment.GetEnvironmentVariable(server.OAuthClientSecretEnvironmentVariable)
                     ?? throw new InvalidOperationException($"Required OAuth environment variable '{server.OAuthClientSecretEnvironmentVariable}' is not set.");
-            var callback = new McpOAuthCallbackListener(server.Name, status);
+            var callback = new McpOAuthCallbackListener(server.Name, status, oauthBrowserOpener);
             _oauthListeners.Add(callback);
             oauthOptions = new ClientOAuthOptions
             {

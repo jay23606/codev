@@ -6,11 +6,15 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.AspNetCore;
+using ModelContextProtocol.Authentication;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Codev.Tests;
 
@@ -261,6 +265,207 @@ public sealed class McpCodeTaskToolTests
     {
         [McpServerTool]
         public static string Echo(string message) => "Echo from legacy SSE: " + message;
+    }
+
+    [Fact]
+    public async Task OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization()
+    {
+        using var portReservation = new TcpListener(IPAddress.Loopback, 0);
+        portReservation.Start();
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+        portReservation.Stop();
+        var origin = new Uri($"http://127.0.0.1:{port}/");
+        var issuer = new Uri(origin, "/").AbsoluteUri.TrimEnd('/');
+        var mcpUri = new Uri(origin, "mcp");
+        var resourceMetadataUri = new Uri(origin, ".well-known/oauth-protected-resource/mcp");
+        var tokenEndpointUri = new Uri(origin, "token");
+        var authorizedRequests = 0;
+        var authorizationCodeExchanges = 0;
+        var refreshExchanges = 0;
+        var seenCodeVerifier = "";
+        var browserLaunches = 0;
+        var browserCallbackStatus = 0;
+        var authorizeCodeChallenge = "";
+        Task<int>? browserCallbackTask = null;
+        var acceptedTokens = new HashSet<string>(StringComparer.Ordinal) { "access-token-1", "access-token-2" };
+        var requestEvents = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var statusEvents = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var browserEvents = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls(origin.AbsoluteUri.TrimEnd('/'));
+        builder.Services.AddMcpServer()
+            .WithHttpTransport(options => options.Stateless = false)
+            .WithTools<OAuthIntegrationTools>();
+        var app = builder.Build();
+        app.Use(async (context, next) =>
+        {
+            requestEvents.Enqueue($"{context.Request.Method} {context.Request.Path}");
+            if (context.Request.Path == "/mcp")
+            {
+                var authorization = context.Request.Headers.Authorization.ToString();
+                var accessToken = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                    ? authorization[7..] : "";
+                if (!acceptedTokens.Contains(accessToken))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    context.Response.Headers.WWWAuthenticate = $"Bearer resource_metadata=\"{resourceMetadataUri.AbsoluteUri}\", scope=\"mcp\"";
+                    return;
+                }
+                Interlocked.Increment(ref authorizedRequests);
+            }
+            await next();
+        });
+        app.MapGet("/.well-known/oauth-protected-resource/mcp", () => { requestEvents.Enqueue("PRM metadata"); return Results.Json(new
+        {
+            resource = mcpUri.AbsoluteUri,
+            authorization_servers = new[] { issuer },
+            scopes_supported = new[] { "mcp" }
+        }); });
+        app.MapGet("/.well-known/oauth-authorization-server", () => { requestEvents.Enqueue("authorization metadata"); return Results.Json(new
+        {
+            issuer,
+            authorization_endpoint = new Uri(origin, "authorize").AbsoluteUri,
+            token_endpoint = tokenEndpointUri.AbsoluteUri,
+            response_types_supported = new[] { "code" },
+            grant_types_supported = new[] { "authorization_code", "refresh_token" },
+            token_endpoint_auth_methods_supported = new[] { "none" },
+            code_challenge_methods_supported = new[] { "S256" },
+            authorization_response_iss_parameter_supported = true
+        }); });
+        app.MapGet("/authorize", () => Results.Ok("The test browser launcher completes the redirect."));
+        app.MapPost("/token", async (HttpRequest request) =>
+        {
+            var form = await request.ReadFormAsync();
+            requestEvents.Enqueue("token " + form["grant_type"]);
+            if (form["grant_type"] == "authorization_code")
+            {
+                Interlocked.Increment(ref authorizationCodeExchanges);
+                seenCodeVerifier = form["code_verifier"].ToString();
+                return Results.Json(new
+                {
+                    access_token = "access-token-1",
+                    token_type = "Bearer",
+                    expires_in = 3_600,
+                    refresh_token = "refresh-token",
+                    scope = "mcp"
+                });
+            }
+            if (form["grant_type"] == "refresh_token" && form["refresh_token"] == "refresh-token")
+            {
+                Interlocked.Increment(ref refreshExchanges);
+                return Results.Json(new
+                {
+                    access_token = "access-token-2",
+                    token_type = "Bearer",
+                    expires_in = 3_600,
+                    refresh_token = "refresh-token",
+                    scope = "mcp"
+                });
+            }
+            return Results.BadRequest();
+        });
+        app.MapMcp("/mcp");
+        await app.StartAsync();
+
+        var configuration = new McpServerConfiguration("oauth-test", "OAuth test", McpServerTransportKind.Http,
+            Enabled: true, Url: mcpUri.AbsoluteUri, OAuthEnabled: true, OAuthClientId: "codev-oauth-test-client", OAuthScopes: ["mcp"]);
+        var vault = new MemoryMcpOAuthTokenVault();
+        var openBrowser = (Uri authorizationUri, CancellationToken cancellationToken) =>
+        {
+            Interlocked.Increment(ref browserLaunches);
+            browserEvents.Enqueue(authorizationUri.AbsoluteUri);
+            var query = System.Web.HttpUtility.ParseQueryString(authorizationUri.Query);
+            authorizeCodeChallenge = query["code_challenge"] ?? "";
+            Assert.Equal("S256", query["code_challenge_method"]);
+            Assert.Equal("codev-oauth-test-client", query["client_id"]);
+            Assert.Equal("mcp", query["scope"]);
+            var redirectUri = new Uri(query["redirect_uri"] ?? throw new InvalidDataException("OAuth redirect URI was not supplied."));
+            var callback = new Uri(redirectUri.AbsoluteUri + "?code=authorization-code&state=" +
+                Uri.EscapeDataString(query["state"] ?? "") + "&iss=" + Uri.EscapeDataString(issuer));
+            browserCallbackTask = CompleteBrowserCallbackAsync(callback, cancellationToken);
+            return Task.CompletedTask;
+        };
+
+        try
+        {
+            McpCodeTaskSession session;
+            try
+            {
+                session = await McpCodeTaskSession.ConnectAsync([configuration], status: message => statusEvents.Enqueue(message), oauthTokenVault: vault,
+                    oauthBrowserOpener: openBrowser).WaitAsync(TimeSpan.FromSeconds(20));
+            }
+            catch (TimeoutException ex)
+            {
+                throw new TimeoutException($"OAuth startup did not complete. HTTP events: {string.Join(" | ", requestEvents)}; status: {string.Join(" | ", statusEvents)}; browser launches: {browserLaunches}; browser events: {string.Join(" | ", browserEvents)}.", ex);
+            }
+            await using (session)
+            {
+                var tool = Assert.Single(session.Tools.Values);
+                using var arguments = JsonDocument.Parse("""{"message":"first"}""");
+                Assert.Contains("OAuth echo: first", await session.CallAsync(tool.FunctionName, arguments.RootElement));
+            }
+
+            var account = McpOAuthTokenCache.CreateAccount(configuration);
+            var savedText = await vault.GetTokensAsync(account);
+            Assert.NotNull(savedText);
+            var saved = JsonSerializer.Deserialize<TokenContainer>(savedText!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            Assert.Equal("access-token-1", saved?.AccessToken);
+            Assert.Equal("refresh-token", saved?.RefreshToken);
+            Assert.NotEmpty(seenCodeVerifier);
+            Assert.Equal(authorizeCodeChallenge, ToPkceChallenge(seenCodeVerifier));
+            Assert.Equal(1, Volatile.Read(ref browserLaunches));
+            Assert.Equal(1, Volatile.Read(ref authorizationCodeExchanges));
+            Assert.NotNull(browserCallbackTask);
+            browserCallbackStatus = await browserCallbackTask;
+            browserEvents.Enqueue("callback status=" + browserCallbackStatus);
+            Assert.Equal((int)HttpStatusCode.OK, browserCallbackStatus);
+
+            saved!.ExpiresIn = 1;
+            saved.ObtainedAt = DateTimeOffset.UtcNow.AddHours(-1);
+            await vault.SaveTokensAsync(account, JsonSerializer.Serialize(saved, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            await using (var restartedSession = await McpCodeTaskSession.ConnectAsync([configuration], oauthTokenVault: vault,
+                             oauthBrowserOpener: openBrowser).WaitAsync(TimeSpan.FromSeconds(20)))
+            {
+                var tool = Assert.Single(restartedSession.Tools.Values);
+                using var arguments = JsonDocument.Parse("""{"message":"refreshed"}""");
+                Assert.Contains("OAuth echo: refreshed", await restartedSession.CallAsync(tool.FunctionName, arguments.RootElement));
+            }
+
+            Assert.Equal(1, Volatile.Read(ref browserLaunches));
+            Assert.Equal(1, Volatile.Read(ref refreshExchanges));
+            Assert.True(Volatile.Read(ref authorizedRequests) >= 4);
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    private static string ToPkceChallenge(string verifier) => Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)))
+        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    private static async Task<int> CompleteBrowserCallbackAsync(Uri callback, CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient();
+        using var response = await http.GetAsync(callback, cancellationToken);
+        return (int)response.StatusCode;
+    }
+
+    private sealed class MemoryMcpOAuthTokenVault : IMcpOAuthTokenVault
+    {
+        private readonly Dictionary<string, string> _tokens = new(StringComparer.Ordinal);
+        public Task<string?> GetTokensAsync(string account) => Task.FromResult(_tokens.GetValueOrDefault(account));
+        public Task SaveTokensAsync(string account, string tokens) { _tokens[account] = tokens; return Task.CompletedTask; }
+        public Task<bool> RemoveTokensAsync(string account) => Task.FromResult(_tokens.Remove(account));
+    }
+
+    [McpServerToolType]
+    private sealed class OAuthIntegrationTools
+    {
+        [McpServerTool]
+        public static string Echo(string message) => "OAuth echo: " + message;
     }
 
     [Fact]
