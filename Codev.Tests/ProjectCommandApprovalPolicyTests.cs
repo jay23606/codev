@@ -15,15 +15,15 @@ public sealed class ProjectCommandApprovalPolicyTests : IDisposable
         _permissions = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "permissions.json"));
     }
 
-    [Fact]
-    public async Task Auto_approves_even_protected_compound_commands_without_requesting_approval()
+    [Theory]
+    [InlineData("Remove-Item -Recurse -Force signaling; git -C game add game.js; git -C game commit -m \"Update game\"; git -C game push origin main")]
+    [InlineData("Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short")]
+    public async Task Auto_approves_even_protected_compound_commands_without_requesting_approval(string command)
     {
         await _permissions.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
         var policy = new ProjectCommandApprovalPolicy(_permissions);
         var callsToApprovalUi = 0;
-        var proposal = new CodeTaskCommandProposal(
-            "Remove-Item -Recurse -Force signaling; git -C game add game.js; git -C game commit -m \"Update game\"; git -C game push origin main",
-            _project, "PowerShell");
+        var proposal = new CodeTaskCommandProposal(command, _project, "PowerShell");
 
         var result = await policy.ApproveAsync(proposal, requestApproval: _ =>
         {
