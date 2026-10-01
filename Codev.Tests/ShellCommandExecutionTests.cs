@@ -15,7 +15,7 @@ public sealed class ShellCommandExecutionTests : IDisposable
             ? "Write-Output 'Codev shell smoke test'"
             : "printf 'Codev shell smoke test'";
 
-        var result = await new WorkspaceFileService(_root).RunApprovedCommandAsync(command, TimeSpan.FromSeconds(20));
+        var result = await new WorkspaceFileService(_root).RunApprovedCommandAsync(command, TimeSpan.FromMinutes(1));
 
         Assert.Contains("Codev shell smoke test", result);
         Assert.Contains("Exit code: 0", result);

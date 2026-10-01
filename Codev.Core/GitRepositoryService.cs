@@ -23,6 +23,7 @@ public sealed record GitUnstagedDiscardPreview(IReadOnlyList<GitFileStatus> Repo
 /// <summary>Reads Git state and switches only between existing local branches on a clean worktree.</summary>
 public sealed class GitRepositoryService
 {
+    private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(30);
     public const int MaxReviewDiffCharacters = 40_000;
     public const int MaxReviewFiles = 40;
     public const int MaxBulkDiscardFiles = 40;
@@ -494,13 +495,13 @@ public sealed class GitRepositoryService
             process.StandardInput.Close();
         }
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        timeout.CancelAfter(GitCommandTimeout);
         try { await process.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
             if (cancellationToken.IsCancellationRequested) throw;
-            throw new TimeoutException("The Git command took longer than 10 seconds.");
+            throw new TimeoutException($"The Git command took longer than {GitCommandTimeout.TotalSeconds:0} seconds.");
         }
         return new GitCommandResult(process.ExitCode, await outputTask, await errorTask);
     }

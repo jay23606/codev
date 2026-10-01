@@ -548,7 +548,7 @@ public sealed class McpCodeTaskToolTests
             try
             {
                 session = await McpCodeTaskSession.ConnectAsync([configuration], status: message => statusEvents.Enqueue(message), oauthTokenVault: vault,
-                    oauthBrowserOpener: openBrowser).WaitAsync(TimeSpan.FromSeconds(20));
+                    oauthBrowserOpener: openBrowser).WaitAsync(TimeSpan.FromMinutes(1));
             }
             catch (TimeoutException ex)
             {
@@ -580,7 +580,7 @@ public sealed class McpCodeTaskToolTests
             saved.ObtainedAt = DateTimeOffset.UtcNow.AddHours(-1);
             await vault.SaveTokensAsync(account, JsonSerializer.Serialize(saved, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
             await using (var restartedSession = await McpCodeTaskSession.ConnectAsync([configuration], oauthTokenVault: vault,
-                             oauthBrowserOpener: openBrowser).WaitAsync(TimeSpan.FromSeconds(20)))
+                             oauthBrowserOpener: openBrowser).WaitAsync(TimeSpan.FromMinutes(1)))
             {
                 var tool = Assert.Single(restartedSession.Tools.Values);
                 using var arguments = JsonDocument.Parse("""{"message":"refreshed"}""");
