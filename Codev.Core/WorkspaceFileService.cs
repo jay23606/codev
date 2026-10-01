@@ -45,6 +45,7 @@ public sealed class WorkspaceFileService
         _root = string.Equals(Path.GetPathRoot(full), full, StringComparison.OrdinalIgnoreCase)
             ? full
             : full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        EnsureRootIsNotLink();
         _contextExclusions = (contextExclusions ?? []).Select(NormalizeExclusion).Where(value => value is not null).Select(value => value!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
@@ -56,6 +57,7 @@ public sealed class WorkspaceFileService
 
     public string ResolvePath(string relativePath, bool allowWorkspaceRoot = false)
     {
+        EnsureRootIsNotLink();
         if (string.IsNullOrWhiteSpace(relativePath))
         {
             if (allowWorkspaceRoot) return _root;
@@ -88,6 +90,29 @@ public sealed class WorkspaceFileService
         if (IsSensitivePath(full))
             throw new UnauthorizedAccessException("This file looks like a secret or private key and is excluded from agent access.");
         return full;
+    }
+
+    private void EnsureRootIsNotLink()
+    {
+        try
+        {
+            var current = _root;
+            while (true)
+            {
+                if ((Directory.Exists(current) || File.Exists(current)) &&
+                    (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    throw new UnauthorizedAccessException("Project file operations do not follow symbolic links or junctions in the project path.");
+                var parent = Path.GetDirectoryName(current);
+                if (string.IsNullOrEmpty(parent) || string.Equals(parent, current, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    return;
+                current = parent;
+            }
+        }
+        catch (UnauthorizedAccessException) { throw; }
+        catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
+        {
+            throw new UnauthorizedAccessException("The project path could not be verified without following links.", ex);
+        }
     }
 
     private static bool IsWindowsRootedPath(string path) =>
@@ -235,7 +260,7 @@ public sealed class WorkspaceFileService
         if (!info.Exists) throw new FileNotFoundException("File not found in the selected project.", relativePath);
         if (info.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
         var bytes = await File.ReadAllBytesAsync(full, cancellationToken);
-        return new FileSnapshot(Encoding.UTF8.GetString(bytes), Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+        return new FileSnapshot(Encoding.UTF8.GetString(bytes), Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
     public async Task<IReadOnlyList<string>> SearchFilesAsync(string query, CancellationToken cancellationToken = default)
@@ -287,7 +312,8 @@ public sealed class WorkspaceFileService
         if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromMinutes(3)) throw new ArgumentOutOfRangeException(nameof(timeout), "Command timeout must be at most three minutes.");
 
         var shell = ShellCommandResolver.ResolveCurrent();
-        var start = shell.CreateStartInfo(command, _root);
+        var executionCommand = AutoSafeCommandClassifier.PrepareApprovedExecutionCommand(command, _root);
+        var start = shell.CreateStartInfo(executionCommand, _root);
         using var process = new System.Diagnostics.Process { StartInfo = start, EnableRaisingEvents = true };
         if (!process.Start()) throw new InvalidOperationException($"Could not start {shell.DisplayName}.");
         using var timeoutCts = new CancellationTokenSource(timeout);
@@ -348,12 +374,13 @@ public sealed class WorkspaceFileService
         var full = ResolvePath(relativePath);
         if (!File.Exists(full)) return null;
         var bytes = await File.ReadAllBytesAsync(full, cancellationToken);
+        if (bytes.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB cannot be checkpointed or restored.");
         if (expectedHash is not null && !HashMatches(bytes, expectedHash))
             throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversationId.ToString("N"));
         Directory.CreateDirectory(directory);
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(relativePath)))[..12];
-        var backup = Path.Combine(directory, $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{hash}.bak");
+        var backup = Path.Combine(directory, $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{hash}_{Guid.NewGuid():N}.bak");
         await File.WriteAllBytesAsync(backup, bytes, cancellationToken);
         return backup;
     }
@@ -402,10 +429,16 @@ public sealed class WorkspaceFileService
 
     public async Task<string> ReadCheckpointAsync(string relativePath, Guid conversationId, string checkpointPath, CancellationToken cancellationToken = default)
     {
+        return (await ReadCheckpointSnapshotAsync(relativePath, conversationId, checkpointPath, cancellationToken)).Content;
+    }
+
+    public async Task<FileSnapshot> ReadCheckpointSnapshotAsync(string relativePath, Guid conversationId, string checkpointPath, CancellationToken cancellationToken = default)
+    {
         ResolvePath(relativePath);
         var path = ValidateCheckpointPath(conversationId, checkpointPath);
         if (new FileInfo(path).Length > 500_000) throw new InvalidOperationException("Checkpoint files larger than 500 KB cannot be restored.");
-        return await File.ReadAllTextAsync(path, cancellationToken);
+        var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+        return new FileSnapshot(Encoding.UTF8.GetString(bytes), Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
     public async Task<string> RestoreCheckpointAsync(string relativePath, Guid conversationId, string checkpointPath, string expectedCurrentHash, CancellationToken cancellationToken = default)
@@ -423,6 +456,10 @@ public sealed class WorkspaceFileService
         var full = ResolvePath(relativePath);
         if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are restored by the agent.");
         var currentExists = File.Exists(full);
+        if (currentExists && previousFileExisted)
+        {
+            FileHardLinkInspector.EnsureSafeToReplaceExistingFile(full, relativePath);
+        }
         if (currentExists)
         {
             if (expectedCurrentHash is null || !await CurrentFileMatchesAsync(full, expectedCurrentHash, cancellationToken))
@@ -439,9 +476,9 @@ public sealed class WorkspaceFileService
             if (string.IsNullOrWhiteSpace(checkpointPath)) throw new FileNotFoundException("The saved checkpoint for this change is missing.");
             var checkpoint = ValidateCheckpointPath(conversationId, checkpointPath);
             if (new FileInfo(checkpoint).Length > 500_000) throw new InvalidOperationException("Checkpoint files larger than 500 KB cannot be restored.");
-            var content = await File.ReadAllTextAsync(checkpoint, cancellationToken);
-            if (currentExists) await WriteFileAtomicAsync(relativePath, content, cancellationToken, expectedCurrentHash, maxCharacters: 500_000);
-            else await CreateFileAtomicAsync(relativePath, content, cancellationToken);
+            var content = await File.ReadAllBytesAsync(checkpoint, cancellationToken);
+            if (content.Length > 500_000) throw new InvalidOperationException("Checkpoint files larger than 500 KB cannot be restored.");
+            await RestoreBytesAtomicAsync(relativePath, content, currentExists ? expectedCurrentHash : null, cancellationToken);
         }
         else
         {
@@ -451,6 +488,30 @@ public sealed class WorkspaceFileService
             File.Delete(full);
         }
         return rollback;
+    }
+
+    private async Task RestoreBytesAtomicAsync(string relativePath, byte[] content, string? expectedCurrentHash, CancellationToken cancellationToken)
+    {
+        var full = ResolvePath(relativePath);
+        if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are restored by the agent.");
+        if (expectedCurrentHash is not null && !await CurrentFileMatchesAsync(full, expectedCurrentHash, cancellationToken))
+            throw new IOException("The file changed while its checkpoint was being restored. Nothing was overwritten; review it again.");
+        if (expectedCurrentHash is null && File.Exists(full))
+            throw new IOException("A file appeared while its checkpoint was being restored. Nothing was overwritten; review it again.");
+        var parent = Path.GetDirectoryName(full)!;
+        if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The parent folder must already exist; Codev will not create new directory trees yet.");
+        var temp = Path.Combine(parent, $".codev-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllBytesAsync(temp, content, cancellationToken);
+            ResolvePath(relativePath);
+            if (expectedCurrentHash is not null && !await CurrentFileMatchesAsync(full, expectedCurrentHash, cancellationToken))
+                throw new IOException("The file changed while its checkpoint was being restored. Nothing was overwritten; review it again.");
+            if (expectedCurrentHash is null && File.Exists(full))
+                throw new IOException("A file appeared while its checkpoint was being restored. Nothing was overwritten; review it again.");
+            File.Move(temp, full, overwrite: expectedCurrentHash is not null);
+        }
+        finally { try { if (File.Exists(temp)) File.Delete(temp); } catch { } }
     }
 
     private static string ValidateCheckpointPath(Guid conversationId, string checkpointPath)
@@ -488,7 +549,10 @@ public sealed class WorkspaceFileService
     }
 }
 
-public sealed record FileSnapshot(string Content, string Sha256);
+public sealed record FileSnapshot(string Content, string Sha256)
+{
+    public static string ComputeSha256(string content) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+}
 
 public sealed record FileSearchMatch(string RelativePath, int LineNumber, string LineText)
 {

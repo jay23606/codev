@@ -62,6 +62,32 @@ public sealed class ProjectSkillCatalogTests
     }
 
     [Fact]
+    public async Task Project_skills_are_not_loaded_through_a_symlinked_project_ancestor()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var project = Path.Combine(root, "project");
+            var linkedProject = Path.Combine(root, "linked-project");
+            var skillDirectory = Path.Combine(project, ".codev", "skills", "review");
+            Directory.CreateDirectory(skillDirectory);
+            await File.WriteAllTextAsync(Path.Combine(skillDirectory, "SKILL.md"), Markdown("Linked project instructions."));
+            try { Directory.CreateSymbolicLink(linkedProject, project); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var result = await ProjectSkillCatalog.LoadAsync(Path.Combine(root, "user-skills"), linkedProject, includeProjectSkills: true);
+
+            Assert.Empty(result.Skills);
+            var skill = new SlashCommandDefinition("/skill-review", "review", SlashCommandAction.UserPrompt,
+                null, null, "skill-project");
+            var expanded = await ProjectSkillCatalog.ReadPromptAsync(skill, Path.Combine(root, "user-skills"), linkedProject,
+                projectTrusted: true, skill.Name);
+            Assert.False(expanded.Success);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task Skill_is_reloaded_before_inserting_so_changed_files_are_not_stale()
     {
         var root = CreateTempDirectory();

@@ -1,0 +1,184 @@
+name: Release desktop preview
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Test and publish Avalonia ${{ matrix.rid }} preview
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore test projects
+        run: dotnet restore Codev.Tests/Codev.Tests.csproj
+
+      - name: Run portable tests
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
+
+      - name: Publish self-contained Avalonia app
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish/${{ matrix.rid }}
+
+      - name: Launch Avalonia on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $appPath = Join-Path $PWD 'artifacts/publish/win-x64/Codev.Avalonia.exe'
+          $stdoutPath = Join-Path $env:TEMP 'codev-avalonia-windows-smoke.out.log'
+          $stderrPath = Join-Path $env:TEMP 'codev-avalonia-windows-smoke.err.log'
+          $app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+          try {
+            if ($app.WaitForExit(15000)) {
+              Get-Content $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+              throw "Avalonia exited before the Windows launch smoke completed (exit $($app.ExitCode))."
+            }
+            Write-Host 'Avalonia remained running for the 15-second Windows launch smoke.'
+          }
+          finally {
+            if (-not $app.HasExited) {
+              $app.Kill($true)
+              $app.WaitForExit(5000)
+            }
+          }
+
+      - name: Launch Avalonia under the macOS window server
+        if: runner.os == 'macOS'
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import sys
+
+          log_path = "/tmp/codev-avalonia-smoke.log"
+          with open(log_path, "w") as log:
+              app = subprocess.Popen(["./artifacts/publish/${{ matrix.rid }}/Codev.Avalonia"], stdout=log, stderr=subprocess.STDOUT)
+              try:
+                  app.wait(timeout=15)
+              except subprocess.TimeoutExpired:
+                  app.terminate()
+                  try:
+                      app.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      app.kill()
+                      app.wait()
+              else:
+                  log.flush()
+                  with open(log_path, encoding="utf-8") as output:
+                      sys.stderr.write(output.read())
+                  raise SystemExit(f"Avalonia exited before the 15-second macOS launch smoke (exit {app.returncode}).")
+          print("Avalonia remained running for the macOS launch smoke.")
+          PY
+
+      - name: Launch Avalonia under a virtual Linux display
+        if: runner.os == 'Linux'
+        run: |
+          log_path="/tmp/codev-avalonia-linux-smoke.log"
+          set +e
+          xvfb-run -a timeout --signal=TERM --kill-after=5s 15s ./artifacts/publish/linux-x64/Codev.Avalonia >"$log_path" 2>&1
+          status=$?
+          if [ "$status" -eq 124 ]; then
+            echo "Avalonia remained running for the 15-second Linux launch smoke."
+          else
+            cat "$log_path"
+            echo "Avalonia exited before the Linux launch smoke completed (exit $status)." >&2
+            exit 1
+          fi
+
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          @'
+          Codev Avalonia preview for Windows (x64)
+
+          Extract this ZIP to a folder and run Codev.Avalonia.exe. This package includes the .NET runtime.
+          Ollama is optional when using hosted models; install Ollama separately to use local models.
+          Conversations and settings are stored in your Windows user profile.
+          '@ | Set-Content -Path artifacts/publish/win-x64/README.txt -Encoding utf8
+          Get-ChildItem artifacts/publish/win-x64 -Filter *.pdb | Remove-Item -Force
+          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/Codev-windows-x64.zip -CompressionLevel Optimal
+
+      - name: Package Linux app
+        if: runner.os == 'Linux'
+        run: |
+          cat > artifacts/publish/linux-x64/README.txt <<'EOF'
+          Codev Avalonia preview for Linux (x64)
+
+          Extract this archive and run ./Codev.Avalonia from a desktop session.
+          This package includes the .NET runtime. Ollama is optional for hosted models.
+          Hosted API key storage needs Secret Service available in the desktop session.
+          EOF
+          find artifacts/publish/linux-x64 -name '*.pdb' -delete
+          mkdir -p artifacts
+          tar -czf "$GITHUB_WORKSPACE/artifacts/Codev-linux-x64.tar.gz" -C artifacts/publish/linux-x64 .
+
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          cat > artifacts/publish/${{ matrix.rid }}/README.txt <<'EOF'
+          Codev Avalonia preview for macOS (${{ matrix.rid }})
+
+          Extract this archive and run ./Codev.Avalonia from Terminal in the extracted folder.
+          This package includes the .NET runtime. Ollama is optional for hosted models.
+          Hosted API key storage needs macOS Keychain access.
+          This preview is not code-signed or notarized; macOS Gatekeeper may require manual approval.
+          EOF
+          find artifacts/publish/${{ matrix.rid }} -name '*.pdb' -delete
+          tar -czf "$GITHUB_WORKSPACE/artifacts/Codev-${{ matrix.rid }}.tar.gz" -C artifacts/publish/${{ matrix.rid }} .
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Codev-${{ matrix.rid }}
+          path: artifacts/Codev-*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Codev ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/Codev-windows-x64.zip
+            artifacts/Codev-linux-x64.tar.gz
+            artifacts/Codev-osx-arm64.tar.gz
+            artifacts/Codev-osx-x64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

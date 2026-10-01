@@ -41,6 +41,37 @@ public sealed class PromptContextBreakdownTests
         Assert.Contains("Context limit: model default", display);
         Assert.Contains("Provider-reported input: not reported", display);
     }
+
+    [Fact]
+    public void Code_task_round_sections_keep_captured_context_separate_from_tool_interactions()
+    {
+        var sections = PromptContextBreakdown.BuildCodeTaskRoundSections(
+            [new("System instructions", "system prompt"), new("Repository map", "src/app.cs: App")],
+            "[{\"type\":\"function_call_output\",\"output\":\"read result\"}]", "[tool schema]", "think=false");
+
+        Assert.Equal(new[] { "System instructions", "Repository map", "Tool calls and results", "Available tool schemas", "Generation controls" },
+            sections.Select(section => section.Name));
+        Assert.Equal("src/app.cs: App", sections[1].Content);
+    }
+
+    [Fact]
+    public void Open_ai_input_display_includes_function_calls_and_outputs_from_the_current_round()
+    {
+        using var functionCall = System.Text.Json.JsonDocument.Parse("{\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"list_files\",\"arguments\":\"{}\"}");
+        using var functionOutput = System.Text.Json.JsonDocument.Parse("{\"type\":\"function_call_output\",\"call_id\":\"call-1\",\"output\":\"src/app.cs\"}");
+        var input = new object[]
+        {
+            new { role = "user", content = "Inspect the project" },
+            functionCall.RootElement.Clone(),
+            functionOutput.RootElement.Clone()
+        };
+
+        var messages = PromptContextBreakdown.ToOpenAiInputDisplayMessages(input);
+
+        Assert.Equal(new[] { "user", "function_call", "function_call_output" }, messages.Select(message => message.Role));
+        Assert.Contains("list_files", messages[1].Content);
+        Assert.Contains("src/app.cs", messages[2].Content);
+    }
 }
 
 

@@ -93,6 +93,31 @@ public sealed class OpenAiCodeTaskRunnerTests
     }
 
     [Fact]
+    public async Task Allowing_one_repeated_call_resets_guard_before_prompting_again()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new ResponseHandler(_ =>
+        {
+            requests++;
+            return OpenAiSse("{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call-" + requests +
+                "\",\"name\":\"list_files\",\"arguments\":\"{}\"}]}");
+        }));
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+        var toolExecutions = 0;
+        var repeatedPrompts = 0;
+
+        var result = await runner.RunAsync("gpt-test", [new { role = "user", content = "list files" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => { toolExecutions++; return Task.FromResult("[]"); },
+            (_, _, _) => Task.FromResult(++repeatedPrompts == 1));
+
+        Assert.Equal(6, requests);
+        Assert.Equal(5, toolExecutions);
+        Assert.Equal(2, repeatedPrompts);
+        Assert.Contains("same tool call repeated", result.Transcript);
+    }
+
+    [Fact]
     public async Task Stops_after_the_shared_model_step_limit_with_tool_results_and_clear_follow_up_guidance()
     {
         var requests = 0;
@@ -124,6 +149,27 @@ public sealed class OpenAiCodeTaskRunnerTests
         Assert.Contains("send a follow-up to continue", result.Transcript);
         Assert.Contains("contents", result.Transcript);
         Assert.Equal(result.Transcript, transcriptUpdates[^1]);
+    }
+
+    [Fact]
+    public async Task Honors_a_profile_specific_step_limit_below_the_global_cap()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new ResponseHandler(_ =>
+        {
+            requests++;
+            return OpenAiSse("""{"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"read_file","arguments":"{}"}]}""");
+        }));
+        var runner = new OpenAiCodeTaskRunner(new CloudModelApiClient(http));
+
+        var result = await runner.RunAsync("gpt-test", [new { role = "user", content = "inspect" }], [],
+            (_, _, _) => Task.FromResult("key"),
+            (_, _, _) => Task.FromResult("contents"),
+            (_, _, _) => Task.FromResult(false),
+            maxSteps: 1);
+
+        Assert.Equal(1, requests);
+        Assert.Contains("reached its 1-request limit", result.Transcript);
     }
 
     [Fact]

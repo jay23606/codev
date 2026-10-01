@@ -27,17 +27,86 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     }
 
     [Fact]
-    public async Task Allow_rules_only_apply_in_allowlist_mode_and_match_exact_command_text()
+    public async Task Auto_allows_commands_and_allowlist_requires_an_exact_allow_rule()
     {
         var registry = ProjectCommandPermissionRegistry.Load(_path);
         const string command = "dotnet test Codev.Tests\\Codev.Tests.csproj";
         await registry.SetRuleAsync(_project, command, ProjectCommandPermissionDecision.Allow);
 
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, command));
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+        await registry.SetRuleAsync(_project, command, ProjectCommandPermissionDecision.Allow);
+        Assert.Equal(ProjectCommandPermissionMode.Auto, registry.GetMode(_project));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_project, command));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_project, command + " --filter Fast"));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project + "-other", command));
         await registry.SetModeAsync(_project, ProjectCommandPermissionMode.Allowlist);
         Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_project, command));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, command + " --filter Fast"));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project + "-other", command));
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.ReadOnly);
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, command));
+    }
+
+    [Fact]
+    public async Task Auto_mode_approves_commands_unless_the_exact_command_is_denied()
+    {
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+        Directory.CreateDirectory(Path.Combine(_project, ".git"));
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+
+        foreach (var command in new[]
+        {
+            "git add game.js; git commit -m update; git push origin main",
+            "Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short",
+            "npm test",
+            "dotnet test",
+            "Invoke-Expression 'arbitrary command'"
+        })
+            Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_project, command, isVerification: command.Contains("test", StringComparison.OrdinalIgnoreCase)));
+
+        const string deniedCommand = "Remove-Item -Recurse -Force space-invaders-game/signaling";
+        await registry.SetRuleAsync(_project, deniedCommand, ProjectCommandPermissionDecision.Deny);
+        Assert.Equal(ProjectCommandPermissionDecision.Deny, registry.Evaluate(_project, deniedCommand));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_project, deniedCommand + "; Get-Location"));
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.AskEveryTime);
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, "dotnet test"));
+    }
+
+    [Fact]
+    public async Task Auto_mode_survives_reload_and_allows_the_protected_rule_command_shape()
+    {
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+        var restarted = ProjectCommandPermissionRegistry.Load(_path);
+        const string command = "Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short";
+
+        Assert.Equal(ProjectCommandPermissionMode.Auto, restarted.GetMode(_project));
+        Assert.False(ProjectCommandPermissionRegistry.CanCreateAllowRule(command));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, restarted.Evaluate(_project, command));
+    }
+
+    [Fact]
+    public async Task Auto_mode_routes_safe_external_checks_to_shell_and_filesystem_inspections_to_bounded_apis()
+    {
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+        await File.WriteAllTextAsync(Path.Combine(_project, "game.js"), "const x = 1;");
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+
+        var shellName = OperatingSystem.IsWindows() ? "PowerShell" : "bash";
+        var fileInspection = registry.Evaluate(_project, "pwd", shellName);
+        var githubInspection = registry.Evaluate(_project, "gh auth status");
+        var nodeSyntaxCheck = registry.Evaluate(_project, "node --check game.js", isVerification: true);
+        var gitWrite = registry.Evaluate(_project, "git add game.js");
+
+        Assert.True(registry.ShouldUseBoundedFileInspection(_project, "pwd", fileInspection, shellName: shellName));
+        Assert.False(registry.ShouldUseBoundedFileInspection(_project, "gh auth status", githubInspection));
+        Assert.False(registry.ShouldUseBoundedFileInspection(_project, "node --check game.js", nodeSyntaxCheck, isVerification: true));
+        Assert.False(registry.ShouldUseBoundedFileInspection(_project, "git add game.js", gitWrite));
+
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.ReadOnly);
+        var readOnlyInspection = registry.Evaluate(_project, "pwd", shellName);
+        Assert.True(registry.ShouldUseBoundedFileInspection(_project, "pwd", readOnlyInspection, shellName: shellName));
     }
 
     [Fact]
@@ -101,7 +170,7 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     }
 
     [Fact]
-    public async Task Protected_git_and_codev_data_commands_never_skip_approval()
+    public async Task Protected_commands_cannot_be_saved_as_allows_but_auto_still_honors_deny_rules()
     {
         var codevDataFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
         Assert.False(ProjectCommandPermissionRegistry.CanCreateAllowRule("git status --short"));
@@ -117,6 +186,11 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
         var loaded = ProjectCommandPermissionRegistry.Load(_path);
         Assert.Equal(ProjectCommandPermissionDecision.Ask, loaded.Evaluate(_project, "git status --short"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => loaded.SetRuleAsync(_project, "git status --short", ProjectCommandPermissionDecision.Allow));
+
+        await loaded.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, "git status --short"));
+        await loaded.SetRuleAsync(_project, "git status --short", ProjectCommandPermissionDecision.Deny);
+        Assert.Equal(ProjectCommandPermissionDecision.Deny, loaded.Evaluate(_project, "git status --short"));
     }
 
     public void Dispose()

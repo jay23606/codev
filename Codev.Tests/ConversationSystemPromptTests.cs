@@ -44,8 +44,10 @@ public sealed class ConversationSystemPromptTests
         Assert.Contains("explicit user approval", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("full account permissions", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("without a sandbox", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("exact saved allow rule", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("saved deny rule always blocks", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Auto mode, which applies ordinary file proposals after a checkpoint", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approve all shell commands unless the exact command is blocked by a saved project deny rule", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Every file replacement needs user approval", prompt, StringComparison.Ordinal);
+        Assert.Contains("A saved exact deny rule always blocks its exact command in every mode", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("allow rules never authorize file tools", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("untrusted data", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("as untrusted data", prompt, StringComparison.OrdinalIgnoreCase);

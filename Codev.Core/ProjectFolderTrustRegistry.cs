@@ -47,7 +47,7 @@ public sealed class ProjectFolderTrustRegistry
         {
             var candidate = NormalizePath(folder);
             return _trustedRoots
-                .Where(root => ContainsPath(root, candidate))
+                .Where(root => ContainsPath(root, candidate) && ContainsNoLinkedPathSegments(root, candidate))
                 .OrderByDescending(root => root.Length)
                 .FirstOrDefault();
         }
@@ -71,6 +71,8 @@ public sealed class ProjectFolderTrustRegistry
     {
         var normalized = NormalizePath(folder);
         if (!IsAllowedTrustRoot(normalized)) throw new InvalidOperationException("The filesystem root cannot be trusted. Choose a narrower project folder.");
+        if (!ContainsNoLinkedPathSegments(normalized, normalized))
+            throw new UnauthorizedAccessException("A project folder with a symbolic link or junction in its path cannot be trusted.");
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -146,5 +148,36 @@ public sealed class ProjectFolderTrustRegistry
         return relative == "." || (!Path.IsPathRooted(relative) && relative != ".." &&
             !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
             !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal));
+    }
+
+    private static bool ContainsNoLinkedPathSegments(string root, string candidate)
+    {
+        try
+        {
+            var rootPath = Path.GetFullPath(root);
+            var candidatePath = Path.GetFullPath(candidate);
+            if (!ContainsPath(rootPath, candidatePath)) return false;
+            var pathSegments = new Stack<string>();
+            var current = candidatePath;
+            var rootDirectory = Path.GetPathRoot(current);
+            while (!string.IsNullOrEmpty(current))
+            {
+                pathSegments.Push(current);
+                var parent = Path.GetDirectoryName(current);
+                if (string.IsNullOrEmpty(parent) || PathComparer.Equals(parent, current)) break;
+                current = parent;
+            }
+            while (pathSegments.Count > 0)
+            {
+                current = pathSegments.Pop();
+                if ((Directory.Exists(current) || File.Exists(current)) &&
+                    (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 }

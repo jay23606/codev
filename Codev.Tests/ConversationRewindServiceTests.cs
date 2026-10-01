@@ -10,7 +10,12 @@ public sealed class ConversationRewindServiceTests
         var conversation = new Conversation
         {
             Messages = [new("user", "first"), new("assistant", "answer 1"), new("user", "second"), new("assistant", "answer 2")],
-            FileChanges = [new("src/app.cs", null, DateTimeOffset.UnixEpoch, "Create", PreviousFileExisted: false)],
+            FileChanges =
+            [
+                new("src/old.cs", null, DateTimeOffset.UnixEpoch, "Create", PreviousFileExisted: false, TurnUserMessageIndex: 0),
+                new("src/app.cs", null, DateTimeOffset.UnixEpoch, "Create", PreviousFileExisted: false, TurnUserMessageIndex: 2)
+            ],
+            FileChangesPrunedThroughMessageIndex = 3,
             LastPromptTokens = 500,
             LastPromptOutputTokens = 90,
             LastPromptContext = 4096,
@@ -24,7 +29,10 @@ public sealed class ConversationRewindServiceTests
         Assert.Equal([new ChatMessage("user", "first") { MessageIndex = 0 }, new ChatMessage("assistant", "answer 1") { MessageIndex = 1 }], conversation.Messages);
         Assert.Equal(0, conversation.Messages[0].MessageIndex);
         Assert.Equal(1, conversation.Messages[1].MessageIndex);
-        Assert.Single(conversation.FileChanges);
+        Assert.Equal(2, conversation.FileChanges.Count);
+        Assert.Equal(0, conversation.FileChanges[0].TurnUserMessageIndex);
+        Assert.Null(conversation.FileChanges[1].TurnUserMessageIndex);
+        Assert.Equal(1, conversation.FileChangesPrunedThroughMessageIndex);
         Assert.Equal(0, conversation.LastPromptTokens);
         Assert.Null(conversation.LastPromptOutputTokens);
         Assert.Equal(0, conversation.LastPromptContext);

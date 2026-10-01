@@ -86,6 +86,39 @@ public sealed class ProjectFolderTrustRegistryTests : IDisposable
         Assert.False(registry.IsTrusted(_root));
     }
 
+    [Fact]
+    public async Task Trust_fails_closed_when_a_trusted_root_becomes_a_symbolic_link()
+    {
+        var project = Path.Combine(_root, "project");
+        var outside = Path.Combine(_root, "outside");
+        Directory.CreateDirectory(project);
+        Directory.CreateDirectory(outside);
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+        await registry.TrustAsync(project);
+
+        Directory.Delete(project);
+        try { Directory.CreateSymbolicLink(project, outside); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+        Assert.False(registry.IsTrusted(project));
+        Assert.Throws<UnauthorizedAccessException>(() => new WorkspaceFileService(project));
+    }
+
+    [Fact]
+    public async Task Trust_refuses_a_project_path_under_a_symbolic_link_parent()
+    {
+        var outside = Path.Combine(_root, "outside");
+        var linkedParent = Path.Combine(_root, "linked-parent");
+        Directory.CreateDirectory(outside);
+        try { Directory.CreateSymbolicLink(linkedParent, outside); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+        var project = Path.Combine(linkedParent, "project");
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => registry.TrustAsync(project));
+        Assert.False(registry.IsTrusted(project));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

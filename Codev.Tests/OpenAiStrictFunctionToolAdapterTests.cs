@@ -25,6 +25,62 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
     }
 
     [Fact]
+    public void Selected_profile_removes_denied_tools_from_strict_schema_but_keeps_approved_categories()
+    {
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"required":[],"additionalProperties":false}""");
+        var mcpTool = new McpCodeTaskTool("mcp_github_search_1234567890abcdef", "github", "GitHub", "search", "Search issues.", schema.RootElement.Clone(), null!);
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var askProfile = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Ask");
+        var names = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, [mcpTool], askProfile)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString()).ToArray();
+
+        Assert.Contains("read_file", names);
+        Assert.Contains(mcpTool.FunctionName, names);
+        Assert.DoesNotContain("write_file", names);
+        Assert.DoesNotContain("create_file", names);
+        Assert.DoesNotContain("run_command", names);
+        Assert.DoesNotContain("verify_command", names);
+    }
+
+    [Fact]
+    public void Plan_primary_agent_exposes_project_inspection_only()
+    {
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"required":[],"additionalProperties":false}""");
+        var mcpTool = new McpCodeTaskTool("mcp_github_search_1234567890abcdef", "github", "GitHub", "search", "Search issues.", schema.RootElement.Clone(), null!);
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var plan = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Plan");
+
+        var names = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, [mcpTool], plan, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString()).ToArray();
+
+        Assert.Equal(new[] { "list_files", "read_file", "search_files" }, names);
+    }
+
+    [Fact]
+    public void Delegation_schema_is_exposed_only_to_an_explicit_orchestrator_profile()
+    {
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var orchestrator = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Orchestrator");
+        var code = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Code");
+
+        var normal = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: null)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
+        var codeNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: code, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
+        var orchestratorNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: orchestrator, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
+
+        Assert.DoesNotContain("delegate_task", normal);
+        Assert.DoesNotContain("delegate_task", codeNames);
+        var delegation = JsonSerializer.SerializeToElement(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(
+                shell, profile: orchestrator, allowDelegation: true).Single(tool =>
+                JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString() == "delegate_task"));
+        Assert.Contains("delegate_task", orchestratorNames);
+        Assert.True(delegation.GetProperty("strict").GetBoolean());
+        AssertStrictSchema(delegation.GetProperty("parameters"));
+    }
+
+    [Fact]
     public void Converts_nested_function_schema_to_strict_form_and_leaves_size_checks_to_runtime()
     {
         using var source = JsonDocument.Parse("""

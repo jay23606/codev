@@ -8,15 +8,25 @@ public static class ConversationBackupService
 {
     public static string Export(IEnumerable<Conversation> conversations, JsonSerializerOptions options)
     {
-        var snapshot = conversations.Select(conversation => new Conversation
+        var items = conversations.ToArray();
+        var includedIds = items.Select(conversation => conversation.Id).ToHashSet();
+        var snapshot = items.Select(conversation => new Conversation
         {
             Id = conversation.Id,
+            ParentConversationId = conversation.ParentConversationId is { } parentId && includedIds.Contains(parentId) ? parentId : null,
+            DelegatedFromMessageIndex = conversation.DelegatedFromMessageIndex,
+            DelegatedAgentName = AgentProfileCatalog.NormalizeReferenceName(conversation.DelegatedAgentName),
+            DelegatedResultReported = conversation.DelegatedResultReported,
+            ChildWorktreeBranch = conversation.ChildWorktreeBranch,
+            ChildWorktreeStartCommit = conversation.ChildWorktreeStartCommit,
+            ChildConversationsExpanded = conversation.ChildConversationsExpanded,
             Title = conversation.Title,
             Draft = conversation.Draft,
             Model = conversation.Model,
             Provider = conversation.Provider,
             IsPlanMode = conversation.IsPlanMode,
             IsCodeTask = conversation.IsCodeTask,
+            AgentProfileName = conversation.AgentProfileName,
             ThinkEnabled = conversation.ThinkEnabled,
             OutputStyle = conversation.OutputStyle,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
@@ -47,6 +57,8 @@ public static class ConversationBackupService
             Messages = [.. conversation.Messages],
             FileChanges = conversation.FileChanges.Where(change => change is not null)
                 .Select(change => change with { CheckpointPath = null }).ToList(),
+            FileChangesPrunedThroughMessageIndex = conversation.FileChangesPrunedThroughMessageIndex,
+            FileChangesPrunedUnlinked = conversation.FileChangesPrunedUnlinked,
             ContextFiles = [.. conversation.ContextFiles],
             PendingDiffComments = conversation.PendingDiffComments?.Select(comment => comment with { }).ToList() ?? [],
             PendingTurns = null!
@@ -66,6 +78,15 @@ public static class ConversationBackupService
         if (imported is null || imported.Count == 0) throw new InvalidDataException("The backup contains no conversations.");
         if (imported.Count > 10_000) throw new InvalidDataException("The backup contains too many conversations.");
 
+        var originalConversations = new Dictionary<Guid, Conversation>();
+        var remappedIds = new Dictionary<Guid, Guid>();
+        foreach (var item in imported)
+        {
+            if (item is null) throw new InvalidDataException("The backup contains an invalid empty conversation entry.");
+            if (!originalConversations.TryAdd(item.Id, item)) throw new InvalidDataException("The backup contains duplicate conversation IDs.");
+            remappedIds[item.Id] = Guid.NewGuid();
+        }
+
         var result = new List<Conversation>(imported.Count);
         foreach (var item in imported)
         {
@@ -75,7 +96,35 @@ public static class ConversationBackupService
             if (item.Messages.Any(message => message is null || (message.Role != "user" && message.Role != "assistant") || message.Content is null))
                 throw new InvalidDataException("A conversation contains an unsupported or invalid message.");
 
-            item.Id = Guid.NewGuid();
+            var originalId = item.Id;
+            var originalParentId = item.ParentConversationId;
+            item.Id = remappedIds[originalId];
+            if (originalParentId is { } parentId && parentId != originalId &&
+                originalConversations.TryGetValue(parentId, out var parent) && parent.ParentConversationId is null)
+            {
+                item.ParentConversationId = remappedIds[parentId];
+                if (item.DelegatedFromMessageIndex is not { } messageIndex || messageIndex < 0 || messageIndex >= originalConversations[parentId].Messages.Count ||
+                    !originalConversations[parentId].Messages[messageIndex].IsAssistant ||
+                    AgentProfileCatalog.NormalizeReferenceName(item.DelegatedAgentName) is null)
+                {
+                    item.DelegatedFromMessageIndex = null;
+                    item.DelegatedAgentName = null;
+                    item.DelegatedResultReported = false;
+                }
+                item.ChildWorktreeBranch = item.ChildWorktreeBranch is { Length: <= 120 } branch && branch.StartsWith("codev/child-", StringComparison.Ordinal)
+                    ? branch : null;
+                item.ChildWorktreeStartCommit = item.ChildWorktreeStartCommit is { } commit && (commit.Length is 40 or 64) && commit.All(Uri.IsHexDigit)
+                    ? commit : null;
+            }
+            else
+            {
+                item.ParentConversationId = null;
+                item.DelegatedFromMessageIndex = null;
+                item.DelegatedAgentName = null;
+                item.DelegatedResultReported = false;
+                item.ChildWorktreeBranch = null;
+                item.ChildWorktreeStartCommit = null;
+            }
             item.Title = Limit(item.Title, 300, "Imported conversation");
             item.Model = Limit(item.Model, 200, "");
             if (item.Provider is not ("ollama" or CloudModelProviders.OpenAI or CloudModelProviders.Anthropic)) item.Provider = "ollama";
@@ -103,6 +152,7 @@ public static class ConversationBackupService
             item.OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(item.OpenAiReasoningEffort);
             item.OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(item.OpenAiVerbosity);
             item.OpenAiReasoningMode = OpenAiGenerationSettings.NormalizeReasoningMode(item.OpenAiReasoningMode, item.Model);
+            item.AgentProfileName = AgentProfileCatalog.NormalizeReferenceName(item.AgentProfileName);
             item.Draft = item.Draft is null ? "" : item.Draft[..Math.Min(item.Draft.Length, 500_000)];
             item.PendingRequestCount = 0;
             item.PendingTurns = [];
@@ -116,6 +166,7 @@ public static class ConversationBackupService
                 .Where(comment => !string.IsNullOrWhiteSpace(comment.SelectedDiff) && !string.IsNullOrWhiteSpace(comment.Comment)).ToList() ?? [];
             item.FileChanges = item.FileChanges?.Where(change => change is not null)
                 .Select(change => change with { CheckpointPath = null }).ToList() ?? [];
+            ConversationFileChangeHistoryService.Trim(item);
             item.Messages = item.Messages.Select(message =>
                 message.Role == "assistant" && string.IsNullOrWhiteSpace(message.Content)
                     ? new ChatMessage("assistant", "This request did not finish before it was imported.")

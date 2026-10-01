@@ -16,7 +16,7 @@ public static class ProjectSkillCatalog
         var warnings = new List<string>();
         var user = await LoadScopeAsync(userSkillsDirectory, "user", warnings, cancellationToken).ConfigureAwait(false);
         var project = new List<SlashCommandDefinition>();
-        if (includeProjectSkills && !string.IsNullOrWhiteSpace(projectRoot) && Directory.Exists(projectRoot))
+        if (includeProjectSkills && !string.IsNullOrWhiteSpace(projectRoot) && Directory.Exists(projectRoot) && HasNoLinkedPathSegments(projectRoot))
         {
             var skillsDirectory = Path.Combine(Path.GetFullPath(projectRoot), ".codev", "skills");
             if (IsSafeProjectSkillsDirectory(projectRoot, skillsDirectory))
@@ -43,7 +43,7 @@ public static class ProjectSkillCatalog
         if (skill.Scope == "skill-user") root = Path.GetFullPath(userSkillsDirectory);
         else
         {
-            if (!projectTrusted || string.IsNullOrWhiteSpace(projectRoot))
+            if (!projectTrusted || string.IsNullOrWhiteSpace(projectRoot) || !HasNoLinkedPathSegments(projectRoot))
                 return new(false, "", "Project skills require a trusted attached project.");
             root = Path.Combine(Path.GetFullPath(projectRoot), ".codev", "skills");
             if (!IsSafeProjectSkillsDirectory(projectRoot, root))
@@ -189,5 +189,26 @@ public static class ProjectSkillCatalog
         catch (FileNotFoundException) { return false; }
         catch (DirectoryNotFoundException) { return false; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return true; }
+    }
+
+    private static bool HasNoLinkedPathSegments(string path)
+    {
+        try
+        {
+            var current = Path.GetFullPath(path);
+            while (true)
+            {
+                if ((Directory.Exists(current) || File.Exists(current)) && IsReparsePoint(current)) return false;
+                var parent = Path.GetDirectoryName(current);
+                if (string.IsNullOrEmpty(parent) || string.Equals(parent, current,
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    return true;
+                current = parent;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 }

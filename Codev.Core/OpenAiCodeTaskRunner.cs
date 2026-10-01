@@ -23,7 +23,8 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
         CancellationToken cancellationToken = default,
         string? reasoningEffort = null,
         string? verbosity = null,
-        string? reasoningMode = null)
+        string? reasoningMode = null,
+        int? maxSteps = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
         ArgumentNullException.ThrowIfNull(initialInput);
@@ -36,10 +37,11 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
         var transcript = new StringBuilder();
         var repeatedCalls = new RepeatedToolCallGuard();
         var usage = new OpenAiCodeTaskUsageAccumulator();
-        for (var step = 0; step < OpenAiCodeTaskLimits.MaxModelStepsPerTurn; step++)
+        var stepLimit = Math.Clamp(maxSteps ?? OpenAiCodeTaskLimits.MaxModelStepsPerTurn, 1, OpenAiCodeTaskLimits.MaxModelStepsPerTurn);
+        for (var step = 0; step < stepLimit; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (status is not null) await status($"OpenAI Code task · thinking · step {step + 1}/{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}");
+            if (status is not null) await status($"OpenAI Code task · thinking · step {step + 1}/{stepLimit}");
             var apiKey = await prepareRequestAsync(step, input, cancellationToken);
             var streamedText = new StringBuilder();
             var lastPublished = Stopwatch.GetTimestamp();
@@ -103,16 +105,15 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
                 var result = await executeToolAsync(name, arguments, cancellationToken);
                 outputs.Add(new OpenAiFunctionOutput(callId, result));
                 transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**")
-                    .AppendLine(result.Length > MaxToolResultTranscriptCharacters
-                        ? result[..MaxToolResultTranscriptCharacters] + "\n… [tool output truncated]" : result);
+                    .AppendLine(UntrustedToolOutput.Truncate(result, MaxToolResultTranscriptCharacters));
                 if (onTranscript is not null) await onTranscript(transcript.ToString());
             }
             OpenAiToolCallHistory.AppendResponseAndOutputs(input, response, outputs);
 
-            if (step == OpenAiCodeTaskLimits.MaxModelStepsPerTurn - 1)
+            if (step == stepLimit - 1)
             {
                 transcript.AppendLine().AppendLine()
-                    .Append($"OpenAI Code task reached its {OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-request limit. The completed tool results are shown above; send a follow-up to continue.");
+                    .Append($"OpenAI Code task reached its {stepLimit}-request limit. The completed tool results are shown above; send a follow-up to continue.");
                 if (onTranscript is not null) await onTranscript(transcript.ToString());
                 if (status is not null) await status("OpenAI Code task · request limit reached");
                 return new OpenAiCodeTaskRunResult(transcript.ToString(), turnUsage);

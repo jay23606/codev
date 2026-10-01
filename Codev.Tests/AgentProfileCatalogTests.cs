@@ -1,0 +1,208 @@
+using Codev;
+
+namespace Codev.Tests;
+
+public sealed class AgentProfileCatalogTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "Codev-agent-profiles", Guid.NewGuid().ToString("N"));
+    private readonly string _project = Path.Combine(Path.GetTempPath(), "Codev-agent-project", Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public void Parses_bounded_metadata_body_and_tool_permissions()
+    {
+        const string contents = "---\nname: Debug\ndescription: Reproduce and isolate a defect.\nmodel: qwen-coder\ntemperature: 0.2\nmax_steps: 6\ndefault_permission: ask\ntools: read_file=allow, search_files=allow, run_command=ask, mcp:*=deny\n---\nFirst reproduce the reported problem.\nThen test one explanation at a time.\n";
+
+        var valid = AgentProfileCatalog.TryParse("debug.md", contents, "user", out var profile, out var error);
+
+        Assert.True(valid, error);
+        Assert.Equal("Debug", profile!.Name);
+        Assert.Equal("qwen-coder", profile.Model);
+        Assert.Equal(0.2, profile.Temperature);
+        Assert.Equal(6, profile.MaxSteps);
+        Assert.Equal(AgentToolPermission.Allow, profile.ToolPermissions["read_file"]);
+        Assert.Equal(AgentToolPermission.Deny, profile.ToolPermissions["mcp:*"]);
+        Assert.Contains("First reproduce", profile.Instructions);
+    }
+
+    [Fact]
+    public void Parses_and_enforces_edit_path_allow_and_deny_globs()
+    {
+        const string contents = "---\nname: Frontend\ndescription: Edit frontend files only.\nedit_paths: src/**, index.html\ndeny_edit_paths: src/secrets/**\n---\nKeep changes focused.";
+        Assert.True(AgentProfileCatalog.TryParse("frontend.md", contents, "user", out var profile, out var error), error);
+
+        Assert.True(AgentProfilePolicy.CanEditPath(profile, "src/components/app.ts", Path.GetTempPath()));
+        Assert.True(AgentProfilePolicy.CanEditPath(profile, "index.html", Path.GetTempPath()));
+        Assert.False(AgentProfilePolicy.CanEditPath(profile, "README.md", Path.GetTempPath()));
+        Assert.False(AgentProfilePolicy.CanEditPath(profile, "src/secrets/token.ts", Path.GetTempPath()));
+    }
+
+    [Fact]
+    public void Tool_permission_globs_match_and_later_rules_override_earlier_rules()
+    {
+        const string contents = "---\nname: McpReader\ndescription: Read-only GitHub tools.\ntools: mcp_github_*=deny, mcp_github_search_*=allow, read_file_?=ask\n---\nSearch only.";
+        Assert.True(AgentProfileCatalog.TryParse("mcp-reader.md", contents, "user", out var profile, out var error), error);
+
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "mcp_github_search_repos_123"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "mcp_github_create_issue_456"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(profile, "read_file_1"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(profile, "run_command"));
+    }
+
+    [Fact]
+    public void Command_permission_globs_apply_to_command_tools_in_order()
+    {
+        const string contents = "---\nname: BuildRules\ndescription: Allow checks and block publishing.\ncommands: *=allow, git *=ask, git push *=deny, git status --short=allow\n---\nUse project commands carefully.";
+        Assert.True(AgentProfileCatalog.TryParse("build-rules.md", contents, "user", out var profile, out var error), error);
+
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "run_command", "npm test"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(profile, "run_command", "git status --branch"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "verify_command", "git push origin main"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "Remove-Item -Recurse signaling; git push origin main"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "run_command", "git status --short"));
+    }
+
+    [Theory]
+    [InlineData("temperature: 2.1", "temperature must be")]
+    [InlineData("max_steps: 99", "max_steps must be")]
+    [InlineData("default_permission: execute", "default_permission must be")]
+    [InlineData("tools: run_command=execute", "tools must be")]
+    [InlineData("commands: =deny", "commands must be")]
+    [InlineData("edit_paths: ../outside.txt", "edit_paths must contain safe")]
+    [InlineData("deny_edit_paths: /rooted.txt", "deny_edit_paths must contain safe")]
+    [InlineData("unknown: value", "Unsupported agent profile field")]
+    public void Rejects_invalid_profile_values(string field, string errorText)
+    {
+        var contents = $"---\nname: Test\ndescription: Test profile\n{field}\n---\nInstructions.";
+        Assert.False(AgentProfileCatalog.TryParse("test.md", contents, "user", out _, out var error));
+        Assert.Contains(errorText, error);
+    }
+
+    [Fact]
+    public async Task User_profiles_load_without_project_trust_and_project_profiles_require_explicit_scope()
+    {
+        var userDirectory = Path.Combine(_root, "user");
+        Directory.CreateDirectory(userDirectory);
+        Directory.CreateDirectory(_project);
+        Directory.CreateDirectory(Path.Combine(_project, ".codev", "agents"));
+        await File.WriteAllTextAsync(Path.Combine(userDirectory, "ask.md"), Profile("Ask"));
+        await File.WriteAllTextAsync(Path.Combine(_project, ".codev", "agents", "code.md"), Profile("Code"));
+
+        var userOnly = await AgentProfileCatalog.LoadAsync(userDirectory, _project, includeProjectProfiles: false);
+        var both = await AgentProfileCatalog.LoadAsync(userDirectory, _project, includeProjectProfiles: true);
+
+        Assert.Equal("user", Assert.Single(userOnly.Profiles, profile => profile.Name == "Ask").Scope);
+        Assert.Contains(userOnly.Profiles, profile => profile.Name == "Code" && profile.Scope == "built-in");
+        Assert.Equal(new[] { "Code", "Ask", "Debug", "Orchestrator", "Plan" }, both.Profiles.Select(profile => profile.Name));
+        Assert.Equal("project", both.Profiles[0].Scope);
+    }
+
+    [Fact]
+    public async Task User_profile_store_saves_valid_documents_and_rejects_invalid_or_duplicate_profiles()
+    {
+        var directory = Path.Combine(_root, "editable-user-profiles");
+        var store = new UserAgentProfileStore(directory);
+        var original = Profile("Reviewer");
+
+        await store.SaveAsync("reviewer.md", original);
+        Assert.Equal(new AgentProfileDocument("reviewer.md", original), Assert.Single(await store.LoadDocumentsAsync()));
+
+        var updated = original.Replace("Follow the user's instructions.", "Review changes with focused feedback.", StringComparison.Ordinal);
+        await store.SaveAsync("reviewer.md", updated);
+        Assert.Equal(updated, Assert.Single(await store.LoadDocumentsAsync()).Contents);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("invalid.md", "not a profile"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("other.md", Profile("Reviewer")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("orchestrator.md", Profile("Orchestrator")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("plan.md", Profile("Plan")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("large.md", Profile("Large") + string.Concat(Enumerable.Repeat("🙂", 9_000))));
+        Assert.False(File.Exists(Path.Combine(directory, "invalid.md")));
+        Assert.False(File.Exists(Path.Combine(directory, "other.md")));
+        Assert.False(File.Exists(Path.Combine(directory, "large.md")));
+        Assert.Equal(updated, await File.ReadAllTextAsync(Path.Combine(directory, "reviewer.md")));
+    }
+
+    [Fact]
+    public async Task Profile_name_collision_prefers_trusted_project_scope()
+    {
+        var userDirectory = Path.Combine(_root, "user");
+        Directory.CreateDirectory(userDirectory);
+        Directory.CreateDirectory(Path.Combine(_project, ".codev", "agents"));
+        await File.WriteAllTextAsync(Path.Combine(userDirectory, "code.md"), Profile("Code"));
+        await File.WriteAllTextAsync(Path.Combine(_project, ".codev", "agents", "code.md"), Profile("Code"));
+
+        var loaded = await AgentProfileCatalog.LoadAsync(userDirectory, _project, includeProjectProfiles: true);
+
+        var profile = Assert.Single(loaded.Profiles, profile => profile.Name == "Code");
+        Assert.Equal("Code", profile.Name);
+        Assert.Equal("project", profile.Scope);
+    }
+
+    [Fact]
+    public async Task Reserved_plan_profile_cannot_be_overridden_by_project_or_user_markdown()
+    {
+        var userDirectory = Path.Combine(_root, "user-plan");
+        var projectAgentDirectory = Path.Combine(_project, ".codev", "agents");
+        Directory.CreateDirectory(userDirectory);
+        Directory.CreateDirectory(projectAgentDirectory);
+        await File.WriteAllTextAsync(Path.Combine(userDirectory, "plan.md"), Profile("Plan"));
+        await File.WriteAllTextAsync(Path.Combine(projectAgentDirectory, "plan.md"), Profile("Plan"));
+
+        var loaded = await AgentProfileCatalog.LoadAsync(userDirectory, _project, includeProjectProfiles: true);
+        var plan = Assert.Single(loaded.Profiles, profile => profile.Name == "Plan");
+
+        Assert.Equal("built-in", plan.Scope);
+        Assert.Contains(loaded.Warnings, warning => warning.Contains("reserved built-in agent profile name 'Plan'", StringComparison.Ordinal));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "write_file"));
+    }
+
+    [Fact]
+    public void Built_in_profile_policies_restrict_tools_without_granting_project_permissions()
+    {
+        var ask = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Ask");
+        var debug = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Debug");
+        var code = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Code");
+        var orchestrator = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Orchestrator");
+        var plan = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Plan");
+
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(ask, "run_command"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(ask, "read_file"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(ask, "mcp_server_tool"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(debug, "run_command"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(code, "write_file"));
+        Assert.False(AgentProfilePolicy.IsAvailable(ask, "write_file"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(orchestrator, "read_file"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(orchestrator, "delegate_task"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(plan, "list_files"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(plan, "read_file"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(plan, "search_files"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "create_file"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "write_file"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "apply_patch"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "run_command"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "verify_command"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "mcp_server_tool"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(plan, "delegate_task"));
+        Assert.False(AgentProfilePolicy.IsAvailable(code with { DefaultPermission = AgentToolPermission.Deny }, "delegate_task"));
+        Assert.False(AgentProfilePolicy.RequiresOneCallApproval(AgentToolPermission.Ask, ProjectCommandPermissionMode.Auto));
+        Assert.True(AgentProfilePolicy.RequiresOneCallApproval(AgentToolPermission.Ask, ProjectCommandPermissionMode.AskEveryTime));
+        Assert.False(AgentProfilePolicy.RequiresOneCallApproval(AgentToolPermission.Allow, ProjectCommandPermissionMode.AskEveryTime));
+    }
+
+    [Fact]
+    public void Legacy_builtin_code_selection_migrates_to_build_but_custom_code_profile_is_preserved()
+    {
+        var builtInCode = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Code");
+        Assert.Null(AgentProfileCatalog.MigrateBuiltInCodeSelection("Code", [builtInCode]));
+        Assert.Equal("Code", AgentProfileCatalog.MigrateBuiltInCodeSelection("Code", [builtInCode with { Scope = "project" }]));
+        Assert.Equal("Plan", AgentProfileCatalog.MigrateBuiltInCodeSelection("Plan", [builtInCode]));
+        Assert.Equal("Unavailable", AgentProfileCatalog.MigrateBuiltInCodeSelection("Unavailable", [builtInCode]));
+    }
+
+    private static string Profile(string name) => $"---\nname: {name}\ndescription: Do a coding task.\n---\nFollow the user's instructions.";
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+        if (Directory.Exists(_project)) Directory.Delete(_project, recursive: true);
+    }
+}

@@ -28,18 +28,28 @@ public sealed class MainViewModel : ViewModelBase
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-trusted-folders.json");
     private static readonly string ProjectCommandPermissionsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-command-permissions.json");
+    private static readonly string McpServerConfigurationPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "mcp-servers.json");
+    private static readonly string ProjectMcpPermissionsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-mcp-permissions.json");
     private static readonly string ActiveConversationPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-active-conversation.json");
     private static readonly string UserSlashCommandsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "commands");
     private static readonly string UserSkillsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "skills");
+    private static readonly string UserAgentProfilesPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "agents");
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
     private readonly Codev.ProjectFolderTrustRegistry _projectFolderTrust = Codev.ProjectFolderTrustRegistry.Load(ProjectTrustPath);
     private readonly Codev.ConversationWorkspaceManager _conversationWorkspaces = new(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+    private readonly Codev.GitChildWorktreeManager _childWorktrees = new(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
     private readonly Codev.ProjectCommandPermissionRegistry _projectCommandPermissions = Codev.ProjectCommandPermissionRegistry.Load(ProjectCommandPermissionsPath);
+    private readonly Codev.McpServerConfigurationStore _mcpServerConfigurations = new(McpServerConfigurationPath);
+    private readonly Codev.ProjectMcpToolPermissionRegistry _projectMcpPermissions = Codev.ProjectMcpToolPermissionRegistry.Load(ProjectMcpPermissionsPath);
     private Codev.Conversation? _active;
     private string _searchText = "";
     private string _draft = "";
@@ -48,6 +58,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _outputStyle = Codev.ConversationOutputStyles.Balanced;
     private bool _thinkEnabled;
     private bool _cloudRequestsEnabled;
+    private string? _autoConnectProvider;
     private int _contextSize;
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly SemaphoreSlim _persistGate = new(1, 1);
@@ -60,8 +71,11 @@ public sealed class MainViewModel : ViewModelBase
     private long _persistenceRevision;
     private long _activeConversationRevision;
     private readonly HttpClient _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
-    private readonly Codev.ICloudApiKeyVault _cloudApiKeyVault = new Codev.CloudApiKeyVault();
+    private readonly Codev.CloudApiKeyVault _cloudApiKeyVault = new();
+    private Task _savedCloudApiKeysRestoreTask = Task.CompletedTask;
+    private Task _managedWorkspacePermissionDefaultsTask = Task.CompletedTask;
     private Uri _ollamaEndpoint = Codev.OllamaEndpoint.Default;
+    private readonly Dictionary<string, string> _savedCloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _cloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, Codev.PromptContextSnapshot> _lastPromptContexts = [];
     private readonly Dictionary<Guid, int> _lastPromptMessageCounts = [];
@@ -71,6 +85,8 @@ public sealed class MainViewModel : ViewModelBase
     private bool _isUnloadingModel;
     private string _lastSlashCommandWarning = "";
     private readonly Queue<QueuedChatTurn> _requestQueue = new();
+    private readonly HashSet<Guid> _runningParallelChildren = [];
+    private readonly Dictionary<Guid, CancellationTokenSource> _parallelChildCancellation = [];
     private bool _queuePaused;
     private bool _queueProcessorRunning;
     private Codev.Conversation? _generationConversation;
@@ -79,11 +95,20 @@ public sealed class MainViewModel : ViewModelBase
     private CancellationTokenSource? _modelLoadCancellation;
     private long _modelSelectionRevision;
     private bool _isLoadingModels;
+    private Task _modelLoadTask = Task.CompletedTask;
     private string _contextEstimateLabel = "No project files will be included.";
     private int _readingWidth = 800;
+    private string _uiFontFamily = "Inter";
+    private int _uiFontSize = 14;
+    private bool _pinnedConversationsExpanded = true;
+    private bool _recentConversationsExpanded = true;
 
     public ObservableCollection<Codev.Conversation> PinnedConversations { get; } = [];
     public ObservableCollection<Codev.Conversation> RecentConversations { get; } = [];
+    public bool PinnedConversationsExpanded => _pinnedConversationsExpanded;
+    public bool RecentConversationsExpanded => _recentConversationsExpanded;
+    public string PinnedConversationsSectionLabel => $"{(_pinnedConversationsExpanded ? "⌄" : "›")}  PINNED  ·  {PinnedConversations.Count}";
+    public string RecentConversationsSectionLabel => $"{(_recentConversationsExpanded ? "⌄" : "›")}  RECENTS  ·  {RecentConversations.Count}";
     public ObservableCollection<Codev.ChatMessage> Messages { get; } = [];
     public ObservableCollection<Codev.PromptTemplate> PromptTemplates { get; } = [];
     public ObservableCollection<Codev.SamplingPreset> SamplingPresets { get; } = [];
@@ -92,6 +117,31 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsStandardReadingWidth => _readingWidth == 800;
     public bool IsWideReadingWidth => _readingWidth == 960;
     public bool IsFullReadingWidth => _readingWidth == 0;
+    public global::Avalonia.Media.FontFamily UiFontFamily => new(_uiFontFamily);
+    public int UiFontSize => _uiFontSize;
+    public bool IsFontInter => _uiFontFamily == "Inter";
+    public bool IsFontSegoeUi => _uiFontFamily == "Segoe UI";
+    public bool IsFontArial => _uiFontFamily == "Arial";
+    public bool IsFontConsolas => _uiFontFamily == "Consolas";
+    public bool IsFontAptos => _uiFontFamily == "Aptos";
+    public bool IsFontCalibri => _uiFontFamily == "Calibri";
+    public bool IsFontVerdana => _uiFontFamily == "Verdana";
+    public bool IsFontTahoma => _uiFontFamily == "Tahoma";
+    public bool IsFontGeorgia => _uiFontFamily == "Georgia";
+    public bool IsFontCascadiaCode => _uiFontFamily == "Cascadia Code";
+    public bool IsFontSize10 => _uiFontSize == 10;
+    public bool IsFontSize11 => _uiFontSize == 11;
+    public bool IsFontSize12 => _uiFontSize == 12;
+    public bool IsFontSize13 => _uiFontSize == 13;
+    public bool IsFontSize14 => _uiFontSize == 14;
+    public bool IsFontSize15 => _uiFontSize == 15;
+    public bool IsFontSize16 => _uiFontSize == 16;
+    public bool IsFontSize18 => _uiFontSize == 18;
+    public bool IsFontSize20 => _uiFontSize == 20;
+    public bool IsFontSize22 => _uiFontSize == 22;
+    public bool IsFontSize24 => _uiFontSize == 24;
+    public bool IsFontSize28 => _uiFontSize == 28;
+    public bool IsFontSize32 => _uiFontSize == 32;
     public ObservableCollection<string> SelectedContextFiles { get; } = [];
     public ObservableCollection<Codev.GitDiffComment> PendingDiffComments { get; } = [];
     public ObservableCollection<Codev.TaskChecklistItem> TaskChecklistItems { get; } = [];
@@ -103,6 +153,7 @@ public sealed class MainViewModel : ViewModelBase
         new(Codev.ConversationOutputStyles.Explanatory, "Explanatory"),
         new(Codev.ConversationOutputStyles.CodeOnly, "Code only")
     ];
+    public ObservableCollection<AgentProfileChoice> AgentProfiles { get; } = [new("", "Default", "Use Codev's standard behavior.")];
     public ICommand NewConversationCommand { get; }
     public ICommand SelectConversationCommand { get; }
     public ICommand TogglePinCommand { get; }
@@ -177,7 +228,9 @@ public sealed class MainViewModel : ViewModelBase
         var startupConversation = Codev.ConversationStartupSelection.Choose(_conversations, LoadLastActiveConversationId());
         if (startupConversation is not null) SelectConversation(startupConversation);
         LoadSettings();
-        _ = RestoreSavedCloudApiKeysAsync();
+        _managedWorkspacePermissionDefaultsTask = InitializeManagedWorkspacePermissionDefaultsAsync();
+        _savedCloudApiKeysRestoreTask = RestoreSavedCloudApiKeysAsync();
+        _ = AutoConnectSavedProviderOnStartupAsync();
         _ = LoadModelsAsync();
     }
 
@@ -200,6 +253,7 @@ public sealed class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ShouldWarnUnknownContext));
                 OnPropertyChanged(nameof(ProjectLabel));
                 OnPropertyChanged(nameof(ProjectCommandPermissionMode));
+                OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
                 OnPropertyChanged(nameof(ProjectCommandPermissionRules));
                 OnPropertyChanged(nameof(ProjectCommandPermissionStoreNotice));
                 OnPropertyChanged(nameof(ContextLabel));
@@ -272,9 +326,11 @@ public sealed class MainViewModel : ViewModelBase
     public string CompactionOfferLabel => ActiveConversation is { LastPromptContext: > 0 } conversation
         ? $"This request used {Math.Round(100d * conversation.LastPromptTokens / conversation.LastPromptContext)}% of its selected context. Compact older turns before continuing?"
         : "This request used most of the selected context. Compact older turns before continuing?";
-    public string ProjectLabel => ActiveConversation?.ProjectPath is { Length: > 0 } path
-        ? _conversationWorkspaces.IsManagedWorkspace(path) ? $"Workspace · {Path.GetFileName(path)}" : Path.GetFileName(path) + " · " + path
-        : "No project · Code task creates a workspace";
+    public string ProjectLabel => ActiveConversation is { ChildWorktreeBranch: { Length: > 0 } branch }
+        ? $"Child worktree · {branch}"
+        : ActiveConversation?.ProjectPath is { Length: > 0 } path
+            ? _conversationWorkspaces.IsManagedWorkspace(path) ? $"Workspace · {Path.GetFileName(path)}" : Path.GetFileName(path) + " · " + path
+            : "No project · Code task creates a workspace";
     public int FileChangesCount => ActiveConversation?.FileChanges?.Count ?? 0;
     public string FileChangesLabel => FileChangesCount == 0 ? "Files" : $"Files · {FileChangesCount}";
     public bool CanReviewFileChanges => HasProject && FileChangesCount > 0 && !IsGenerating && ActiveConversation?.PendingRequestCount == 0;
@@ -284,6 +340,15 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsProjectTrustInherited => IsProjectTrusted && ActiveConversation?.ProjectPath is { } path && !_projectFolderTrust.IsDirectTrustRoot(path);
     public Codev.ProjectCommandPermissionMode ProjectCommandPermissionMode => ActiveConversation?.ProjectPath is { Length: > 0 } path
         ? _projectCommandPermissions.GetMode(path) : Codev.ProjectCommandPermissionMode.AskEveryTime;
+    public Codev.ProjectCommandPermissionMode GetProjectCommandPermissionMode(string projectPath) =>
+        _projectCommandPermissions.GetMode(projectPath);
+    public string ProjectCommandPermissionModeLabel => ProjectCommandPermissionMode switch
+    {
+        Codev.ProjectCommandPermissionMode.Auto => "Auto ▾",
+        Codev.ProjectCommandPermissionMode.Allowlist => "Allowlist ▾",
+        Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only ▾",
+        _ => "Ask every time ▾"
+    };
     public IReadOnlyList<Codev.ProjectCommandPermissionRule> ProjectCommandPermissionRules => ActiveConversation?.ProjectPath is { Length: > 0 } path
         ? _projectCommandPermissions.GetRules(path) : [];
     public bool CanPersistProjectCommandPermissions => _projectCommandPermissions.CanPersist;
@@ -300,7 +365,7 @@ public sealed class MainViewModel : ViewModelBase
     public bool HasSelectedContextFiles => SelectedContextFiles.Count > 0;
     public string ContextLabel => !HasProject ? "No project context" : SelectedContextFiles.Count > 0
         ? IsProjectTrusted ? $"{SelectedContextFiles.Count} file(s) selected · no other files will be included" : $"{SelectedContextFiles.Count} file(s) explicitly selected · folder untrusted"
-        : IsProjectTrusted ? "Trusted project · bounded source files included automatically" : "Untrusted project · automatic context is off";
+        : IsProjectTrusted ? "Trusted · source context on" : "Untrusted · source context off";
     public string ContextEstimateLabel => _contextEstimateLabel;
     public bool HasLastPromptContext => ActiveConversation is { } conversation && _lastPromptContexts.ContainsKey(conversation.Id);
     public string LastPromptContextLabel => ActiveConversation is { } conversation && _lastPromptContexts.TryGetValue(conversation.Id, out var snapshot)
@@ -331,6 +396,8 @@ public sealed class MainViewModel : ViewModelBase
     public string TaskChecklistLabel => TaskChecklistItems.Count == 0
         ? "Task checklist · no steps yet"
         : $"Task checklist · {TaskChecklistItems.Count(item => item.Status == Codev.TaskChecklistService.Completed)}/{TaskChecklistItems.Count} done";
+    public bool IsQueueEnabled => ActiveConversation?.QueueEnabled != false;
+    public bool IsQueueDisabled => ActiveConversation?.QueueEnabled == false;
     public bool HasQueuedTurns => _requestQueue.Count > 0;
     public bool HasModels => Models.Any(choice => !string.IsNullOrWhiteSpace(choice.Name) && !string.IsNullOrWhiteSpace(choice.DisplayName));
     public string UserSlashCommandsFolder => UserSlashCommandsPath;
@@ -338,6 +405,35 @@ public sealed class MainViewModel : ViewModelBase
         ? Path.Combine(ActiveConversation!.ProjectPath!, ".codev", "commands")
         : null;
     public string UserSkillsFolder => UserSkillsPath;
+    public string UserAgentProfilesFolder => UserAgentProfilesPath;
+    public async Task<IReadOnlyList<Codev.McpServerConfiguration>> GetMcpServerConfigurationsAsync(CancellationToken cancellationToken = default) =>
+        await _mcpServerConfigurations.LoadAsync(cancellationToken);
+    public async Task SaveMcpServerConfigurationsAsync(IEnumerable<Codev.McpServerConfiguration> servers, CancellationToken cancellationToken = default)
+    {
+        var serverList = servers.ToArray();
+        await _mcpServerConfigurations.SaveAsync(serverList, cancellationToken);
+        _ = SetConnectionStatusAsync($"Saved {serverList.Length} MCP server configuration(s). They connect during the next Code task.");
+    }
+    public async Task<int> ForgetMcpOAuthSignInsAsync(CancellationToken cancellationToken = default)
+    {
+        var servers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
+        var removed = 0;
+        foreach (var raw in servers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var server = Codev.McpServerConfigurationStore.NormalizeAndValidate(raw);
+                if (server.Transport == Codev.McpServerTransportKind.Http && server.OAuthEnabled == true &&
+                    await _cloudApiKeyVault.RemoveTokensAsync(Codev.McpOAuthTokenCache.CreateAccount(server))) removed++;
+            }
+            catch (ArgumentException) { /* Invalid saved entries cannot identify a valid credential record. */ }
+        }
+        _ = SetConnectionStatusAsync(removed == 0
+            ? "No saved MCP OAuth sign-ins were found for the configured HTTP servers."
+            : $"Forgot {removed} saved MCP OAuth sign-in(s). The servers may ask you to sign in again.");
+        return removed;
+    }
     public string? ProjectSkillsFolder => HasProject && IsProjectTrusted
         ? Path.Combine(ActiveConversation!.ProjectPath!, ".codev", "skills")
         : null;
@@ -347,6 +443,8 @@ public sealed class MainViewModel : ViewModelBase
     public string PlanModeLabel => IsPlanMode ? "Plan mode" : "Chat mode";
     public bool IsCodeTask => ActiveConversation?.IsCodeTask ?? false;
     public string CodeTaskLabel => IsCodeTask ? "Code task on" : CanEnterCodeTaskMode ? "Enable Code task" : "Code task unavailable";
+    public string PrimaryAgentLabel => SelectedAgentProfileName.Equals("Plan", StringComparison.OrdinalIgnoreCase) ? "Plan agent" :
+        SelectedAgentProfileName.Length == 0 ? "Build agent" : $"{SelectedAgentProfileName} agent";
     public string ConversationModeCycleTooltip => IsCodeTask
         ? "Ctrl+Shift+M switches Code task back to Chat."
         : IsPlanMode
@@ -361,10 +459,11 @@ public sealed class MainViewModel : ViewModelBase
     public string CodeTaskTooltip => IsCodeTask
         ? $"Code task is on. {(IsOpenAIModel && ActiveConversation?.AllowHostedCodeTask != true ? "The first prompt asks permission to send prompts and tool results to OpenAI. " : "")}{(IsOpenAIModel ? Codev.OpenAiCodeTaskLimits.Description + " " : "")}{ProjectCommandPermissionMode switch
         {
+            Codev.ProjectCommandPermissionMode.Auto => "Auto applies ordinary file changes with checkpoints and runs all shell commands unless an exact saved deny rule blocks them. Commands use your account permissions and are not sandboxed to the project folder.",
             Codev.ProjectCommandPermissionMode.Allowlist => "Exact saved allow rules can skip approval; unlisted commands still ask.",
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
             _ => "Commands ask every time."
-        }} Change this under Project actions → Command permissions. File changes still require review."
+        }} Change this under Project actions → Command permissions."
         : IsOpenAIModel && _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Codev.CloudModelProviders.OpenAI) &&
           ActiveConversation?.AllowHostedCodeTask != true
             ? "Enable OpenAI Code task. Codev will ask before sending prompts and tool results to OpenAI. Sharing an attached project is a separate choice; a private workspace works with sharing off. Commands still follow project approval."
@@ -382,10 +481,13 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ConversationModeCycleTooltip));
     }
     public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
-    public Func<int, Task<bool>>? ConfirmConversationRewindAsync { get; set; }
+    public Func<int, Task<Codev.ConversationRewindChoice>>? ChooseConversationRewindAsync { get; set; }
+    public Func<Codev.Conversation, int, Task<Codev.CodeRewindReviewResult>>? ReviewAndRestoreCodeBeforeRewindAsync { get; set; }
     public Func<int, string, Task<string?>>? EditConversationPromptAsync { get; set; }
     public Func<Codev.ConversationCompactionProposal, Task>? ShowCompactionProposalAsync { get; set; }
     public Func<Codev.CodeTaskCommandProposal, Task<Codev.ProjectCommandApprovalChoice>>? ApproveProjectCommandAsync { get; set; }
+    public Func<Codev.McpCodeTaskTool, JsonElement, Task<Codev.ProjectCommandApprovalChoice>>? ApproveMcpToolAsync { get; set; }
+    public Func<Codev.AgentProfile, string, JsonElement, Task<bool>>? ConfirmAgentProfileToolAsync { get; set; }
     public Func<string, Task<bool>>? ConfirmRepeatedToolCallAsync { get; set; }
     public Func<Task<bool>>? ConfirmHostedCodeTaskConsentAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
@@ -394,7 +496,7 @@ public sealed class MainViewModel : ViewModelBase
             : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
     public bool CanClearConversation => Codev.ConversationHistoryClearService.CanClear(ActiveConversation,
-        ActiveConversation is { } conversation && ReferenceEquals(_generationConversation, conversation));
+        ActiveConversation is { } conversation && IsConversationBusy(conversation));
     public string QueueStatusLabel => HasQueuedTurns
         ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · resume when ready" : $"{_requestQueue.Count} request(s) queued"
         : "";
@@ -505,6 +607,22 @@ public sealed class MainViewModel : ViewModelBase
         conversation.NumPredict = Codev.ConversationSamplingSettings.NormalizeOutputTokens(numPredict);
         OnPropertyChanged(nameof(AdvancedModelSettingsLabel));
         Persist();
+    }
+
+    public string SelectedAgentProfileName
+    {
+        get => ActiveConversation?.AgentProfileName ?? "";
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (normalized is { Length: > 80 } || normalized is not null && !AgentProfiles.Any(profile => profile.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase)))
+                return;
+            if (string.Equals(ActiveConversation?.AgentProfileName, normalized, StringComparison.Ordinal)) return;
+            if (ActiveConversation is { } conversation) conversation.AgentProfileName = normalized;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(PrimaryAgentLabel));
+            Persist();
+        }
     }
 
     public void SetOpenAiGenerationSettings(string? reasoningEffort, string? verbosity, string? reasoningMode = null)
@@ -635,11 +753,11 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
-    public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default, bool securityFocused = false, string? commit = null, string? baseBranch = null)
+    public async Task<string?> ReviewUncommittedChangesAsync(CancellationToken cancellationToken = default, bool securityFocused = false, string? commit = null, string? baseBranch = null, bool lastTurn = false)
     {
         if (ActiveConversation is not { } conversation || conversation.ProjectPath is not { Length: > 0 } projectPath || !IsProjectTrusted)
         {
-            ReportContextActionStatus($"{(securityFocused ? "/security-review" : "/review")} needs an attached, trusted Git project.");
+            ReportContextActionStatus($"{(lastTurn ? "/review-last-turn" : securityFocused ? "/security-review" : "/review")} needs an attached, trusted project.");
             return null;
         }
         var reviewModel = conversation.Model;
@@ -655,7 +773,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (!securityFocused)
             {
-                ReportContextActionStatus("/review uses only the selected local Ollama model and a loopback Ollama endpoint. Switch back to local Ollama to continue.");
+                ReportContextActionStatus($"{(lastTurn ? "/review-last-turn" : "/review")} uses only the selected local Ollama model and a loopback Ollama endpoint. Switch back to local Ollama to continue.");
                 return null;
             }
         }
@@ -671,12 +789,12 @@ public sealed class MainViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(reviewModel) && !Codev.OllamaEndpoint.IsLoopback(reviewEndpoint)) reviewModel = "";
         if (string.IsNullOrWhiteSpace(reviewModel) && !securityFocused)
         {
-            ReportContextActionStatus("Choose an installed Ollama model before starting /review.");
+            ReportContextActionStatus($"Choose an installed Ollama model before starting {(lastTurn ? "/review-last-turn" : "/review")}.");
             return null;
         }
         if (IsGenerating || HasQueuedTurns || _queueProcessorRunning)
         {
-            ReportContextActionStatus("Wait for active and queued requests to finish before starting a Git review.");
+            ReportContextActionStatus("Wait for active and queued requests to finish before starting a review.");
             return null;
         }
 
@@ -688,14 +806,16 @@ public sealed class MainViewModel : ViewModelBase
         IsGenerating = true;
         try
         {
-            var commandName = securityFocused ? "/security-review" : "/review";
-            await SetConnectionStatusAsync($"{commandName} · reading local Git changes…");
-            var repository = new Codev.GitRepositoryService(projectPath);
-            var snapshot = !string.IsNullOrWhiteSpace(commit)
-                ? await repository.GetCommitReviewAsync(commit, timeout.Token)
-                : !string.IsNullOrWhiteSpace(baseBranch)
-                    ? await repository.GetBranchReviewAsync(baseBranch, timeout.Token)
-                    : await repository.GetWorkingTreeReviewAsync(timeout.Token);
+            var commandName = lastTurn ? "/review-last-turn" : securityFocused ? "/security-review" : "/review";
+            await SetConnectionStatusAsync(lastTurn ? $"{commandName} · checking Codev turn history…" : $"{commandName} · reading local Git changes…");
+            var repository = lastTurn ? null : new Codev.GitRepositoryService(projectPath);
+            var snapshot = lastTurn
+                ? await Codev.ConversationLastTurnReviewService.BuildSnapshotAsync(conversation, new Codev.WorkspaceFileService(projectPath), timeout.Token)
+                : !string.IsNullOrWhiteSpace(commit)
+                    ? await repository!.GetCommitReviewAsync(commit, timeout.Token)
+                    : !string.IsNullOrWhiteSpace(baseBranch)
+                        ? await repository!.GetBranchReviewAsync(baseBranch, timeout.Token)
+                        : await repository!.GetWorkingTreeReviewAsync(timeout.Token);
             if (!_projectFolderTrust.IsTrusted(projectPath))
             {
                 ReportContextActionStatus("Project trust was revoked while preparing the review. No diff was sent to the model.");
@@ -719,7 +839,8 @@ public sealed class MainViewModel : ViewModelBase
                     ReportContextActionStatus("Project trust was revoked before the review could send its diff. No changes were sent to the model.");
                     return null;
                 }
-                var messages = Codev.GitReviewPromptBuilder.Build(snapshot, securityFocused);
+                var messages = Codev.GitReviewPromptBuilder.Build(snapshot, securityFocused,
+                    lastTurn ? "the files changed by the assistant's last completed turn in Codev" : null);
                 var options = Codev.OllamaRequestOptions.Build(reviewContext, reviewTemperature, reviewTopP, reviewTopK,
                     reviewPresencePenalty, reviewRepeatPenalty, reviewOutputTokens) ?? new Dictionary<string, object>();
                 if (reviewContext > 0) options["num_ctx"] = reviewContext;
@@ -728,7 +849,7 @@ public sealed class MainViewModel : ViewModelBase
                 {
                     ["model"] = reviewModel, ["messages"] = messages, ["stream"] = false, ["think"] = false, ["options"] = options
                 };
-                await SetConnectionStatusAsync($"{(securityFocused ? "/security-review" : "/review")} · {snapshot.Files.Count} changed files · local second opinion…");
+                await SetConnectionStatusAsync($"{commandName} · {snapshot.Files.Count} changed files · local second opinion…");
                 using var response = await _http.PostAsJsonAsync(Codev.OllamaEndpoint.ApiUri(reviewEndpoint, "api/chat"), payload, timeout.Token);
                 if (!response.IsSuccessStatusCode)
                     throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {await response.Content.ReadAsStringAsync(timeout.Token)}");
@@ -740,7 +861,7 @@ public sealed class MainViewModel : ViewModelBase
             if (securityFocused && string.IsNullOrWhiteSpace(modelFindings))
                 ReportContextActionStatus("/security-review complete · deterministic local secret scan only · no diff was sent to a model");
             else
-                ReportContextActionStatus($"{(securityFocused ? "/security-review" : "/review")} complete · {snapshot.Files.Count} files · read-only local second opinion");
+                ReportContextActionStatus($"{commandName} complete · {snapshot.Files.Count} files · read-only local second opinion");
             var truncationNote = snapshot.Truncated ? "\n\n_Codev capped the review input; some changed content may not have been included._" : "";
             var secretReport = securityFocused
                 ? (snapshot.Truncated ? "The diff was truncated; this scan covers only the included portion and may miss findings.\n" : "") +
@@ -749,7 +870,7 @@ public sealed class MainViewModel : ViewModelBase
             var body = securityFocused
                 ? "Local secret-pattern scan\n" + secretReport + (modelFindings is null ? "" : "\n\nLocal model security review\n" + modelFindings)
                 : modelFindings ?? "No model review was available.";
-            return $"Read-only {(securityFocused ? "security review" : "second opinion")} · {snapshot.Branch} · {snapshot.Files.Count} files" +
+            return $"Read-only {(securityFocused ? "security review" : "second opinion")} · {(lastTurn ? "assistant's last turn" : snapshot.Branch)} · {snapshot.Files.Count} files" +
                 (snapshot.Truncated ? " · input capped" : "") + "\n\n" + body + truncationNote;
         }
         catch (OperationCanceledException)
@@ -763,7 +884,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             ReportContextActionStatus(securityFocused && string.IsNullOrWhiteSpace(reviewModel)
                 ? $"Could not scan local Git changes: {ex.Message}"
-                : $"Could not review local Git changes: {ex.Message}");
+                : $"Could not review {(lastTurn ? "the assistant's last turn" : "local Git changes")}: {ex.Message}");
             return null;
         }
         finally
@@ -831,12 +952,7 @@ public sealed class MainViewModel : ViewModelBase
         if (ActiveConversation?.ProjectPath is not { Length: > 0 } path) return;
         await _projectCommandPermissions.SetModeAsync(path, mode);
         OnPropertyChanged(nameof(ProjectCommandPermissionMode));
-        ReportContextActionStatus(mode switch
-        {
-            Codev.ProjectCommandPermissionMode.Allowlist => "Project allowlist mode enabled. Exact saved allow rules skip approval; unlisted commands still ask, and saved denials always block.",
-            Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only command mode enabled. Only simple inspection commands with project-relative paths can skip approval; all other commands still ask.",
-            _ => "Project commands will ask for approval every time; saved denials remain in force."
-        });
+        OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
     }
 
     public async Task RemoveProjectCommandPermissionRuleAsync(string command, Codev.ProjectCommandPermissionDecision decision)
@@ -851,20 +967,31 @@ public sealed class MainViewModel : ViewModelBase
         IReadOnlyList<string> contextExclusions)
     {
         var decision = _projectCommandPermissions.Evaluate(proposal.ProjectPath, proposal.Command, proposal.ShellName,
-            allowReadOnly: !proposal.IsVerification, contextExclusions: contextExclusions);
+            allowReadOnly: !proposal.IsVerification, contextExclusions: contextExclusions, isVerification: proposal.IsVerification);
         if (decision == Codev.ProjectCommandPermissionDecision.Deny)
         {
             _ = SetConnectionStatusAsync("Project command permission denied this exact command; it was not run.");
             return Codev.CommandApprovalOutcome.Denied;
         }
+        if (proposal.ProfileApprovalSatisfied && decision == Codev.ProjectCommandPermissionDecision.Ask)
+        {
+            _ = SetConnectionStatusAsync("The selected agent profile approved this command once; the project permission mode was left unchanged.");
+            return Codev.CommandApprovalOutcome.Approved;
+        }
         if (decision == Codev.ProjectCommandPermissionDecision.Allow)
         {
-            if (!proposal.IsVerification && _projectCommandPermissions.GetMode(proposal.ProjectPath) == Codev.ProjectCommandPermissionMode.ReadOnly)
+            var mode = _projectCommandPermissions.GetMode(proposal.ProjectPath);
+            if (_projectCommandPermissions.ShouldUseBoundedFileInspection(proposal.ProjectPath, proposal.Command, decision,
+                    proposal.IsVerification, proposal.ShellName, contextExclusions))
             {
-                _ = SetConnectionStatusAsync("Recognized read-only command; running through Codev's bounded file inspection, without launching a shell.");
+                _ = SetConnectionStatusAsync(mode == Codev.ProjectCommandPermissionMode.Auto
+                    ? "Auto mode · recognized read-only inspection; running through bounded file APIs without launching a shell."
+                    : "Recognized read-only command; running through Codev's bounded file inspection, without launching a shell.");
                 return Codev.CommandApprovalOutcome.ApprovedReadOnly;
             }
-            _ = SetConnectionStatusAsync("Exact project allowlist match; running the previously approved command.");
+            _ = SetConnectionStatusAsync(mode == Codev.ProjectCommandPermissionMode.Auto
+                ? "Auto mode · running command without approval. Commands are unsandboxed and have your account permissions."
+                : "Exact project allowlist match; running the previously approved command.");
             return Codev.CommandApprovalOutcome.Approved;
         }
 
@@ -877,10 +1004,11 @@ public sealed class MainViewModel : ViewModelBase
                 try
                 {
                     await _projectCommandPermissions.SetRuleAsync(proposal.ProjectPath, proposal.Command,
-                        Codev.ProjectCommandPermissionDecision.Allow, Codev.ProjectCommandPermissionMode.Allowlist);
+                        Codev.ProjectCommandPermissionDecision.Allow);
                     OnPropertyChanged(nameof(ProjectCommandPermissionMode));
+                    OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
                     OnPropertyChanged(nameof(ProjectCommandPermissionRules));
-                    _ = SetConnectionStatusAsync("Exact command added to this project's allowlist and approved for this run.");
+                    _ = SetConnectionStatusAsync("Exact command saved and approved for this run; the current permission mode was kept.");
                     return Codev.CommandApprovalOutcome.Approved;
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
@@ -933,18 +1061,92 @@ public sealed class MainViewModel : ViewModelBase
         else await EnableCodeTaskWithWorkspaceAsync(conversation);
     }
 
+    private async Task<Codev.CommandApprovalOutcome> ApproveMcpToolWithProjectPolicyAsync(Codev.Conversation conversation, Codev.McpCodeTaskTool tool, JsonElement arguments, bool profileApprovalSatisfied)
+    {
+        if (string.IsNullOrWhiteSpace(conversation.ProjectPath)) return Codev.CommandApprovalOutcome.Rejected;
+        var mode = _projectCommandPermissions.GetMode(conversation.ProjectPath);
+        var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName);
+        if (decision == Codev.ProjectCommandPermissionDecision.Deny) return Codev.CommandApprovalOutcome.Denied;
+        if (decision == Codev.ProjectCommandPermissionDecision.Allow) return Codev.CommandApprovalOutcome.Approved;
+        if (profileApprovalSatisfied) return Codev.CommandApprovalOutcome.Approved;
+
+        var choice = await (ApproveMcpToolAsync?.Invoke(tool, arguments) ?? Task.FromResult(Codev.ProjectCommandApprovalChoice.Cancel));
+        try
+        {
+            if (choice == Codev.ProjectCommandApprovalChoice.RunOnce) return Codev.CommandApprovalOutcome.Approved;
+            if (choice == Codev.ProjectCommandApprovalChoice.AllowExactCommand)
+            {
+                await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName, Codev.ProjectCommandPermissionDecision.Allow);
+                return Codev.CommandApprovalOutcome.Approved;
+            }
+            if (choice == Codev.ProjectCommandApprovalChoice.DenyExactCommand)
+            {
+                await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName, Codev.ProjectCommandPermissionDecision.Deny);
+                return Codev.CommandApprovalOutcome.Denied;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            _ = SetConnectionStatusAsync($"Could not save the MCP tool permission ({ex.GetType().Name}); the tool was not called.");
+        }
+        return Codev.CommandApprovalOutcome.Rejected;
+    }
+
+    private async Task<Codev.AgentToolProfileDecision> CheckAgentProfileToolPermissionAsync(Codev.Conversation conversation,
+        Codev.AgentProfile? profile, string toolName, JsonElement arguments)
+    {
+        var command = arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("command", out var commandValue)
+            ? commandValue.GetString() : null;
+        var permission = Codev.AgentProfilePolicy.PermissionFor(profile, toolName, command);
+        if (permission == Codev.AgentToolPermission.Deny) return Codev.AgentToolProfileDecision.Denied;
+        var projectMode = conversation.ProjectPath is { Length: > 0 } path
+            ? _projectCommandPermissions.GetMode(path)
+            : Codev.ProjectCommandPermissionMode.AskEveryTime;
+        if (permission == Codev.AgentToolPermission.Allow ||
+            !Codev.AgentProfilePolicy.RequiresOneCallApproval(permission, projectMode))
+            return Codev.AgentToolProfileDecision.DeferToProjectPolicy;
+
+        if (toolName is "run_command" or "verify_command" && arguments.TryGetProperty("command", out var commandElement) &&
+            commandElement.ValueKind == JsonValueKind.String && conversation.ProjectPath is { Length: > 0 } projectPath)
+        {
+            var shell = Codev.ShellCommandResolver.ResolveCurrent();
+            var isVerification = toolName == "verify_command";
+            if (_projectCommandPermissions.Evaluate(projectPath, commandElement.GetString() ?? "", shell.DisplayName,
+                    contextExclusions: [], isVerification: isVerification) == Codev.ProjectCommandPermissionDecision.Deny)
+                return Codev.AgentToolProfileDecision.Denied;
+        }
+
+        var allowed = await Dispatcher.UIThread.InvokeAsync(async () =>
+            await (ConfirmAgentProfileToolAsync?.Invoke(profile!, toolName, arguments) ?? Task.FromResult(false)));
+        return allowed ? Codev.AgentToolProfileDecision.ApprovedOnce : Codev.AgentToolProfileDecision.Rejected;
+    }
+
+    private async Task<bool> ReviewOrAutoApplyFileChangeAsync(Codev.Conversation conversation, Codev.CodeTaskFileProposal proposal)
+    {
+        if (conversation.ProjectPath is { Length: > 0 } path &&
+            !Codev.ProjectFileChangePolicy.RequiresReview(_projectCommandPermissions.GetMode(path)))
+        {
+            var warnings = Codev.InstructionFollowingContentDetector.Detect(proposal.After);
+            var advisory = warnings.Count == 0 ? "" : $" Advisory: content resembles {string.Join(", ", warnings)}; it remains subject to the system and user instructions.";
+            await SetConnectionStatusAsync($"Auto mode · applying {proposal.RelativePath} with a rollback checkpoint…{advisory}");
+            return true;
+        }
+        return await (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After,
+            proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false));
+    }
+
     private async Task EnableCodeTaskWithWorkspaceAsync(Codev.Conversation conversation)
     {
         try
         {
+            await _managedWorkspacePermissionDefaultsTask;
             if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !Directory.Exists(conversation.ProjectPath))
             {
                 var workspace = _conversationWorkspaces.GetOrCreateWorkspace(conversation.Id);
                 await _projectFolderTrust.TrustAsync(workspace);
                 SetProjectFolder(workspace);
-                ContextActionStatus = $"Created a dedicated Codev workspace for this conversation: {Path.GetFileName(workspace)}";
-                OnPropertyChanged(nameof(ContextActionStatus));
-                OnPropertyChanged(nameof(HasContextActionStatus));
+                if (_projectCommandPermissions.CanPersist && !_projectCommandPermissions.HasProjectSettings(workspace))
+                    await _projectCommandPermissions.SetModeAsync(workspace, Codev.ProjectCommandPermissionMode.Auto);
             }
             SetConversationMode(ConversationMode.CodeTask);
         }
@@ -972,7 +1174,9 @@ public sealed class MainViewModel : ViewModelBase
         return null;
     }
     public bool CloudRequestsEnabled => _cloudRequestsEnabled;
-    public bool HasSavedCloudApiKey(string provider) => _cloudApiKeys.ContainsKey(provider);
+    public string? AutoConnectProvider => _autoConnectProvider;
+    public bool HasSavedCloudApiKey(string provider) => _savedCloudApiKeys.ContainsKey(provider);
+    public Task WaitForSavedCloudApiKeysAsync() => _savedCloudApiKeysRestoreTask;
     public bool IncludeProjectContextForHosted
     {
         get => ActiveConversation?.IncludeProjectContextForHosted ?? false;
@@ -982,6 +1186,8 @@ public sealed class MainViewModel : ViewModelBase
             conversation.IncludeProjectContextForHosted = value;
             if (!value && conversation.IsCodeTask && conversation.Provider == Codev.CloudModelProviders.OpenAI &&
                 ReferenceEquals(_generationConversation, conversation)) _generationCancellation?.Cancel();
+            if (!value && conversation.IsCodeTask && conversation.Provider == Codev.CloudModelProviders.OpenAI &&
+                _parallelChildCancellation.TryGetValue(conversation.Id, out var parallelCancellation)) parallelCancellation.Cancel();
             OnPropertyChanged();
             OnPropertyChanged(nameof(CanIncludeRepoMap));
             OnPropertyChanged(nameof(RepoMapEstimateLabel));
@@ -1083,9 +1289,7 @@ public sealed class MainViewModel : ViewModelBase
         RefreshContextSizes(choice.Name);
         RefreshContextEstimate();
         if (choice.Provider == "ollama") _ = WarmModelAsync(choice.Name);
-        else ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(choice.Provider)
-            ? $"Hosted model selected · {choice.DisplayName}"
-            : $"{choice.DisplayName} selected · connect its API key to send";
+        else ConnectionStatus = HostedModelStatus(choice.Provider, choice.DisplayName);
     }
 
     public int ContextSize
@@ -1201,6 +1405,11 @@ public sealed class MainViewModel : ViewModelBase
     public async Task<bool> DeleteConversationAsync(Codev.Conversation conversation)
     {
         if (!_conversations.Contains(conversation)) return false;
+        if (conversation.HasChildConversations)
+        {
+            ReportContextActionStatus("Delete the child sessions first so they remain accessible.");
+            return false;
+        }
         if (IsConversationBusy(conversation))
         {
             ReportContextActionStatus("Cancel queued requests and wait for this conversation to finish before deleting it.");
@@ -1226,13 +1435,27 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     private bool IsConversationBusy(Codev.Conversation conversation) =>
-        conversation.PendingRequestCount > 0 || ReferenceEquals(_generationConversation, conversation);
+        conversation.PendingRequestCount > 0 || ReferenceEquals(_generationConversation, conversation) ||
+        _runningParallelChildren.Contains(conversation.Id);
+
+    private void CancelParallelChildren(Guid parentId, string? provider = null)
+    {
+        foreach (var childId in _runningParallelChildren.ToArray())
+        {
+            var child = _conversations.FirstOrDefault(item => item.Id == childId);
+            if (child?.ParentConversationId == parentId &&
+                (provider is null || child.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase)) &&
+                _parallelChildCancellation.TryGetValue(childId, out var cancellation))
+                cancellation.Cancel();
+        }
+    }
 
     private void SelectConversation(Codev.Conversation conversation)
     {
         var previousModel = Model;
         var previousProvider = Provider;
         ActiveConversation = conversation;
+        _ = RefreshAgentProfilesAsync();
         _model = conversation.Model;
         _provider = conversation.Provider;
         if (conversation.NumCtx > Codev.OllamaContextSizes.MaximumFor(conversation.Model))
@@ -1245,12 +1468,12 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (previousProvider != conversation.Provider || !string.Equals(previousModel, conversation.Model, StringComparison.OrdinalIgnoreCase)) _ = WarmModelAsync(conversation.Model);
         }
-        else ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(conversation.Provider)
-            ? $"Hosted model selected · {conversation.Model}"
-            : $"{conversation.Model} selected · connect its API key to send";
+        else ConnectionStatus = HostedModelStatus(conversation.Provider, conversation.Model);
         Draft = conversation.Draft;
         OnPropertyChanged(nameof(IncludeRepoMap));
         OnPropertyChanged(nameof(OutputStyle));
+        OnPropertyChanged(nameof(SelectedAgentProfileName));
+        OnPropertyChanged(nameof(PrimaryAgentLabel));
         OnPropertyChanged(nameof(ThinkEnabled));
         OnPropertyChanged(nameof(CanIncludeRepoMap));
         OnPropertyChanged(nameof(RepoMapEstimateLabel));
@@ -1263,12 +1486,15 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanEditTaskChecklist));
         OnPropertyChanged(nameof(CanAddTaskChecklistItem));
         OnPropertyChanged(nameof(TaskChecklistLabel));
+        OnPropertyChanged(nameof(IsQueueEnabled));
+        OnPropertyChanged(nameof(IsQueueDisabled));
         ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(SendButtonLabel));
         Messages.Clear();
         for (var index = 0; index < conversation.Messages.Count; index++)
         {
-            var message = conversation.Messages[index] with { MessageIndex = index };
+            var isQueued = conversation.PendingTurns?.Any(turn => turn.AssistantIndex == index + 1) == true;
+            var message = conversation.Messages[index] with { MessageIndex = index, IsQueued = isQueued };
             conversation.Messages[index] = message;
             Messages.Add(message);
         }
@@ -1299,6 +1525,7 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ProjectLabel));
         OnPropertyChanged(nameof(CanOpenProjectActions));
         OnPropertyChanged(nameof(ProjectCommandPermissionMode));
+        OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
         OnPropertyChanged(nameof(ProjectCommandPermissionRules));
         OnPropertyChanged(nameof(ContextLabel));
         OnPropertyChanged(nameof(PinLabel));
@@ -1314,12 +1541,14 @@ public sealed class MainViewModel : ViewModelBase
         if (!string.Equals(conversation.ProjectPath, fullPath, StringComparison.OrdinalIgnoreCase))
             conversation.ContextFiles.Clear();
         conversation.ProjectPath = fullPath;
+        _ = RefreshAgentProfilesAsync();
         Reset(SelectedContextFiles, conversation.ContextFiles);
         ContextActionStatus = _projectFolderTrust.IsTrusted(fullPath)
             ? "Project attached. Bounded source files will be included with local chat requests."
             : "Project attached as untrusted. Automatic source context is off until you trust this folder.";
         OnPropertyChanged(nameof(ProjectLabel));
         OnPropertyChanged(nameof(ProjectCommandPermissionMode));
+        OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
         OnPropertyChanged(nameof(ProjectCommandPermissionRules));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
@@ -1338,6 +1567,319 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSelectedContextFiles));
         ((RelayCommand)ClearContextFilesCommand).NotifyCanExecuteChanged();
         Persist();
+    }
+
+    public async Task<bool> CreateIsolatedChildSessionAsync(Codev.Conversation parent)
+        => await CreateIsolatedChildSessionCoreAsync(parent, selectChild: true) is not null;
+
+    public async Task<bool> RecoverChildWorktreeAsync(Codev.Conversation child)
+    {
+        if (child.ParentConversationId is not { } parentId || child.ChildWorktreeBranch is not { } branch ||
+            child.ChildWorktreeStartCommit is not { } startCommit)
+        {
+            ReportContextActionStatus("This conversation has no saved child-worktree recovery data.");
+            return false;
+        }
+        var parent = _conversations.FirstOrDefault(conversation => conversation.Id == parentId);
+        if (parent?.ProjectPath is not { Length: > 0 } repositoryPath || !_projectFolderTrust.IsTrusted(repositoryPath))
+        {
+            ReportContextActionStatus("Re-trust the parent Git project before recovering this child worktree.");
+            return false;
+        }
+        try
+        {
+            var recovered = await _childWorktrees.RecoverAsync(repositoryPath, parent.Id, child.Id, branch, startCommit);
+            child.ProjectPath = recovered.WorktreePath;
+            await _projectFolderTrust.TrustAsync(recovered.WorktreePath);
+            await _projectCommandPermissions.SetModeAsync(recovered.WorktreePath, _projectCommandPermissions.GetMode(repositoryPath));
+            foreach (var rule in _projectCommandPermissions.GetRules(repositoryPath)
+                         .Where(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Deny ||
+                             Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command)))
+                await _projectCommandPermissions.SetRuleAsync(recovered.WorktreePath, rule.Command, rule.Decision);
+            child.UpdatedAt = DateTimeOffset.Now;
+            Persist();
+            RebuildLists();
+            ReportContextActionStatus($"Recovered child worktree · {branch}");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TimeoutException)
+        {
+            ReportContextActionStatus($"Could not recover child worktree: {ex.Message}");
+            return false;
+        }
+    }
+
+    private async Task<Codev.Conversation?> CreateIsolatedChildSessionCoreAsync(Codev.Conversation parent, bool selectChild)
+    {
+        if (!_conversations.Contains(parent)) return null;
+        var parentProjectPath = parent.ProjectPath;
+        if (parent.ParentConversationId is not null)
+        {
+            ReportContextActionStatus("Child sessions cannot create more child sessions.");
+            return null;
+        }
+        if (IsConversationBusy(parent))
+        {
+            ReportContextActionStatus("Wait for this conversation to finish before creating a child session.");
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(parentProjectPath) || !_projectFolderTrust.IsTrusted(parentProjectPath))
+        {
+            ReportContextActionStatus("Attach and trust a Git project before creating an isolated child session.");
+            return null;
+        }
+        if (!_projectFolderTrust.CanWrite)
+        {
+            ReportContextActionStatus("Folder trust settings are unavailable; Codev cannot safely create a trusted child session.");
+            return null;
+        }
+
+        Codev.Conversation? child = null;
+        Codev.GitChildWorktree? worktree = null;
+        try
+        {
+            var childId = Guid.NewGuid();
+            worktree = await _childWorktrees.CreateAsync(parentProjectPath, parent.Id, childId);
+
+            var parentTitle = string.IsNullOrWhiteSpace(parent.Title) ? "Conversation" : parent.Title.Trim();
+            var title = $"Child · {parentTitle}";
+            if (title.Length > 100) title = title[..99].TrimEnd() + "…";
+            child = new Codev.Conversation
+            {
+                Id = childId,
+                ParentConversationId = parent.Id,
+                ChildWorktreeBranch = worktree.Branch,
+                ChildWorktreeStartCommit = worktree.StartCommit,
+                Title = title,
+                Model = parent.Model,
+                Provider = parent.Provider,
+                IsCodeTask = true,
+                AgentProfileName = parent.AgentProfileName,
+                QueueEnabled = parent.QueueEnabled,
+                ThinkEnabled = parent.ThinkEnabled,
+                OutputStyle = parent.OutputStyle,
+                IncludeRepoMap = parent.IncludeRepoMap,
+                NumCtx = parent.NumCtx,
+                Temperature = parent.Temperature,
+                TopP = parent.TopP,
+                TopK = parent.TopK,
+                PresencePenalty = parent.PresencePenalty,
+                RepeatPenalty = parent.RepeatPenalty,
+                NumPredict = parent.NumPredict,
+                OpenAiReasoningEffort = parent.OpenAiReasoningEffort,
+                OpenAiVerbosity = parent.OpenAiVerbosity,
+                OpenAiReasoningMode = parent.OpenAiReasoningMode,
+                ProjectPath = worktree.WorktreePath,
+                UpdatedAt = DateTimeOffset.Now
+            };
+            parent.ChildConversationsExpanded = true;
+            _conversations.Insert(0, child);
+            RebuildLists();
+            Persist();
+            await _persistenceTask;
+
+            await _projectFolderTrust.TrustAsync(worktree.WorktreePath);
+
+            var inheritedMode = _projectCommandPermissions.GetMode(parentProjectPath);
+            await _projectCommandPermissions.SetModeAsync(worktree.WorktreePath, inheritedMode);
+            foreach (var rule in _projectCommandPermissions.GetRules(parentProjectPath)
+                         .Where(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Deny ||
+                             Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command)))
+                await _projectCommandPermissions.SetRuleAsync(worktree.WorktreePath, rule.Command, rule.Decision);
+
+            if (selectChild) SelectConversation(child);
+            RebuildLists();
+            Persist();
+            await _persistenceTask;
+            ReportContextActionStatus($"Created isolated child session · {worktree.Branch}");
+            return child;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TimeoutException)
+        {
+            ReportContextActionStatus(child is not null
+                ? $"Child worktree was kept so you can recover it; setup stopped before all trust and command rules were copied ({ex.Message})."
+                : $"Could not create isolated child session: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static bool CanDelegate(Codev.Conversation conversation, Codev.AgentProfile? profile) =>
+        conversation.ParentConversationId is null &&
+        profile?.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase) == true &&
+        Codev.AgentProfilePolicy.IsAvailable(profile, "delegate_task");
+
+    private async Task<string> DelegateTaskAsync(Codev.Conversation parent, JsonElement arguments,
+        int parentAssistantIndex, CancellationToken cancellationToken)
+    {
+        if (parent.ParentConversationId is not null || parent.AgentProfileName?.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase) != true)
+            return "Delegation is available only in a root conversation using the Orchestrator profile.";
+        if (string.IsNullOrWhiteSpace(parent.ProjectPath) || !_projectFolderTrust.IsTrusted(parent.ProjectPath))
+            return "Delegation requires a trusted Git project attached to this conversation.";
+        if (parent.ChildConversations.Count >= 3)
+            return "This conversation has reached its limit of three child tasks.";
+        if (parent.Provider == Codev.CloudModelProviders.OpenAI &&
+            (!parent.AllowHostedCodeTask || !parent.IncludeProjectContextForHosted || !_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(parent.Provider)))
+            return "Delegation to OpenAI requires hosted Code task and Share workspace with OpenAI to be enabled before starting the parent task.";
+
+        if (arguments.ValueKind != JsonValueKind.Object ||
+            !arguments.TryGetProperty("agent", out var agentValue) || agentValue.ValueKind != JsonValueKind.String ||
+            !arguments.TryGetProperty("task", out var taskValue) || taskValue.ValueKind != JsonValueKind.String)
+            return "Delegation needs an agent profile name and a bounded task description.";
+        var agentName = agentValue.GetString()?.Trim();
+        var task = taskValue.GetString()?.Trim();
+        if (string.IsNullOrWhiteSpace(agentName) || agentName.Length > 40 ||
+            Codev.AgentProfileCatalog.NormalizeReferenceName(agentName) is null)
+            return "Choose an installed agent profile by its exact name.";
+        if (string.IsNullOrWhiteSpace(task) || task.Length > 4000)
+            return "The delegated task must contain 1 to 4,000 characters.";
+        if (parentAssistantIndex < 0 || parentAssistantIndex >= parent.Messages.Count || parent.Messages[parentAssistantIndex].Role != "assistant")
+            return "The parent assistant turn is no longer available for this delegation.";
+
+        var catalog = await Codev.AgentProfileCatalog.LoadAsync(UserAgentProfilesPath, parent.ProjectPath,
+            includeProjectProfiles: true, cancellationToken);
+        var target = catalog.Profiles.FirstOrDefault(profile => profile.Name.Equals(agentName, StringComparison.OrdinalIgnoreCase));
+        if (target is null) return $"Agent profile '{agentName}' is not installed in this trusted project or user profile catalog.";
+        if (target.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase))
+            return "An Orchestrator cannot delegate to another Orchestrator.";
+
+        var child = await CreateIsolatedChildSessionCoreAsync(parent, selectChild: false);
+        if (child is null) return ContextActionStatus;
+        child.Title = task.Length <= 72 ? task : task[..69].TrimEnd() + "…";
+        child.AgentProfileName = target.Name;
+        child.DelegatedFromMessageIndex = parentAssistantIndex;
+        child.DelegatedAgentName = target.Name;
+        child.DelegatedResultReported = false;
+        child.AllowHostedCodeTask = parent.Provider == Codev.CloudModelProviders.OpenAI && parent.AllowHostedCodeTask;
+        child.IncludeProjectContextForHosted = parent.Provider == Codev.CloudModelProviders.OpenAI && parent.IncludeProjectContextForHosted;
+
+        var userMessage = new Codev.ChatMessage("user", task) { MessageIndex = 0, IsQueued = true };
+        var assistantIndex = 1;
+        var placeholder = new Codev.ChatMessage("assistant", "Starting in an isolated Git worktree…");
+        child.Messages.Add(userMessage);
+        child.Messages.Add(placeholder);
+        child.PendingTurns ??= [];
+        var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, child.Model, child.NumCtx,
+            IsCodeTask: true, IsPlanMode: false, ProjectPath: child.ProjectPath, ContextFiles: [], ContextExclusions: [],
+            EnqueuedAt: DateTimeOffset.Now, Temperature: child.Temperature, Provider: child.Provider,
+            IncludeProjectContext: child.Provider == "ollama" || child.IncludeProjectContextForHosted,
+            IncludeRepoMap: child.IncludeRepoMap, OutputStyle: child.OutputStyle, ThinkEnabled: child.ThinkEnabled,
+            TopP: child.TopP, TopK: child.TopK, PresencePenalty: child.PresencePenalty, RepeatPenalty: child.RepeatPenalty,
+            NumPredict: child.NumPredict, OpenAiReasoningEffort: child.OpenAiReasoningEffort,
+            OpenAiVerbosity: child.OpenAiVerbosity, OpenAiReasoningMode: child.OpenAiReasoningMode,
+            AgentProfileName: target.Name);
+        child.PendingTurns.Add(queuedTurn);
+        child.PendingRequestCount++;
+        parent.ChildConversationsExpanded = true;
+        Persist();
+        RebuildLists();
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        OnPropertyChanged(nameof(HasQueuedTurns));
+        _ = SetConnectionStatusAsync($"Parallel child started · {target.Name}");
+        _ = RunDelegatedChildAsync(child, queuedTurn, cancellationToken);
+        return $"Started child task · {target.Name}. It is running in its own Git worktree alongside this response; the completed result will return here as untrusted output.";
+    }
+
+    private async Task RunDelegatedChildAsync(Codev.Conversation child, Codev.PersistedQueuedTurn turn,
+        CancellationToken parentCancellationToken)
+    {
+        try
+        {
+            await ExecuteQueuedTurnAsync(new QueuedChatTurn(child, turn), parallelChild: true, parentCancellationToken);
+        }
+        catch (Exception ex)
+        {
+            var assistantIndex = turn.AssistantIndex;
+            if (assistantIndex >= 0 && assistantIndex < child.Messages.Count)
+                child.Messages[assistantIndex] = child.Messages[assistantIndex] with { Content = $"Child task stopped unexpectedly ({ex.GetType().Name})." };
+            child.PendingRequestCount = Math.Max(0, child.PendingRequestCount - 1);
+            child.PendingTurns?.RemoveAll(item => item.AssistantIndex == assistantIndex);
+            Persist();
+        }
+        finally
+        {
+            await ReportDelegatedResultAsync(child);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                OnPropertyChanged(nameof(QueueStatusLabel));
+                OnPropertyChanged(nameof(HasQueuedTurns));
+            });
+        }
+    }
+
+    private async Task ReportDelegatedResultAsync(Codev.Conversation child)
+    {
+        if (child.DelegatedResultReported || IsConversationBusy(child) || child.ParentConversationId is not { } parentId ||
+            child.DelegatedFromMessageIndex is not { } assistantIndex) return;
+        var parent = _conversations.FirstOrDefault(item => item.Id == parentId);
+        if (parent is null || IsConversationBusy(parent) || assistantIndex < 0 || assistantIndex >= parent.Messages.Count ||
+            parent.Messages[assistantIndex].Role != "assistant") return;
+        var resultText = child.Messages.LastOrDefault(message => message.Role == "assistant")?.Content ?? "The child task returned no assistant output.";
+        const int resultLimit = 6000;
+        if (resultText.Length > resultLimit) resultText = resultText[..resultLimit] + "\n… [delegated result truncated]";
+        var payload = Codev.UntrustedToolOutput.Format($"child agent · {child.DelegatedAgentName ?? child.AgentProfileName ?? "agent"}", resultText);
+        var current = parent.Messages[assistantIndex].Content;
+        var heading = $"**Delegated result · {child.DelegatedAgentName ?? child.AgentProfileName ?? "agent"}**";
+        var addition = heading + Environment.NewLine + payload;
+        if (!current.Contains(heading, StringComparison.Ordinal))
+            parent.Messages[assistantIndex] = parent.Messages[assistantIndex] with { Content = string.IsNullOrWhiteSpace(current) ? addition : current + Environment.NewLine + Environment.NewLine + addition };
+        child.DelegatedResultReported = true;
+        child.UpdatedAt = DateTimeOffset.Now;
+        Persist();
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(ActiveConversation, parent) && assistantIndex < Messages.Count)
+                Messages[assistantIndex] = parent.Messages[assistantIndex];
+        });
+    }
+
+    public async Task RefreshAgentProfilesAsync(CancellationToken cancellationToken = default)
+    {
+        var conversation = ActiveConversation;
+        try
+        {
+            Directory.CreateDirectory(UserAgentProfilesPath);
+            var loaded = await Codev.AgentProfileCatalog.LoadAsync(UserAgentProfilesPath, conversation?.ProjectPath,
+                conversation?.ProjectPath is { Length: > 0 } project && _projectFolderTrust.IsTrusted(project), cancellationToken);
+            if (!ReferenceEquals(ActiveConversation, conversation)) return;
+            var currentProfileName = conversation?.AgentProfileName;
+            var migratedProfileName = Codev.AgentProfileCatalog.MigrateBuiltInCodeSelection(currentProfileName, loaded.Profiles);
+            if (conversation is not null && !string.Equals(currentProfileName, migratedProfileName, StringComparison.Ordinal))
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (!ReferenceEquals(ActiveConversation, conversation) ||
+                        !string.Equals(conversation.AgentProfileName, currentProfileName, StringComparison.Ordinal)) return;
+                    conversation.AgentProfileName = migratedProfileName;
+                    Persist();
+                });
+            }
+            var choices = new List<AgentProfileChoice> { new("", "Build", "Use the default coding agent with the selected project permissions. Ctrl+Shift+A switches between Build and Plan.") };
+            choices.AddRange(loaded.Profiles.Select(profile => new AgentProfileChoice(profile.Name,
+                profile.Model is { Length: > 0 } model ? $"{profile.Name} · {model}" : profile.Name, profile.Description)));
+            var selected = conversation?.AgentProfileName;
+            if (!string.IsNullOrWhiteSpace(selected) && choices.All(choice => !choice.Name.Equals(selected, StringComparison.OrdinalIgnoreCase)))
+                choices.Add(new AgentProfileChoice(selected, selected + " · unavailable", "This profile could not be loaded for the current project scope."));
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!ReferenceEquals(ActiveConversation, conversation)) return;
+                Reset(AgentProfiles, choices);
+                OnPropertyChanged(nameof(SelectedAgentProfileName));
+                OnPropertyChanged(nameof(PrimaryAgentLabel));
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _ = SetConnectionStatusAsync($"Agent profiles could not be loaded ({ex.GetType().Name}).");
+        }
+    }
+
+    public Task<IReadOnlyList<Codev.AgentProfileDocument>> GetUserAgentProfileDocumentsAsync(CancellationToken cancellationToken = default) =>
+        new Codev.UserAgentProfileStore(UserAgentProfilesPath).LoadDocumentsAsync(cancellationToken);
+
+    public async Task SaveUserAgentProfileAsync(string fileName, string contents, CancellationToken cancellationToken = default)
+    {
+        await new Codev.UserAgentProfileStore(UserAgentProfilesPath).SaveAsync(fileName, contents, cancellationToken);
+        await RefreshAgentProfilesAsync(cancellationToken);
     }
 
     public void ReportContextActionStatus(string message)
@@ -1423,6 +1965,37 @@ public sealed class MainViewModel : ViewModelBase
         return current is null
             ? new(false, "", "That command is no longer available. Check its Markdown file and project trust setting.")
             : Codev.CustomSlashCommandService.Expand(current, invocation);
+    }
+
+    private async Task<IReadOnlyList<Codev.SlashCommandDefinition>> LoadAgentSkillsAsync(Codev.Conversation conversation,
+        CancellationToken cancellationToken)
+    {
+        var projectPath = conversation.ProjectPath;
+        var trusted = !string.IsNullOrWhiteSpace(projectPath) && _projectFolderTrust.IsTrusted(projectPath);
+        var loaded = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, trusted ? projectPath : null, trusted, cancellationToken);
+        if (loaded.Warnings.Count > 0)
+            ReportContextActionStatus("Agent skill: " + loaded.Warnings[0]);
+        return loaded.Skills;
+    }
+
+    private async Task<string> LoadAgentSkillPromptAsync(Codev.Conversation conversation, Codev.SlashCommandDefinition selectedSkill,
+        string arguments, CancellationToken cancellationToken)
+    {
+        var projectPath = conversation.ProjectPath;
+        var trusted = !string.IsNullOrWhiteSpace(projectPath) && _projectFolderTrust.IsTrusted(projectPath);
+        if (selectedSkill.Scope == "skill-project" && !trusted)
+            throw new InvalidOperationException("Project skill access stopped because project trust is no longer enabled.");
+        var loaded = await Codev.ProjectSkillCatalog.LoadAsync(UserSkillsPath, trusted ? projectPath : null, trusted, cancellationToken);
+        var current = loaded.Skills.FirstOrDefault(skill =>
+            skill.Name.Equals(selectedSkill.Name, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(skill.Scope, selectedSkill.Scope, StringComparison.OrdinalIgnoreCase));
+        if (current is null)
+            throw new InvalidOperationException("That skill changed or is no longer available. Refresh the task and try again.");
+        var invocation = string.IsNullOrWhiteSpace(arguments) ? current.Name : current.Name + " " + arguments;
+        var expansion = await Codev.ProjectSkillCatalog.ReadPromptAsync(current, UserSkillsPath,
+            trusted ? projectPath : null, trusted, invocation, cancellationToken);
+        if (!expansion.Success) throw new InvalidOperationException(expansion.Error ?? "The skill prompt could not be loaded.");
+        return expansion.Prompt;
     }
 
     public void SavePromptTemplates(IEnumerable<Codev.PromptTemplate?> templates)
@@ -1739,6 +2312,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private void RefreshProjectTrustState()
     {
+        _ = RefreshAgentProfilesAsync();
         OnPropertyChanged(nameof(IsProjectTrusted));
         OnPropertyChanged(nameof(CanToggleCodeTaskMode));
         ((RelayCommand)ToggleCodeTaskCommand).NotifyCanExecuteChanged();
@@ -1777,7 +2351,25 @@ public sealed class MainViewModel : ViewModelBase
     private async Task RewindConversationAsync(int messageIndex)
     {
         if (ActiveConversation is not { } conversation || !CanRewindConversationMessage(messageIndex)) return;
-        if (await (ConfirmConversationRewindAsync?.Invoke(messageIndex) ?? Task.FromResult(false)) != true) return;
+        var choice = await (ChooseConversationRewindAsync?.Invoke(messageIndex) ?? Task.FromResult(Codev.ConversationRewindChoice.Cancel));
+        if (choice == Codev.ConversationRewindChoice.Cancel) return;
+        var codeResult = Codev.CodeRewindReviewResult.NoChanges;
+        if (choice is Codev.ConversationRewindChoice.CodeOnly or Codev.ConversationRewindChoice.CodeAndConversation)
+        {
+            codeResult = await (ReviewAndRestoreCodeBeforeRewindAsync?.Invoke(conversation, messageIndex) ?? Task.FromResult(Codev.CodeRewindReviewResult.Cancelled));
+            if (codeResult == Codev.CodeRewindReviewResult.Cancelled) return;
+            if (choice == Codev.ConversationRewindChoice.CodeOnly)
+            {
+                ContextActionStatus = codeResult == Codev.CodeRewindReviewResult.Restored
+                    ? "Code restored to before that prompt. The conversation was kept."
+                    : "No Codev-managed file changes needed restoring. The conversation was kept.";
+                OnPropertyChanged(nameof(ContextActionStatus));
+                OnPropertyChanged(nameof(HasContextActionStatus));
+                Persist();
+                RebuildLists();
+                return;
+            }
+        }
         try
         {
             var prompt = Codev.ConversationRewindService.RestoreConversationOnly(conversation, messageIndex);
@@ -1785,7 +2377,11 @@ public sealed class MainViewModel : ViewModelBase
             Messages.Clear();
             foreach (var message in conversation.Messages) Messages.Add(message);
             OnPropertyChanged(nameof(MessageCountLabel));
-            ContextActionStatus = "Conversation rewound before that prompt. Project files were left unchanged; review them in Files history.";
+            ContextActionStatus = choice == Codev.ConversationRewindChoice.CodeAndConversation
+                ? codeResult == Codev.CodeRewindReviewResult.Restored
+                    ? "Code and conversation rewound before that prompt. The prompt is back in the composer."
+                    : "Conversation rewound before that prompt. The prompt is back in the composer; no recorded code changes needed restoring."
+                : "Conversation rewound before that prompt. Project files were left unchanged; review them in Files history.";
             OnPropertyChanged(nameof(ContextActionStatus));
             OnPropertyChanged(nameof(HasContextActionStatus));
             Persist();
@@ -1851,6 +2447,12 @@ public sealed class MainViewModel : ViewModelBase
     private async Task SendDraftAsync()
     {
         if (ActiveConversation is not { } conversation || (string.IsNullOrWhiteSpace(Draft) && PendingDiffComments.Count == 0)) return;
+        if (!Codev.ConversationQueuePolicy.CanSubmit(conversation.QueueEnabled,
+                IsGenerating || HasQueuedTurns || conversation.PendingRequestCount > 0))
+        {
+            ReportContextActionStatus("Queuing is off for this conversation. Wait for its active or saved requests to finish before sending another prompt.");
+            return;
+        }
         if (_isReviewRunning)
         {
             ReportContextActionStatus("Wait for /review to finish or stop it before sending another prompt.");
@@ -1910,7 +2512,7 @@ public sealed class MainViewModel : ViewModelBase
         var titleText = string.IsNullOrWhiteSpace(text) ? "Review selected diff" : text;
         if (conversation.Title == "New conversation") conversation.Title = titleText.Length > 48 ? titleText[..48].TrimEnd() + "…" : titleText;
         else if (conversation.Messages.Count == 0) conversation.Title = titleText.Length > 48 ? titleText[..48].TrimEnd() + "…" : titleText;
-        var userMessage = new Codev.ChatMessage("user", sentText) { MessageIndex = conversation.Messages.Count };
+        var userMessage = new Codev.ChatMessage("user", sentText) { MessageIndex = conversation.Messages.Count, IsQueued = true };
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(new Codev.ChatMessage("assistant", ""));
         conversation.Draft = "";
@@ -1928,7 +2530,8 @@ public sealed class MainViewModel : ViewModelBase
             conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle, conversation.ThinkEnabled,
             conversation.TopP, conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, conversation.NumPredict,
             OpenAiReasoningEffort: conversation.OpenAiReasoningEffort, OpenAiVerbosity: conversation.OpenAiVerbosity,
-            OpenAiReasoningMode: conversation.OpenAiReasoningMode);
+            OpenAiReasoningMode: conversation.OpenAiReasoningMode,
+            AgentProfileName: conversation.AgentProfileName);
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -1966,7 +2569,7 @@ public sealed class MainViewModel : ViewModelBase
             instructionFiles = Codev.ProjectAgentInstructions.GetIncludedRelativePaths(instructions);
         }
         var assistantMessage = new Codev.ChatMessage("assistant", Codev.ConversationStatusReport.Build(
-            conversation, ReferenceEquals(_generationConversation, conversation) && IsGenerating,
+            conversation, IsConversationBusy(conversation),
             conversation.PendingRequestCount, _queuePaused, _cloudRequestsEnabled,
             trustRoot is not null, trustRoot, OllamaEndpointDisplay, Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint), instructionFiles,
             _projectCommandPermissions.GetMode(conversation.ProjectPath ?? ""),
@@ -1993,7 +2596,7 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (ActiveConversation is not { } conversation) return false;
         if (!Codev.ConversationHistoryClearService.Clear(conversation,
-                ReferenceEquals(_generationConversation, conversation)))
+                IsConversationBusy(conversation)))
         {
             ReportContextActionStatus("Wait for this conversation to finish and clear its queued requests before clearing its history.");
             return false;
@@ -2188,7 +2791,20 @@ public sealed class MainViewModel : ViewModelBase
         {
             while (!_queuePaused && _requestQueue.TryDequeue(out var turn))
             {
-                await ExecuteQueuedTurnAsync(turn);
+                var userIndex = turn.Turn.AssistantIndex - 1;
+                if (userIndex >= 0 && userIndex < turn.Conversation.Messages.Count && turn.Conversation.Messages[userIndex].IsQueued)
+                {
+                    turn.Conversation.Messages[userIndex] = turn.Conversation.Messages[userIndex] with { IsQueued = false };
+                    if (ReferenceEquals(ActiveConversation, turn.Conversation)) Messages[userIndex] = turn.Conversation.Messages[userIndex];
+                }
+                try { await ExecuteQueuedTurnAsync(turn); }
+                finally
+                {
+                    if (turn.Turn.IsCodeTask && turn.Conversation.ParentConversationId is not null)
+                        await ReportDelegatedResultAsync(turn.Conversation);
+                    else
+                        await ReportCompletedDelegatedChildrenAsync(turn.Conversation);
+                }
             }
         }
         finally
@@ -2226,22 +2842,37 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task RunCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
         List<OllamaChatMessage> history, Codev.WorkspaceFileService files, Codev.PersistedQueuedTurn turn,
-        System.Text.StringBuilder thinking, CancellationToken cancellationToken, IReadOnlyList<string> initialContextSources)
+        System.Text.StringBuilder thinking, CancellationToken cancellationToken, IReadOnlyList<string> initialContextSources,
+        IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile)
     {
         var shell = Codev.ShellCommandResolver.ResolveCurrent();
-        var tools = CreateCodeTaskToolSchemas(shell);
+        var mcpServers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
+        await using var mcpSession = await Codev.McpCodeTaskSession.ConnectAsync(mcpServers,
+            message => _ = SetConnectionStatusAsync(message), cancellationToken, _cloudApiKeyVault);
+        var agentSkills = await LoadAgentSkillsAsync(conversation, cancellationToken);
+        var agentSkillTools = agentSkills.ToDictionary(Codev.AgentSkillTool.FunctionName, StringComparer.Ordinal);
+        var tools = Codev.CodeTaskToolSchemaFactory.CreateOllamaTools(shell, mcpSession.Tools.Values, agentProfile,
+            allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills);
         var repeatedCalls = new Codev.RepeatedToolCallGuard();
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
-            async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
-                (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After, proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false))),
+            async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
             _ => Task.FromResult(false),
             status: message => _ = SetConnectionStatusAsync(message), initialContextSources: initialContextSources,
-            permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)));
-        var transcript = new System.Text.StringBuilder();
-        for (var round = 0; round < 8; round++)
+            permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)),
+            turnUserMessageIndex: assistantIndex - 1,
+            mcpTools: mcpSession.Tools,
+            mcpPermissionApproval: (tool, args, profileApproved) => ApproveMcpToolWithProjectPolicyAsync(conversation, tool, args, profileApproved),
+            agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
+            agentProfile: agentProfile,
+            agentSkills: agentSkillTools,
+            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token));
+        var transcript = new System.Text.StringBuilder(mcpSession.ToConnectionTranscript());
+        var initialMessageCount = history.Count;
+        var maxSteps = Math.Clamp(agentProfile?.MaxSteps ?? Codev.CodeTaskLimits.MaxModelStepsPerTurn, 1, Codev.CodeTaskLimits.MaxModelStepsPerTurn);
+        for (var round = 0; round < maxSteps; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await SetConnectionStatusAsync($"Code task · thinking · step {round + 1}/8");
+            await SetConnectionStatusAsync($"Code task · thinking · step {round + 1}/{maxSteps}");
             var payload = new Dictionary<string, object>
             {
                 ["model"] = turn.Model,
@@ -2257,13 +2888,10 @@ public sealed class MainViewModel : ViewModelBase
             var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
             request.Content = new StringContent(payloadJson, System.Text.Encoding.UTF8, "application/json");
             var roundMessages = history.Select(message => new Codev.ChatMessage(message.Role, message.Content)).ToArray();
-            var roundSections = new[]
-            {
-                new Codev.PromptContextSection("Current model messages and tool results",
-                    string.Join("\n\n", history.Select(message => $"[{message.Role}]\n{message.Content}"))),
-                new Codev.PromptContextSection("Available tool schemas", JsonSerializer.Serialize(tools, JsonSerializerOptions.Web)),
-                new Codev.PromptContextSection("Generation controls", $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}; top_p={turn.TopP?.ToString() ?? "model default"}; top_k={turn.TopK?.ToString() ?? "model default"}; presence_penalty={turn.PresencePenalty?.ToString() ?? "model default"}; repeat_penalty={turn.RepeatPenalty?.ToString() ?? "model default"}; num_predict={turn.NumPredict?.ToString() ?? "model default"}")
-            };
+            var interactions = JsonSerializer.Serialize(history.Skip(initialMessageCount), JsonSerializerOptions.Web);
+            var roundSections = Codev.PromptContextBreakdown.BuildCodeTaskRoundSections(capturedContextSections,
+                interactions, JsonSerializer.Serialize(tools, JsonSerializerOptions.Web),
+                $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}; top_p={turn.TopP?.ToString() ?? "model default"}; top_k={turn.TopK?.ToString() ?? "model default"}; presence_penalty={turn.PresencePenalty?.ToString() ?? "model default"}; repeat_penalty={turn.RepeatPenalty?.ToString() ?? "model default"}; num_predict={turn.NumPredict?.ToString() ?? "model default"}");
             await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create("ollama", turn.Model,
                 turn.NumCtx, roundSections, roundMessages, payloadJson));
             using var response = await _http.SendAsync(request, cancellationToken);
@@ -2317,9 +2945,12 @@ public sealed class MainViewModel : ViewModelBase
                     }
                     repeatedCalls.AllowOneMore();
                 }
-                var result = name == "update_task_checklist"
-                    ? await UpdateTaskChecklistFromModelAsync(conversation, arguments)
-                    : await executor.ExecuteAsync(name, arguments, cancellationToken);
+                var result = name switch
+                {
+                    "update_task_checklist" => await UpdateTaskChecklistFromModelAsync(conversation, arguments),
+                    "delegate_task" => await DelegateTaskAsync(conversation, arguments, assistantIndex, cancellationToken),
+                    _ => await executor.ExecuteAsync(name, arguments, cancellationToken)
+                };
                 Persist();
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
@@ -2333,23 +2964,42 @@ public sealed class MainViewModel : ViewModelBase
             }
             await SetConnectionStatusAsync("Code task · Thinking…");
         }
-        throw new InvalidOperationException("Code task reached the eight-step tool limit. Send a follow-up to continue.");
+        transcript.AppendLine().AppendLine().Append($"Code task reached its {maxSteps}-step limit. The completed tool results are shown above; send a follow-up to continue.");
+        if (conversation.TaskChecklist.Count > 0)
+            transcript.AppendLine().AppendLine().Append("**Task checklist**").AppendLine().AppendLine(Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist));
+        await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
+        await SetConnectionStatusAsync("Code task · profile step limit reached");
+        return;
     }
 
     private async Task RunOpenAiCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
-        IReadOnlyList<Codev.ChatMessage> normalizedHistory, Codev.PersistedQueuedTurn turn, CancellationToken cancellationToken)
+        IReadOnlyList<Codev.ChatMessage> normalizedHistory, Codev.PersistedQueuedTurn turn, CancellationToken cancellationToken,
+        IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile)
     {
         if (string.IsNullOrWhiteSpace(turn.ProjectPath)) throw new InvalidOperationException("OpenAI Code task requires a trusted workspace.");
         var files = new Codev.WorkspaceFileService(turn.ProjectPath, turn.ContextExclusions);
-        var toolSchemas = CreateOpenAiCodeTaskToolSchemas(Codev.ShellCommandResolver.ResolveCurrent());
+        var mcpServers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
+        await using var mcpSession = await Codev.McpCodeTaskSession.ConnectAsync(mcpServers,
+            message => _ = SetConnectionStatusAsync(message), cancellationToken, _cloudApiKeyVault);
+        var agentSkills = await LoadAgentSkillsAsync(conversation, cancellationToken);
+        var agentSkillTools = agentSkills.ToDictionary(Codev.AgentSkillTool.FunctionName, StringComparer.Ordinal);
+        var toolSchemas = Codev.CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(Codev.ShellCommandResolver.ResolveCurrent(), mcpSession.Tools.Values,
+            agentProfile, allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills);
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
-            async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await
-                (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After, proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false))),
+            async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
             _ => Task.FromResult(false), status: message => _ = SetConnectionStatusAsync(message),
-            permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)));
+            permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)),
+            turnUserMessageIndex: assistantIndex - 1,
+            mcpTools: mcpSession.Tools,
+            mcpPermissionApproval: (tool, args, profileApproved) => ApproveMcpToolWithProjectPolicyAsync(conversation, tool, args, profileApproved),
+            agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
+            agentProfile: agentProfile,
+            agentSkills: agentSkillTools,
+            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token));
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var client = new Codev.CloudModelApiClient(_http);
         var runner = new Codev.OpenAiCodeTaskRunner(client);
+        var connectionTranscript = mcpSession.ToConnectionTranscript();
         var result = await runner.RunAsync(turn.Model, input, toolSchemas,
             async (step, currentInput, token) =>
         {
@@ -2361,22 +3011,25 @@ public sealed class MainViewModel : ViewModelBase
                     turn.IncludeProjectContext && conversation.IncludeProjectContextForHosted,
                     _conversationWorkspaces.IsConversationWorkspace(conversation.Id, turn.ProjectPath)))
                 throw new InvalidOperationException("OpenAI Code task stopped because hosted requests or the consent required for this workspace were turned off.");
-            var sections = new[]
-            {
-                new Codev.PromptContextSection("Conversation and tool results", JsonSerializer.Serialize(currentInput.Skip(normalizedHistory.Count), JsonSerializerOptions.Web)),
-                new Codev.PromptContextSection("Available tool schemas", JsonSerializer.Serialize(toolSchemas, JsonSerializerOptions.Web))
-            };
+            var sections = Codev.PromptContextBreakdown.BuildCodeTaskRoundSections(capturedContextSections,
+                JsonSerializer.Serialize(currentInput.Skip(normalizedHistory.Count), JsonSerializerOptions.Web),
+                JsonSerializer.Serialize(toolSchemas, JsonSerializerOptions.Web),
+                $"reasoning_effort={turn.OpenAiReasoningEffort ?? "model default"}; verbosity={turn.OpenAiVerbosity ?? "model default"}; reasoning_mode={turn.OpenAiReasoningMode ?? "model default"}");
             await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create(
-                turn.Provider, turn.Model, 0, sections, normalizedHistory, ""));
+                turn.Provider, turn.Model, 0, sections,
+                Codev.PromptContextBreakdown.ToOpenAiInputDisplayMessages(currentInput), ""));
             return currentOpenAiKey;
         }, async (name, arguments, token) =>
         {
             token.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !_projectFolderTrust.IsTrusted(turn.ProjectPath))
                 throw new InvalidOperationException("Workspace trust was revoked during the Code task. No further tools will run until it is trusted again.");
-            var toolResult = name == "update_task_checklist"
-                ? await UpdateTaskChecklistFromModelAsync(conversation, arguments)
-                : await executor.ExecuteAsync(name, arguments, token);
+            var toolResult = name switch
+            {
+                "update_task_checklist" => await UpdateTaskChecklistFromModelAsync(conversation, arguments),
+                "delegate_task" => await DelegateTaskAsync(conversation, arguments, assistantIndex, token),
+                _ => await executor.ExecuteAsync(name, arguments, token)
+            };
             Persist();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -2410,17 +3063,23 @@ public sealed class MainViewModel : ViewModelBase
         onRequestPayload: body => SetLastPromptRequestBodyAsync(conversation, body),
         onTranscript: async transcript =>
         {
+            var displayTranscript = string.IsNullOrWhiteSpace(connectionTranscript)
+                ? transcript
+                : connectionTranscript + Environment.NewLine + Environment.NewLine + transcript;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = transcript };
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = displayTranscript };
                 if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
                 Persist();
             });
         },
         cancellationToken: cancellationToken,
         reasoningEffort: turn.OpenAiReasoningEffort, verbosity: turn.OpenAiVerbosity,
-        reasoningMode: turn.OpenAiReasoningMode);
-        var finalTranscript = result.Transcript;
+        reasoningMode: turn.OpenAiReasoningMode,
+        maxSteps: agentProfile?.MaxSteps);
+        var finalTranscript = string.IsNullOrWhiteSpace(connectionTranscript)
+            ? result.Transcript
+            : connectionTranscript + Environment.NewLine + Environment.NewLine + result.Transcript;
         if (conversation.TaskChecklist.Count > 0)
             finalTranscript += Environment.NewLine + Environment.NewLine + "**Task checklist**" + Environment.NewLine + Environment.NewLine + Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist);
         await SetAssistantTranscriptAsync(conversation, assistantIndex, finalTranscript);
@@ -2497,6 +3156,33 @@ public sealed class MainViewModel : ViewModelBase
         });
     }
 
+    public void CyclePrimaryAgent()
+    {
+        if (!IsCodeTask || IsGenerating) return;
+        SelectedAgentProfileName = SelectedAgentProfileName.Equals("Plan", StringComparison.OrdinalIgnoreCase) ? "" : "Plan";
+        OnPropertyChanged(nameof(PrimaryAgentLabel));
+        ReportContextActionStatus($"Primary agent · {PrimaryAgentLabel}");
+    }
+
+    private async Task InitializeManagedWorkspacePermissionDefaultsAsync()
+    {
+        if (!_projectCommandPermissions.CanPersist) return;
+        foreach (var path in _conversations.Select(conversation => conversation.ProjectPath)
+                     .Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (_projectCommandPermissions.HasProjectSettings(path!)) continue;
+            try { await _projectCommandPermissions.SetModeAsync(path!, Codev.ProjectCommandPermissionMode.Auto); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException) { }
+        }
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            OnPropertyChanged(nameof(ProjectCommandPermissionMode));
+            OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
+            OnPropertyChanged(nameof(CodeTaskTooltip));
+        });
+    }
+
     private async Task RecordPromptOutputTokenUsageAsync(Codev.Conversation conversation, string provider, string model, int outputTokens)
     {
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -2520,7 +3206,7 @@ public sealed class MainViewModel : ViewModelBase
         });
     }
 
-    private static string TruncateToolOutput(string value, int max = 6000) => value.Length <= max ? value : value[..max] + "\n… [tool output truncated]";
+    private static string TruncateToolOutput(string value, int max = 6000) => Codev.UntrustedToolOutput.Truncate(value, max);
 
     private async Task<IReadOnlyList<string>> SelectModelRelevantProjectRulesAsync(
         Codev.PersistedQueuedTurn turn, string task, CancellationToken cancellationToken)
@@ -2615,20 +3301,37 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
-    private async Task ExecuteQueuedTurnAsync(QueuedChatTurn turn)
+    private async Task ExecuteQueuedTurnAsync(QueuedChatTurn turn, bool parallelChild = false, CancellationToken parentCancellationToken = default)
     {
         var conversation = turn.Conversation;
         var savedTurn = turn.Turn;
         var assistantIndex = savedTurn.AssistantIndex;
-        var token = new CancellationTokenSource();
-        _generationCancellation = token;
-        _generationConversation = conversation;
+        if (parallelChild && conversation.ParentConversationId is null)
+            throw new InvalidOperationException("Only an isolated child conversation can run as a parallel task.");
+        var token = parentCancellationToken.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(parentCancellationToken)
+            : new CancellationTokenSource();
+        if (parallelChild)
+        {
+            _runningParallelChildren.Add(conversation.Id);
+            _parallelChildCancellation[conversation.Id] = token;
+        }
+        else
+        {
+            _generationCancellation = token;
+            _generationConversation = conversation;
+        }
+        if (conversation.ParentConversationId is not null) conversation.IsChildTaskRunning = true;
+        var userMessageIndex = assistantIndex - 1;
+        if (userMessageIndex >= 0 && userMessageIndex < conversation.Messages.Count && conversation.Messages[userMessageIndex].IsQueued)
+            conversation.Messages[userMessageIndex] = conversation.Messages[userMessageIndex] with { IsQueued = false };
         conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
         conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == assistantIndex);
         conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "");
         if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
         IsGenerating = true;
         Persist();
+        RebuildLists();
         await _persistenceTask;
         try
         {
@@ -2639,13 +3342,40 @@ public sealed class MainViewModel : ViewModelBase
                         savedTurn.IncludeProjectContext && conversation.IncludeProjectContextForHosted,
                         _conversationWorkspaces.IsConversationWorkspace(conversation.Id, savedTurn.ProjectPath)))))
                 throw new InvalidOperationException("This Code task can no longer run because its provider connection or required hosted data-sharing consent is unavailable.");
+            Codev.AgentProfile? selectedAgentProfile = null;
+            if (savedTurn.IsCodeTask && !string.IsNullOrWhiteSpace(savedTurn.AgentProfileName))
+            {
+                var profiles = await Codev.AgentProfileCatalog.LoadAsync(UserAgentProfilesPath, savedTurn.ProjectPath,
+                    !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath), token.Token);
+                selectedAgentProfile = profiles.Profiles.FirstOrDefault(profile => profile.Name.Equals(savedTurn.AgentProfileName, StringComparison.OrdinalIgnoreCase));
+                if (selectedAgentProfile is null)
+                    throw new InvalidOperationException($"Agent profile '{savedTurn.AgentProfileName}' is unavailable. Refresh the profile list or choose another profile before continuing.");
+                if (!string.IsNullOrWhiteSpace(selectedAgentProfile.Model) && !selectedAgentProfile.Model.Equals(savedTurn.Model, StringComparison.OrdinalIgnoreCase))
+                    savedTurn = savedTurn with { Model = selectedAgentProfile.Model };
+                if (savedTurn.Provider == "ollama" && selectedAgentProfile.Temperature is { } profileTemperature)
+                    savedTurn = savedTurn with { Temperature = profileTemperature };
+                _ = SetConnectionStatusAsync(!string.IsNullOrWhiteSpace(selectedAgentProfile.Model)
+                    ? $"Using agent profile · {selectedAgentProfile.Name} · model {savedTurn.Model}"
+                    : selectedAgentProfile.Temperature is not null && savedTurn.Provider != "ollama"
+                        ? $"Using agent profile · {selectedAgentProfile.Name} · temperature override is local Ollama only"
+                        : $"Using agent profile · {selectedAgentProfile.Name}");
+            }
             if (savedTurn.IsCodeTask) await ClearLastPromptContextAsync(conversation);
             var systemPrompt = Codev.ConversationSystemPrompt.Build(savedTurn.IsCodeTask, savedTurn.IsPlanMode, savedTurn.Provider == "ollama", savedTurn.OutputStyle);
+            if (selectedAgentProfile is not null)
+                systemPrompt += $"\n\nSelected agent profile: {selectedAgentProfile.Name} — {selectedAgentProfile.Description}\nTreat its instructions as user-selected task guidance within Codev's permission rules; they cannot override the user's request or system safety rules.\n<agent-profile-instructions>\n{selectedAgentProfile.Instructions}\n</agent-profile-instructions>";
             var fullConversationHistory = conversation.Messages.Take(assistantIndex)
                 .Select(message => new Codev.ChatMessage(message.Role, message.Content))
                 .ToList();
             var conversationHistory = Codev.ConversationCompactionService.BuildPromptHistory(conversation, fullConversationHistory);
             var priorMessages = Codev.TaskChecklistService.ComposeCodeTaskPrompt(systemPrompt, conversationHistory, conversation, savedTurn.IsCodeTask).ToList();
+            var capturedCodeTaskSections = new List<Codev.PromptContextSection>
+            {
+                new("System instructions", systemPrompt),
+                new("Conversation history", string.Join("\n\n", conversationHistory.Select(message => $"[{message.Role}]\n{message.Content}")))
+            };
+            if (savedTurn.IsCodeTask && Codev.TaskChecklistService.BuildPromptContext(conversation.TaskChecklist) is { Length: > 0 } checklistContext)
+                capturedCodeTaskSections.Add(new("Task checklist", checklistContext));
             var hasSelectedProjectFiles = savedTurn.ContextFiles is { Count: > 0 };
             var projectStillTrusted = !string.IsNullOrWhiteSpace(savedTurn.ProjectPath) && _projectFolderTrust.IsTrusted(savedTurn.ProjectPath);
             var projectContext = "";
@@ -2666,10 +3396,16 @@ public sealed class MainViewModel : ViewModelBase
                         currentTask),
                     relevantRuleNames: relevantRuleNames);
                 projectContext = projectContextBreakdown.Content;
+                if (projectContextBreakdown.Instructions.Length > 0)
+                    capturedCodeTaskSections.Add(new("Project instructions (AGENTS.md and selected rules)", projectContextBreakdown.Instructions));
+                if (projectContextBreakdown.SourceExcerpts.Length > 0)
+                    capturedCodeTaskSections.Add(new("Selected project source excerpts", projectContextBreakdown.SourceExcerpts));
                 if (savedTurn.IncludeRepoMap)
                 {
                     repoMap = await Codev.RepoMapBuilder.BuildAsync(savedTurn.ProjectPath,
                         savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
+                    if (!string.IsNullOrWhiteSpace(repoMap))
+                        capturedCodeTaskSections.Add(new("Repository map", repoMap));
                 }
                 if (projectContext.Length > 0) priorMessages.Add(new Codev.ChatMessage("system", projectContext));
                 if (repoMap.Length > 0) priorMessages.Add(new Codev.ChatMessage("system", repoMap));
@@ -2712,7 +3448,8 @@ public sealed class MainViewModel : ViewModelBase
                     }
                     if (!string.IsNullOrWhiteSpace(repoMap)) contextSources.Add("Repository map");
                     await RunCodeTaskTurnAsync(conversation, assistantIndex, history,
-                        new Codev.WorkspaceFileService(savedTurn.ProjectPath, savedTurn.ContextExclusions), savedTurn, thinking, token.Token, contextSources);
+                        new Codev.WorkspaceFileService(savedTurn.ProjectPath, savedTurn.ContextExclusions), savedTurn, thinking, token.Token, contextSources,
+                        capturedCodeTaskSections, selectedAgentProfile);
                 }
                 else
                 {
@@ -2761,7 +3498,8 @@ public sealed class MainViewModel : ViewModelBase
                     throw new InvalidOperationException("The project workspace is no longer trusted. Re-trust it before resuming this Code task.");
                 if (!_cloudRequestsEnabled || !_cloudApiKeys.ContainsKey(savedTurn.Provider))
                     throw new InvalidOperationException("Reconnect OpenAI and approve hosted requests before resuming this Code task.");
-                await RunOpenAiCodeTaskTurnAsync(conversation, assistantIndex, normalizedHistory, savedTurn, token.Token);
+                await RunOpenAiCodeTaskTurnAsync(conversation, assistantIndex, normalizedHistory, savedTurn, token.Token,
+                    capturedCodeTaskSections, selectedAgentProfile);
             }
             else
             {
@@ -2815,10 +3553,19 @@ public sealed class MainViewModel : ViewModelBase
             {
                 if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
             });
-            IsGenerating = false;
-            _generationCancellation = null;
-            _generationConversation = null;
+            if (parallelChild)
+            {
+                _runningParallelChildren.Remove(conversation.Id);
+                _parallelChildCancellation.Remove(conversation.Id);
+            }
+            else
+            {
+                _generationCancellation = null;
+                _generationConversation = null;
+            }
+            if (conversation.ParentConversationId is not null) conversation.IsChildTaskRunning = false;
             token.Dispose();
+            IsGenerating = _generationConversation is not null || _runningParallelChildren.Count > 0;
             conversation.UpdatedAt = DateTimeOffset.Now;
             OnPropertyChanged(nameof(MessageCountLabel));
             Persist();
@@ -2899,7 +3646,125 @@ public sealed class MainViewModel : ViewModelBase
         RebuildLists();
     }
 
-    private void StopGeneration() => _generationCancellation?.Cancel();
+    public bool SetQueueEnabled(bool enabled)
+    {
+        if (ActiveConversation is not { } conversation) return false;
+        conversation.QueueEnabled = enabled;
+        OnPropertyChanged(nameof(IsQueueEnabled));
+        OnPropertyChanged(nameof(IsQueueDisabled));
+        Persist();
+        ReportContextActionStatus(enabled ? "Queuing is on for this conversation." : "Queuing is off; new prompts must wait for the current response to finish.");
+        return true;
+    }
+
+    public bool PrioritizeQueuedMessage(Codev.ChatMessage message)
+    {
+        if (ActiveConversation is not { } conversation || !message.IsUser) return false;
+        var assistantIndex = message.MessageIndex + 1;
+        var match = _requestQueue.FirstOrDefault(turn => ReferenceEquals(turn.Conversation, conversation) && turn.Turn.AssistantIndex == assistantIndex);
+        if (match is null) return false;
+        var oldestQueuedAt = _requestQueue.Min(turn => turn.Turn.EnqueuedAt);
+        var prioritizedAt = oldestQueuedAt > DateTimeOffset.MinValue ? oldestQueuedAt.AddTicks(-1) : oldestQueuedAt;
+        var prioritizedTurn = new QueuedChatTurn(conversation, match.Turn with { EnqueuedAt = prioritizedAt });
+        var queued = _requestQueue.ToArray().Where(turn => !ReferenceEquals(turn, match)).ToArray();
+        _requestQueue.Clear();
+        _requestQueue.Enqueue(prioritizedTurn);
+        foreach (var turn in queued) _requestQueue.Enqueue(turn);
+        conversation.PendingTurns = _requestQueue.Where(turn => ReferenceEquals(turn.Conversation, conversation))
+            .Select(turn => turn.Turn).ToList();
+        Persist();
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        ReportContextActionStatus("This prompt will run next after the current response.");
+        return true;
+    }
+
+    public bool CancelQueuedMessage(Codev.ChatMessage message)
+    {
+        if (ActiveConversation is not { } conversation || !message.IsUser) return false;
+        var assistantIndex = message.MessageIndex + 1;
+        var retained = new Queue<QueuedChatTurn>();
+        var removed = false;
+        while (_requestQueue.TryDequeue(out var turn))
+        {
+            if (!removed && ReferenceEquals(turn.Conversation, conversation) && turn.Turn.AssistantIndex == assistantIndex)
+            {
+                removed = true;
+                conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
+                conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == assistantIndex);
+                conversation.Messages[message.MessageIndex] = message with { IsQueued = false };
+                conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued prompt removed.");
+                if (ReferenceEquals(ActiveConversation, conversation))
+                {
+                    Messages[message.MessageIndex] = conversation.Messages[message.MessageIndex];
+                    Messages[assistantIndex] = conversation.Messages[assistantIndex];
+                }
+            }
+            else retained.Enqueue(turn);
+        }
+        while (retained.TryDequeue(out var turn)) _requestQueue.Enqueue(turn);
+        if (!removed) return false;
+        OnPropertyChanged(nameof(HasQueuedTurns));
+        OnPropertyChanged(nameof(QueueStatusLabel));
+        Persist();
+        RebuildLists();
+        return true;
+    }
+
+    public async Task<bool> EditQueuedMessageAsync(int messageIndex)
+    {
+        if (ActiveConversation is not { } conversation || messageIndex < 0 || messageIndex >= conversation.Messages.Count ||
+            !conversation.Messages[messageIndex].IsUser || !conversation.Messages[messageIndex].IsQueued) return false;
+        var original = conversation.Messages[messageIndex].Content;
+        var revised = await (EditConversationPromptAsync?.Invoke(messageIndex, original) ?? Task.FromResult<string?>(null));
+        if (revised is null || ActiveConversation != conversation || messageIndex >= conversation.Messages.Count || !conversation.Messages[messageIndex].IsQueued) return false;
+        conversation.Messages[messageIndex] = conversation.Messages[messageIndex] with { Content = revised, IsQueued = true };
+        Messages[messageIndex] = conversation.Messages[messageIndex];
+        Persist();
+        ReportContextActionStatus("Queued prompt updated.");
+        return true;
+    }
+
+    public async Task<bool> OpenSideChatFromMessageAsync(Codev.ChatMessage message)
+    {
+        if (ActiveConversation is not { } source || !message.IsUser || message.MessageIndex < 0 || message.MessageIndex >= source.Messages.Count) return false;
+        try
+        {
+            var sideChat = await Codev.ConversationForkService.CreateSideChatAsync(source, message.MessageIndex);
+            _conversations.Insert(0, sideChat);
+            SelectConversation(sideChat);
+            RebuildLists();
+            Persist();
+            ReportContextActionStatus("Opened a side chat from this prompt.");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            ReportContextActionStatus($"Could not open a side chat: {ex.Message}");
+            return false;
+        }
+    }
+
+    private async Task ReportCompletedDelegatedChildrenAsync(Codev.Conversation parent)
+    {
+        foreach (var child in parent.ChildConversations.Where(child => !child.DelegatedResultReported).ToArray())
+            await ReportDelegatedResultAsync(child);
+    }
+
+    private void StopGeneration()
+    {
+        _generationCancellation?.Cancel();
+        if (ActiveConversation is not { } active)
+        {
+            foreach (var cancellation in _parallelChildCancellation.Values.ToArray()) cancellation.Cancel();
+            return;
+        }
+        if (_parallelChildCancellation.TryGetValue(active.Id, out var childCancellation))
+            childCancellation.Cancel();
+        if (active.ParentConversationId is null)
+            CancelParallelChildren(active.Id);
+        if (_generationCancellation is null)
+            foreach (var cancellation in _parallelChildCancellation.Values.ToArray()) cancellation.Cancel();
+    }
 
     public async Task SaveFileChangesAsync()
     {
@@ -2928,6 +3793,11 @@ public sealed class MainViewModel : ViewModelBase
                 : Codev.AvaloniaUiSettings.Default;
             _isDarkTheme = !string.Equals(settings.Theme, "light", StringComparison.OrdinalIgnoreCase);
             _readingWidth = Codev.AvaloniaUiSettings.NormalizeReadingWidth(settings.ReadingWidth);
+            _autoConnectProvider = settings.AutoConnectProvider;
+            _uiFontFamily = Codev.AvaloniaUiSettings.NormalizeFontFamily(settings.FontFamily);
+            _uiFontSize = Codev.AvaloniaUiSettings.NormalizeFontSize(settings.FontSize);
+            _pinnedConversationsExpanded = settings.PinnedConversationsExpanded;
+            _recentConversationsExpanded = settings.RecentConversationsExpanded;
             if (Codev.OllamaEndpoint.TryParse(settings.OllamaEndpoint, out var endpoint, out _)) _ollamaEndpoint = endpoint;
             var templates = settings.PromptTemplates ?? LoadLegacyPromptTemplates();
             foreach (var template in Codev.PromptTemplateCatalog.Normalize(templates)) PromptTemplates.Add(template);
@@ -2944,12 +3814,38 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsWideReadingWidth));
         OnPropertyChanged(nameof(IsFullReadingWidth));
         OnPropertyChanged(nameof(OllamaEndpointDisplay));
+        OnPropertyChanged(nameof(UiFontFamily));
+        OnPropertyChanged(nameof(UiFontSize));
+        OnPropertyChanged(nameof(IsFontInter));
+        OnPropertyChanged(nameof(IsFontSegoeUi));
+        OnPropertyChanged(nameof(IsFontArial));
+        OnPropertyChanged(nameof(IsFontConsolas));
+        OnPropertyChanged(nameof(IsFontAptos));
+        OnPropertyChanged(nameof(IsFontCalibri));
+        OnPropertyChanged(nameof(IsFontVerdana));
+        OnPropertyChanged(nameof(IsFontTahoma));
+        OnPropertyChanged(nameof(IsFontGeorgia));
+        OnPropertyChanged(nameof(IsFontCascadiaCode));
+        OnPropertyChanged(nameof(IsFontSize10));
+        OnPropertyChanged(nameof(IsFontSize11));
+        OnPropertyChanged(nameof(IsFontSize12));
+        OnPropertyChanged(nameof(IsFontSize13));
+        OnPropertyChanged(nameof(IsFontSize14));
+        OnPropertyChanged(nameof(IsFontSize15));
+        OnPropertyChanged(nameof(IsFontSize16));
+        OnPropertyChanged(nameof(IsFontSize18));
+        OnPropertyChanged(nameof(IsFontSize20));
+        OnPropertyChanged(nameof(IsFontSize22));
+        OnPropertyChanged(nameof(IsFontSize24));
+        OnPropertyChanged(nameof(IsFontSize28));
+        OnPropertyChanged(nameof(IsFontSize32));
     }
 
     private void PersistSettings()
     {
         var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString(),
-            PromptTemplates.ToList(), SamplingPresets.ToList(), _readingWidth);
+            PromptTemplates.ToList(), SamplingPresets.ToList(), _readingWidth, _autoConnectProvider, _uiFontFamily, _uiFontSize,
+            _pinnedConversationsExpanded, _recentConversationsExpanded);
         var revision = Interlocked.Increment(ref _settingsRevision);
         _settingsPersistenceTask = Task.Run(async () =>
         {
@@ -3021,11 +3917,17 @@ public sealed class MainViewModel : ViewModelBase
         return true;
     }
 
-    public async Task LoadModelsAsync()
+    public Task LoadModelsAsync()
     {
-        if (_isLoadingModels) return;
+        if (_isLoadingModels) return _modelLoadTask;
         _isLoadingModels = true;
         OnPropertyChanged(nameof(ModelPickerPlaceholder));
+        _modelLoadTask = LoadModelsCoreAsync();
+        return _modelLoadTask;
+    }
+
+    private async Task LoadModelsCoreAsync()
+    {
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -3054,7 +3956,7 @@ public sealed class MainViewModel : ViewModelBase
                 foreach (var model in allChoices) Models.Add(model);
                 foreach (var model in connectedCloudChoices) Models.Add(model);
                 if (Provider != "ollama" && !Models.Any(choice => choice.Provider == Provider && choice.Name.Equals(Model, StringComparison.OrdinalIgnoreCase)))
-                    Models.Add(new ModelChoice(Model, $"{Provider} · {Model} (connect key)", Provider));
+                    Models.Add(new ModelChoice(Model, GetHostedModelDisplayName(Provider, Model), Provider));
                 OnPropertyChanged(nameof(HasModels));
                 NotifyCodeTaskAvailabilityProperties();
                 OnPropertyChanged(nameof(IsModelPickerPlaceholderVisible));
@@ -3064,12 +3966,11 @@ public sealed class MainViewModel : ViewModelBase
                 {
                     var resolved = Codev.OllamaModelSelection.ResolveInstalledTag(Model, allChoices.Select(item => item.Name));
                     if (resolved is not null && (SelectedModel is null || !resolved.Equals(Model, StringComparison.Ordinal))) Model = resolved;
-                    else OnPropertyChanged(nameof(Model));
+        else OnPropertyChanged(nameof(Model));
                 }
                 OnPropertyChanged(nameof(SelectedModel));
                 RefreshContextSizes(Model);
-                if (Provider != "ollama")
-                    ConnectionStatus = _cloudRequestsEnabled && _cloudApiKeys.ContainsKey(Provider) ? $"Hosted model selected · {Model}" : $"{Provider} model selected · connect its API key to send";
+                if (Provider != "ollama") ConnectionStatus = HostedModelStatus(Provider, Model);
                 else if (allChoices.Length == 0) ConnectionStatus = $"Ollama connected · no models installed{(Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "" : " on remote server")}";
                 else
                 {
@@ -3156,27 +4057,31 @@ public sealed class MainViewModel : ViewModelBase
 
         var enteredKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
         var key = enteredKey ?? Environment.GetEnvironmentVariable(environmentName)?.Trim();
+        var keySaveWarning = "";
         try
         {
-            if (string.IsNullOrWhiteSpace(key)) key = await _cloudApiKeyVault.GetAsync(provider);
+            if (string.IsNullOrWhiteSpace(key) && !_savedCloudApiKeys.TryGetValue(provider, out key))
+                key = await _cloudApiKeyVault.GetAsync(provider);
             if (string.IsNullOrWhiteSpace(key))
             {
                 ReportContextActionStatus($"Enter a {provider} API key, set {environmentName}, or save a key in the OS credential store.");
                 return false;
             }
 
-            ConnectionStatus = $"Connecting to {provider} · loading available models…";
-            var cloudClient = new Codev.CloudModelApiClient(_http) { RequestTimeout = TimeSpan.FromSeconds(30) };
-            var choices = await cloudClient.ListModelsAsync(provider, key.Trim());
-            var keySaveWarning = "";
             if (enteredKey is not null)
             {
                 try { await _cloudApiKeyVault.SaveAsync(provider, enteredKey); }
                 catch (Exception ex) when (IsCredentialStoreFailure(ex))
                 {
-                    keySaveWarning = " · connected for this session, but the OS could not save the key";
+                    keySaveWarning = " The OS credential store could not save the key.";
                 }
+                if (keySaveWarning.Length == 0)
+                    await Dispatcher.UIThread.InvokeAsync(() => _savedCloudApiKeys[provider] = enteredKey);
             }
+
+            ConnectionStatus = $"Connecting to {provider} · loading available models…";
+            var cloudClient = new Codev.CloudModelApiClient(_http) { RequestTimeout = TimeSpan.FromSeconds(30) };
+            var choices = await cloudClient.ListModelsAsync(provider, key.Trim());
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 _cloudApiKeys[provider] = key.Trim();
@@ -3201,10 +4106,67 @@ public sealed class MainViewModel : ViewModelBase
         {
             var message = IsCredentialStoreFailure(ex)
                 ? $"Could not access the OS credential store. Paste the key to use it for this session. ({ex.GetType().Name})"
-                : $"Could not connect to {provider}: {ex.Message}";
+                : $"Could not connect to {provider}: {ex.Message}{(keySaveWarning.Length == 0 ? "" : " " + keySaveWarning.Trim())}";
             await Dispatcher.UIThread.InvokeAsync(() => ConnectionStatus = message);
             return false;
         }
+    }
+
+    public void SetAutoConnectProvider(string? provider)
+    {
+        _autoConnectProvider = provider is not null && Codev.CloudModelProviders.IsCloud(provider) ? provider : null;
+        OnPropertyChanged(nameof(AutoConnectProvider));
+        PersistSettings();
+    }
+
+    public void SetUiFontFamily(string? family)
+    {
+        var normalized = Codev.AvaloniaUiSettings.NormalizeFontFamily(family);
+        if (_uiFontFamily == normalized) return;
+        _uiFontFamily = normalized;
+        OnPropertyChanged(nameof(UiFontFamily));
+        OnPropertyChanged(nameof(IsFontInter));
+        OnPropertyChanged(nameof(IsFontSegoeUi));
+        OnPropertyChanged(nameof(IsFontArial));
+        OnPropertyChanged(nameof(IsFontConsolas));
+        OnPropertyChanged(nameof(IsFontAptos));
+        OnPropertyChanged(nameof(IsFontCalibri));
+        OnPropertyChanged(nameof(IsFontVerdana));
+        OnPropertyChanged(nameof(IsFontTahoma));
+        OnPropertyChanged(nameof(IsFontGeorgia));
+        OnPropertyChanged(nameof(IsFontCascadiaCode));
+        PersistSettings();
+    }
+
+    public void SetUiFontSize(int size)
+    {
+        var normalized = Codev.AvaloniaUiSettings.NormalizeFontSize(size);
+        if (_uiFontSize == normalized) return;
+        _uiFontSize = normalized;
+        OnPropertyChanged(nameof(UiFontSize));
+        OnPropertyChanged(nameof(IsFontSize12));
+        OnPropertyChanged(nameof(IsFontSize10));
+        OnPropertyChanged(nameof(IsFontSize11));
+        OnPropertyChanged(nameof(IsFontSize13));
+        OnPropertyChanged(nameof(IsFontSize14));
+        OnPropertyChanged(nameof(IsFontSize15));
+        OnPropertyChanged(nameof(IsFontSize16));
+        OnPropertyChanged(nameof(IsFontSize18));
+        OnPropertyChanged(nameof(IsFontSize20));
+        OnPropertyChanged(nameof(IsFontSize22));
+        OnPropertyChanged(nameof(IsFontSize24));
+        OnPropertyChanged(nameof(IsFontSize28));
+        OnPropertyChanged(nameof(IsFontSize32));
+        PersistSettings();
+    }
+
+    private async Task AutoConnectSavedProviderOnStartupAsync()
+    {
+        await _savedCloudApiKeysRestoreTask;
+        var provider = _autoConnectProvider;
+        if (provider is null || !_savedCloudApiKeys.ContainsKey(provider)) return;
+
+        await ConnectCloudProviderAsync(provider, apiKey: null, allowCloudRequests: true);
     }
 
     private async Task RestoreSavedCloudApiKeysAsync()
@@ -3219,10 +4181,27 @@ public sealed class MainViewModel : ViewModelBase
             }
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                foreach (var (provider, key) in restored) _cloudApiKeys[provider] = key;
+                foreach (var (provider, key) in restored) _savedCloudApiKeys[provider] = key;
+                // Existing saved credentials should reconnect automatically unless the user opts out.
+                // Prefer the saved provider of the active conversation, then OpenAI, then Anthropic.
+                if (_autoConnectProvider is null && restored.Count > 0)
+                {
+                    _autoConnectProvider = ActiveConversation is { } active && restored.ContainsKey(active.Provider)
+                        ? active.Provider
+                        : restored.ContainsKey(Codev.CloudModelProviders.OpenAI)
+                            ? Codev.CloudModelProviders.OpenAI
+                            : Codev.CloudModelProviders.Anthropic;
+                    OnPropertyChanged(nameof(AutoConnectProvider));
+                    PersistSettings();
+                }
                 NotifyCodeTaskAvailabilityProperties();
-                if (restored.Count > 0 && !_cloudRequestsEnabled)
-                    ConnectionStatus = "Saved hosted API key restored · acknowledge hosted requests to connect for this session";
+                if (ActiveConversation is { } conversation && restored.ContainsKey(conversation.Provider))
+                {
+                    EnsureSavedHostedModelChoice(conversation.Provider, conversation.Model);
+                    ConnectionStatus = HostedModelStatus(conversation.Provider, conversation.Model);
+                    OnPropertyChanged(nameof(SelectedModel));
+                }
+                OnPropertyChanged(nameof(HasModels));
             });
         }
         catch (Exception ex) when (IsCredentialStoreFailure(ex))
@@ -3230,6 +4209,37 @@ public sealed class MainViewModel : ViewModelBase
             await Dispatcher.UIThread.InvokeAsync(() =>
                 ConnectionStatus = $"Could not restore a saved hosted API key from the OS credential store ({ex.GetType().Name}). Re-enter and connect it to retry.");
         }
+    }
+
+    private string HostedModelStatus(string provider, string model)
+    {
+        if (_cloudRequestsEnabled && _cloudApiKeys.ContainsKey(provider)) return $"Hosted model selected · {model}";
+        return _savedCloudApiKeys.ContainsKey(provider)
+            ? $"Saved {CloudProviderDisplayName(provider)} API key · enable hosted requests for this session"
+            : $"{model} selected · connect its API key to send";
+    }
+
+    private string GetHostedModelDisplayName(string provider, string model) =>
+        _savedCloudApiKeys.ContainsKey(provider)
+            ? $"{CloudProviderDisplayName(provider)} · {model} (key saved)"
+            : $"{CloudProviderDisplayName(provider)} · {model} (connect key)";
+
+    private static string CloudProviderDisplayName(string provider) => provider.Equals(CloudModelProviders.OpenAI, StringComparison.OrdinalIgnoreCase)
+        ? "OpenAI"
+        : provider.Equals(CloudModelProviders.Anthropic, StringComparison.OrdinalIgnoreCase) ? "Anthropic" : provider;
+
+    private void EnsureSavedHostedModelChoice(string provider, string model)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return;
+        var existing = Models.FirstOrDefault(choice => choice.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase) &&
+            choice.Name.Equals(model, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            Models.Add(new ModelChoice(model, GetHostedModelDisplayName(provider, model), provider));
+            return;
+        }
+        if (existing.DisplayName.Contains("connect key", StringComparison.OrdinalIgnoreCase))
+            Models[Models.IndexOf(existing)] = existing with { DisplayName = GetHostedModelDisplayName(provider, model) };
     }
 
     public async Task<bool> RemoveStoredCloudApiKeyAsync(string provider)
@@ -3242,7 +4252,11 @@ public sealed class MainViewModel : ViewModelBase
             {
                 if (_generationConversation is { IsCodeTask: true } running && running.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase))
                     _generationCancellation?.Cancel();
+                foreach (var parent in _conversations.Where(item => item.ParentConversationId is null)) CancelParallelChildren(parent.Id, provider);
                 _cloudApiKeys.Remove(provider);
+                _savedCloudApiKeys.Remove(provider);
+                if (_autoConnectProvider?.Equals(provider, StringComparison.OrdinalIgnoreCase) == true)
+                    SetAutoConnectProvider(null);
                 if (ActiveConversation is { } active && active.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase))
                 {
                     active.Provider = "ollama";
@@ -3291,11 +4305,12 @@ public sealed class MainViewModel : ViewModelBase
         Dispatcher.UIThread.Post(() =>
         {
             if (_generationConversation is { IsCodeTask: true, Provider: Codev.CloudModelProviders.OpenAI }) _generationCancellation?.Cancel();
+            foreach (var parent in _conversations.Where(item => item.ParentConversationId is null)) CancelParallelChildren(parent.Id, Codev.CloudModelProviders.OpenAI);
             _cloudRequestsEnabled = false;
             _cloudApiKeys.Clear();
             foreach (var choice in Models.Where(model => model.Provider != "ollama").ToArray()) Models.Remove(choice);
             if (Provider != "ollama" && ActiveConversation is { } conversation)
-                Models.Add(new ModelChoice(conversation.Model, $"{Provider} · {conversation.Model} (connect key)", Provider));
+                Models.Add(new ModelChoice(conversation.Model, GetHostedModelDisplayName(Provider, conversation.Model), Provider));
             OnPropertyChanged(nameof(CloudRequestsEnabled));
             OnPropertyChanged(nameof(HasModels));
             NotifyCodeTaskAvailabilityProperties();
@@ -3311,11 +4326,41 @@ public sealed class MainViewModel : ViewModelBase
 
     private void RebuildLists()
     {
-        var visible = _conversations.Where(c => c.IsArchived == _showArchived && Codev.ConversationSearch.Matches(c, SearchText))
-            .OrderByDescending(c => c.UpdatedAt).ToArray();
+        var conversationsById = _conversations.ToDictionary(conversation => conversation.Id);
+        foreach (var conversation in _conversations) conversation.ChildConversations = [];
+        foreach (var child in _conversations.Where(conversation => conversation.ParentConversationId is not null))
+            if (conversationsById.TryGetValue(child.ParentConversationId!.Value, out var parent)) parent.ChildConversations.Add(child);
+        foreach (var parent in _conversations.Where(conversation => conversation.ParentConversationId is null))
+            parent.ChildConversations = parent.ChildConversations.OrderByDescending(child => child.UpdatedAt).ToList();
+
+        var matched = _conversations.Where(conversation => conversation.IsArchived == _showArchived &&
+            Codev.ConversationSearch.Matches(conversation, SearchText)).ToArray();
+        var matchedIds = matched.Select(conversation => conversation.Id).ToHashSet();
+        var visible = _conversations.Where(conversation => conversation.ParentConversationId is null &&
+                conversation.IsArchived == _showArchived &&
+                (matchedIds.Contains(conversation.Id) || conversation.ChildConversations.Any(child => matchedIds.Contains(child.Id))))
+            .OrderByDescending(conversation => conversation.UpdatedAt).ToArray();
         Reset(PinnedConversations, visible.Where(c => c.IsPinned));
         Reset(RecentConversations, visible.Where(c => !c.IsPinned));
+        OnPropertyChanged(nameof(PinnedConversationsSectionLabel));
+        OnPropertyChanged(nameof(RecentConversationsSectionLabel));
         OnPropertyChanged(nameof(ConversationTitle));
+    }
+
+    public void TogglePinnedConversationsExpanded()
+    {
+        _pinnedConversationsExpanded = !_pinnedConversationsExpanded;
+        OnPropertyChanged(nameof(PinnedConversationsExpanded));
+        OnPropertyChanged(nameof(PinnedConversationsSectionLabel));
+        PersistSettings();
+    }
+
+    public void ToggleRecentConversationsExpanded()
+    {
+        _recentConversationsExpanded = !_recentConversationsExpanded;
+        OnPropertyChanged(nameof(RecentConversationsExpanded));
+        OnPropertyChanged(nameof(RecentConversationsSectionLabel));
+        PersistSettings();
     }
 
     private bool _showArchived;
@@ -3359,6 +4404,7 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             if (!File.Exists(StorePath)) return;
+            var historyTrimmed = false;
             foreach (var conversation in JsonSerializer.Deserialize<List<Codev.Conversation>>(File.ReadAllText(StorePath)) ?? [])
             {
                 conversation.PendingDiffComments ??= [];
@@ -3371,10 +4417,12 @@ public sealed class MainViewModel : ViewModelBase
                     OpenAiVerbosity = Codev.OpenAiGenerationSettings.NormalizeVerbosity(turn.OpenAiVerbosity),
                     OpenAiReasoningMode = Codev.OpenAiGenerationSettings.NormalizeReasoningMode(turn.OpenAiReasoningMode, turn.Model)
                 }).ToList() ?? [];
+                historyTrimmed |= Codev.ConversationFileChangeHistoryService.Trim(conversation);
                 _conversations.Add(conversation);
                 if (conversation.LastPromptTokens > 0 && conversation.Messages.LastOrDefault()?.IsAssistant == true)
                     _lastPromptMessageCounts[conversation.Id] = conversation.Messages.Count;
             }
+            if (historyTrimmed) Persist();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
     }
@@ -3576,6 +4624,7 @@ public sealed class MainViewModel : ViewModelBase
 public sealed record ModelChoice(string Name, string DisplayName, string Provider = "ollama");
 public sealed record ContextSizeChoice(int Value, string DisplayName);
 public sealed record OutputStyleChoice(string Value, string DisplayName);
+public sealed record AgentProfileChoice(string Name, string DisplayName, string Description);
 
 public sealed class RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null) : ICommand
 {

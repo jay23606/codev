@@ -6,9 +6,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Codev.Avalonia\Assets\codev-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="artifacts\**\*.cs" />
+    <Page Remove="artifacts\**\*.xaml" />
+    <ApplicationDefinition Remove="artifacts\**\*.xaml" />
     <Compile Remove="Codev.Tests\**\*.cs" />
     <Compile Remove="Codev.Windows.Tests\**\*.cs" />
     <Compile Remove="Codev.Avalonia\**\*.cs" />
@@ -21,6 +25,11 @@
 
   <ItemGroup>
     <ProjectReference Include="Codev.Core\Codev.Core.csproj" />
+    <Resource Include="Codev.Avalonia\Assets\codev-icon.ico" Link="Assets\codev-icon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="10.0.10" />
   </ItemGroup>
 
 </Project>

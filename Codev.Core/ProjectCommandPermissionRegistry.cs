@@ -7,6 +7,7 @@ namespace Codev;
 public enum ProjectCommandPermissionMode
 {
     AskEveryTime,
+    Auto,
     Allowlist,
     ReadOnly
 }
@@ -92,10 +93,12 @@ public sealed class ProjectCommandPermissionRegistry
 
     public ProjectCommandPermissionMode GetMode(string projectPath) => GetProject(projectPath)?.Mode ?? ProjectCommandPermissionMode.AskEveryTime;
 
+    public bool HasProjectSettings(string projectPath) => GetProject(projectPath) is not null;
+
     public IReadOnlyList<ProjectCommandPermissionRule> GetRules(string projectPath) => GetProject(projectPath)?.Rules.ToArray() ?? [];
 
     public ProjectCommandPermissionDecision Evaluate(string projectPath, string command, string shellName = "", bool allowReadOnly = true,
-        IReadOnlyList<string>? contextExclusions = null)
+        IReadOnlyList<string>? contextExclusions = null, bool isVerification = false)
     {
         var project = GetProject(projectPath);
         if (project is null) return ProjectCommandPermissionDecision.Ask;
@@ -103,14 +106,31 @@ public sealed class ProjectCommandPermissionRegistry
         if (project.Rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Deny &&
                                       string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal)))
             return ProjectCommandPermissionDecision.Deny;
-        if (project.Mode == ProjectCommandPermissionMode.Allowlist && CanCreateAllowRule(normalizedCommand) &&
+        // Auto is an explicit trust decision: resolve every outstanding command prompt as allow,
+        // while preserving per-project exact deny rules. This mirrors OpenCode's --auto behavior.
+        if (project.Mode == ProjectCommandPermissionMode.Auto) return ProjectCommandPermissionDecision.Allow;
+        if ((project.Mode is ProjectCommandPermissionMode.Auto or ProjectCommandPermissionMode.Allowlist) && CanCreateAllowRule(normalizedCommand) &&
             project.Rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Allow &&
                                       string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal)))
             return ProjectCommandPermissionDecision.Allow;
-        if (allowReadOnly && project.Mode == ProjectCommandPermissionMode.ReadOnly &&
+        if (allowReadOnly && project.Mode is (ProjectCommandPermissionMode.ReadOnly or ProjectCommandPermissionMode.Auto) &&
             ReadOnlyCommandClassifier.IsReadOnly(normalizedCommand, project.ProjectPath, shellName, contextExclusions))
             return ProjectCommandPermissionDecision.Allow;
         return ProjectCommandPermissionDecision.Ask;
+    }
+
+    /// <summary>True when an approved inspection should use Codev's bounded file APIs instead of launching a shell.</summary>
+    public bool ShouldUseBoundedFileInspection(string projectPath, string command,
+        ProjectCommandPermissionDecision decision, bool isVerification = false, string shellName = "",
+        IReadOnlyList<string>? contextExclusions = null)
+    {
+        if (decision != ProjectCommandPermissionDecision.Allow || isVerification) return false;
+        return GetMode(projectPath) switch
+        {
+            ProjectCommandPermissionMode.ReadOnly => true,
+            ProjectCommandPermissionMode.Auto => ReadOnlyCommandClassifier.IsReadOnly(command, projectPath, shellName, contextExclusions),
+            _ => false
+        };
     }
 
     public static bool CanCreateAllowRule(string command) => !TargetsProtectedLocation(command);

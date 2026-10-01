@@ -138,8 +138,18 @@ public sealed class ConversationStatusReportTests
         var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true, ProjectPath = @"C:\work\repo" }, false, 0, false, false, projectFolderTrusted: true);
 
         Assert.Contains("Mode: Code task", report);
-        Assert.Contains("Tools and file changes: available with per-change review and project command permissions", report);
+        Assert.Contains("Tools and file changes: available with project file-review and command approval policies", report);
         Assert.Contains("Project command permissions: ask every time", report);
+    }
+
+    [Fact]
+    public void Status_reports_auto_command_policy_and_saved_deny_count()
+    {
+        var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true, ProjectPath = @"C:\work\repo" },
+            false, 0, false, false, projectFolderTrusted: true,
+            commandPermissionMode: ProjectCommandPermissionMode.Auto, deniedCommandRules: 2);
+
+        Assert.Contains("Project command permissions: Auto · ordinary file changes apply with rollback checkpoints; all commands run unless exactly denied · 2 saved deny rule(s)", report);
     }
 
     [Fact]

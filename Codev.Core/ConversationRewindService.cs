@@ -14,6 +14,19 @@ public static class ConversationRewindService
 
         var message = conversation.Messages[userMessageIndex];
         var draft = message.Content;
+        for (var index = 0; index < conversation.FileChanges.Count; index++)
+        {
+            var change = conversation.FileChanges[index];
+            if (change.TurnUserMessageIndex >= userMessageIndex)
+                conversation.FileChanges[index] = change with { TurnUserMessageIndex = null };
+        }
+        if (userMessageIndex == 0)
+        {
+            conversation.FileChangesPrunedThroughMessageIndex = null;
+            conversation.FileChangesPrunedUnlinked = false;
+        }
+        else if (conversation.FileChangesPrunedThroughMessageIndex is int prunedThrough && prunedThrough >= userMessageIndex)
+            conversation.FileChangesPrunedThroughMessageIndex = userMessageIndex - 1;
         conversation.Messages.RemoveRange(userMessageIndex, conversation.Messages.Count - userMessageIndex);
         for (var index = 0; index < conversation.Messages.Count; index++)
             conversation.Messages[index] = conversation.Messages[index] with { MessageIndex = index };

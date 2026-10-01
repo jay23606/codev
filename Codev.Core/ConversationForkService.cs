@@ -3,12 +3,43 @@ namespace Codev;
 /// <summary>Creates an independent conversation fork, including isolated copies of local rollback checkpoints.</summary>
 public static class ConversationForkService
 {
+    public static async Task<Conversation> CreateSideChatAsync(Conversation source, int messageIndex,
+        string? checkpointRoot = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (messageIndex < 0 || messageIndex >= source.Messages.Count || !source.Messages[messageIndex].IsUser)
+            throw new ArgumentOutOfRangeException(nameof(messageIndex), "A side chat must start from a user prompt in the source conversation.");
+
+        var sideChat = await CreateForkAsync(source, checkpointRoot, cancellationToken).ConfigureAwait(false);
+        var sourcePrompt = source.Messages[messageIndex].Content;
+        var prompt = sourcePrompt.Trim().Replace('\r', ' ').Replace('\n', ' ');
+        sideChat.Title = prompt.Length == 0 ? "Side chat" : $"Side chat · {prompt}";
+        if (sideChat.Title.Length > 72) sideChat.Title = sideChat.Title[..69].TrimEnd() + "…";
+        sideChat.Messages = sideChat.Messages.Take(messageIndex)
+            .Select((message, index) => message with { MessageIndex = index, IsQueued = false }).ToList();
+        if (!string.IsNullOrWhiteSpace(sideChat.CompactionSummary) &&
+            !ConversationCompactionService.IsValidRange(sideChat.Messages,
+                sideChat.CompactionFromMessageCount, sideChat.CompactionThroughMessageCount))
+            ConversationCompactionService.Clear(sideChat);
+        sideChat.Draft = sourcePrompt;
+        sideChat.PendingTurns = [];
+        sideChat.PendingRequestCount = 0;
+        return sideChat;
+    }
+
     public static async Task<Conversation> CreateForkAsync(Conversation source, string? checkpointRoot = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
         var fork = ConversationPersistence.CreateSnapshot([source]).Single();
         var sourceId = source.Id;
         fork.Id = Guid.NewGuid();
+        fork.ParentConversationId = null;
+        fork.DelegatedFromMessageIndex = null;
+        fork.DelegatedAgentName = null;
+        fork.DelegatedResultReported = false;
+        fork.ChildWorktreeBranch = null;
+        fork.ChildWorktreeStartCommit = null;
+        fork.ChildConversations = [];
         fork.Title = CreateForkTitle(source.Title);
         fork.UpdatedAt = DateTimeOffset.Now;
 

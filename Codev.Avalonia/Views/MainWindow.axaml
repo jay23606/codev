@@ -5,9 +5,11 @@
         xmlns:md="https://github.com/whistyun/Markdown.Avalonia"
         x:Class="Codev.Avalonia.Views.MainWindow"
         x:DataType="vm:MainViewModel"
+        Icon="/Assets/codev-icon.ico"
         KeyDown="MainWindow_KeyDown"
         Title="Codev"
         Width="1440" Height="960" MinWidth="1000" MinHeight="650"
+        FontFamily="{Binding UiFontFamily}" FontSize="{Binding UiFontSize}"
         Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}">
 
     <Window.Styles>
@@ -32,6 +34,17 @@
         </Style>
         <Style Selector="Button.soft:pointerover">
             <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+        </Style>
+        <Style Selector="Button.composer-send">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="Button.composer-send:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
         </Style>
         <Style Selector="TextBox.search">
             <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
@@ -66,35 +79,69 @@
                 <TextBox x:Name="SearchTextBox" Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" />
                 <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="2">
-                        <TextBlock Text="PINNED" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" Margin="9,4,0,5" />
-                        <ItemsControl ItemsSource="{Binding PinnedConversations}">
+                        <Button Classes="nav" Content="{Binding PinnedConversationsSectionLabel}" Click="TogglePinnedConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" />
+                        <ItemsControl ItemsSource="{Binding PinnedConversations}" IsVisible="{Binding PinnedConversationsExpanded}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
-                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
-                                    <Button.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />
-                                            <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
-                                            <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
-                                            <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
-                                        </ContextMenu>
-                                    </Button.ContextMenu>
-                                </Button>
+                                <StackPanel>
+                                    <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />
+                                                <MenuItem Header="Create isolated child session" ToolTip.Tip="Starts from committed HEAD on a separate Git branch; uncommitted changes stay in the parent checkout." Tag="{Binding}" Click="CreateChildSession_Click" />
+                                                <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
+                                                <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
+                                                <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                    <Expander Header="{Binding ChildConversationsLabel}" IsExpanded="{Binding ChildConversationsExpanded, Mode=TwoWay}" IsVisible="{Binding HasChildConversations}" Margin="10,0,0,3" FontSize="10">
+                                        <ItemsControl ItemsSource="{Binding ChildConversations}">
+                                            <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
+                                                <Button Classes="nav" Content="{Binding ChildConversationLabel}" Padding="12,5" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                                    <Button.ContextMenu>
+                                                        <ContextMenu>
+                                                            <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
+                                                            <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
+                                                        </ContextMenu>
+                                                    </Button.ContextMenu>
+                                                </Button>
+                                            </DataTemplate></ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Expander>
+                                </StackPanel>
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <Button Classes="nav" Content="{Binding ArchiveViewLabel}" Command="{Binding ToggleArchiveViewCommand}" Margin="1,12,0,0" />
-                        <TextBlock Text="RECENTS" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" FontWeight="SemiBold" Margin="9,8,0,5" />
-                        <ItemsControl ItemsSource="{Binding RecentConversations}">
+                        <Button Classes="nav" Content="{Binding RecentConversationsSectionLabel}" Click="ToggleRecentConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" Margin="0,8,0,0" />
+                        <ItemsControl ItemsSource="{Binding RecentConversations}" IsVisible="{Binding RecentConversationsExpanded}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
-                                <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
-                                    <Button.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />
-                                            <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
-                                            <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
-                                            <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
-                                        </ContextMenu>
-                                    </Button.ContextMenu>
-                                </Button>
+                                <StackPanel>
+                                    <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />
+                                                <MenuItem Header="Create isolated child session" ToolTip.Tip="Starts from committed HEAD on a separate Git branch; uncommitted changes stay in the parent checkout." Tag="{Binding}" Click="CreateChildSession_Click" />
+                                                <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
+                                                <MenuItem Header="Archive / restore" Tag="{Binding}" Click="ArchiveConversation_Click" />
+                                                <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                    <Expander Header="{Binding ChildConversationsLabel}" IsExpanded="{Binding ChildConversationsExpanded, Mode=TwoWay}" IsVisible="{Binding HasChildConversations}" Margin="10,0,0,3" FontSize="10">
+                                        <ItemsControl ItemsSource="{Binding ChildConversations}">
+                                            <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
+                                                <Button Classes="nav" Content="{Binding ChildConversationLabel}" Padding="12,5" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                                    <Button.ContextMenu>
+                                                        <ContextMenu>
+                                                            <MenuItem Header="Rename…" Tag="{Binding}" Click="RenameConversation_Click" />
+                                                            <MenuItem Header="Delete permanently…" Tag="{Binding}" Click="DeleteConversation_Click" />
+                                                        </ContextMenu>
+                                                    </Button.ContextMenu>
+                                                </Button>
+                                            </DataTemplate></ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Expander>
+                                </StackPanel>
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </StackPanel>
@@ -102,6 +149,7 @@
                 <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
                     <Button Classes="nav" Content="☁  Connect hosted models…" Click="ConfigureCloudProvider_Click" ToolTip.Tip="Connect OpenAI or Anthropic using an API key; cloud requests require an explicit acknowledgement" />
                     <Button Classes="nav" Content="⚙  Settings…" Click="Settings_Click" ToolTip.Tip="Configure the Ollama server endpoint" />
+                    <Button Classes="nav" Content="🔌  MCP servers…" Click="McpServers_Click" ToolTip.Tip="Configure external MCP tools for Code tasks" />
                     <Button Classes="nav" Content="⇧⇩  Chat backups…" ToolTip.Tip="Import or export conversation backups">
                         <Button.Flyout>
                             <MenuFlyout>
@@ -134,15 +182,15 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" RowDefinitions="62,Auto,Auto,*,Auto">
+        <Grid Grid.Column="1" RowDefinitions="62,Auto,*,Auto,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
                         <TextBlock Text="{Binding CompactionStatusLabel}" IsVisible="{Binding HasCompactionSummary}" Foreground="#89B895" FontSize="9" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <ComboBox x:Name="ModelPicker" Grid.Column="1" Width="225" IsVisible="{Binding HasModels}" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel, Mode=TwoWay}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened">
+                    <ComboBox x:Name="ModelPicker" Grid.Column="1" Width="225" IsVisible="{Binding HasModels}" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel, Mode=TwoWay}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" DropDownOpened="ModelPicker_DropDownOpened" AutomationProperties.Name="Model picker">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ModelChoice">
                                 <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
@@ -159,14 +207,21 @@
                     </ComboBox>
                     <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" />
                     <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" />
-                    <ComboBox Grid.Column="5" Width="105" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions.">
+                    <ComboBox Grid.Column="5" Width="124" ItemsSource="{Binding AgentProfiles}" SelectedValue="{Binding SelectedAgentProfileName, Mode=TwoWay}" SelectedValueBinding="{Binding Name}" IsEnabled="{Binding IsCodeTask}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose the Build or Plan primary agent, or a reusable profile. Ctrl+Shift+A toggles Build and Plan. Plan can inspect files but cannot edit, run commands, call MCP, or delegate.">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AgentProfileChoice">
+                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <ComboBox Grid.Column="6" Width="105" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions.">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:OutputStyleChoice">
                                 <TextBlock Text="{Binding DisplayName}" />
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Grid.Column="6" Classes="soft" Content="More" ToolTip.Tip="Conversation and model actions">
+                    <Button x:Name="MoreButton" Grid.Column="7" Classes="soft" Content="More" ToolTip.Tip="Conversation and model actions">
                         <Button.Flyout>
                             <MenuFlyout>
                                 <MenuItem Header="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
@@ -175,11 +230,40 @@
                                     <MenuItem Header="Markdown…" Click="ExportConversation_Click" />
                                     <MenuItem Header="Standalone HTML…" Click="ExportConversationHtml_Click" />
                                 </MenuItem>
+                                <MenuItem Header="Manage agent profiles…" Click="ManageAgentProfiles_Click" />
+                                <MenuItem Header="Open agent profiles folder" Click="OpenAgentProfiles_Click" />
                                 <MenuItem Header="Reading width">
                                     <MenuItem Header="Compact · 640 px" IsChecked="{Binding IsCompactReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="640" ToggleType="Radio" />
                                     <MenuItem Header="Standard · 800 px" IsChecked="{Binding IsStandardReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="800" ToggleType="Radio" />
                                     <MenuItem Header="Wide · 960 px" IsChecked="{Binding IsWideReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="960" ToggleType="Radio" />
                                     <MenuItem Header="Full width" IsChecked="{Binding IsFullReadingWidth, Mode=OneWay}" Click="ReadingWidth_Click" Tag="0" ToggleType="Radio" />
+                                </MenuItem>
+                                <MenuItem Header="Font family">
+                                    <MenuItem Header="Inter" IsChecked="{Binding IsFontInter, Mode=OneWay}" Click="FontFamily_Click" Tag="Inter" ToggleType="Radio" />
+                                    <MenuItem Header="Segoe UI" IsChecked="{Binding IsFontSegoeUi, Mode=OneWay}" Click="FontFamily_Click" Tag="Segoe UI" ToggleType="Radio" />
+                                    <MenuItem Header="Arial" IsChecked="{Binding IsFontArial, Mode=OneWay}" Click="FontFamily_Click" Tag="Arial" ToggleType="Radio" />
+                                    <MenuItem Header="Consolas" IsChecked="{Binding IsFontConsolas, Mode=OneWay}" Click="FontFamily_Click" Tag="Consolas" ToggleType="Radio" />
+                                    <MenuItem Header="Aptos" IsChecked="{Binding IsFontAptos, Mode=OneWay}" Click="FontFamily_Click" Tag="Aptos" ToggleType="Radio" />
+                                    <MenuItem Header="Calibri" IsChecked="{Binding IsFontCalibri, Mode=OneWay}" Click="FontFamily_Click" Tag="Calibri" ToggleType="Radio" />
+                                    <MenuItem Header="Verdana" IsChecked="{Binding IsFontVerdana, Mode=OneWay}" Click="FontFamily_Click" Tag="Verdana" ToggleType="Radio" />
+                                    <MenuItem Header="Tahoma" IsChecked="{Binding IsFontTahoma, Mode=OneWay}" Click="FontFamily_Click" Tag="Tahoma" ToggleType="Radio" />
+                                    <MenuItem Header="Georgia" IsChecked="{Binding IsFontGeorgia, Mode=OneWay}" Click="FontFamily_Click" Tag="Georgia" ToggleType="Radio" />
+                                    <MenuItem Header="Cascadia Code" IsChecked="{Binding IsFontCascadiaCode, Mode=OneWay}" Click="FontFamily_Click" Tag="Cascadia Code" ToggleType="Radio" />
+                                </MenuItem>
+                                <MenuItem Header="Font size">
+                                    <MenuItem Header="10" IsChecked="{Binding IsFontSize10, Mode=OneWay}" Click="FontSize_Click" Tag="10" ToggleType="Radio" />
+                                    <MenuItem Header="11" IsChecked="{Binding IsFontSize11, Mode=OneWay}" Click="FontSize_Click" Tag="11" ToggleType="Radio" />
+                                    <MenuItem Header="12 · Smaller" IsChecked="{Binding IsFontSize12, Mode=OneWay}" Click="FontSize_Click" Tag="12" ToggleType="Radio" />
+                                    <MenuItem Header="13" IsChecked="{Binding IsFontSize13, Mode=OneWay}" Click="FontSize_Click" Tag="13" ToggleType="Radio" />
+                                    <MenuItem Header="14 · Default" IsChecked="{Binding IsFontSize14, Mode=OneWay}" Click="FontSize_Click" Tag="14" ToggleType="Radio" />
+                                    <MenuItem Header="15" IsChecked="{Binding IsFontSize15, Mode=OneWay}" Click="FontSize_Click" Tag="15" ToggleType="Radio" />
+                                    <MenuItem Header="16 · Larger" IsChecked="{Binding IsFontSize16, Mode=OneWay}" Click="FontSize_Click" Tag="16" ToggleType="Radio" />
+                                    <MenuItem Header="18" IsChecked="{Binding IsFontSize18, Mode=OneWay}" Click="FontSize_Click" Tag="18" ToggleType="Radio" />
+                                    <MenuItem Header="20" IsChecked="{Binding IsFontSize20, Mode=OneWay}" Click="FontSize_Click" Tag="20" ToggleType="Radio" />
+                                    <MenuItem Header="22 · Largest" IsChecked="{Binding IsFontSize22, Mode=OneWay}" Click="FontSize_Click" Tag="22" ToggleType="Radio" />
+                                    <MenuItem Header="24" IsChecked="{Binding IsFontSize24, Mode=OneWay}" Click="FontSize_Click" Tag="24" ToggleType="Radio" />
+                                    <MenuItem Header="28" IsChecked="{Binding IsFontSize28, Mode=OneWay}" Click="FontSize_Click" Tag="28" ToggleType="Radio" />
+                                    <MenuItem Header="32 · Extra large" IsChecked="{Binding IsFontSize32, Mode=OneWay}" Click="FontSize_Click" Tag="32" ToggleType="Radio" />
                                 </MenuItem>
                                 <Separator />
                                 <MenuItem Header="Advanced model settings…" Click="AdvancedModelSettings_Click" IsEnabled="{Binding CanOpenAdvancedModelSettings}" />
@@ -190,9 +274,37 @@
                                 <Separator />
                                 <MenuItem Header="Compact conversation…" Click="CompactConversation_Click" />
                                 <MenuItem Header="Restore full history" IsVisible="{Binding HasCompactionSummary}" Click="RestoreFullHistory_Click" />
+                                <Separator />
+                                <MenuItem Header="{Binding TaskChecklistLabel}" IsVisible="{Binding ShouldShowTaskChecklist}" Click="TaskChecklist_Click" />
+                                <MenuItem Header="Command permissions…" IsEnabled="{Binding HasProject}" Click="ProjectCommandPermissions_Click" ToolTip.Tip="Choose Auto, allowlist, read-only, or ask-every-time approval for this workspace" />
                             </MenuFlyout>
                         </Button.Flyout>
                     </Button>
+                    <Popup x:Name="TaskChecklistPopup" PlacementTarget="{Binding #MoreButton}" Placement="Bottom" IsLightDismissEnabled="True">
+                        <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Width="520" MaxHeight="420">
+                            <StackPanel Spacing="7">
+                                <TextBlock Text="{Binding TaskChecklistLabel}" FontSize="14" FontWeight="SemiBold" />
+                                <TextBlock Text="For multi-step Code tasks, the model can maintain these steps. Edit or reorder them when needed; checklist text never grants permissions." IsVisible="{Binding HasTaskChecklist}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" />
+                                <TextBlock Text="The checklist will appear when a multi-step task needs one." IsVisible="{Binding IsTaskChecklistEmpty}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
+                                <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding TaskChecklistItems}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="core:TaskChecklistItem">
+                                                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2">
+                                                    <Button Content="{Binding DisplayStatus}" Classes="soft" Tag="{Binding}" Click="TaskChecklistStatus_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Cycle between to do, in progress, and done" />
+                                                    <TextBox Grid.Column="1" Text="{Binding Text}" MaxLength="240" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" Tag="{Binding}" LostFocus="TaskChecklistText_LostFocus" VerticalContentAlignment="Center" />
+                                                    <Button Grid.Column="2" Content="↑" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveUp_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step up" />
+                                                    <Button Grid.Column="3" Content="↓" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveDown_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step down" />
+                                                    <Button Grid.Column="4" Content="×" Classes="soft" Tag="{Binding}" Click="TaskChecklistRemove_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Remove this step" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                                <Button Content="＋ Add step" Classes="soft" HorizontalAlignment="Left" Click="AddTaskChecklistItem_Click" IsEnabled="{Binding CanAddTaskChecklistItem}" ToolTip.Tip="Add a checklist step" />
+                            </StackPanel>
+                        </Border>
+                    </Popup>
                 </Grid>
             </Border>
             <Border Grid.Row="1" IsVisible="{Binding ShowCodeTaskUnavailableReason}" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,7">
@@ -200,31 +312,7 @@
                     <TextBlock Text="{Binding CodeTaskUnavailableReason}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </Grid>
             </Border>
-            <Border Grid.Row="2" IsVisible="{Binding ShouldShowTaskChecklist}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="28,8">
-                <Expander Header="{Binding TaskChecklistLabel}" IsExpanded="True">
-                    <StackPanel Spacing="6" MaxWidth="920" HorizontalAlignment="Stretch">
-                        <TextBlock Text="For multi-step Code tasks, the model can maintain these steps. Edit or reorder them when needed; checklist text never grants permissions." IsVisible="{Binding HasTaskChecklist}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" />
-                        <TextBlock Text="The checklist will appear when a multi-step task needs one." IsVisible="{Binding IsTaskChecklistEmpty}" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
-                        <ScrollViewer MaxHeight="165" VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding TaskChecklistItems}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="core:TaskChecklistItem">
-                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2">
-                                            <Button Content="{Binding DisplayStatus}" Classes="soft" Tag="{Binding}" Click="TaskChecklistStatus_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Cycle between to do, in progress, and done" />
-                                            <TextBox Grid.Column="1" Text="{Binding Text}" MaxLength="240" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" Tag="{Binding}" LostFocus="TaskChecklistText_LostFocus" VerticalContentAlignment="Center" />
-                                            <Button Grid.Column="2" Content="↑" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveUp_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step up" />
-                                            <Button Grid.Column="3" Content="↓" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveDown_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step down" />
-                                            <Button Grid.Column="4" Content="×" Classes="soft" Tag="{Binding}" Click="TaskChecklistRemove_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Remove this step" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                        <Button Content="＋ Add step" Classes="soft" HorizontalAlignment="Left" Click="AddTaskChecklistItem_Click" IsEnabled="{Binding CanAddTaskChecklistItem}" ToolTip.Tip="Add a checklist step" />
-                    </StackPanel>
-                </Expander>
-            </Border>
-            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
+            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
                 <ItemsControl ItemsSource="{Binding Messages}" Margin="0,22" MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Center">
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
@@ -233,22 +321,23 @@
                                     <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
                                 </Border>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
-                                    <Button Content="Edit prompt" Classes="soft" Padding="7,3" FontSize="10"
-                                            Command="{Binding $parent[Window].DataContext.EditPromptCommand}"
-                                            CommandParameter="{Binding MessageIndex}"
-                                            ToolTip.Tip="Revise this prompt; later conversation messages will be removed and the edited prompt will return to the composer" />
-                                    <Button Content="Summarize up to here" Classes="soft" Padding="7,3" FontSize="10"
-                                            Command="{Binding $parent[Window].DataContext.SummarizeConversationUpToCommand}"
-                                            CommandParameter="{Binding}"
-                                            ToolTip.Tip="Summarize complete exchanges before this prompt; keep this prompt and later messages verbatim" />
-                                    <Button Content="Summarize from here" Classes="soft" Padding="7,3" FontSize="10"
-                                            Command="{Binding $parent[Window].DataContext.SummarizeConversationFromCommand}"
-                                            CommandParameter="{Binding}"
-                                            ToolTip.Tip="Choose this prompt as the beginning of the summary; the latest four complete exchanges stay verbatim" />
-                                    <Button Content="Rewind" Classes="soft" Padding="7,3" FontSize="10"
-                                            Command="{Binding $parent[Window].DataContext.RewindConversationCommand}"
-                                            CommandParameter="{Binding MessageIndex}"
-                                            ToolTip.Tip="Restore conversation to before this prompt; project files stay unchanged" />
+                                    <Button Content="Steer" Classes="soft" Padding="7,3" FontSize="10" IsVisible="{Binding IsQueued}" Tag="{Binding}" Click="PrioritizeQueuedMessage_Click" ToolTip.Tip="Run this queued prompt next after the current response" />
+                                    <Button Content="×" Classes="soft" Padding="7,3" FontSize="10" IsVisible="{Binding IsQueued}" Tag="{Binding}" Click="CancelQueuedMessage_Click" ToolTip.Tip="Remove this queued prompt" />
+                                    <Button Content="⋯" Classes="soft" Padding="7,3" FontSize="10" ToolTip.Tip="Prompt actions">
+                                        <Button.Flyout>
+                                            <MenuFlyout>
+                                                <MenuItem Header="Edit message" Tag="{Binding}" Click="EditPromptMenu_Click" />
+                                                <MenuItem Header="Open in side chat" Tag="{Binding}" Click="OpenSideChat_Click" />
+                                                <Separator />
+                                                <MenuItem Header="Turn off queuing" IsVisible="{Binding $parent[Window].DataContext.IsQueueEnabled}" Tag="{Binding}" Click="TurnOffQueuing_Click" />
+                                                <MenuItem Header="Turn on queuing" IsVisible="{Binding $parent[Window].DataContext.IsQueueDisabled}" Tag="{Binding}" Click="TurnOnQueuing_Click" />
+                                                <Separator />
+                                                <MenuItem Header="Summarize up to here" Command="{Binding $parent[Window].DataContext.SummarizeConversationUpToCommand}" CommandParameter="{Binding}" />
+                                                <MenuItem Header="Summarize from here" Command="{Binding $parent[Window].DataContext.SummarizeConversationFromCommand}" CommandParameter="{Binding}" />
+                                                <MenuItem Header="Rewind" Command="{Binding $parent[Window].DataContext.RewindConversationCommand}" CommandParameter="{Binding MessageIndex}" />
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                    </Button>
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel IsVisible="{Binding IsAssistant}" HorizontalAlignment="Stretch" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" Margin="24,0,24,0" Spacing="8">
@@ -257,7 +346,29 @@
                                         <md:MarkdownScrollViewer Markdown="{Binding Thinking}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
                                     </Border>
                                 </Expander>
-                                <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
+                                <md:MarkdownScrollViewer Markdown="{Binding DisplayContent}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
+                                <Expander Header="{Binding CommandToolOutputsHeader}" IsExpanded="False" IsVisible="{Binding HasToolOutputs}" ToolTip.Tip="Expand to inspect each tool action and its output.">
+                                    <ItemsControl ItemsSource="{Binding CommandToolOutputs}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="core:ChatToolOutput">
+                                                <StackPanel Margin="0,2,0,2" Spacing="0">
+                                                    <ToggleButton x:Name="ToolOutputToggle" Background="Transparent" BorderThickness="0" Padding="0" HorizontalAlignment="Stretch">
+                                                        <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,7">
+                                                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="9">
+                                                                <TextBlock Text="›_" FontFamily="Consolas" FontWeight="Bold" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="1" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="2" Text="⌄" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
+                                                            </Grid>
+                                                        </Border>
+                                                    </ToggleButton>
+                                                    <Border IsVisible="{Binding #ToolOutputToggle.IsChecked}" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="0,0,8,8" Padding="10" MaxHeight="360" Margin="0,-1,0,0">
+                                                        <TextBox Text="{Binding Content}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="{Binding $parent[Window].DataContext.UiFontSize}" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0" />
+                                                    </Border>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Expander>
                                 <TextBlock Text="{Binding HostedUsageLabel}" IsVisible="{Binding HasHostedUsage}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" Margin="2,0,0,0" ToolTip.Tip="Sum of provider-reported token usage across completed OpenAI Code task requests for this reply. Missing provider reports are marked as a lower bound." />
                                 <TextBlock Text="{Binding GenerationStatsLabel}" IsVisible="{Binding HasGenerationStats}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" Margin="2,0,0,0" ToolTip.Tip="Generation stats reported by Ollama; first-token time is measured by Codev." />
                                 <Button Content="Summarize up to here" Classes="soft" HorizontalAlignment="Left" Padding="7,3" FontSize="10"
@@ -269,12 +380,15 @@
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+            <Border x:Name="InlineApprovalPanel" Grid.Row="3" IsVisible="False" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,8,16,8" MaxHeight="390">
+                <ContentControl x:Name="InlineApprovalContent" />
+            </Border>
             <Border Grid.Row="4" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,8,22,8">
                 <Grid>
                     <StackPanel MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Stretch" Spacing="4">
                         <Grid ColumnDefinitions="*,Auto">
-                            <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="84" MaxHeight="180" TextWrapping="Wrap" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
-                            <Button Grid.Column="1" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="18" Width="40" Height="38" VerticalAlignment="Bottom" Margin="-51,0,9,9" Background="#D97757" Foreground="White" BorderThickness="0" CornerRadius="8" Command="{Binding SendCommand}" />
+                        <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="64" MaxHeight="180" TextWrapping="Wrap" FontFamily="{Binding UiFontFamily}" FontSize="{Binding UiFontSize}" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
+                            <Button Grid.Column="1" Classes="composer-send" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="21" Width="36" Height="34" VerticalAlignment="Bottom" Margin="-49,0,8,9" Command="{Binding SendCommand}" />
                             <Popup x:Name="FileMentionPopup" PlacementTarget="{Binding #ComposerTextBox}" Placement="Top" IsLightDismissEnabled="True">
                                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4" Width="480">
                                     <ListBox x:Name="FileMentionListBox" MaxHeight="220">
@@ -319,7 +433,7 @@
                                 </Border>
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="2">
+                        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="2">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button Classes="soft" Content="＋ Context" Padding="8,4" FontSize="10" ToolTip.Tip="Attach a project or choose files to include with this conversation">
                                     <Button.Flyout>
@@ -333,7 +447,17 @@
                                         </MenuFlyout>
                                     </Button.Flyout>
                                 </Button>
-                                <TextBlock Text="{Binding ContextLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <Button Classes="soft" Content="{Binding ProjectCommandPermissionModeLabel}" Padding="8,4" FontSize="10" IsVisible="{Binding HasProject}" IsEnabled="{Binding CanPersistProjectCommandPermissions}" ToolTip.Tip="Command mode is saved per project. Auto runs commands without approval unless their exact text has a saved deny rule. Commands use your account permissions and are not sandboxed to the project folder.">
+                                    <Button.Flyout>
+                                        <MenuFlyout>
+                                            <MenuItem Header="Auto · approve unless denied" Tag="Auto" Click="ProjectCommandMode_Click" />
+                                            <MenuItem Header="Allowlist · run saved exact commands" Tag="Allowlist" Click="ProjectCommandMode_Click" />
+                                            <MenuItem Header="Read-only · allow recognized inspections" Tag="ReadOnly" Click="ProjectCommandMode_Click" />
+                                            <MenuItem Header="Ask every time" Tag="AskEveryTime" Click="ProjectCommandMode_Click" />
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                                <TextBlock Text="{Binding ContextLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ContextEstimateLabel}" />
                             </StackPanel>
                             <ItemsControl Grid.Row="1" Grid.ColumnSpan="2" ItemsSource="{Binding SelectedContextFiles}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -346,13 +470,7 @@
                                     </Border>
                                 </DataTemplate></ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <Expander Grid.Row="2" Grid.ColumnSpan="2" Header="Context details" IsVisible="{Binding HasProject}" IsExpanded="False">
-                                <StackPanel Spacing="2" Margin="8,2,0,4">
-                                    <TextBlock Text="{Binding ContextEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
-                                    <TextBlock Text="{Binding RepoMapEstimateLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Expander>
-                            <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Spacing="3">
+                            <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="3">
                                 <TextBlock Text="{Binding ContextActionStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding HasContextActionStatus}" />
                                 <TextBlock Text="{Binding UnknownContextWarningLabel}" Foreground="#D6A66D" FontSize="9" TextWrapping="Wrap" IsVisible="{Binding ShouldWarnUnknownContext}" />
                                 <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShouldOfferCompaction}">

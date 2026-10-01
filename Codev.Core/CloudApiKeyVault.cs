@@ -9,6 +9,13 @@ public interface ICloudApiKeyVault
     Task<bool> RemoveAsync(string provider);
 }
 
+public interface IMcpOAuthTokenVault
+{
+    Task<string?> GetTokensAsync(string account);
+    Task SaveTokensAsync(string account, string tokens);
+    Task<bool> RemoveTokensAsync(string account);
+}
+
 public interface ICloudApiKeyStoreBackend
 {
     IReadOnlyList<string> GetAccounts(string target);
@@ -18,10 +25,11 @@ public interface ICloudApiKeyStoreBackend
 }
 
 /// <summary>Stores hosted-provider keys in the operating system's native credential store.</summary>
-public sealed class CloudApiKeyVault : ICloudApiKeyVault
+public sealed class CloudApiKeyVault : ICloudApiKeyVault, IMcpOAuthTokenVault
 {
     private const string ApplicationName = "Codev";
     private const string CredentialTarget = "https://codev.local/hosted-model-api";
+    private const string McpOAuthCredentialTarget = "https://codev.local/mcp-oauth";
     private static readonly object EnvironmentLock = new();
     private readonly Func<ICloudApiKeyStoreBackend> _storeFactory;
     private ICloudApiKeyStoreBackend? _store;
@@ -55,6 +63,37 @@ public sealed class CloudApiKeyVault : ICloudApiKeyVault
         var account = NormalizeProvider(provider);
         lock (_storeLock) return GetStore().Remove(CredentialTarget, account);
     });
+
+    public Task<string?> GetTokensAsync(string account) => Task.Run(() =>
+    {
+        ValidateMcpOAuthAccount(account);
+        lock (_storeLock)
+        {
+            var store = GetStore();
+            if (!store.GetAccounts(McpOAuthCredentialTarget).Contains(account, StringComparer.Ordinal)) return null;
+            return store.Get(McpOAuthCredentialTarget, account);
+        }
+    });
+
+    public Task SaveTokensAsync(string account, string tokens) => Task.Run(() =>
+    {
+        ValidateMcpOAuthAccount(account);
+        if (string.IsNullOrWhiteSpace(tokens) || tokens.Length > 16_000)
+            throw new ArgumentException("MCP OAuth token data must contain 1–16,000 characters.", nameof(tokens));
+        lock (_storeLock) GetStore().AddOrUpdate(McpOAuthCredentialTarget, account, tokens);
+    });
+
+    public Task<bool> RemoveTokensAsync(string account) => Task.Run(() =>
+    {
+        ValidateMcpOAuthAccount(account);
+        lock (_storeLock) return GetStore().Remove(McpOAuthCredentialTarget, account);
+    });
+
+    private static void ValidateMcpOAuthAccount(string account)
+    {
+        if (account.Length is not 64 || account.Any(c => !Uri.IsHexDigit(c)))
+            throw new ArgumentException("MCP OAuth credential identifiers must be a 64-character hexadecimal digest.", nameof(account));
+    }
 
     private ICloudApiKeyStoreBackend GetStore() => _store ??= _storeFactory();
 

@@ -39,6 +39,17 @@ jobs:
       - name: Build Avalonia UI spike
         run: dotnet build Codev.Avalonia/Codev.Avalonia.csproj --configuration Release
 
+      - name: Launch Avalonia under a virtual Linux display
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          xvfb-run -a timeout --signal=TERM --kill-after=5s 15s ./Codev.Avalonia/bin/Release/net9.0/Codev.Avalonia
+          status=$?
+          if [ "$status" -eq 124 ]; then
+            exit 0
+          fi
+          exit "$status"
+
   build-and-test:
     runs-on: windows-latest
     steps:

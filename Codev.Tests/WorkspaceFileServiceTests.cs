@@ -235,6 +235,56 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Restoring_a_checkpoint_preserves_original_bytes_even_when_text_is_invalid_utf8()
+    {
+        var id = Guid.NewGuid();
+        var path = Path.Combine(_root, "source.txt");
+        var originalBytes = new byte[] { 0xFF, 0x00, 0xC3, 0x28, 0x0D, 0x0A };
+        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        try
+        {
+            await File.WriteAllBytesAsync(path, originalBytes);
+            var service = Service;
+            var checkpoint = await service.CreateCheckpointAsync("source.txt", id);
+            await File.WriteAllTextAsync(path, "replacement");
+            var replacement = await service.ReadFileSnapshotAsync("source.txt");
+
+            await service.RestoreFileStateAsync("source.txt", id, previousFileExisted: true, checkpoint, replacement.Sha256);
+
+            Assert.Equal(originalBytes, await File.ReadAllBytesAsync(path));
+        }
+        finally { try { if (Directory.Exists(checkpoints)) Directory.Delete(checkpoints, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Refuses_to_create_a_checkpoint_larger_than_the_restore_limit()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(_root, "large.txt"), new byte[500_001]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Service.CreateCheckpointAsync("large.txt", Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task Checkpoint_paths_remain_unique_for_rapid_changes_to_the_same_file()
+    {
+        var path = Path.Combine(_root, "rapid.js");
+        var id = Guid.NewGuid();
+        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        try
+        {
+            await File.WriteAllTextAsync(path, "first");
+            var first = await Service.CreateCheckpointAsync("rapid.js", id);
+            await File.WriteAllTextAsync(path, "second");
+            var second = await Service.CreateCheckpointAsync("rapid.js", id);
+
+            Assert.NotEqual(first, second);
+            Assert.Equal("first", await Service.ReadCheckpointAsync("rapid.js", id, first!));
+            Assert.Equal("second", await Service.ReadCheckpointAsync("rapid.js", id, second!));
+        }
+        finally { try { if (Directory.Exists(checkpoints)) Directory.Delete(checkpoints, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task Does_not_read_a_checkpoint_outside_the_conversation_backup_folder()
     {
         var outside = Path.Combine(_root, "outside.bak");
@@ -281,6 +331,19 @@ public sealed class WorkspaceFileServiceTests : IDisposable
             try { if (Directory.Exists(Path.Combine(_root, "linked"))) Directory.Delete(Path.Combine(_root, "linked")); } catch { }
             try { Directory.Delete(outside, recursive: true); } catch { }
         }
+    }
+
+    [Fact]
+    public void Refuses_a_symbolic_link_used_as_the_project_root()
+    {
+        var target = Path.Combine(_root, "real-project");
+        var linkedRoot = Path.Combine(_root, "linked-project");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "outside.cs"), "class Outside {}");
+        try { Directory.CreateSymbolicLink(linkedRoot, target); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+        Assert.Throws<UnauthorizedAccessException>(() => new WorkspaceFileService(linkedRoot));
     }
 
     public void Dispose()
