@@ -126,6 +126,59 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Restored_queued_turn_explains_that_resume_is_required()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-restored-queue-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        Directory.CreateDirectory(appData);
+        var conversation = new Conversation
+        {
+            Title = "Queued local request",
+            Model = "qwen3.6:35b-a3b",
+            Provider = "ollama",
+            Messages =
+            [
+                new ChatMessage("user", "tell me a joke"),
+                new ChatMessage("assistant", "Queued locally · waiting for the current response")
+            ],
+            PendingTurns =
+            [
+                new PersistedQueuedTurn(1, "qwen3.6:35b-a3b", 0, false, false, null, [], [], DateTimeOffset.Now)
+            ]
+        };
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-conversations.json"),
+            JsonSerializer.Serialize(new[] { conversation }));
+
+        var viewModel = new MainViewModel(root);
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            Assert.True(viewModel.IsQueuePaused);
+            Assert.Equal("Saved locally · select Resume saved queue to run", viewModel.Messages[1].Content);
+            Assert.Contains("Resume saved queue", viewModel.QueueStatusLabel, StringComparison.Ordinal);
+            var resume = Assert.Single(window.GetVisualDescendants().OfType<Button>(),
+                button => button.Content?.ToString() == "Resume saved queue");
+            Assert.True(resume.IsVisible);
+            Assert.True(resume.IsEnabled);
+        }
+        finally
+        {
+            window.Close();
+            await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            for (var attempt = 0; attempt < 50; attempt++)
+            {
+                await viewModel.SavePendingDraftAsync();
+                if (!Directory.EnumerateFiles(appData, "*.tmp").Any()) break;
+                await Task.Delay(20);
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public void Background_command_status_panel_starts_collapsed()
     {
         var window = new MainWindow();

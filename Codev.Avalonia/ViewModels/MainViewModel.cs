@@ -524,7 +524,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public bool CanClearConversation => Codev.ConversationHistoryClearService.CanClear(ActiveConversation,
         ActiveConversation is { } conversation && IsConversationBusy(conversation));
     public string QueueStatusLabel => HasQueuedTurns
-        ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · resume when ready" : $"{_requestQueue.Count} request(s) queued"
+        ? _queuePaused ? $"{_requestQueue.Count} request(s) saved · select Resume saved queue" : $"{_requestQueue.Count} request(s) queued"
         : "";
     public bool IsGenerating
     {
@@ -2575,7 +2575,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         _requestQueue.Enqueue(turn);
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
-        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued locally · waiting for the current response");
+        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", QueuedMessageStatus());
         if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
         OnPropertyChanged(nameof(QueueStatusLabel));
         OnPropertyChanged(nameof(HasQueuedTurns));
@@ -3630,6 +3630,10 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         {
             item.Conversation.PendingRequestCount++;
             _requestQueue.Enqueue(new QueuedChatTurn(item.Conversation, item.Turn));
+            var assistantIndex = item.Turn.AssistantIndex;
+            if (assistantIndex < item.Conversation.Messages.Count &&
+                item.Conversation.Messages[assistantIndex].Content == "Queued locally · waiting for the current response")
+                item.Conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", SavedQueueMessageStatus);
         }
         foreach (var conversation in _conversations)
         {
@@ -3650,6 +3654,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
         Persist();
     }
+
+    private string QueuedMessageStatus() => _queuePaused
+        ? SavedQueueMessageStatus
+        : "Queued locally · waiting for the current response";
+
+    private const string SavedQueueMessageStatus = "Saved locally · select Resume saved queue to run";
 
     private void ResumeQueue()
     {
