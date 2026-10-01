@@ -3167,9 +3167,7 @@ public sealed class MainViewModel : ViewModelBase
     private async Task InitializeManagedWorkspacePermissionDefaultsAsync()
     {
         if (!_projectCommandPermissions.CanPersist) return;
-        foreach (var path in _conversations.Select(conversation => conversation.ProjectPath)
-                     .Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var path in _conversationWorkspaces.FindExistingConversationWorkspaces(_conversations))
         {
             if (_projectCommandPermissions.HasProjectSettings(path!)) continue;
             try { await _projectCommandPermissions.SetModeAsync(path!, Codev.ProjectCommandPermissionMode.Auto); }
