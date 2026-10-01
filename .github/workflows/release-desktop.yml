@@ -2,6 +2,8 @@ name: Release desktop preview
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   pull_request:
