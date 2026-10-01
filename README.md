@@ -14,7 +14,12 @@ Codev is a standalone desktop coding workspace for local language models. The fu
 
 ## Download
 
-**[Download the latest Windows build](https://github.com/jay23606/codev/releases/latest)** — a self-contained `win-x64` zip; unzip and run `Codev.exe`, no .NET install required. Requires Windows 10/11. This is the full-featured WPF app; the cross-platform Avalonia app is still a prototype (see [Run](#run)) and isn't published as a binary yet. Builds are produced by [a GitHub Actions workflow](.github/workflows/release.yml) and are not code-signed, so Windows SmartScreen may warn on first run.
+All builds are self-contained (no .NET install required), produced by [a GitHub Actions workflow](.github/workflows/release.yml), and **not code-signed** — see each platform's note below. Find them all on the [latest release](https://github.com/jay23606/codev/releases/latest).
+
+- **Windows (recommended): `Codev-win-x64.zip`** — the full-featured WPF app. Unzip and run `Codev.exe`. Requires Windows 10/11. Windows SmartScreen may warn on first run; choose **More info → Run anyway**.
+- **Cross-platform early preview: `Codev-Avalonia-preview-*.zip`** (`win-x64`, `osx-arm64`, `osx-x64`, `linux-x64`) — the Avalonia app described in [Run](#run). It is genuinely incomplete right now: no Code task (agent file edits/commands), no Git integration, no hosted OpenAI/Anthropic providers, and other gaps tracked as in-progress in [DESIGN.md](DESIGN.md)'s X6 entry. Try it if you want the cross-platform direction early; use the Windows WPF build above for the full feature set.
+  - **macOS:** unzip, then either right-click the app and choose **Open** the first time, or run `xattr -dr com.apple.quarantine <path-to-the-unzipped-folder>` to clear the Gatekeeper quarantine flag, then `chmod +x Codev.Avalonia` and run it.
+  - **Linux:** unzip, `chmod +x Codev.Avalonia`, then run it.
 
 ## First preview
 
