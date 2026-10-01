@@ -63,4 +63,27 @@ public sealed class McpOAuthSupportTests
         Assert.Equal("csrf-value", result?.State);
         Assert.Equal("https://identity.example.test", result?.Iss);
     }
+
+    [Theory]
+    [InlineData("http://identity.example.test/authorize")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("https://user:secret@identity.example.test/authorize")]
+    public async Task Callback_rejects_insecure_or_credential_bearing_authorization_urls(string authorizationUrl)
+    {
+        var browserOpened = false;
+        await using var listener = new McpOAuthCallbackListener("Docs", openBrowser: (_, _) =>
+        {
+            browserOpened = true;
+            return Task.CompletedTask;
+        });
+        var context = new AuthorizationCallbackContext
+        {
+            AuthorizationUri = new Uri(authorizationUrl),
+            RedirectUri = listener.RedirectUri
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            listener.HandleAsync(context, CancellationToken.None));
+        Assert.False(browserOpened);
+    }
 }

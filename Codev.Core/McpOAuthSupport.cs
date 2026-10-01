@@ -87,8 +87,11 @@ public sealed class McpOAuthCallbackListener : IAsyncDisposable
     public async Task<AuthorizationResult?> HandleAsync(AuthorizationCallbackContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.AuthorizationUri.Scheme is not ("http" or "https"))
-            throw new InvalidOperationException("The MCP OAuth authorization endpoint must use HTTP or HTTPS.");
+        if (context.AuthorizationUri.Scheme != Uri.UriSchemeHttps &&
+            !(context.AuthorizationUri.Scheme == Uri.UriSchemeHttp && context.AuthorizationUri.IsLoopback))
+            throw new InvalidOperationException("MCP OAuth authorization endpoints must use HTTPS; plain HTTP is allowed only for loopback development servers.");
+        if (!string.IsNullOrEmpty(context.AuthorizationUri.UserInfo))
+            throw new InvalidOperationException("MCP OAuth authorization endpoints cannot contain embedded credentials.");
 
         _status?.Invoke($"MCP · sign in to {_serverName} in your browser to continue.");
         await _openBrowser(context.AuthorizationUri, cancellationToken).ConfigureAwait(false);
