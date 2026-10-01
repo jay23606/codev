@@ -51,7 +51,7 @@ node bench/a9-retrieval.cjs --model qwen3.6:35b-a3b --embedding nomic-embed-text
 node bench/a9-retrieval.cjs --model qwen3.8:27b --embedding nomic-embed-text --runs 3 --out bench/results/a9-qwen38.jsonl
 ```
 
-Both endpoints must be loopback Ollama. The harness never downloads models and refuses a non-loopback server because it sends source excerpts to `/api/embed` and `/api/chat`. The default corpus is the current repo; `--root` can select a disposable Codev checkout. It skips symlinks, hidden paths, ignored build folders, unsupported files, and secret-like filenames, and enforces file/byte/chunk bounds. Use a fresh output file per benchmark run. No real retrieval result is recorded until an embedding model is installed and the full repeated comparison has completed.
+Both endpoints must be loopback Ollama. The harness never downloads models and refuses a non-loopback server because it sends source excerpts to `/api/embed` and `/api/chat`. The default corpus is the current repo; `--root` can select a disposable Codev checkout. It skips symlinks, hidden paths, ignored build folders, unsupported files, and secret-like filenames, and enforces file/byte/chunk bounds. Use a fresh output file per benchmark run. The first live pilot is recorded in `results/a9-qwen38.jsonl`; it contains one literal-only task and is explicitly partial. Its subsequent CPU-only Qwen3.8 chat task did not finish within roughly nine minutes, so the harness was stopped. This does not establish retrieval quality. Complete the repeated comparison on faster hardware or with a smaller local model before drawing conclusions.
 
 ## Results in this folder
 
