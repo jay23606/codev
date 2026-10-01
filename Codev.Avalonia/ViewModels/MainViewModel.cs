@@ -18,41 +18,28 @@ namespace Codev.Avalonia.ViewModels;
 /// <summary>Local conversation browser for the Avalonia renderer prototype.</summary>
 public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorService
 {
-    private static readonly string StorePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-conversations.json");
-    private static readonly string SettingsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
-    private static readonly string LegacySettingsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
-    private static readonly string ProjectTrustPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-trusted-folders.json");
-    private static readonly string ProjectCommandPermissionsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-command-permissions.json");
-    private static readonly string McpServerConfigurationPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "mcp-servers.json");
-    private static readonly string ProjectMcpPermissionsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-mcp-permissions.json");
-    private static readonly string ActiveConversationPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-active-conversation.json");
-    private static readonly string UserSlashCommandsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "commands");
-    private static readonly string UserSkillsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "skills");
-    private static readonly string UserAgentProfilesPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "agents");
+    private readonly string StorePath;
+    private readonly string SettingsPath;
+    private readonly string LegacySettingsPath;
+    private readonly string ProjectTrustPath;
+    private readonly string ProjectCommandPermissionsPath;
+    private readonly string McpServerConfigurationPath;
+    private readonly string ProjectMcpPermissionsPath;
+    private readonly string ActiveConversationPath;
+    private readonly string UserSlashCommandsPath;
+    private readonly string UserSkillsPath;
+    private readonly string UserAgentProfilesPath;
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
-    private readonly Codev.ProjectFolderTrustRegistry _projectFolderTrust = Codev.ProjectFolderTrustRegistry.Load(ProjectTrustPath);
-    private readonly Codev.ConversationWorkspaceManager _conversationWorkspaces = new(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-    private readonly Codev.GitChildWorktreeManager _childWorktrees = new(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-    private readonly Codev.ProjectCommandPermissionRegistry _projectCommandPermissions = Codev.ProjectCommandPermissionRegistry.Load(ProjectCommandPermissionsPath);
+    private readonly Codev.ProjectFolderTrustRegistry _projectFolderTrust;
+    private readonly Codev.ConversationWorkspaceManager _conversationWorkspaces;
+    private readonly Codev.GitChildWorktreeManager _childWorktrees;
+    private readonly Codev.ProjectCommandPermissionRegistry _projectCommandPermissions;
     private readonly Codev.ProjectCommandApprovalPolicy _projectCommandApprovalPolicy;
     private readonly Codev.BackgroundCommandManager _backgroundCommands = new();
     private readonly DispatcherTimer _backgroundCommandTimer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly Codev.McpServerConfigurationStore _mcpServerConfigurations = new(McpServerConfigurationPath);
-    private readonly Codev.ProjectMcpToolPermissionRegistry _projectMcpPermissions = Codev.ProjectMcpToolPermissionRegistry.Load(ProjectMcpPermissionsPath);
+    private readonly Codev.McpServerConfigurationStore _mcpServerConfigurations;
+    private readonly Codev.ProjectMcpToolPermissionRegistry _projectMcpPermissions;
     private Codev.Conversation? _active;
     private string _searchText = "";
     private string _draft = "";
@@ -183,8 +170,27 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     [
     ];
 
-    public MainViewModel()
+    public MainViewModel(string? localDataRoot = null)
     {
+        var dataRoot = Path.GetFullPath(localDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        var appData = Path.Combine(dataRoot, "Codev");
+        StorePath = Path.Combine(appData, "avalonia-conversations.json");
+        SettingsPath = Path.Combine(appData, "avalonia-settings.json");
+        LegacySettingsPath = Path.Combine(appData, "settings.json");
+        ProjectTrustPath = Path.Combine(appData, "avalonia-trusted-folders.json");
+        ProjectCommandPermissionsPath = Path.Combine(appData, "avalonia-command-permissions.json");
+        McpServerConfigurationPath = Path.Combine(appData, "mcp-servers.json");
+        ProjectMcpPermissionsPath = Path.Combine(appData, "avalonia-mcp-permissions.json");
+        ActiveConversationPath = Path.Combine(appData, "avalonia-active-conversation.json");
+        UserSlashCommandsPath = Path.Combine(appData, "commands");
+        UserSkillsPath = Path.Combine(appData, "skills");
+        UserAgentProfilesPath = Path.Combine(appData, "agents");
+        _projectFolderTrust = Codev.ProjectFolderTrustRegistry.Load(ProjectTrustPath);
+        _conversationWorkspaces = new Codev.ConversationWorkspaceManager(dataRoot);
+        _childWorktrees = new Codev.GitChildWorktreeManager(dataRoot);
+        _projectCommandPermissions = Codev.ProjectCommandPermissionRegistry.Load(ProjectCommandPermissionsPath);
+        _mcpServerConfigurations = new Codev.McpServerConfigurationStore(McpServerConfigurationPath);
+        _projectMcpPermissions = Codev.ProjectMcpToolPermissionRegistry.Load(ProjectMcpPermissionsPath);
         _projectCommandApprovalPolicy = new Codev.ProjectCommandApprovalPolicy(_projectCommandPermissions);
         _backgroundCommands.Changed += (_, _) => Dispatcher.UIThread.Post(RefreshBackgroundCommands);
         _backgroundCommandTimer.Tick += (_, _) =>
@@ -3856,7 +3862,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         });
     }
 
-    private static List<Codev.PromptTemplate> LoadLegacyPromptTemplates()
+    private List<Codev.PromptTemplate> LoadLegacyPromptTemplates()
     {
         try
         {
@@ -4423,7 +4429,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
     }
 
-    private static Guid? LoadLastActiveConversationId()
+    private Guid? LoadLastActiveConversationId()
     {
         try
         {
