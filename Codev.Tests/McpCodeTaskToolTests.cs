@@ -77,7 +77,7 @@ public sealed class McpCodeTaskToolTests
     }
 
     [Fact]
-    public void Built_in_debug_profile_ask_for_mcp_tools_defers_to_auto_but_asks_in_ask_mode()
+    public void Custom_profile_ask_for_mcp_tools_defers_to_auto_but_asks_in_ask_mode()
     {
         const string profileText = "---\nname: ReviewMcp\ndescription: Ask before external MCP operations.\ntools: mcp_*=ask\n---\nInspect before calling MCP tools.";
         Assert.True(AgentProfileCatalog.TryParse("review-mcp.md", profileText, "user", out var profile, out var error), error);
@@ -155,16 +155,35 @@ public sealed class McpCodeTaskToolTests
             Assert.Equal("echo", tool.ToolName);
             Assert.Contains("connected; 1 tool(s) available", Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
             var permissions = ProjectMcpToolPermissionRegistry.Load(Path.Combine(workspace, "permissions.json"));
+            var commandPermissions = ProjectCommandPermissionRegistry.Load(Path.Combine(workspace, "command-permissions.json"));
+            await commandPermissions.SetModeAsync(workspace, ProjectCommandPermissionMode.Auto);
+            const string profileText = "---\nname: ReviewMcp\ndescription: Ask before external MCP operations.\ntools: mcp_*=ask\n---\nInspect before calling MCP tools.";
+            Assert.True(AgentProfileCatalog.TryParse("review-mcp.md", profileText, "user", out var profile, out var profileError), profileError);
+            var promptCount = 0;
             var executor = new CodeTaskToolExecutor(new WorkspaceFileService(workspace), new Conversation(),
                 _ => Task.FromResult(false), _ => Task.FromResult(false),
                 mcpTools: session.Tools,
-                mcpPermissionApproval: (mcpTool, _, _) => Task.FromResult(
-                    permissions.Evaluate(workspace, ProjectCommandPermissionMode.Auto, mcpTool.ServerId, mcpTool.ToolName) switch
+                agentProfile: profile,
+                agentProfilePermission: (name, _) =>
+                {
+                    var permission = AgentProfilePolicy.PermissionFor(profile, name);
+                    return Task.FromResult(permission == AgentToolPermission.Deny
+                        ? AgentToolProfileDecision.Denied
+                        : AgentProfilePolicy.RequiresOneCallApproval(permission, commandPermissions.GetMode(workspace))
+                            ? AgentToolProfileDecision.Rejected
+                            : AgentToolProfileDecision.DeferToProjectPolicy);
+                },
+                mcpPermissionApproval: (mcpTool, _, _) =>
+                {
+                    var decision = permissions.Evaluate(workspace, commandPermissions.GetMode(workspace), mcpTool.ServerId, mcpTool.ToolName);
+                    if (decision == ProjectCommandPermissionDecision.Ask) promptCount++;
+                    return Task.FromResult(decision switch
                     {
                         ProjectCommandPermissionDecision.Allow => CommandApprovalOutcome.Approved,
                         ProjectCommandPermissionDecision.Deny => CommandApprovalOutcome.Denied,
                         _ => CommandApprovalOutcome.Rejected
-                    }));
+                    });
+                });
 
             var result = await executor.ExecuteAsync(tool.FunctionName, arguments.RootElement);
             var parsedResult = ToolOutputTranscriptParser.Parse("**MCP tool result**\n" + result);
@@ -173,6 +192,7 @@ public sealed class McpCodeTaskToolTests
             Assert.Equal("mcp_tool", returned.Activity);
             Assert.Contains("Echo: hello", returned.Content, StringComparison.Ordinal);
             Assert.Equal(1, Volatile.Read(ref toolCalls));
+            Assert.Equal(0, promptCount);
 
             await permissions.SetRuleAsync(workspace, tool.ServerId, tool.ToolName, ProjectCommandPermissionDecision.Deny);
             var denied = await executor.ExecuteAsync(tool.FunctionName, arguments.RootElement);
