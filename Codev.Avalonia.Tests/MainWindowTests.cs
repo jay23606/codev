@@ -955,6 +955,75 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Code_task_profile_selection_is_restored_after_restarting_the_window()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var store = new UserAgentProfileStore(Path.Combine(root, "Codev", "agents"));
+        await store.SaveAsync("reviewer.md", "---\nname: Reviewer\ndescription: Review source changes.\n---\nInspect first, then report clearly.\n");
+
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        MainViewModel? restoredViewModel = null;
+        MainWindow? restoredWindow = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            await viewModel.RefreshAgentProfilesAsync();
+            typeof(MainViewModel).GetMethod("SetConversationMode", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(viewModel, [ConversationMode.CodeTask]);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
+            Assert.Equal("", viewModel.SelectedAgentProfileName);
+            var reviewerIndex = viewModel.AgentProfiles.ToList().FindIndex(profile => profile.Name == "Reviewer");
+            Assert.True(reviewerIndex > 0);
+            var pickerCenter = global::Avalonia.VisualExtensions.TranslatePoint(picker,
+                new global::Avalonia.Point(picker.Bounds.Width / 2, picker.Bounds.Height / 2), window);
+            Assert.NotNull(pickerCenter);
+            window.MouseDown(pickerCenter.Value, MouseButton.Left);
+            window.MouseUp(pickerCenter.Value, MouseButton.Left);
+            window.UpdateLayout();
+            Assert.True(picker.IsDropDownOpen);
+            for (var index = 0; index < reviewerIndex; index++)
+                window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, "\u2193");
+            window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Equal("Reviewer", viewModel.ActiveConversation!.AgentProfileName);
+
+            var persistence = typeof(MainViewModel).GetField("_persistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(viewModel) as Task;
+            Assert.NotNull(persistence);
+            await persistence!.WaitAsync(TimeSpan.FromSeconds(5));
+
+            window.Close();
+            window = null;
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            restoredViewModel = new MainViewModel(root);
+            await restoredViewModel.RefreshAgentProfilesAsync();
+            restoredWindow = new MainWindow { DataContext = restoredViewModel };
+            restoredWindow.Show();
+            restoredWindow.UpdateLayout();
+
+            var restoredPicker = Assert.IsType<ComboBox>(restoredWindow.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
+            Assert.Equal("Reviewer", restoredViewModel.SelectedAgentProfileName);
+            Assert.Equal("Reviewer", restoredPicker.SelectedValue);
+            Assert.Equal("Reviewer agent", restoredViewModel.PrimaryAgentLabel);
+        }
+        finally
+        {
+            window?.Close();
+            restoredWindow?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            if (restoredViewModel is not null) await StopAndFlushAsync(restoredViewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public void File_review_is_readable_collapsed_by_default_and_keeps_decisions_visible()
     {
         var window = new MainWindow();
