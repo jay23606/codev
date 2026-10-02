@@ -751,7 +751,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
         };
         // Custom environment-backed headers can carry credentials. Never forward them through
         // an HTTP redirect, which may point at a different origin.
-        var httpClient = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
+        var httpClient = new HttpClient(new McpBoundedHttpMessageHandler(new SocketsHttpHandler { AllowAutoRedirect = false }))
         {
             Timeout = Timeout.InfiniteTimeSpan
         };
