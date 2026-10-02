@@ -252,7 +252,10 @@ public sealed class LiveLocalModelTests
 
             var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
             Assert.True(sawGeneration, $"The local Auto Code task did not start. Transcript: {transcript}");
-            Assert.False(viewModel.IsGenerating, $"The local Auto Code task did not finish within five minutes. Transcript: {transcript}");
+            Assert.False(viewModel.IsGenerating,
+                $"The local Auto Code task did not finish within five minutes. Status: {viewModel.ConnectionStatus}; " +
+                $"last request: {viewModel.LastPromptContextLabel}; request details length: {viewModel.GetLastPromptContextDetails()?.Length ?? 0} characters. " +
+                $"Transcript: {transcript}");
             Assert.Equal(0, Volatile.Read(ref approvalRequests));
             Assert.Contains("Verification PASSED (exit code 0)", transcript, StringComparison.Ordinal);
             Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
