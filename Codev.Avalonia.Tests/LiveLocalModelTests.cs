@@ -9,6 +9,71 @@ namespace Codev.Avalonia.Tests;
 public sealed class LiveLocalModelTests
 {
     [AvaloniaFact]
+    public async Task Live_local_default_context_warning_follows_a_real_completed_turn()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
+            return;
+
+        var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-unknown-context", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            conversation.Model = Environment.GetEnvironmentVariable("CODEV_OLLAMA_MODEL") ?? "qwen3.6:35b-a3b";
+            conversation.Provider = "ollama";
+            conversation.NumCtx = 0;
+            conversation.NumPredict = 96;
+            conversation.ThinkEnabled = false;
+            conversation.Temperature = 0;
+            viewModel.Draft = "Reply with exactly: context warning smoke passed.";
+
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            var sendTask = Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+            await sendTask;
+
+            var sawGeneration = false;
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(4);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                sawGeneration |= viewModel.IsGenerating;
+                if (sawGeneration && !viewModel.IsGenerating) break;
+                await Task.Delay(100);
+            }
+
+            var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
+            Assert.True(sawGeneration, $"The local chat did not start. Transcript: {transcript}");
+            Assert.False(viewModel.IsGenerating, $"The local chat did not finish within four minutes. Transcript: {transcript}");
+            Assert.Contains(conversation.Messages, message => message.Role == "assistant" && !string.IsNullOrWhiteSpace(message.Content));
+            Assert.Equal("ollama", conversation.LastPromptProvider);
+            Assert.Equal(0, conversation.LastPromptContext);
+            Assert.True(conversation.LastPromptTokens > 0, "The completed prompt should retain its token estimate.");
+            Assert.True(viewModel.ShouldWarnUnknownContext);
+
+            viewModel.Draft = "A new unsent follow-up";
+            Assert.False(viewModel.ShouldWarnUnknownContext);
+            viewModel.Draft = "";
+            Assert.True(viewModel.ShouldWarnUnknownContext);
+            viewModel.ContextSize = 8192;
+            Assert.False(viewModel.ShouldWarnUnknownContext);
+        }
+        finally
+        {
+            if (viewModel is not null)
+            {
+                if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
+                var stopDeadline = DateTimeOffset.UtcNow.AddSeconds(15);
+                while (viewModel.IsGenerating && DateTimeOffset.UtcNow < stopDeadline) await Task.Delay(100);
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                await viewModel.SavePendingDraftAsync();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Live_local_plan_mode_uses_structured_output_or_its_plain_text_fallback()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
