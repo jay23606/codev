@@ -89,4 +89,82 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
         }
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
     }
+
+    [Fact]
+    public async Task Winner_review_returns_only_changed_supported_source_files_and_ignores_build_output()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(Path.Combine(project, "src"));
+        Directory.CreateDirectory(Path.Combine(project, "bin"));
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(project, "src", "Main.cs"), "class Main { }\n");
+            await File.WriteAllBytesAsync(Path.Combine(project, "bin", "original.dll"), [0, 1, 2, 3]);
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+            var snapshot = await manager.CaptureAsync(project);
+            var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+            await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "src", "Main.cs"), "class Main { static void Run() { } }\n");
+            await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "src", "New.cs"), "class New { }\n");
+            await File.WriteAllBytesAsync(Path.Combine(workspace.WorkspacePath, "bin", "generated.dll"), [4, 5, 6, 7]);
+
+            var review = await manager.ReviewChangesAsync(snapshot, workspace, new WorkspaceFileService(project));
+
+            Assert.True(review.CanApply, string.Join(Environment.NewLine, review.BlockingReasons));
+            Assert.Equal(2, review.Proposals.Count);
+            Assert.Contains(review.Proposals, proposal => proposal.RelativePath == "src/Main.cs" && proposal.Before.Contains("class Main") && proposal.After.Contains("Run"));
+            Assert.Contains(review.Proposals, proposal => proposal.RelativePath == "src/New.cs" && proposal.IsNewFile);
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Winner_review_fails_closed_for_deletions_and_unsupported_files()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(project, "Main.cs"), "class Main { }\n");
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+            var snapshot = await manager.CaptureAsync(project);
+            var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+            File.Delete(Path.Combine(workspace.WorkspacePath, "Main.cs"));
+            await File.WriteAllBytesAsync(Path.Combine(workspace.WorkspacePath, "tool.bin"), [0, 1, 2]);
+
+            var review = await manager.ReviewChangesAsync(snapshot, workspace, new WorkspaceFileService(project));
+
+            Assert.False(review.CanApply);
+            Assert.Empty(review.Proposals);
+            Assert.Contains(review.BlockingReasons, reason => reason.Contains("File deletion"));
+            Assert.Contains(review.BlockingReasons, reason => reason.Contains("excluded from reviewed source-file writes"));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Winner_review_refuses_to_overwrite_a_file_changed_after_snapshot_capture()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        try
+        {
+            var originalFile = Path.Combine(project, "Main.cs");
+            await File.WriteAllTextAsync(originalFile, "class Main { }\n");
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+            var snapshot = await manager.CaptureAsync(project);
+            var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+            await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "Main.cs"), "class Main { void Attempt() {} }\n");
+            await File.WriteAllTextAsync(originalFile, "class Main { void UserEdit() {} }\n");
+
+            var review = await manager.ReviewChangesAsync(snapshot, workspace, new WorkspaceFileService(project));
+
+            Assert.False(review.CanApply);
+            Assert.Empty(review.Proposals);
+            Assert.Contains(review.BlockingReasons, reason => reason.Contains("Original file changed"));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
 }

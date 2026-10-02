@@ -6,12 +6,18 @@ namespace Codev;
 
 public sealed record BestOfNAttemptSnapshot(Guid Id, string BaselineId, string SourceProjectPath, string RootPath);
 public sealed record BestOfNAttemptWorkspace(int AttemptNumber, string BaselineId, string IsolationId, string WorkspacePath);
+public sealed record BestOfNAttemptWorkspaceReview(IReadOnlyList<CodeTaskFileProposal> Proposals,
+    IReadOnlyList<string> BlockingReasons)
+{
+    public bool CanApply => BlockingReasons.Count == 0;
+}
 
 /// <summary>Captures a project tree once, then clones that exact snapshot into separate attempt directories.</summary>
 public sealed class BestOfNAttemptWorkspaceManager
 {
     public const int MaximumAttempts = BestOfNAttemptCoordinator.MaximumAttempts;
     public const int MaximumFiles = 200_000;
+    public const int MaximumReviewChanges = 100;
     public const long MaximumBytes = 4L * 1024 * 1024 * 1024;
 
     private readonly string _root;
@@ -84,6 +90,120 @@ public sealed class BestOfNAttemptWorkspaceManager
         TryDeleteOwnedDirectory(snapshot.RootPath);
     }
 
+    public async Task<BestOfNAttemptWorkspaceReview> ReviewChangesAsync(BestOfNAttemptSnapshot snapshot,
+        BestOfNAttemptWorkspace workspace, WorkspaceFileService targetFiles,
+        IReadOnlyList<string>? contextSources = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(targetFiles);
+        ValidateSnapshot(snapshot);
+        var expectedWorkspace = Path.GetFullPath(Path.Combine(snapshot.RootPath, $"attempt-{workspace.AttemptNumber}"));
+        if (workspace.AttemptNumber is < 1 or > MaximumAttempts ||
+            !string.Equals(workspace.BaselineId, snapshot.BaselineId, StringComparison.Ordinal) ||
+            !string.Equals(workspace.WorkspacePath, expectedWorkspace, PathComparison) ||
+            !string.Equals(workspace.IsolationId, expectedWorkspace, PathComparison))
+            throw new InvalidOperationException("The attempt workspace does not belong to this captured project snapshot.");
+        EnsureOrdinaryDirectory(expectedWorkspace, "The attempt workspace cannot be a link.");
+        var actualBaselineId = await ComputeTreeIdAsync(Path.Combine(snapshot.RootPath, "baseline"), cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(snapshot.BaselineId, actualBaselineId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The captured baseline changed during the attempt; no candidate can be reviewed safely.");
+        if (!string.Equals(Path.GetFullPath(targetFiles.Root), Path.GetFullPath(snapshot.SourceProjectPath), PathComparison))
+            throw new InvalidOperationException("Winner review must target the original project folder captured by this snapshot.");
+
+        var baseline = await EnumerateSnapshotFilesAsync(Path.Combine(snapshot.RootPath, "baseline"), cancellationToken).ConfigureAwait(false);
+        var candidate = await EnumerateSnapshotFilesAsync(expectedWorkspace, cancellationToken).ConfigureAwait(false);
+        var paths = baseline.Keys.Concat(candidate.Keys).Distinct(OperatingSystem.IsWindows()
+                ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .OrderBy(path => path, StringComparer.Ordinal).ToArray();
+        var proposals = new List<CodeTaskFileProposal>();
+        var blockers = new List<string>();
+        foreach (var relativePath in paths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var hadOriginal = baseline.TryGetValue(relativePath, out var beforePath);
+            var hasResult = candidate.TryGetValue(relativePath, out var afterPath);
+            if (hadOriginal && !hasResult)
+            {
+                blockers.Add($"File deletion cannot be applied through the reviewed proposal path: {relativePath}");
+                continue;
+            }
+            if (hadOriginal && hasResult && await FileContentsMatchAsync(beforePath!, afterPath!, cancellationToken).ConfigureAwait(false))
+                continue;
+            if (!targetFiles.IsSupportedContextFile(relativePath) || targetFiles.IsContextExcluded(relativePath) ||
+                WorkspaceFileService.IsSensitiveFileName(Path.GetFileName(relativePath)))
+            {
+                blockers.Add($"Changed path is excluded from reviewed source-file writes: {relativePath}");
+                continue;
+            }
+
+            string before;
+            string after;
+            try
+            {
+                before = hadOriginal ? await ReadBoundedTextFileAsync(beforePath!, cancellationToken).ConfigureAwait(false) : "";
+                after = await ReadBoundedTextFileAsync(afterPath!, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DecoderFallbackException or InvalidOperationException)
+            {
+                blockers.Add($"Changed file cannot be reviewed as bounded UTF-8 text ({Path.GetFileName(relativePath)}): {ex.Message}");
+                continue;
+            }
+            if (hadOriginal && string.Equals(before, after, StringComparison.Ordinal)) continue;
+
+            string targetPath;
+            try { targetPath = targetFiles.ResolvePath(relativePath); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            {
+                blockers.Add($"Changed path is not safe in the original project: {relativePath} ({ex.Message})");
+                continue;
+            }
+            if (hadOriginal)
+            {
+                if (!File.Exists(targetPath))
+                {
+                    blockers.Add($"Original file was removed after the attempt baseline was captured: {relativePath}");
+                    continue;
+                }
+                try
+                {
+                    var current = await targetFiles.ReadFileSnapshotAsync(relativePath, cancellationToken).ConfigureAwait(false);
+                    if (!string.Equals(current.Content, before, StringComparison.Ordinal))
+                    {
+                        blockers.Add($"Original file changed after the attempt baseline was captured: {relativePath}");
+                        continue;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+                {
+                    blockers.Add($"Original file cannot be safely re-read for winner review: {relativePath} ({ex.Message})");
+                    continue;
+                }
+            }
+            else
+            {
+                if (File.Exists(targetPath))
+                {
+                    blockers.Add($"New file path now exists in the original project: {relativePath}");
+                    continue;
+                }
+                if (!Directory.Exists(Path.GetDirectoryName(targetPath)))
+                {
+                    blockers.Add($"New file requires a directory that does not exist in the original project: {relativePath}");
+                    continue;
+                }
+            }
+            if (proposals.Count >= MaximumReviewChanges)
+            {
+                blockers.Add($"Candidate changed more than the {MaximumReviewChanges} files Codev can safely review at once.");
+                break;
+            }
+            proposals.Add(new CodeTaskFileProposal(relativePath, before, after, IsNewFile: !hadOriginal,
+                ContextSources: contextSources?.ToArray()));
+        }
+        return new BestOfNAttemptWorkspaceReview(proposals, blockers);
+    }
+
     private async Task CopyTreeAsync(string source, string destination, bool makeWritable, CancellationToken cancellationToken)
     {
         EnsureOrdinaryDirectory(source, "Snapshot source folders cannot be links.");
@@ -126,6 +246,57 @@ public sealed class BestOfNAttemptWorkspaceManager
                 await CopyFileAsync(entry, target, makeWritable, cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private static Task<Dictionary<string, string>> EnumerateSnapshotFilesAsync(string root, CancellationToken cancellationToken)
+    {
+        EnsureOrdinaryDirectory(root, "Attempt review folders cannot be links.");
+        var files = new Dictionary<string, string>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(pending.Pop()))
+            {
+                var name = Path.GetFileName(entry);
+                if (WorkspaceFileService.IsIgnoredDirectory(name)) continue;
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("Attempt review cannot follow symbolic links or reparse points.");
+                if ((attributes & FileAttributes.Directory) != 0) pending.Push(entry);
+                else
+                {
+                    if (files.Count >= MaximumFiles) throw new InvalidOperationException("Attempt review exceeded its file-count limit.");
+                    files.Add(Path.GetRelativePath(root, entry).Replace(Path.DirectorySeparatorChar, '/'), entry);
+                }
+            }
+        }
+        return Task.FromResult(files);
+    }
+
+    private static async Task<string> ReadBoundedTextFileAsync(string path, CancellationToken cancellationToken)
+    {
+        EnsureOrdinaryFile(path);
+        var info = new FileInfo(path);
+        if (info.Length > 200_000) throw new InvalidOperationException("The file exceeds Codev's 200 KB reviewed-write limit.");
+        var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        if (bytes.Length > 200_000) throw new InvalidOperationException("The file exceeds Codev's 200 KB reviewed-write limit.");
+        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+    }
+
+    private static async Task<bool> FileContentsMatchAsync(string firstPath, string secondPath, CancellationToken cancellationToken)
+    {
+        EnsureOrdinaryFile(firstPath);
+        EnsureOrdinaryFile(secondPath);
+        var firstLength = new FileInfo(firstPath).Length;
+        if (firstLength != new FileInfo(secondPath).Length) return false;
+        await using var first = new FileStream(firstPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var second = new FileStream(secondPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var firstHash = await SHA256.HashDataAsync(first, cancellationToken).ConfigureAwait(false);
+        var secondHash = await SHA256.HashDataAsync(second, cancellationToken).ConfigureAwait(false);
+        return CryptographicOperations.FixedTimeEquals(firstHash, secondHash);
     }
 
     private static async Task CopyFileAsync(string source, string destination, bool makeWritable, CancellationToken cancellationToken)
@@ -252,6 +423,12 @@ public sealed class BestOfNAttemptWorkspaceManager
     {
         if (!Directory.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException(message);
+    }
+
+    private static void EnsureOrdinaryFile(string path)
+    {
+        if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("Attempt review cannot read a missing file, symbolic link, or reparse point.");
     }
 
     private static void RestrictDirectoryToCurrentUser(string path)

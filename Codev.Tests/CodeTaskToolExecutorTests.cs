@@ -534,6 +534,45 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Selected_attempt_proposal_uses_normal_review_and_rollback_checkpoint()
+    {
+        var filePath = Path.Combine(_root, "Program.cs");
+        await File.WriteAllTextAsync(filePath, "class Old {}\n");
+        CodeTaskFileProposal? reviewed = null;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            proposal => { reviewed = proposal; return Task.FromResult(true); }, _ => Task.FromResult(false));
+
+        var result = await executor.ApplyReviewedProposalAsync(new CodeTaskFileProposal(
+            "Program.cs", "class Old {}\n", "class Winner {}\n", IsNewFile: false));
+
+        Assert.Contains("checkpoint was saved", result);
+        Assert.Equal("class Winner {}\n", await File.ReadAllTextAsync(filePath));
+        Assert.Equal("class Old {}\n", reviewed!.Before);
+        Assert.Equal("class Winner {}\n", reviewed.After);
+        var change = Assert.Single(_conversation.FileChanges);
+        Assert.Equal("Edit", change.Kind);
+        Assert.NotNull(change.CheckpointPath);
+    }
+
+    [Fact]
+    public async Task Selected_attempt_proposal_is_not_applied_if_original_changed_after_capture()
+    {
+        var filePath = Path.Combine(_root, "Program.cs");
+        await File.WriteAllTextAsync(filePath, "class UserEdit {}\n");
+        var reviewCalled = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => { reviewCalled = true; return Task.FromResult(true); }, _ => Task.FromResult(false));
+
+        var result = await executor.ApplyReviewedProposalAsync(new CodeTaskFileProposal(
+            "Program.cs", "class Old {}\n", "class Winner {}\n", IsNewFile: false));
+
+        Assert.Contains("changed after the attempt baseline", result);
+        Assert.False(reviewCalled);
+        Assert.Equal("class UserEdit {}\n", await File.ReadAllTextAsync(filePath));
+        Assert.Empty(_conversation.FileChanges);
+    }
+
+    [Fact]
     public async Task Post_write_formatter_result_is_checkpointed_with_the_preformatted_contents()
     {
         var filePath = Path.Combine(_root, "Program.cs");

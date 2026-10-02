@@ -106,6 +106,38 @@ public sealed class CodeTaskToolExecutor(
         catch (Exception ex) { return "Error: " + ex.Message; }
     }
 
+    /// <summary>Applies one selected isolated-attempt result through the normal profile, review, and checkpoint path.</summary>
+    public async Task<string> ApplyReviewedProposalAsync(CodeTaskFileProposal proposal, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+        if (string.IsNullOrWhiteSpace(proposal.RelativePath)) return "Rejected: a project-relative file path is required.";
+        if (!AgentProfilePolicy.CanEditPath(agentProfile, proposal.RelativePath, files.Root))
+            return "Rejected: the selected agent profile does not allow edits to this path.";
+        if (agentProfilePermission is not null)
+        {
+            var arguments = JsonSerializer.SerializeToElement(new { relative_path = proposal.RelativePath, content = proposal.After });
+            var profileDecision = await agentProfilePermission(proposal.IsNewFile ? "create_file" : "write_file", arguments).ConfigureAwait(false);
+            if (profileDecision is AgentToolProfileDecision.Denied or AgentToolProfileDecision.Rejected)
+                return profileDecision == AgentToolProfileDecision.Denied
+                    ? "Denied by the selected agent profile; the winner file was not applied."
+                    : "Rejected by the selected agent profile; the winner file was not applied.";
+        }
+
+        if (proposal.IsNewFile)
+        {
+            if (proposal.Before.Length > 0) return "Rejected: a new-file proposal cannot include previous contents.";
+            return await CreateFileAsync(proposal.RelativePath, proposal.After, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!File.Exists(files.ResolvePath(proposal.RelativePath)))
+            return "Rejected: the selected file no longer exists in the original project.";
+        var original = await files.ReadFileSnapshotAsync(proposal.RelativePath, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(original.Content, proposal.Before, StringComparison.Ordinal))
+            return "Rejected: the selected file changed after the attempt baseline was captured; inspect it again before applying.";
+        return await ReviewAndWriteAsync(proposal.RelativePath, original, proposal.After, proposal.ProposedPatch,
+            cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<string> ExecuteAgentSkillAsync(SlashCommandDefinition skill, JsonElement arguments, CancellationToken cancellationToken)
     {
         if (skill.UserOnly) return "Denied: this skill is configured for user-only invocation.";
