@@ -5,7 +5,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 ## Windows smoke run
 
 - [x] Launch `Codev.Avalonia` and verify the window opens responsively in the persisted theme.
-- [ ] Toggle dark/light mode, close and relaunch, and verify the chosen theme persists.
+- [x] Toggle dark/light mode, close and relaunch, and verify the chosen theme persists. Verified on Windows with an isolated data profile on 2026-10-02; macOS/Linux native interaction remains pending.
 - [x] Confirm the installed-model picker lists local Ollama tags and refreshes when opened, with no blank entries.
 - [x] Close and relaunch with a known conversation open; verify Codev reopens that conversation and its installed model is visibly selected. With no Ollama models installed, verify a clear empty-state label appears and the model selector is hidden; while loading or when Ollama is unavailable, verify a status label appears instead of blank options.
 - [ ] Change context size, switch conversations, and verify context size is stored per conversation and capped for the selected model.
