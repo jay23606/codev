@@ -1,6 +1,7 @@
 using Codev;
 using ModelContextProtocol.Authentication;
 using System.Net;
+using System.Net.Sockets;
 
 namespace Codev.Tests;
 
@@ -62,6 +63,41 @@ public sealed class McpOAuthSupportTests
         Assert.Equal("a+b", result?.Code);
         Assert.Equal("csrf-value", result?.State);
         Assert.Equal("https://identity.example.test", result?.Iss);
+    }
+
+    [Fact]
+    public async Task Loopback_callback_rejects_an_oversized_request_line_without_reading_it_unbounded()
+    {
+        Uri? callbackBase = null;
+        TcpClient? client = null;
+        Task<string>? responseTask = null;
+        await using var listener = new McpOAuthCallbackListener("Docs", openBrowser: async (_, cancellationToken) =>
+        {
+            client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, callbackBase!.Port, cancellationToken);
+            var stream = client.GetStream();
+            await stream.WriteAsync(Enumerable.Repeat((byte)'A', 8_193).ToArray(), cancellationToken);
+            responseTask = Task.Run(async () =>
+            {
+                using var reader = new StreamReader(stream);
+                return await reader.ReadToEndAsync(cancellationToken);
+            }, cancellationToken);
+        });
+        callbackBase = listener.RedirectUri;
+
+        try
+        {
+            var result = await listener.HandleAsync(new AuthorizationCallbackContext
+            {
+                AuthorizationUri = new Uri("https://identity.example.test/authorize"),
+                RedirectUri = listener.RedirectUri
+            }, CancellationToken.None);
+
+            var response = await responseTask!;
+            Assert.Null(result);
+            Assert.StartsWith("HTTP/1.1 400 Bad Request\r\n", response, StringComparison.Ordinal);
+        }
+        finally { client?.Dispose(); }
     }
 
     [Theory]

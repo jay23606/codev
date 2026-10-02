@@ -64,6 +64,7 @@ public sealed class McpOAuthCallbackListener : IAsyncDisposable
 {
     private const int MaxRequestLineCharacters = 8_192;
     private const int MaxHeaderLines = 64;
+    private const int MaxHeaderCharacters = 16_384;
     private readonly TcpListener _listener;
     private readonly Func<Uri, CancellationToken, Task> _openBrowser;
     private readonly Action<string>? _status;
@@ -125,20 +126,42 @@ public sealed class McpOAuthCallbackListener : IAsyncDisposable
     {
         using var reader = new StreamReader(stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false,
             bufferSize: 1024, leaveOpen: true);
-        var requestLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-        if (requestLine is null || requestLine.Length > MaxRequestLineCharacters) return null;
+        var requestLine = await ReadBoundedLineAsync(reader, MaxRequestLineCharacters, cancellationToken).ConfigureAwait(false);
+        if (requestLine is null) return null;
+        var totalHeaderCharacters = requestLine.Length + 2;
+        var terminated = false;
         for (var count = 0; count < MaxHeaderLines; count++)
         {
-            var header = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            var header = await ReadBoundedLineAsync(reader, MaxRequestLineCharacters, cancellationToken).ConfigureAwait(false);
             if (header is null) return null;
-            if (header.Length == 0) break;
-            if (header.Length > MaxRequestLineCharacters) return null;
+            totalHeaderCharacters += header.Length + 2;
+            if (totalHeaderCharacters > MaxHeaderCharacters) return null;
+            if (header.Length == 0) { terminated = true; break; }
         }
+        if (!terminated) return null;
 
         var parts = requestLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 3 || parts[0] != "GET" || !parts[2].StartsWith("HTTP/1.", StringComparison.Ordinal)) return null;
         if (!Uri.TryCreate("http://127.0.0.1" + parts[1], UriKind.Absolute, out var requestUri) || requestUri.AbsolutePath != "/oauth/callback") return null;
         return requestUri;
+    }
+
+    private static async Task<string?> ReadBoundedLineAsync(StreamReader reader, int maxCharacters,
+        CancellationToken cancellationToken)
+    {
+        var line = new StringBuilder(Math.Min(maxCharacters, 256));
+        var character = new char[1];
+        var carriageReturnSeen = false;
+        while (true)
+        {
+            var count = await reader.ReadAsync(character.AsMemory(), cancellationToken).ConfigureAwait(false);
+            if (count == 0) return null;
+            if (character[0] == '\n') return carriageReturnSeen ? line.ToString() : null;
+            if (carriageReturnSeen) return null;
+            if (character[0] == '\r') { carriageReturnSeen = true; continue; }
+            if (line.Length >= maxCharacters) return null;
+            line.Append(character[0]);
+        }
     }
 
     private static Dictionary<string, List<string>> ParseQuery(string query)
