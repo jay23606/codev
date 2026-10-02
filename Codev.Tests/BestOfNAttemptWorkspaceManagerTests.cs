@@ -210,6 +210,41 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
     }
 
+    [Fact]
+    public async Task Git_attempt_context_is_private_when_source_is_a_linked_worktree()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-worktree-git-tests", Guid.NewGuid().ToString("N"));
+        var repository = Path.Combine(root, "repository");
+        var project = Path.Combine(root, "project worktree");
+        Directory.CreateDirectory(repository);
+        try
+        {
+            await RunGitAsync(repository, "init", "--quiet", "--initial-branch=main");
+            await RunGitAsync(repository, "config", "user.name", "Codev Test");
+            await RunGitAsync(repository, "config", "user.email", "codev-test@example.invalid");
+            await File.WriteAllTextAsync(Path.Combine(repository, "Program.cs"), "class Baseline {}\n");
+            await RunGitAsync(repository, "add", "Program.cs");
+            await RunGitAsync(repository, "commit", "--quiet", "-m", "baseline");
+            await RunGitAsync(repository, "worktree", "add", "--quiet", "--detach", project, "HEAD");
+
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+            var snapshot = await manager.CaptureAsync(project);
+            try
+            {
+                var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+
+                Assert.Equal(Path.GetFullPath(workspace.WorkspacePath), Path.GetFullPath(
+                    (await RunGitAsync(workspace.WorkspacePath, "rev-parse", "--show-toplevel")).Trim()));
+                Assert.Empty(await RunGitAsync(workspace.WorkspacePath, "remote", "-v"));
+                await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "Program.cs"), "class AttemptOnly {}\n");
+                Assert.Contains("AttemptOnly", await RunGitAsync(workspace.WorkspacePath, "diff", "--", "Program.cs"), StringComparison.Ordinal);
+                Assert.DoesNotContain("AttemptOnly", await File.ReadAllTextAsync(Path.Combine(project, "Program.cs")), StringComparison.Ordinal);
+            }
+            finally { manager.Delete(snapshot); }
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
     private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
     {
         var start = new ProcessStartInfo("git")
