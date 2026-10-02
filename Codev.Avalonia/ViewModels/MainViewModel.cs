@@ -1015,14 +1015,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         if (ActiveConversation?.ProjectPath is not { Length: > 0 } path)
         {
             _defaultProjectCommandPermissionMode = Codev.AvaloniaUiSettings.NormalizeDefaultProjectCommandPermissionMode(mode);
-            PersistSettings();
         }
         else
         {
             _defaultProjectCommandPermissionMode = Codev.AvaloniaUiSettings.NormalizeDefaultProjectCommandPermissionMode(mode);
             await _projectCommandPermissions.SetModeAsync(path, mode);
-            PersistSettings();
         }
+        PersistSettings();
+        await _settingsPersistenceTask;
         OnPropertyChanged(nameof(ProjectCommandPermissionMode));
         OnPropertyChanged(nameof(ProjectCommandPermissionModeLabel));
     }
