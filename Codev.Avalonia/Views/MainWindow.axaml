@@ -199,7 +199,7 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <TextBlock Grid.Column="1" Width="225" IsVisible="{Binding IsModelPickerPlaceholderVisible}" Text="{Binding ModelPickerPlaceholder}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="The model selector appears when at least one model is available." />
-                    <ComboBox Grid.Column="2" Width="96" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" IsEnabled="{Binding IsLocalModel}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context for local Ollama models; hosted providers control their context windows.">
+                    <ComboBox x:Name="ContextSizePicker" Grid.Column="2" Width="96" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" IsEnabled="{Binding IsLocalModel}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context for local Ollama models; hosted providers control their context windows." AutomationProperties.Name="Context size">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:ContextSizeChoice">
                                 <TextBlock Text="{Binding DisplayName}" />

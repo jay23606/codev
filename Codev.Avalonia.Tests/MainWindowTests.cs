@@ -73,6 +73,106 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Context_size_picker_tracks_each_conversation_and_applies_model_cap()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        Directory.CreateDirectory(appData);
+        var largeContextConversation = new Conversation
+        {
+            Title = "Large context",
+            Provider = "ollama",
+            Model = "qwen3.6:35b-a3b",
+            NumCtx = 32768,
+            UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        };
+        var cappedConversation = new Conversation
+        {
+            Title = "Capped context",
+            Provider = "ollama",
+            Model = "qwen3-coder-next-q2-24k",
+            NumCtx = 32768,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-conversations.json"),
+            JsonSerializer.Serialize(new[] { largeContextConversation, cappedConversation }));
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-active-conversation.json"),
+            JsonSerializer.Serialize(largeContextConversation.Id.ToString("D")));
+
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        MainViewModel? restoredViewModel = null;
+        MainWindow? restoredWindow = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ContextSizePicker"));
+            Assert.True(picker.IsEnabled);
+            Assert.Equal(largeContextConversation.Id, viewModel.ActiveConversation!.Id);
+            Assert.Equal(32768, picker.SelectedValue);
+
+            picker.SelectedValue = 49152;
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Equal(49152, viewModel.ActiveConversation.NumCtx);
+
+            var loadedCappedConversation = Assert.Single(viewModel.RecentConversations,
+                conversation => conversation.Id == cappedConversation.Id);
+            var loadedLargeContextConversation = Assert.Single(viewModel.RecentConversations,
+                conversation => conversation.Id == largeContextConversation.Id);
+            await Dispatcher.UIThread.InvokeAsync(() => viewModel.SelectConversationCommand.Execute(loadedCappedConversation));
+            window.UpdateLayout();
+            Assert.Equal(0, loadedCappedConversation.NumCtx);
+            Assert.Equal(0, picker.SelectedValue);
+            Assert.Equal(new[] { 0, 8192, 16384, 24576 }, viewModel.ContextSizes.Select(choice => choice.Value));
+
+            picker.SelectedValue = 24576;
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.Equal(24576, viewModel.ActiveConversation.NumCtx);
+
+            await Dispatcher.UIThread.InvokeAsync(() => viewModel.SelectConversationCommand.Execute(loadedLargeContextConversation));
+            window.UpdateLayout();
+            Assert.Equal(49152, picker.SelectedValue);
+            Assert.Equal(49152, viewModel.ActiveConversation.NumCtx);
+
+            var persistence = typeof(MainViewModel).GetField("_persistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(viewModel) as Task;
+            Assert.NotNull(persistence);
+            await persistence!.WaitAsync(TimeSpan.FromSeconds(5));
+
+            window.Close();
+            window = null;
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            restoredViewModel = new MainViewModel(root);
+            restoredWindow = new MainWindow { DataContext = restoredViewModel };
+            restoredWindow.Show();
+            restoredWindow.UpdateLayout();
+            var restoredPicker = Assert.IsType<ComboBox>(restoredWindow.FindControl<ComboBox>("ContextSizePicker"));
+            Assert.Equal(largeContextConversation.Id, restoredViewModel.ActiveConversation!.Id);
+            Assert.Equal(49152, restoredPicker.SelectedValue);
+            var restoredCappedConversation = Assert.Single(restoredViewModel.RecentConversations,
+                conversation => conversation.Id == cappedConversation.Id);
+            await Dispatcher.UIThread.InvokeAsync(() => restoredViewModel.SelectConversationCommand.Execute(restoredCappedConversation));
+            restoredWindow.UpdateLayout();
+            Assert.Equal(24576, restoredPicker.SelectedValue);
+            Assert.Equal(new[] { 0, 8192, 16384, 24576 }, restoredViewModel.ContextSizes.Select(choice => choice.Value));
+        }
+        finally
+        {
+            window?.Close();
+            restoredWindow?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            if (restoredViewModel is not null) await StopAndFlushAsync(restoredViewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public void Attached_project_exposes_a_persistable_auto_command_mode_selector()
     {
         var window = new MainWindow
