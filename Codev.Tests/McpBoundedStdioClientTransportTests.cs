@@ -64,4 +64,30 @@ public sealed class McpBoundedStdioClientTransportTests
         Assert.NotNull(error);
         Assert.Contains("frame limit", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Process_transport_delivers_a_valid_json_rpc_message()
+    {
+        var message = """{"jsonrpc":"2.0","method":"notifications/initialized"}""";
+        var options = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? new StdioClientTransportOptions
+            {
+                Command = "powershell.exe",
+                Arguments = ["-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine('" + message.Replace("'", "''") + "')"],
+                Name = "valid-message-test"
+            }
+            : new StdioClientTransportOptions
+            {
+                Command = "/bin/sh",
+                Arguments = ["-c", "printf '%s\\n' '" + message + "'"],
+                Name = "valid-message-test"
+            };
+        var clientTransport = new McpBoundedStdioClientTransport(options, maxMessageLineBytes: 256);
+        var session = await clientTransport.ConnectAsync();
+        await using var lifetime = (IAsyncDisposable)session;
+
+        var received = await session.MessageReader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.NotNull(received);
+    }
 }
