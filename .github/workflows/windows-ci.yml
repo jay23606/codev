@@ -76,11 +76,32 @@ jobs:
           CODEV_TEST_NATIVE_MCP_OAUTH_VAULT: '1'
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
 
-      - name: Build Avalonia UI spike
+  avalonia-headless-ui:
+    name: Avalonia headless UI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build Avalonia UI
         run: dotnet build Codev.Avalonia/Codev.Avalonia.csproj --configuration Release
 
       - name: Run Avalonia headless UI tests
         run: dotnet test Codev.Avalonia.Tests/Codev.Avalonia.Tests.csproj --configuration Release --logger "console;verbosity=minimal"
+
+      - name: Install Xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends xvfb
 
       - name: Launch Avalonia under a virtual Linux display
         if: runner.os == 'Linux'
