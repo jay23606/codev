@@ -416,9 +416,11 @@ public sealed class McpCodeTaskToolTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task OAuth_http_mcp_server_issuer_mismatch_is_rejected_and_matching_login_persists_refresh_tokens(bool issuerMismatch)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens(
+        bool issuerMismatch, bool stateMismatch)
     {
         var useNativeCredentialStore = string.Equals(Environment.GetEnvironmentVariable("CODEV_TEST_NATIVE_MCP_OAUTH_VAULT"), "1", StringComparison.Ordinal);
         if (useNativeCredentialStore && !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
@@ -539,8 +541,10 @@ public sealed class McpCodeTaskToolTests
             Assert.Equal("codev-oauth-test-client", query["client_id"]);
             Assert.Equal("mcp", query["scope"]);
             var redirectUri = new Uri(query["redirect_uri"] ?? throw new InvalidDataException("OAuth redirect URI was not supplied."));
+            var callbackState = query["state"] ?? "";
+            if (stateMismatch) callbackState += "-tampered";
             var callback = new Uri(redirectUri.AbsoluteUri + "?code=authorization-code&state=" +
-                Uri.EscapeDataString(query["state"] ?? "") + "&iss=" + Uri.EscapeDataString(callbackIssuer));
+                Uri.EscapeDataString(callbackState) + "&iss=" + Uri.EscapeDataString(callbackIssuer));
             browserCallbackTask = CompleteBrowserCallbackAsync(callback, cancellationToken);
             return Task.CompletedTask;
         };
@@ -558,7 +562,7 @@ public sealed class McpCodeTaskToolTests
                 throw new TimeoutException($"OAuth startup did not complete. HTTP events: {string.Join(" | ", requestEvents)}; status: {string.Join(" | ", statusEvents)}; browser launches: {browserLaunches}; browser events: {string.Join(" | ", browserEvents)}.", ex);
             }
 
-            if (issuerMismatch)
+            if (issuerMismatch || stateMismatch)
             {
                 await using (session)
                 {
@@ -566,6 +570,8 @@ public sealed class McpCodeTaskToolTests
                     Assert.Contains(session.ConnectionLog, entry => entry.Contains("connection failed", StringComparison.Ordinal));
                 }
                 Assert.Equal(1, Volatile.Read(ref browserLaunches));
+                Assert.NotNull(browserCallbackTask);
+                Assert.Equal((int)HttpStatusCode.OK, await browserCallbackTask);
                 Assert.Equal(0, Volatile.Read(ref authorizationCodeExchanges));
                 Assert.Null(await vault.GetTokensAsync(vaultAccount!));
                 return;
