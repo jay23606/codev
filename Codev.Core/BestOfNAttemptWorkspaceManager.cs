@@ -333,9 +333,9 @@ public sealed class BestOfNAttemptWorkspaceManager
             var index = await RunGitAsync(workspace, cancellationToken, "read-tree", "HEAD").ConfigureAwait(false);
             if (index.ExitCode != 0)
                 throw new InvalidOperationException($"Could not initialize the private attempt Git index: {BoundGitOutput(index)}");
-            var top = await RunGitAsync(workspace, cancellationToken, "rev-parse", "--show-toplevel").ConfigureAwait(false);
-            if (top.ExitCode != 0 || !string.Equals(Path.GetFullPath(top.StandardOutput.Trim()), Path.GetFullPath(workspace), PathComparison))
-                throw new IOException("The private attempt Git context does not resolve to its isolated workspace.");
+            var prefix = await RunGitAsync(workspace, cancellationToken, "rev-parse", "--show-prefix").ConfigureAwait(false);
+            if (prefix.ExitCode != 0 || !string.IsNullOrWhiteSpace(prefix.StandardOutput))
+                throw new IOException("The private attempt Git context does not resolve to its isolated workspace root.");
         }
         finally
         {

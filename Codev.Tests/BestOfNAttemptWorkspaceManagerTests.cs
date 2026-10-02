@@ -235,6 +235,8 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
 
                 Assert.Equal(Path.GetFullPath(workspace.WorkspacePath), Path.GetFullPath(
                     (await RunGitAsync(workspace.WorkspacePath, "rev-parse", "--show-toplevel")).Trim()));
+                Assert.True(string.IsNullOrWhiteSpace(
+                    await RunGitAsync(workspace.WorkspacePath, "rev-parse", "--show-prefix")));
                 Assert.Empty(await RunGitAsync(workspace.WorkspacePath, "remote", "-v"));
                 await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "Program.cs"), "class AttemptOnly {}\n");
                 Assert.Contains("AttemptOnly", await RunGitAsync(workspace.WorkspacePath, "diff", "--", "Program.cs"), StringComparison.Ordinal);
