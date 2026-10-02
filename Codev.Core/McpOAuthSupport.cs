@@ -88,6 +88,8 @@ public sealed class McpOAuthCallbackListener : IAsyncDisposable
     public async Task<AuthorizationResult?> HandleAsync(AuthorizationCallbackContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
+        if (context.RedirectUri is null || context.RedirectUri != RedirectUri)
+            throw new InvalidOperationException("MCP OAuth callback redirect URI does not match Codev's loopback listener.");
         if (context.AuthorizationUri.Scheme != Uri.UriSchemeHttps &&
             !(context.AuthorizationUri.Scheme == Uri.UriSchemeHttp && context.AuthorizationUri.IsLoopback))
             throw new InvalidOperationException("MCP OAuth authorization endpoints must use HTTPS; plain HTTP is allowed only for loopback development servers.");

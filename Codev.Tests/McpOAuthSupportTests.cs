@@ -122,4 +122,24 @@ public sealed class McpOAuthSupportTests
             listener.HandleAsync(context, CancellationToken.None));
         Assert.False(browserOpened);
     }
+
+    [Fact]
+    public async Task Callback_rejects_a_redirect_uri_that_does_not_match_its_loopback_listener()
+    {
+        var browserOpened = false;
+        await using var listener = new McpOAuthCallbackListener("Docs", openBrowser: (_, _) =>
+        {
+            browserOpened = true;
+            return Task.CompletedTask;
+        });
+        var context = new AuthorizationCallbackContext
+        {
+            AuthorizationUri = new Uri("https://identity.example.test/authorize"),
+            RedirectUri = new Uri("http://127.0.0.1:12345/oauth/callback")
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => listener.HandleAsync(context, CancellationToken.None));
+
+        Assert.False(browserOpened);
+    }
 }
