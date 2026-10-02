@@ -7,7 +7,7 @@ public sealed record CodeTaskFileProposal(string RelativePath, string Before, st
     IReadOnlyList<string>? ContextSources = null);
 public sealed record CodeTaskCommandProposal(string Command, string ProjectPath, string ShellName, bool IsVerification = false,
     IReadOnlyList<string>? ContextSources = null, string? MatchingUntrustedSource = null, bool ProfileApprovalSatisfied = false,
-    bool IsBackground = false);
+    bool IsBackground = false, string? PermissionProjectPath = null);
 
 /// <summary>Executes bounded Code task tools. The UI supplies file-review and command-policy decisions, which may allow, deny, or prompt according to the active project and agent modes.</summary>
 public sealed class CodeTaskToolExecutor(
@@ -30,8 +30,11 @@ public sealed class CodeTaskToolExecutor(
     Func<McpCodeTaskTool, JsonElement, CancellationToken, Task<string>>? mcpCall = null,
     BackgroundCommandManager? backgroundCommands = null,
     Func<string, CancellationToken, Task<string>>? afterFileWrite = null,
-    Func<string, CancellationToken, Task<IReadOnlyList<SemanticSearchResult>>>? semanticSearch = null)
+    Func<string, CancellationToken, Task<IReadOnlyList<SemanticSearchResult>>>? semanticSearch = null,
+    string? permissionProjectPath = null)
 {
+    private readonly string _permissionProjectPath = string.IsNullOrWhiteSpace(permissionProjectPath)
+        ? files.Root : Path.GetFullPath(permissionProjectPath);
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> ToolArgumentLimits =
         new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
         {
@@ -49,6 +52,7 @@ public sealed class CodeTaskToolExecutor(
             ["stop_background_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["id"] = 80 }
         };
     private int _failedVerifications;
+    public int SuccessfulVerificationCount { get; private set; }
     private readonly List<(string Source, string Content)> _untrustedContents = [];
     private readonly List<string> _contextSources = initialContextSources?
         .Where(source => !string.IsNullOrWhiteSpace(source))
@@ -408,7 +412,8 @@ public sealed class CodeTaskToolExecutor(
             return "Rejected: command must contain 1–4,000 characters.";
         var shell = ShellCommandResolver.ResolveCurrent();
         var commandProposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
-            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command), ProfileApprovalSatisfied: profileApprovalSatisfied);
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command), ProfileApprovalSatisfied: profileApprovalSatisfied,
+            PermissionProjectPath: _permissionProjectPath);
         var approval = await RequestCommandApprovalAsync(commandProposal);
         if (approval is not (CommandApprovalOutcome.Approved or CommandApprovalOutcome.ApprovedReadOnly))
             return approval == CommandApprovalOutcome.Denied
@@ -449,7 +454,8 @@ public sealed class CodeTaskToolExecutor(
         if (RepairBudgetExhausted) return RepairLimitMessage;
         var shell = ShellCommandResolver.ResolveCurrent();
         var commandProposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true,
-            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command), ProfileApprovalSatisfied: profileApprovalSatisfied);
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command), ProfileApprovalSatisfied: profileApprovalSatisfied,
+            PermissionProjectPath: _permissionProjectPath);
         var approval = await RequestCommandApprovalAsync(commandProposal);
         if (approval != CommandApprovalOutcome.Approved)
             return approval == CommandApprovalOutcome.Denied
@@ -466,7 +472,10 @@ public sealed class CodeTaskToolExecutor(
             TrackUntrustedContent("Output from approved verification: " + command, output);
             var exitMatch = Regex.Match(output, @"(?:^|\n)Exit code: (-?\d+)\s*$", RegexOptions.CultureInvariant);
             if (exitMatch.Success && int.TryParse(exitMatch.Groups[1].Value, out var exitCode) && exitCode == 0)
+            {
+                SuccessfulVerificationCount++;
                 return "Verification PASSED (exit code 0).\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000), command: command);
+            }
 
             _failedVerifications++;
             var limit = Math.Clamp(maxRepairAttempts, 0, 3);
@@ -490,7 +499,8 @@ public sealed class CodeTaskToolExecutor(
         var shell = ShellCommandResolver.ResolveCurrent();
         var proposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
             ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command),
-            ProfileApprovalSatisfied: profileApprovalSatisfied, IsBackground: true);
+            ProfileApprovalSatisfied: profileApprovalSatisfied, IsBackground: true,
+            PermissionProjectPath: _permissionProjectPath);
         var approval = await RequestCommandApprovalAsync(proposal);
         if (approval != CommandApprovalOutcome.Approved)
             return approval switch

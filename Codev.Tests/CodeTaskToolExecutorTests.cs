@@ -573,6 +573,23 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Successful_verification_is_exposed_for_best_of_n_selection()
+    {
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), new Conversation(),
+            _ => Task.FromResult(true), _ => Task.FromResult(true),
+            permissionApproval: _ => Task.FromResult(CommandApprovalOutcome.Approved));
+        var shell = ShellCommandResolver.ResolveCurrent();
+        var command = shell.DisplayName == "PowerShell" ? "Write-Output passed" : "printf passed";
+        var args = JsonSerializer.SerializeToElement(new { command });
+
+        Assert.Equal(0, executor.SuccessfulVerificationCount);
+        var result = await executor.ExecuteAsync("verify_command", args);
+
+        Assert.Contains("Verification PASSED (exit code 0)", result, StringComparison.Ordinal);
+        Assert.Equal(1, executor.SuccessfulVerificationCount);
+    }
+
+    [Fact]
     public async Task Post_write_formatter_result_is_checkpointed_with_the_preformatted_contents()
     {
         var filePath = Path.Combine(_root, "Program.cs");

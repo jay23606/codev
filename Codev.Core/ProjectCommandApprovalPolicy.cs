@@ -12,10 +12,19 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
         Func<CodeTaskCommandProposal, Task<ProjectCommandApprovalChoice>>? requestApproval = null)
     {
         ArgumentNullException.ThrowIfNull(proposal);
-        var mode = permissions.GetMode(proposal.ProjectPath);
-        var decision = permissions.Evaluate(proposal.ProjectPath, proposal.Command, proposal.ShellName,
-            allowReadOnly: !proposal.IsVerification, contextExclusions: contextExclusions,
+        var permissionProjectPath = proposal.PermissionProjectPath ?? proposal.ProjectPath;
+        var mode = permissions.GetMode(permissionProjectPath);
+        // Resolve saved modes and exact rules against the trusted source project, but classify and
+        // execute relative inspection commands against ProjectPath (the isolated attempt workspace).
+        var decision = permissions.Evaluate(permissionProjectPath, proposal.Command, proposal.ShellName,
+            allowReadOnly: false, contextExclusions: contextExclusions,
             isVerification: proposal.IsVerification);
+
+        var readOnlyInspection = !proposal.IsVerification && !proposal.IsBackground &&
+            (mode is ProjectCommandPermissionMode.Auto or ProjectCommandPermissionMode.ReadOnly) &&
+            ReadOnlyCommandClassifier.IsReadOnly(proposal.Command, proposal.ProjectPath, proposal.ShellName, contextExclusions);
+        if (decision == ProjectCommandPermissionDecision.Ask && readOnlyInspection)
+            decision = ProjectCommandPermissionDecision.Allow;
 
         if (decision == ProjectCommandPermissionDecision.Deny)
             return Result(CommandApprovalOutcome.Denied, "Project command permission denied this exact command; it was not run.");
@@ -29,8 +38,7 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
 
         if (decision == ProjectCommandPermissionDecision.Allow)
         {
-            if (!proposal.IsBackground && permissions.ShouldUseBoundedFileInspection(proposal.ProjectPath, proposal.Command, decision,
-                    proposal.IsVerification, proposal.ShellName, contextExclusions))
+            if (readOnlyInspection)
                 return Result(CommandApprovalOutcome.ApprovedReadOnly,
                     mode == ProjectCommandPermissionMode.Auto
                         ? "Auto mode · recognized read-only inspection; running through bounded file APIs without launching a shell."
@@ -52,7 +60,7 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
             case ProjectCommandApprovalChoice.AllowExactCommand:
                 try
                 {
-                    await permissions.SetRuleAsync(proposal.ProjectPath, proposal.Command, ProjectCommandPermissionDecision.Allow)
+                    await permissions.SetRuleAsync(permissionProjectPath, proposal.Command, ProjectCommandPermissionDecision.Allow)
                         .ConfigureAwait(false);
                     return Result(CommandApprovalOutcome.Approved,
                         "Exact command saved and approved for this run; the current permission mode was kept.", rulesChanged: true);
@@ -65,7 +73,7 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
             case ProjectCommandApprovalChoice.DenyExactCommand:
                 try
                 {
-                    await permissions.SetRuleAsync(proposal.ProjectPath, proposal.Command, ProjectCommandPermissionDecision.Deny)
+                    await permissions.SetRuleAsync(permissionProjectPath, proposal.Command, ProjectCommandPermissionDecision.Deny)
                         .ConfigureAwait(false);
                     return Result(CommandApprovalOutcome.Denied,
                         "Exact command denied for this project; it was not run.", rulesChanged: true);

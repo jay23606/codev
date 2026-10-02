@@ -93,6 +93,39 @@ public sealed class ProjectCommandApprovalPolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Isolated_attempt_uses_attached_project_policy_and_attempt_workspace_for_inspection()
+    {
+        await _permissions.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+        var attempt = Path.Combine(_root, "attempt");
+        Directory.CreateDirectory(attempt);
+        File.WriteAllText(Path.Combine(_project, "probe.txt"), "original project marker");
+        File.WriteAllText(Path.Combine(attempt, "probe.txt"), "isolated attempt marker");
+        var files = new WorkspaceFileService(attempt);
+        var policy = new ProjectCommandApprovalPolicy(_permissions);
+        var proposals = new List<CodeTaskCommandProposal>();
+        var executor = new CodeTaskToolExecutor(files, new Conversation(), _ => Task.FromResult(true), _ => Task.FromResult(false),
+            permissionApproval: async proposal =>
+            {
+                proposals.Add(proposal);
+                return (await policy.ApproveAsync(proposal, files.ContextExclusions)).Outcome;
+            }, permissionProjectPath: _project);
+        var command = OperatingSystem.IsWindows() ? "Get-Content probe.txt" : "cat probe.txt";
+
+        var result = await executor.ExecuteAsync("run_command", System.Text.Json.JsonSerializer.SerializeToElement(new { command }));
+
+        Assert.Contains("isolated attempt marker", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("original project marker", result, StringComparison.Ordinal);
+        var proposal = Assert.Single(proposals);
+        Assert.Equal(attempt, proposal.ProjectPath);
+        Assert.Equal(_project, proposal.PermissionProjectPath);
+        Assert.Equal(ProjectCommandPermissionMode.Auto, _permissions.GetMode(proposal.PermissionProjectPath!));
+
+        await _permissions.SetRuleAsync(_project, command, ProjectCommandPermissionDecision.Deny);
+        var denied = await executor.ExecuteAsync("run_command", System.Text.Json.JsonSerializer.SerializeToElement(new { command }));
+        Assert.Contains("Denied by a saved project command permission rule", denied, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Ask_mode_uses_the_approval_callback_and_persists_an_exact_deny()
     {
         const string command = "cargo check --manifest-path signaling/Cargo.toml";
