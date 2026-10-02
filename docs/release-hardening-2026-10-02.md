@@ -1,11 +1,13 @@
 # Avalonia release hardening — 2026-10-02
 
-This report records the pre-release Q3 check for PR #1, branch `avalonia-opencode-parity`, head `d05e527`. It is intentionally a status report: green CI and the checks below do not satisfy the whole-app/manual requirements in `DESIGN.md` Q3.
+This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-parity`, current head `a317291`. The application source under test is unchanged from `d96bfb2`; later commits added documentation and benchmark evidence. It is intentionally a status report: green CI and the checks below do not satisfy the whole-app/manual requirements in `DESIGN.md` Q3.
 
 ## Whole-app smoke run — partial
 
-- Windows CI [#37065063403](https://github.com/jay23606/codev/actions/runs/37065063403) passed portable tests and Avalonia headless UI on Windows, Linux, and macOS; native credential-vault checks passed for Windows, Linux Secret Service, and macOS Keychain.
-- Desktop preview [#37065063374](https://github.com/jay23606/codev/actions/runs/37065063374) passed self-contained app/CLI package and launch checks for Windows x64, Linux x64, macOS Intel, and Apple silicon.
+- Windows CI [#37067913255](https://github.com/jay23606/codev/actions/runs/37067913255) passed at `a317291` for portable tests and Avalonia headless UI on Windows, Linux, and macOS; native credential-vault checks passed for Windows, Linux Secret Service, and macOS Keychain.
+- Desktop preview [#37067913186](https://github.com/jay23606/codev/actions/runs/37067913186) passed at `a317291` for self-contained app/CLI package and launch checks on Windows x64, Linux x64, macOS Intel, and Apple silicon.
+- The Windows x64 app archive from that preview was extracted into a fresh temporary directory and launched with a separate `CODEV_DATA_ROOT`. A native window titled `Codev` appeared; its accessibility tree exposed the model picker, composer, and Auto footer. Process working set was 188.8 MB after two seconds. This is one developer-machine startup snapshot, not a measured budget.
+- The follow-up screenshot capture for that same window did not match its accessibility tree: the tree described a new, empty conversation, while the screenshot showed unrelated conversation content. No visual or keyboard interaction pass is claimed from this session. The capture mismatch is an automation limitation to resolve before treating native visual QA as reliable.
 - These are hosted CI runners, not clean user machines without development tools. Native manual interaction on macOS/Linux remains unverified. The Windows smoke checklist has individual native checks, but the complete Q2 card has not been run end to end.
 
 ## Performance budgets — incomplete
