@@ -19,6 +19,7 @@ This report records the pre-release Q3 check for PR #1, branch `avalonia-opencod
 
 - The branch-wide added-line secret-pattern scan and the targeted MCP schema/strict-function-schema adversarial review are recorded in `DESIGN.md` Q3. The latter added bounded tool schemas and nullable optional arguments, with 26 focused regressions passing.
 - On this head, 101 focused Windows tests passed across command policy/classification, atomic text writes, and conversation backup import/export. In particular, Auto mode approves command proposals unless an exact saved Deny matches; it does not silently switch the project to Ask.
+- A follow-up targeted code review covered agent-profile parsing/path filters, MCP environment isolation, redirect handling, HTTP/SSE and stdio framing limits, OAuth callbacks, and child-worktree recovery/merge boundaries. No additional concrete finding was identified. A separate focused Windows suite passed 101/101 profile, MCP transport/OAuth, permission-registry, and child-worktree tests, including linked-profile rejection and hook/smudge-filter suppression on worktree creation/recovery.
 - The full manual review of folder trust, untrusted content, command/background execution, provider credential handling, MCP server behavior, and project-supplied inputs remains open. Automated tests and the targeted review do not close that requirement.
 
 ## Data safety — partial
