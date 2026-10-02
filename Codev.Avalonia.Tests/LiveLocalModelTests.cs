@@ -9,6 +9,63 @@ namespace Codev.Avalonia.Tests;
 public sealed class LiveLocalModelTests
 {
     [AvaloniaFact]
+    public async Task Live_local_plan_mode_uses_structured_output_or_its_plain_text_fallback()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
+            return;
+
+        var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-plan", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            conversation.Model = Environment.GetEnvironmentVariable("CODEV_OLLAMA_MODEL") ?? "qwen3.6:35b-a3b";
+            conversation.Provider = "ollama";
+            conversation.IsCodeTask = false;
+            conversation.IsPlanMode = true;
+            conversation.NumCtx = 8192;
+            conversation.NumPredict = 700;
+            conversation.ThinkEnabled = false;
+            conversation.Temperature = 0;
+            viewModel.Draft = "Give an implementation plan for adding a persisted setting that controls the editor font size. Include ordered steps and likely files. Do not change files.";
+
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            await Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+
+            var sawGeneration = false;
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(5);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                sawGeneration |= viewModel.IsGenerating;
+                if (sawGeneration && !viewModel.IsGenerating) break;
+                await Task.Delay(100);
+            }
+
+            var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
+            Assert.True(sawGeneration, $"The local Plan request did not start. Transcript: {transcript}");
+            Assert.False(viewModel.IsGenerating, $"The local Plan request did not finish within five minutes. Transcript: {transcript}");
+            Assert.Contains(conversation.Messages, message => message.Role == "assistant" && !string.IsNullOrWhiteSpace(message.Content));
+            Assert.True(viewModel.ConnectionStatus is "Plan ready · structured output" or "Plan ready · text fallback",
+                $"The app did not report which Plan response path ran. Status: {viewModel.ConnectionStatus}. Transcript: {transcript}");
+        }
+        finally
+        {
+            if (viewModel is not null)
+            {
+                if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
+                var stopDeadline = DateTimeOffset.UtcNow.AddSeconds(15);
+                while (viewModel.IsGenerating && DateTimeOffset.UtcNow < stopDeadline) await Task.Delay(100);
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                await viewModel.SavePendingDraftAsync();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Live_best_of_n_runs_independent_local_code_attempts_and_applies_a_verified_winner()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
@@ -72,6 +129,75 @@ public sealed class LiveLocalModelTests
             {
                 if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
                 var stopDeadline = DateTimeOffset.UtcNow.AddSeconds(20);
+                while (viewModel.IsGenerating && DateTimeOffset.UtcNow < stopDeadline) await Task.Delay(100);
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                await viewModel.SavePendingDraftAsync();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Live_auto_code_task_runs_verification_without_showing_command_approval()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
+            return;
+
+        var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-auto-verify", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "app-data");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        var approvalRequests = 0;
+        try
+        {
+            viewModel = new MainViewModel(appData);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            conversation.Model = Environment.GetEnvironmentVariable("CODEV_OLLAMA_MODEL") ?? "qwen3.6:35b-a3b";
+            conversation.Provider = "ollama";
+            conversation.IsCodeTask = true;
+            conversation.IsPlanMode = false;
+            conversation.AgentProfileName = null;
+            conversation.NumCtx = 8192;
+            conversation.NumPredict = 700;
+            conversation.ThinkEnabled = false;
+            conversation.Temperature = 0;
+            viewModel.ApproveProjectCommandAsync = _ =>
+            {
+                Interlocked.Increment(ref approvalRequests);
+                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+            };
+            viewModel.Draft = "Call verify_command exactly once with the exact command `dotnet --version`. Do not edit files or call any other tool. Wait for the verification result, then report it.";
+
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            await Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+
+            var sawGeneration = false;
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(5);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                sawGeneration |= viewModel.IsGenerating;
+                if (sawGeneration && !viewModel.IsGenerating) break;
+                await Task.Delay(100);
+            }
+
+            var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
+            Assert.True(sawGeneration, $"The local Auto Code task did not start. Transcript: {transcript}");
+            Assert.False(viewModel.IsGenerating, $"The local Auto Code task did not finish within five minutes. Transcript: {transcript}");
+            Assert.Equal(0, Volatile.Read(ref approvalRequests));
+            Assert.Contains("Verification PASSED (exit code 0)", transcript, StringComparison.Ordinal);
+            Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (viewModel is not null)
+            {
+                if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
+                var stopDeadline = DateTimeOffset.UtcNow.AddSeconds(15);
                 while (viewModel.IsGenerating && DateTimeOffset.UtcNow < stopDeadline) await Task.Delay(100);
                 await viewModel.StopBackgroundCommandsAndShutdownAsync();
                 await viewModel.SavePendingDraftAsync();
