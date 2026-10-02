@@ -1,6 +1,6 @@
 # Avalonia release hardening — 2026-10-02
 
-This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-parity`, current head `a491b2e`. The application source under test is unchanged from `d96bfb2`; later commits added documentation and benchmark evidence. It is intentionally a status report: green CI and the checks below do not satisfy the whole-app/manual requirements in `DESIGN.md` Q3.
+This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-parity`. The application source under test is unchanged from `d96bfb2`; later commits added documentation and benchmark evidence. It is intentionally a status report: green CI and the checks below do not satisfy the whole-app/manual requirements in `DESIGN.md` Q3.
 
 ## Whole-app smoke run — partial
 
@@ -16,6 +16,8 @@ This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-p
 
 - A fresh benchmark run against local `qwen3.6:35b-a3b` completed all nine tasks: 150/167 hidden checks (89.8%), 571.5 seconds total task wall time, median reported generation speed 24.2 tokens/s, and a 27.5-second cold model load on the first task. Raw task results: [`bench/results/q3-release-qwen36-20261002.jsonl`](../bench/results/q3-release-qwen36-20261002.jsonl).
 - The run used one attempt, temperature 0, thinking off, and a 16,384-token harness context. It found misses in expression parsing (15/19), filter parsing (43/51), and the hard agent task (24/29); the other six tasks passed.
+- A second fresh run against installed `qwen3.8:27b` also completed all nine tasks: 138/167 hidden checks (82.6%), 1,095.4 seconds total task wall time, median reported generation speed 8.4 tokens/s, and an 18.8-second cold model load on the first task. Raw task results: [`bench/results/q3-release-qwen38-20261002.jsonl`](../bench/results/q3-release-qwen38-20261002.jsonl). It used one attempt, temperature 0, thinking off, and the same 16,384-token harness context. It missed the filter parser task (27/51) and hard agent task (24/29); the other seven tasks passed.
+- These are separate single-run observations, not a controlled Qwen3.6-vs-Qwen3.8 comparison: host load and model sizes differ, and run-to-run variance has not been characterized here. Both runs missed the same two task families, suggesting useful follow-up targets but not proving a general model limitation.
 - The prior checked-in benchmark uses `qwen3-coder:30b`, so model, task-era, and runtime differences prevent a same-model regression conclusion. No old same-model result was available locally.
 - Product startup time, first-token latency through Codev, and memory with a long conversation plus a large project are still unmeasured. Do not treat the benchmark wall time as a product performance budget.
 
