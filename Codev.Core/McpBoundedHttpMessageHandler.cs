@@ -117,6 +117,7 @@ internal sealed class BoundedTotalReadStream(Stream inner, long maximumBytes, lo
     public override async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        cancellationToken.ThrowIfCancellationRequested();
         if (destination.IsEmpty) return 0;
         ThrowIfKnownOversize();
         if (_bytesRead >= maximumBytes)
@@ -209,10 +210,12 @@ internal sealed class BoundedSseEventReadStream(Stream inner, int maximumEventBy
     public override async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        cancellationToken.ThrowIfCancellationRequested();
         if (destination.IsEmpty) return 0;
         var written = 0;
         while (written < destination.Length)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (_bufferOffset >= _bufferCount)
             {
                 _bufferCount = await inner.ReadAsync(_buffer.AsMemory(), cancellationToken).ConfigureAwait(false);

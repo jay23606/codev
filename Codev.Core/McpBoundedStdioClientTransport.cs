@@ -199,10 +199,12 @@ internal sealed class BoundedLineReadStream(Stream inner, int maximumLineBytes, 
     public override async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        cancellationToken.ThrowIfCancellationRequested();
         if (destination.IsEmpty) return 0;
         var written = 0;
         while (written < destination.Length)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (_bufferOffset >= _bufferCount)
             {
                 _bufferCount = await inner.ReadAsync(_buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
