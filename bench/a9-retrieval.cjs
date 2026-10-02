@@ -21,6 +21,10 @@ const CHUNK_CHARS = 1800
 const CHUNK_OVERLAP = 240
 const TOP_K = 8
 const MAX_TOOL_ROUNDS = 5
+const samplingSeed = run => {
+  if (!Number.isInteger(run) || run < 1 || run > 10) throw new Error('Run number must be between 1 and 10.')
+  return 100 + run
+}
 const MAX_FILES = 8000
 const MAX_LITERAL_FILES = 500
 const MAX_SCANNED_ENTRIES = 10000
@@ -275,7 +279,7 @@ async function runModelTask(model, mode, task, chunks, files, embeddingsModel, r
     rounds++
     const body = await postJson('/api/chat', {
       model, stream: false, think: false, tools: schemas(mode), messages,
-      options: { temperature: 0, seed: 42, num_ctx: 16384, num_predict: 1200 }
+      options: { temperature: 0, seed: samplingSeed(run), num_ctx: 16384, num_predict: 1200 }
     })
     const message = body.message
     if (!message) throw new Error('Ollama returned no chat message.')
@@ -398,6 +402,9 @@ async function selftest() {
   assert(safeName('WorkspaceFileService.cs'))
   assert(!safeName('.env.local'))
   assert(!safeName('credentials.json'))
+  assert.equal(samplingSeed(1), 101)
+  assert.equal(samplingSeed(3), 103)
+  assert.throws(() => samplingSeed(0))
   assert(loopback('http://127.0.0.1:11434'))
   assert(loopback('http://localhost:11434'))
   assert(!loopback('http://192.168.1.50:11434'))
@@ -445,7 +452,7 @@ async function main() {
       for (const mode of modes) {
         const result = await runModelTask(model, mode, task, corpus.chunks, corpus.literalFiles, embeddingModel, run)
         Object.assign(result, {
-          benchmarkId, embeddingModel, sourceCommit, sourceFiles: corpus.fileCount,
+          benchmarkId, samplingSeed: samplingSeed(run), embeddingModel, sourceCommit, sourceFiles: corpus.fileCount,
           sourceChunks: corpus.chunks.length, sourceBytes: corpus.byteCount,
           literalSearchFiles: corpus.literalFiles.length, literalSearchFileCap: MAX_LITERAL_FILES, indexBuildMs
         })
