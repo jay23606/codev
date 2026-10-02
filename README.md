@@ -80,7 +80,7 @@ Codev has two front ends over one shared, cross-platform core:
 | Front end | Platforms | Status |
 |---|---|---|
 | WPF app (`Codev.csproj`) | Windows 10/11 | The full feature set described above |
-| Avalonia desktop preview (`Codev.Avalonia`) | Windows and Linux x64 release archives; CI builds the UI on Windows, macOS and Linux | Cross-platform front end; macOS release packaging and interactive checks remain |
+| Avalonia desktop (`Codev.Avalonia`) | Self-contained release archives for Windows x64, Linux x64, macOS Apple silicon and macOS Intel | Cross-platform front end; native macOS/Linux interaction checks remain |
 
 Both need the .NET 9 SDK to build from source. Ollama at `http://127.0.0.1:11434` is needed for local models; it is optional when using only hosted models. A framework-dependent published WPF build needs the .NET 9 Desktop Runtime; the self-contained publish below needs neither.
 
