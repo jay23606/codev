@@ -10,7 +10,9 @@ Codev brings a chat-first desktop workflow for local and hosted coding models. O
 
 Download the latest installable Avalonia build for [Windows x64](https://github.com/jay23606/codev/releases/latest/download/Codev-Avalonia-preview-win-x64.zip), [Linux x64](https://github.com/jay23606/codev/releases/latest/download/Codev-Avalonia-preview-linux-x64.zip), [macOS Apple silicon](https://github.com/jay23606/codev/releases/latest/download/Codev-Avalonia-preview-osx-arm64.zip), or [macOS Intel](https://github.com/jay23606/codev/releases/latest/download/Codev-Avalonia-preview-osx-x64.zip). See [all releases](https://github.com/jay23606/codev/releases) for the newest versions. These archives are self-contained; Ollama is optional for hosted models and must be installed separately for local models. Linux hosted API key storage requires Secret Service in the desktop session. The builds are not code-signed; Windows SmartScreen or macOS Gatekeeper may require manual approval.
 
-For the latest main-branch build before a tagged release, open the [desktop preview workflow](https://github.com/jay23606/codev/actions/workflows/release-desktop.yml?query=branch%3Amain), choose its newest successful run, and download the `Codev-win-x64`, `Codev-linux-x64`, or macOS artifact. For Windows, extract the ZIP and run `Codev.Avalonia.exe`; for Linux or macOS, extract the archive and run `Codev.Avalonia` from a desktop session. The Windows WPF app remains available to build from source. Each `v*` tag publishes Windows, Linux, and macOS Avalonia archives to a GitHub Release. Linux packages are built on GitHub's Ubuntu runner; native Linux/macOS interaction checks remain pending.
+For the standalone headless CLI, download [Windows x64](https://github.com/jay23606/codev/releases/latest/download/Codev-CLI-preview-win-x64.zip), [Linux x64](https://github.com/jay23606/codev/releases/latest/download/Codev-CLI-preview-linux-x64.zip), [macOS Apple silicon](https://github.com/jay23606/codev/releases/latest/download/Codev-CLI-preview-osx-arm64.zip), or [macOS Intel](https://github.com/jay23606/codev/releases/latest/download/Codev-CLI-preview-osx-x64.zip). Extract the ZIP and run `Codev.Cli.exe --help` on Windows or `./Codev.Cli --help` on macOS/Linux. The package includes the .NET runtime. Ollama is required for local models; OpenAI uses a key already saved by the desktop app in the operating system's credential store and requires `--allow-hosted-data` because prompts and project tool results are sent to OpenAI. Remote Ollama endpoints also require explicit consent. Runs are read-only by default; file edits and shell commands require separate explicit flags. Shell commands run unsandboxed with your account permissions.
+
+For the latest main-branch build before a tagged release, open the [desktop preview workflow](https://github.com/jay23606/codev/actions/workflows/release-desktop.yml?query=branch%3Amain), choose its newest successful run, and download the `Codev-win-x64`, `Codev-linux-x64`, or macOS artifact. The artifacts include both desktop and CLI ZIPs. For Windows desktop, run `Codev.Avalonia.exe`; for Linux or macOS, run `Codev.Avalonia` from a desktop session. The Windows WPF app remains available to build from source. Each `v*` tag publishes Windows, Linux, and macOS Avalonia and CLI archives to a GitHub Release. Linux packages are built on GitHub's Ubuntu runner; native Linux/macOS interaction checks remain pending.
 
 Codev is a standalone desktop coding workspace for local and hosted language models. Avalonia is the primary cross-platform front end and parity target; WPF remains a buildable legacy Windows app. Codev connects directly to Ollama on `127.0.0.1` by default; a different server can be configured explicitly in Settings, with a warning before using a non-local endpoint. No VS Code dependency is required.
 
@@ -138,14 +140,23 @@ Build a self-contained Windows app:
 dotnet publish .\Codev.csproj -c Release -r win-x64 --self-contained true
 ```
 
+Run a one-shot headless Code task from a terminal (Ollama is the default provider):
+
+```powershell
+dotnet run --project .\Codev.Cli\Codev.Cli.csproj -c Release -- -p "Summarize the project structure" --model qwen3.6:35b-a3b --workspace .
+```
+
+Headless mode supports Ollama and OpenAI. OpenAI uses the key already saved in Codev's operating-system credential store and requires `--allow-hosted-data` for per-run consent. Non-loopback Ollama endpoints require `--allow-remote-endpoint`. Runs are read-only by default; pass `--allow-edits` to permit file changes and `--allow-commands` to permit shell commands. Shell commands run unsandboxed with the current user's account permissions. `--allow` enables both. Use `--help` for all options, or pipe a prompt to `codev` after publishing the CLI executable.
+
 ## Tests
 
 ```bash
 dotnet test Codev.Tests/Codev.Tests.csproj                    # portable tests: any operating system
 dotnet test Codev.Windows.Tests/Codev.Windows.Tests.csproj    # WPF renderer and PowerShell tests: Windows only
+dotnet build Codev.Cli/Codev.Cli.csproj -c Release           # headless CLI: any operating system
 ```
 
-GitHub Actions builds `Codev.Core` and the Avalonia UI and runs the portable tests on Windows, Linux and macOS for every push and pull request. The desktop workflow also publishes and launch-smokes self-contained Windows x64, Linux x64, macOS Apple silicon, and macOS Intel packages on pull requests and manual dispatch, without creating a release; only `v*` tag pushes publish the archives as a GitHub Release. The Windows-only tests and legacy WPF publish run on Windows. Native macOS/Linux interaction checks remain open.
+GitHub Actions builds `Codev.Core`, the headless CLI and the Avalonia UI, and runs the portable tests on Windows, Linux and macOS for every push and pull request. The desktop workflow also publishes and launch-smokes self-contained Windows x64, Linux x64, macOS Apple silicon, and macOS Intel packages on pull requests and manual dispatch, without creating a release; only `v*` tag pushes publish the archives as a GitHub Release. The Windows-only tests and legacy WPF publish run on Windows. Native macOS/Linux interaction checks remain open.
 
 To run Codev with a separate local profile, set `CODEV_DATA_ROOT` to an absolute directory before starting the app. Codev stores its settings, conversations, projects, workspaces, and checkpoints under `<directory>/Codev`; hosted API keys and MCP OAuth tokens use a separate OS credential-vault namespace for that profile. No existing data is copied or changed. For example, in PowerShell set `$env:CODEV_DATA_ROOT = 'C:\Codev-test-profile'` before launching `Codev.Avalonia.exe`.
 
@@ -154,6 +165,7 @@ To run Codev with a separate local profile, set `CODEV_DATA_ROOT` to an absolute
 | Path | What it is |
 |---|---|
 | `Codev.Core/` | Shared logic with no UI dependency: conversations and persistence, Ollama endpoint checks and request options, Git integration, diffs, project context, the command runner and its shell selection |
+| `Codev.Cli/` | One-shot headless Code task CLI for Ollama and OpenAI |
 | `Codev.Tests/` | Portable tests for the core (plain .NET; runs on every OS) |
 | `Codev.csproj`, `MainWindow.xaml`, `MarkdownRenderer.cs` | The WPF app (Windows) |
 | `Codev.Windows.Tests/` | Tests that need Windows: WPF rendering and PowerShell command execution |
