@@ -702,7 +702,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 if (value is null) throw new InvalidOperationException($"Required environment variable '{variableName}' is not set.");
                 environment[name] = value;
             }
-            return new StdioClientTransport(new StdioClientTransportOptions
+            return new McpBoundedStdioClientTransport(new StdioClientTransportOptions
             {
                 Command = server.Command,
                 Arguments = server.Arguments?.ToArray() ?? [],

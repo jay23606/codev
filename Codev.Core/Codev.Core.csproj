@@ -9,4 +9,7 @@
     <PackageReference Include="Markdig" Version="1.4.0" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Codev.Tests" />
+  </ItemGroup>
 </Project>
