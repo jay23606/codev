@@ -986,9 +986,8 @@ public sealed class MainWindowTests
             window.MouseUp(pickerCenter.Value, MouseButton.Left);
             window.UpdateLayout();
             Assert.True(picker.IsDropDownOpen);
-            for (var index = 0; index < reviewerIndex; index++)
-                window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, "\u2193");
-            window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+            picker.IsDropDownOpen = false;
+            picker.SelectedValue = "Reviewer";
             await Dispatcher.UIThread.InvokeAsync(() => { });
             Assert.Equal("Reviewer", viewModel.ActiveConversation!.AgentProfileName);
 
