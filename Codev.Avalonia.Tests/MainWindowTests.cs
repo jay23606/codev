@@ -136,6 +136,13 @@ public sealed class MainWindowTests
                 await Task.Delay(20);
             Assert.Equal(ProjectCommandPermissionMode.Auto, ProjectCommandPermissionRegistry.Load(permissionPath).GetMode(project));
 
+            var settingsDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while (DateTimeOffset.UtcNow < settingsDeadline)
+            {
+                if (File.Exists(settingsPath) &&
+                    AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).DefaultProjectCommandPermissionMode == ProjectCommandPermissionMode.Auto) break;
+                await Task.Delay(20);
+            }
             var savedDefault = AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).DefaultProjectCommandPermissionMode;
             Assert.Equal(ProjectCommandPermissionMode.Auto, savedDefault);
 
