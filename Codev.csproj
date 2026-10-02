@@ -17,6 +17,7 @@
     <Compile Remove="Codev.Avalonia.Tests\**\*.cs" />
     <Compile Remove="Codev.Windows.Tests\**\*.cs" />
     <Compile Remove="Codev.Avalonia\**\*.cs" />
+    <Compile Remove="Codev.Cli\**\*.cs" />
     <Compile Remove="Codev.Core\**\*.cs" />
     <Page Remove="Codev.Tests\**\*.xaml" />
     <ApplicationDefinition Remove="Codev.Tests\**\*.xaml" />
