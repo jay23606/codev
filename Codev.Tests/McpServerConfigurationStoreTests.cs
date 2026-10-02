@@ -59,6 +59,32 @@ public sealed class McpServerConfigurationStoreTests : IDisposable
         Assert.Throws<ArgumentException>(() => McpServerConfigurationStore.NormalizeAndValidate(configuration));
     }
 
+    [Theory]
+    [InlineData("Bad Header")]
+    [InlineData("X:Injected")]
+    [InlineData("X/Trace")]
+    [InlineData("Héader")]
+    public void Rejects_invalid_http_header_field_names(string headerName)
+    {
+        var configuration = new McpServerConfiguration("remote", "Remote", McpServerTransportKind.Http, true,
+            Url: "https://example.test/mcp",
+            HeaderEnvironmentVariables: new Dictionary<string, string> { [headerName] = "MCP_TOKEN" });
+
+        Assert.Throws<ArgumentException>(() => McpServerConfigurationStore.NormalizeAndValidate(configuration));
+    }
+
+    [Fact]
+    public void Accepts_valid_http_header_token_characters()
+    {
+        var configuration = new McpServerConfiguration("remote", "Remote", McpServerTransportKind.Http, true,
+            Url: "https://example.test/mcp",
+            HeaderEnvironmentVariables: new Dictionary<string, string> { ["X-Trace_Id~"] = "MCP_TOKEN" });
+
+        var normalized = McpServerConfigurationStore.NormalizeAndValidate(configuration);
+
+        Assert.Contains("X-Trace_Id~", normalized.HeaderEnvironmentVariables!.Keys);
+    }
+
     [Fact]
     public void Http_oauth_defaults_on_and_stdio_defaults_off_while_explicit_http_opt_out_is_preserved()
     {

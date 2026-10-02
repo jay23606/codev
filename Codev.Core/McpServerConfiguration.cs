@@ -45,6 +45,7 @@ public sealed class McpServerConfigurationStore(string path)
     public const int DefaultExecutionTimeoutMs = 120_000;
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private static readonly Regex IdPattern = new("^[A-Za-z0-9_-]{1,40}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex HttpHeaderNamePattern = new("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly string _path = Path.GetFullPath(path);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private IReadOnlyList<McpServerConfiguration>? _servers;
@@ -204,6 +205,8 @@ public sealed class McpServerConfigurationStore(string path)
             var variableName = (value ?? string.Empty).Trim();
             if (normalizedKey.Length is 0 or > 100 || normalizedKey.Any(c => char.IsControl(c) || c == '='))
                 throw new ArgumentException("MCP environment names and HTTP header names must be valid printable names.");
+            if (headerNames && !HttpHeaderNamePattern.IsMatch(normalizedKey))
+                throw new ArgumentException("MCP HTTP header names must use valid HTTP token characters.");
             if (variableName.Length is 0 or > 200 || variableName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
                 throw new ArgumentException("MCP secrets must be referenced by an environment variable name, never saved as a value.");
             if (headerNames && normalizedKey.Equals("Host", StringComparison.OrdinalIgnoreCase))
