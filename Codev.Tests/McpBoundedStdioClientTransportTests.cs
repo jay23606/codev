@@ -69,7 +69,9 @@ public sealed class McpBoundedStdioClientTransportTests
         var session = await clientTransport.ConnectAsync();
         await using var lifetime = (IAsyncDisposable)session;
 
-        var error = await Record.ExceptionAsync(() => session.MessageReader.Completion.WaitAsync(TimeSpan.FromSeconds(10)));
+        // Starting PowerShell and observing its redirected pipe can exceed ten seconds on a
+        // busy Windows CI runner; retain a finite bound while allowing that startup variance.
+        var error = await Record.ExceptionAsync(() => session.MessageReader.Completion.WaitAsync(TimeSpan.FromSeconds(30)));
 
         Assert.NotNull(error);
         Assert.Contains("frame limit", error.ToString(), StringComparison.OrdinalIgnoreCase);
