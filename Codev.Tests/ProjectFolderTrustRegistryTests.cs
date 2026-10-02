@@ -119,6 +119,39 @@ public sealed class ProjectFolderTrustRegistryTests : IDisposable
         Assert.False(registry.IsTrusted(project));
     }
 
+    [Fact]
+    public async Task Concurrent_trust_reads_observe_safe_snapshots_during_updates()
+    {
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+        var folders = Enumerable.Range(0, 32).Select(index => Path.Combine(_root, $"concurrent-{index}")).ToArray();
+        using var start = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, 4).Select(readerIndex => Task.Run(() =>
+        {
+            start.Wait();
+            for (var iteration = 0; iteration < 5_000; iteration++)
+            {
+                registry.TrustedRoots.ToArray();
+                registry.IsKnown(folders[(iteration + readerIndex) % folders.Length]);
+                registry.IsTrusted(folders[(iteration + readerIndex) % folders.Length]);
+                registry.FindTrustedRoot(folders[(iteration + readerIndex) % folders.Length]);
+            }
+        })).ToArray();
+        var writer = Task.Run(async () =>
+        {
+            start.Set();
+            foreach (var folder in folders)
+            {
+                await registry.TrustAsync(folder);
+                await registry.RevokeAsync(folder);
+                await registry.MarkKnownAsync(folder);
+            }
+        });
+
+        await Task.WhenAll(readers.Append(writer));
+        Assert.All(folders, folder => Assert.True(registry.IsKnown(folder)));
+        Assert.Empty(registry.TrustedRoots);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

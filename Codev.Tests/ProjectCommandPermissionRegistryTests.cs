@@ -202,6 +202,39 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
         Assert.Equal(ProjectCommandPermissionDecision.Deny, loaded.Evaluate(_project, "git status --short"));
     }
 
+    [Fact]
+    public async Task Concurrent_policy_reads_remain_safe_while_project_rules_are_updated()
+    {
+        var permissions = ProjectCommandPermissionRegistry.Load(_path);
+        var projects = Enumerable.Range(0, 64).Select(index => Path.Combine(_root, $"concurrent-{index}")).ToArray();
+        using var start = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            start.Wait();
+            for (var iteration = 0; iteration < 5_000; iteration++)
+            {
+                var project = projects[iteration % projects.Length];
+                Assert.True(Enum.IsDefined(permissions.GetMode(project)));
+                Assert.NotNull(permissions.GetRules(project));
+                Assert.True(Enum.IsDefined(permissions.Evaluate(project, "dotnet test")));
+            }
+        })).ToArray();
+        var writer = Task.Run(async () =>
+        {
+            start.Set();
+            for (var index = 0; index < projects.Length; index++)
+            {
+                await permissions.SetModeAsync(projects[index], index % 2 == 0
+                    ? ProjectCommandPermissionMode.Auto : ProjectCommandPermissionMode.Allowlist);
+                await permissions.SetRuleAsync(projects[index], "dotnet test", index % 2 == 0
+                    ? ProjectCommandPermissionDecision.Deny : ProjectCommandPermissionDecision.Allow);
+            }
+        });
+
+        await Task.WhenAll(readers.Append(writer));
+        Assert.Equal(projects.Length, projects.Count(permissions.HasProjectSettings));
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_root, recursive: true); } catch { }

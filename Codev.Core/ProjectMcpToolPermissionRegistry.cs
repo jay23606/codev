@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -16,7 +17,7 @@ public sealed class ProjectMcpToolPermissionRegistry
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly Dictionary<string, ProjectMcpToolPermissions> _projects = new(PathComparer);
+    private readonly ConcurrentDictionary<string, ProjectMcpToolPermissions> _projects = new(PathComparer);
 
     private ProjectMcpToolPermissionRegistry(string path, bool canPersist = true, string? loadError = null)
     {
@@ -122,22 +123,17 @@ public sealed class ProjectMcpToolPermissionRegistry
         if (!CanPersist) throw new InvalidOperationException(LoadError ?? "MCP tool permissions are read-only.");
         var path = NormalizePath(projectPath);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        var previous = _projects.GetValueOrDefault(path);
         try
         {
+            var previous = _projects.GetValueOrDefault(path);
             var current = previous ?? new ProjectMcpToolPermissions(path, []);
             var next = update(current);
-            _projects[path] = next;
-            if (_projects.Count > MaxProjects) throw new InvalidOperationException("Too many projects have MCP tool permissions.");
-            var json = JsonSerializer.Serialize(_projects.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
+            var candidate = new Dictionary<string, ProjectMcpToolPermissions>(_projects, PathComparer) { [path] = next };
+            if (candidate.Count > MaxProjects) throw new InvalidOperationException("Too many projects have MCP tool permissions.");
+            var json = JsonSerializer.Serialize(candidate.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
             if (System.Text.Encoding.UTF8.GetByteCount(json) > MaxFileBytes) throw new InvalidOperationException("MCP tool permissions would exceed the size limit.");
             await AtomicTextFile.WriteAsync(_path, json, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            if (previous is null) _projects.Remove(path);
-            else _projects[path] = previous;
-            throw;
+            _projects[path] = next;
         }
         finally { _gate.Release(); }
     }

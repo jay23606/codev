@@ -59,5 +59,34 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => registry.SetRuleAsync(_project, "github", "", ProjectCommandPermissionDecision.Allow));
     }
 
+    [Fact]
+    public async Task Concurrent_policy_reads_remain_safe_while_project_rules_are_updated()
+    {
+        var registry = ProjectMcpToolPermissionRegistry.Load(_path);
+        var projects = Enumerable.Range(0, 64).Select(index => Path.Combine(_root, $"concurrent-{index}")).ToArray();
+        using var start = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            start.Wait();
+            for (var iteration = 0; iteration < 5_000; iteration++)
+            {
+                var project = projects[iteration % projects.Length];
+                Assert.NotNull(registry.GetRules(project));
+                var decision = registry.Evaluate(project, ProjectCommandPermissionMode.Auto, "github", "search");
+                Assert.True(Enum.IsDefined(decision));
+            }
+        })).ToArray();
+        var writer = Task.Run(async () =>
+        {
+            start.Set();
+            for (var index = 0; index < projects.Length; index++)
+                await registry.SetRuleAsync(projects[index], "github", "search",
+                    index % 2 == 0 ? ProjectCommandPermissionDecision.Deny : ProjectCommandPermissionDecision.Allow);
+        });
+
+        await Task.WhenAll(readers.Append(writer));
+        Assert.Equal(projects.Length, projects.Sum(project => registry.GetRules(project).Count));
+    }
+
     public void Dispose() => Directory.Delete(_root, recursive: true);
 }

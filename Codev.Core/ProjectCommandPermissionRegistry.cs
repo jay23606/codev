@@ -1,5 +1,6 @@
-using System.Text.Json;
+using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Codev;
@@ -51,7 +52,7 @@ public sealed class ProjectCommandPermissionRegistry
     private static readonly Regex GitMetadataPath = new(@"(?:^|[/\\\s])\.git(?:$|[/\\\s])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly Dictionary<string, ProjectCommandPermissions> _projects = new(PathComparer);
+    private readonly ConcurrentDictionary<string, ProjectCommandPermissions> _projects = new(PathComparer);
 
     private ProjectCommandPermissionRegistry(string path, bool canPersist = true, string? loadError = null)
     {
@@ -186,22 +187,17 @@ public sealed class ProjectCommandPermissionRegistry
         if (!CanPersist) throw new InvalidOperationException(LoadError ?? "Command permissions are read-only.");
         var normalizedPath = NormalizeProjectPath(projectPath);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        var previous = _projects.TryGetValue(normalizedPath, out var current) ? current : null;
         try
         {
+            var previous = _projects.TryGetValue(normalizedPath, out var current) ? current : null;
             current ??= new ProjectCommandPermissions(normalizedPath, ProjectCommandPermissionMode.AskEveryTime, []);
             var next = update(current);
-            _projects[normalizedPath] = next;
-            if (_projects.Count > MaxProjects) throw new InvalidOperationException("Too many projects have saved command permissions.");
-            var json = JsonSerializer.Serialize(_projects.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
+            var candidate = new Dictionary<string, ProjectCommandPermissions>(_projects, PathComparer) { [normalizedPath] = next };
+            if (candidate.Count > MaxProjects) throw new InvalidOperationException("Too many projects have saved command permissions.");
+            var json = JsonSerializer.Serialize(candidate.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
             if (Encoding.UTF8.GetByteCount(json) > MaxFileBytes) throw new InvalidOperationException("Saved command permissions would exceed the size limit.");
             await AtomicTextFile.WriteAsync(_path, json, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            if (previous is null) _projects.Remove(normalizedPath);
-            else _projects[normalizedPath] = previous;
-            throw;
+            _projects[normalizedPath] = next;
         }
         finally { _gate.Release(); }
     }
