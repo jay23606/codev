@@ -112,7 +112,7 @@ public sealed class LiveLocalModelTests
             conversation.NumPredict = 1800;
             conversation.ThinkEnabled = false;
             conversation.Temperature = 0;
-            viewModel.ReviewFileChangeAsync = (_, _, _, _, _, _) =>
+            viewModel.ReviewFileChangeAsync = (_, _, _, _, _, _, _) =>
             {
                 reviewWasShown = true;
                 return Task.FromResult(false);

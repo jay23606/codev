@@ -684,7 +684,7 @@ public sealed class MainWindowTests
             window.Show();
             var buildReview = typeof(MainWindow).GetMethod("BuildFileApprovalContent", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var review = Assert.IsAssignableFrom<Control>(buildReview.Invoke(window,
-                ["index.html", "", "<h1>Updated</h1>", true, null, null]));
+                ["index.html", "", "<h1>Updated</h1>", true, null, null, "No attempt passed verification, so Auto will not apply this candidate automatically. Review each file before applying it."]));
             var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
             content.Content = review;
             window.UpdateLayout();
@@ -696,12 +696,55 @@ public sealed class MainWindowTests
             var panes = review.GetLogicalDescendants().OfType<TextBox>().ToArray();
             Assert.Equal(2, panes.Length);
             Assert.All(panes, AssertReadableContrast);
+            Assert.Contains(review.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains("No attempt passed verification, so Auto will not apply this candidate automatically", StringComparison.Ordinal) == true);
+            Assert.DoesNotContain(review.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains("Auto paused", StringComparison.Ordinal) == true);
             Assert.Contains(review.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Keep unchanged");
             Assert.Contains(review.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Approve & create");
         }
         finally
         {
             window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task File_review_reports_the_actual_reason_and_auto_applies_ordinary_proposals()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        var appData = Path.Combine(root, "app-data");
+        Directory.CreateDirectory(project);
+        var viewModel = new MainViewModel(appData);
+        try
+        {
+            viewModel.SetProjectFolder(project);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            var reviewCalls = 0;
+            string? approvalReason = null;
+            viewModel.ReviewFileChangeAsync = (_, _, _, _, _, _, reason) =>
+            {
+                reviewCalls++;
+                approvalReason = reason;
+                return Task.FromResult(false);
+            };
+            var reviewChange = typeof(MainViewModel).GetMethod("ReviewOrAutoApplyFileChangeAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var proposal = new CodeTaskFileProposal("example.txt", "old", "new", false);
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.AskEveryTime);
+            Assert.False(await (Task<bool>)reviewChange.Invoke(viewModel, [conversation, proposal])!);
+            Assert.Equal(1, reviewCalls);
+            Assert.Contains("Ask every time", approvalReason, StringComparison.Ordinal);
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            Assert.True(await (Task<bool>)reviewChange.Invoke(viewModel, [conversation, proposal])!);
+            Assert.Equal(1, reviewCalls);
+        }
+        finally
+        {
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
         }
     }
 

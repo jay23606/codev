@@ -532,7 +532,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(CodeTaskTooltip));
         OnPropertyChanged(nameof(ConversationModeCycleTooltip));
     }
-    public Func<string, string, string, bool, string?, IReadOnlyList<string>?, Task<bool>>? ReviewFileChangeAsync { get; set; }
+    public Func<string, string, string, bool, string?, IReadOnlyList<string>?, string, Task<bool>>? ReviewFileChangeAsync { get; set; }
     public Func<int, Task<Codev.ConversationRewindChoice>>? ChooseConversationRewindAsync { get; set; }
     public Func<Codev.Conversation, int, Task<Codev.CodeRewindReviewResult>>? ReviewAndRestoreCodeBeforeRewindAsync { get; set; }
     public Func<int, string, Task<string?>>? EditConversationPromptAsync { get; set; }
@@ -1136,16 +1136,26 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     private async Task<bool> ReviewOrAutoApplyFileChangeAsync(Codev.Conversation conversation, Codev.CodeTaskFileProposal proposal)
     {
-        if (conversation.ProjectPath is { Length: > 0 } path &&
-            !Codev.ProjectFileChangePolicy.RequiresReview(_projectCommandPermissions.GetMode(path)))
+        var mode = conversation.ProjectPath is { Length: > 0 } path
+            ? _projectCommandPermissions.GetMode(path)
+            : Codev.ProjectCommandPermissionMode.AskEveryTime;
+        if (!Codev.ProjectFileChangePolicy.RequiresReview(mode))
         {
             var warnings = Codev.InstructionFollowingContentDetector.Detect(proposal.After);
             var advisory = warnings.Count == 0 ? "" : $" Advisory: content resembles {string.Join(", ", warnings)}; it remains subject to the system and user instructions.";
             await SetConnectionStatusAsync($"Auto mode · applying {proposal.RelativePath} with a rollback checkpoint…{advisory}");
             return true;
         }
+        var modeName = mode switch
+        {
+            Codev.ProjectCommandPermissionMode.Auto => "Auto",
+            Codev.ProjectCommandPermissionMode.Allowlist => "Allowlist",
+            Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only",
+            _ => "Ask every time"
+        };
         return await (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After,
-            proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false));
+            proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources,
+            $"The {modeName} permission mode requires approval before applying file changes.") ?? Task.FromResult(false));
     }
 
     private async Task<string> RunProjectFormatterAfterWriteAsync(Codev.Conversation conversation,
@@ -3280,7 +3290,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                             cancellationToken.ThrowIfCancellationRequested();
                             var approved = await Dispatcher.UIThread.InvokeAsync(async () =>
                                 await (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After,
-                                    proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false)));
+                                    proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources,
+                                    "No attempt passed verification, so Auto will not apply this candidate automatically. Review each file before applying it.") ?? Task.FromResult(false)));
                             if (!approved) break;
                             explicitlyApproved.Add(proposal);
                         }

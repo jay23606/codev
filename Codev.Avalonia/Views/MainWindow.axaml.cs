@@ -272,20 +272,20 @@ public partial class MainWindow : Window
             viewModel.SetBestOfNAttemptsForNextTurn(attempts);
     }
 
-    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources)
+    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources, string approvalReason)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             ClearInlineApproval();
             _pendingFileApproval = tcs;
-            InlineApprovalContent.Content = BuildFileApprovalContent(relativePath, before, after, isNewFile, proposedPatch, contextSources);
+            InlineApprovalContent.Content = BuildFileApprovalContent(relativePath, before, after, isNewFile, proposedPatch, contextSources, approvalReason);
             InlineApprovalPanel.IsVisible = true;
         });
         return await tcs.Task;
     }
 
-    private Control BuildFileApprovalContent(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources)
+    private Control BuildFileApprovalContent(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources, string approvalReason)
     {
         var panel = new StackPanel { Spacing = 7 };
         panel.Children.Add(new TextBlock
@@ -295,27 +295,15 @@ public partial class MainWindow : Window
             FontSize = 14
         });
         var warnings = Codev.InstructionFollowingContentDetector.Detect(after);
-        var isAuto = DataContext is ViewModels.MainViewModel activeViewModel &&
-            activeViewModel.ProjectCommandPermissionMode == Codev.ProjectCommandPermissionMode.Auto;
         if (warnings.Count > 0)
             panel.Children.Add(new TextBlock
             {
-                Text = isAuto
-                    ? "Auto paused because the proposed file matched its instruction-safety check: " + string.Join(", ", warnings) + ". This can flag ordinary HTML or code; review the change below."
-                    : "This workspace is not in Auto mode, and the proposed file also matched the instruction-safety check: " + string.Join(", ", warnings) + ".",
+                Text = "Advisory: proposed content resembles " + string.Join(", ", warnings) + ". This check does not determine whether approval is required.",
                 TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
                 Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
             });
-        else
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = isAuto
-                    ? "Auto paused because Codev could not safely classify this change. Review the proposed content before continuing."
-                    : "This workspace is not in Auto mode, so Codev is asking before changing a project file.",
-                Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
-            });
-        }
+        panel.Children.Add(new TextBlock { Text = approvalReason, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
         if (contextSources is { Count: > 0 })
             panel.Children.Add(new TextBlock { Text = "Untrusted context: " + string.Join(" · ", contextSources), FontSize = 10, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
 
