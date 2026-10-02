@@ -41,6 +41,7 @@ This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-p
 
 - Automated Avalonia UI coverage and Windows/Linux/macOS headless UI CI passed, but no keyboard-only end-to-end pass, screen-reader spot check, large-text/high-contrast visual check, or native macOS/Linux interaction was performed for this report.
 - README download links, platform notes, and the feature/status documentation were reviewed and the platform packaging statement was corrected in `d05e527`. Full README, in-app help, and every DESIGN status-row alignment still needs a deliberate review.
+- A release-workflow review found the manual legacy workflow could create and mark latest a release missing the new CLI archives. It now only uploads Actions artifacts with read-only repository permission; the desktop workflow is the sole public release path, triggered by pushing a `v*` tag. GitHub documents that events created with `GITHUB_TOKEN` do not start another workflow run, which meant a tag created by the old workflow would not have invoked the desktop publisher. The latest-tag public release path still requires a future tagged release after the remaining Q3 gates are closed.
 
 ## Release decision
 

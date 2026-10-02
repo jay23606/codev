@@ -1,15 +1,10 @@
-name: Release
+name: Legacy WPF and Avalonia build archives
 
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag (leave blank to auto-generate from date + short SHA)
-        required: false
-        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows-wpf:
@@ -133,47 +128,3 @@ jobs:
           path: |
             Codev-Avalonia-preview-osx-arm64.zip
             Codev-Avalonia-preview-osx-x64.zip
-
-  publish-release:
-    name: Create GitHub release
-    needs: [windows-wpf, avalonia-windows, avalonia-linux, avalonia-macos]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: release-*
-          merge-multiple: true
-
-      - name: List downloaded assets
-        run: ls -la artifacts
-
-      - name: Determine release tag
-        id: tag
-        run: |
-          tag="${{ inputs.tag }}"
-          if [ -z "$tag" ]; then
-            tag="v$(date -u +%Y.%m.%d)-$(echo "${{ github.sha }}" | cut -c1-7)"
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Create or update release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ steps.tag.outputs.tag }}" \
-            artifacts/*.zip \
-            --repo ${{ github.repository }} \
-            --title "${{ steps.tag.outputs.tag }}" \
-            --notes "Built from commit ${{ github.sha }}.
-
-          **\`Codev-win-x64.zip\`** is the legacy WPF app for Windows 10/11. Avalonia is the active cross-platform product and parity target.
-
-          The **\`Codev-Avalonia-preview-*.zip\`** builds are the cross-platform Avalonia app (Windows, macOS Apple Silicon/Intel, Linux x64). They include local Ollama and optional hosted models, Code tasks with file and command tools, and Git workflows. Feature development and platform interaction checks remain in progress; see DESIGN.md for current status.
-
-          None of these builds are code-signed. Windows will show a SmartScreen warning; macOS Gatekeeper will block the app until you right-click → Open (or run \`xattr -dr com.apple.quarantine <path>\`) the first time; on Linux and macOS, mark the binary executable first (\`chmod +x\`)." \
-            --latest
