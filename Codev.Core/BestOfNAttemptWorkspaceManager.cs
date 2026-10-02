@@ -1,10 +1,12 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 
 namespace Codev;
 
-public sealed record BestOfNAttemptSnapshot(Guid Id, string BaselineId, string SourceProjectPath, string RootPath);
+public sealed record BestOfNAttemptSnapshot(Guid Id, string BaselineId, string SourceProjectPath, string RootPath,
+    string? GitHeadCommit = null);
 public sealed record BestOfNAttemptWorkspace(int AttemptNumber, string BaselineId, string IsolationId, string WorkspacePath);
 public sealed record BestOfNAttemptWorkspaceReview(IReadOnlyList<CodeTaskFileProposal> Proposals,
     IReadOnlyList<string> BlockingReasons)
@@ -33,6 +35,7 @@ public sealed class BestOfNAttemptWorkspaceManager
         var source = Path.GetFullPath(projectPath);
         EnsureOrdinaryDirectory(source, "The project folder cannot be a link.");
         EnsureStorageRoot();
+        var gitHead = await ReadGitHeadIfRepositoryRootAsync(source, cancellationToken).ConfigureAwait(false);
 
         var id = Guid.NewGuid();
         var root = Path.Combine(_root, id.ToString("N"));
@@ -43,7 +46,12 @@ public sealed class BestOfNAttemptWorkspaceManager
             RestrictDirectoryToCurrentUser(root);
             await CopyTreeAsync(source, baseline, makeWritable: false, cancellationToken).ConfigureAwait(false);
             var baselineId = await ComputeTreeIdAsync(baseline, cancellationToken).ConfigureAwait(false);
-            return new BestOfNAttemptSnapshot(id, baselineId, source, root);
+            var sourceId = await ComputeTreeIdAsync(source, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(baselineId, sourceId, StringComparison.Ordinal))
+                throw new IOException("The project tree changed while the attempt baseline was being captured.");
+            if (gitHead is not null && !string.Equals(gitHead, await ReadGitHeadIfRepositoryRootAsync(source, cancellationToken).ConfigureAwait(false), StringComparison.Ordinal))
+                throw new IOException("The source repository moved to a different Git commit while the attempt baseline was being captured.");
+            return new BestOfNAttemptSnapshot(id, baselineId, source, root, gitHead);
         }
         catch
         {
@@ -73,6 +81,8 @@ public sealed class BestOfNAttemptWorkspaceManager
             var copyId = await ComputeTreeIdAsync(destination, cancellationToken).ConfigureAwait(false);
             if (!string.Equals(snapshot.BaselineId, copyId, StringComparison.Ordinal))
                 throw new IOException("The attempt workspace does not match the captured project state.");
+            if (snapshot.GitHeadCommit is not null)
+                await InitializeAttemptGitContextAsync(snapshot, destination, attemptNumber, cancellationToken).ConfigureAwait(false);
             return new BestOfNAttemptWorkspace(attemptNumber, snapshot.BaselineId,
                 Path.GetFullPath(destination), Path.GetFullPath(destination));
         }
@@ -223,11 +233,11 @@ public sealed class BestOfNAttemptWorkspaceManager
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var name = Path.GetFileName(entry);
-                // Git metadata belongs to the original repository and cannot be shared by attempt copies.
-                if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase)) continue;
                 var attributes = File.GetAttributes(entry);
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                     throw new InvalidOperationException($"Cannot capture a project containing a symbolic link or reparse point: {Path.GetRelativePath(source, entry)}");
+                // Git metadata belongs to the original repository and is replaced by private attempt metadata.
+                if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase)) continue;
                 var target = Path.GetFullPath(Path.Combine(current.Destination, name));
                 EnsureWithinRoot(destination, target);
                 if ((attributes & FileAttributes.Directory) != 0)
@@ -246,6 +256,130 @@ public sealed class BestOfNAttemptWorkspaceManager
                 await CopyFileAsync(entry, target, makeWritable, cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private static async Task<string?> ReadGitHeadIfRepositoryRootAsync(string projectPath, CancellationToken cancellationToken)
+    {
+        var projectGitMarker = Path.Combine(projectPath, ".git");
+        if ((Directory.Exists(projectGitMarker) || File.Exists(projectGitMarker)) &&
+            (File.GetAttributes(projectGitMarker) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("The project .git marker cannot be a symbolic link or reparse point.");
+        var marker = projectPath;
+        var hasGitMarker = false;
+        while (!string.IsNullOrEmpty(marker))
+        {
+            if (HasGitMetadataMarker(marker))
+            {
+                hasGitMarker = true;
+                break;
+            }
+            var parent = Path.GetDirectoryName(marker);
+            if (string.IsNullOrEmpty(parent) || string.Equals(parent, marker, PathComparison)) break;
+            marker = parent;
+        }
+        if (!hasGitMarker) return null;
+
+        var rootOutput = await RunGitAsync(projectPath, cancellationToken, "rev-parse", "--show-toplevel").ConfigureAwait(false);
+        if (rootOutput.ExitCode != 0)
+            throw new InvalidOperationException("Git metadata was found above this project, but Git could not identify its worktree root; best-of-N cannot isolate it safely.");
+        var gitRoot = Path.GetFullPath(rootOutput.StandardOutput.Trim());
+        if (!string.Equals(gitRoot, Path.GetFullPath(projectPath), PathComparison))
+            throw new InvalidOperationException("Best-of-N currently requires the attached project folder to be the Git repository root so each attempt can receive a private Git context.");
+        var headOutput = await RunGitAsync(projectPath, cancellationToken, "rev-parse", "--verify", "HEAD^{commit}").ConfigureAwait(false);
+        if (headOutput.ExitCode != 0 || string.IsNullOrWhiteSpace(headOutput.StandardOutput))
+            throw new InvalidOperationException("Best-of-N requires the attached Git repository to have a committed HEAD.");
+        return headOutput.StandardOutput.Trim();
+    }
+
+    private static bool HasGitMetadataMarker(string projectPath)
+    {
+        var marker = Path.Combine(projectPath, ".git");
+        return Directory.Exists(marker)
+            ? File.Exists(Path.Combine(marker, "HEAD"))
+            : File.Exists(marker);
+    }
+
+    private async Task InitializeAttemptGitContextAsync(BestOfNAttemptSnapshot snapshot, string workspace,
+        int attemptNumber, CancellationToken cancellationToken)
+    {
+        var clonePath = Path.Combine(snapshot.RootPath, $"git-context-{attemptNumber}");
+        var templatePath = Path.Combine(snapshot.RootPath, "empty-git-template");
+        if (Directory.Exists(clonePath) || File.Exists(clonePath))
+            throw new IOException("A private Git context already exists for this attempt.");
+        Directory.CreateDirectory(templatePath);
+        try
+        {
+            var clone = await RunGitAsync(snapshot.SourceProjectPath, cancellationToken,
+                "clone", "--shared", "--no-checkout", "--template", templatePath, "--", snapshot.SourceProjectPath, clonePath)
+                .ConfigureAwait(false);
+            if (clone.ExitCode != 0)
+                throw new InvalidOperationException($"Could not create a private Git context for attempt {attemptNumber}: {BoundGitOutput(clone)}");
+
+            var clonedHead = await RunGitAsync(clonePath, cancellationToken, "rev-parse", "--verify", "HEAD^{commit}").ConfigureAwait(false);
+            if (clonedHead.ExitCode != 0 || !string.Equals(snapshot.GitHeadCommit, clonedHead.StandardOutput.Trim(), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("The source repository changed while the private attempt Git context was being created.");
+
+            var removeRemote = await RunGitAsync(clonePath, cancellationToken, "remote", "remove", "origin").ConfigureAwait(false);
+            if (removeRemote.ExitCode != 0)
+                throw new InvalidOperationException($"Could not remove the source remote from the private attempt Git context: {BoundGitOutput(removeRemote)}");
+
+            var gitDirectory = Path.Combine(clonePath, ".git");
+            EnsureOrdinaryDirectory(gitDirectory, "The private attempt Git metadata cannot be a link.");
+            var privateGitDirectory = Path.Combine(workspace, ".git");
+            if (Directory.Exists(privateGitDirectory) || File.Exists(privateGitDirectory))
+                throw new IOException("The captured project contains a .git entry inside the attempt workspace.");
+            Directory.Move(gitDirectory, privateGitDirectory);
+
+            var index = await RunGitAsync(workspace, cancellationToken, "read-tree", "HEAD").ConfigureAwait(false);
+            if (index.ExitCode != 0)
+                throw new InvalidOperationException($"Could not initialize the private attempt Git index: {BoundGitOutput(index)}");
+            var top = await RunGitAsync(workspace, cancellationToken, "rev-parse", "--show-toplevel").ConfigureAwait(false);
+            if (top.ExitCode != 0 || !string.Equals(Path.GetFullPath(top.StandardOutput.Trim()), Path.GetFullPath(workspace), PathComparison))
+                throw new IOException("The private attempt Git context does not resolve to its isolated workspace.");
+        }
+        finally
+        {
+            if (Directory.Exists(clonePath)) TryDeleteOwnedDirectory(clonePath);
+            if (Directory.Exists(templatePath)) TryDeleteOwnedDirectory(templatePath);
+        }
+    }
+
+    private static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunGitAsync(string workingDirectory,
+        CancellationToken cancellationToken, params string[] arguments)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        start.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        start.Environment["GIT_NO_LAZY_FETCH"] = "1";
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start Git for isolated best-of-N workspaces.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        var stdout = process.StandardOutput.ReadToEndAsync(linked.Token);
+        var stderr = process.StandardError.ReadToEndAsync(linked.Token);
+        try { await process.WaitForExitAsync(linked.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            if (cancellationToken.IsCancellationRequested) throw;
+            throw new TimeoutException("Git did not finish preparing the private attempt context within two minutes.");
+        }
+        return (process.ExitCode, await stdout.ConfigureAwait(false), await stderr.ConfigureAwait(false));
+    }
+
+    private static string BoundGitOutput((int ExitCode, string StandardOutput, string StandardError) result)
+    {
+        var detail = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+        detail = detail.Trim();
+        return detail.Length <= 1_000 ? detail : detail[..1_000] + "…";
     }
 
     private static Task<Dictionary<string, string>> EnumerateSnapshotFilesAsync(string root, CancellationToken cancellationToken)

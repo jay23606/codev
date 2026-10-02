@@ -46,6 +46,7 @@ public sealed class ConversationPersistenceTests
     {
         var turn = new PersistedQueuedTurn(1, "gpt-5.6", 8192, false, false, null,
             ["src/a.cs"], ["private"], DateTimeOffset.UnixEpoch, OutputStyle: ConversationOutputStyles.CodeOnly, ThinkEnabled: true,
+            BestOfNAttempts: 3,
             TopP: 0.8, TopK: 40, PresencePenalty: 0.2, RepeatPenalty: 1.1, NumPredict: 4096, AgentProfileName: "Debug");
         turn = turn with { OpenAiReasoningEffort = "high", OpenAiVerbosity = "low", OpenAiReasoningMode = "pro" };
         var source = new Conversation
@@ -82,6 +83,7 @@ public sealed class ConversationPersistenceTests
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
             EnableSemanticSearch = true,
+            BestOfNAttempts = 3,
             LastPromptTokens = 321,
             LastPromptOutputTokens = 123,
             LastPromptContext = 4096,
@@ -139,6 +141,7 @@ public sealed class ConversationPersistenceTests
         Assert.True(snapshot.AllowHostedCodeTask);
         Assert.True(snapshot.IncludeRepoMap);
         Assert.True(snapshot.EnableSemanticSearch);
+        Assert.Equal(3, snapshot.BestOfNAttempts);
         Assert.Equal(321, snapshot.LastPromptTokens);
         Assert.Equal(123, snapshot.LastPromptOutputTokens);
         Assert.Equal(CloudModelProviders.OpenAI, snapshot.LastPromptProvider);
@@ -165,5 +168,6 @@ public sealed class ConversationPersistenceTests
         Assert.Equal("low", snapshot.PendingTurns[0].OpenAiVerbosity);
         Assert.Equal("pro", snapshot.PendingTurns[0].OpenAiReasoningMode);
         Assert.Equal("Debug", snapshot.PendingTurns[0].AgentProfileName);
+        Assert.Equal(3, snapshot.PendingTurns[0].BestOfNAttempts);
     }
 }

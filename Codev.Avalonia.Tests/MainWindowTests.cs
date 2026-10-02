@@ -95,6 +95,68 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Best_of_n_is_a_one_shot_local_code_task_choice_captured_by_the_queue()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-best-of-n-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "app-data");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        var viewModel = new MainViewModel(appData);
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            conversation.Provider = "ollama";
+            conversation.Model = "qwen-test";
+            typeof(MainViewModel).GetMethod("SetConversationMode", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(viewModel, [ConversationMode.CodeTask]);
+            Assert.True(viewModel.CanSelectBestOfNAttempts);
+
+            window.Show();
+            window.UpdateLayout();
+            var contextButton = Assert.Single(window.GetVisualDescendants().OfType<Button>(),
+                button => button.Content?.ToString() == "＋ Context");
+            var flyout = Assert.IsType<MenuFlyout>(contextButton.Flyout);
+            flyout.ShowAt(contextButton);
+            window.UpdateLayout();
+            var bestOfMenu = Assert.Single(flyout.Items.OfType<MenuItem>(),
+                item => item.Header?.ToString()?.StartsWith("Best-of-N", StringComparison.Ordinal) == true);
+            Assert.True(bestOfMenu.IsEnabled);
+            Assert.Contains(bestOfMenu.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "3 independent attempts");
+
+            viewModel.SetBestOfNAttemptsForNextTurn(3);
+            Assert.Equal(3, conversation.BestOfNAttempts);
+            typeof(MainViewModel).GetField("_queuePaused", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(viewModel, true);
+            typeof(MainViewModel).GetField("_queueProcessorRunning", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(viewModel, true);
+            viewModel.Draft = "inspect the project";
+            Assert.True(conversation.IsCodeTask);
+            Assert.Equal(project, conversation.ProjectPath);
+            Assert.Equal("ollama", conversation.Provider);
+            Assert.Equal("inspect the project", viewModel.Draft);
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+                await (Task)typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(viewModel, null)!);
+
+            Assert.True(conversation.PendingTurns?.Count > 0,
+                $"{viewModel.ContextActionStatus}; draft={viewModel.Draft}; requests={conversation.PendingRequestCount}; active={ReferenceEquals(viewModel.ActiveConversation, conversation)}; busy={viewModel.IsGenerating}; paused={viewModel.IsQueuePaused}");
+            Assert.Equal(3, Assert.Single(conversation.PendingTurns!).BestOfNAttempts);
+            Assert.Equal(1, conversation.BestOfNAttempts);
+        }
+        finally
+        {
+            typeof(MainViewModel).GetField("_queueProcessorRunning", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(viewModel, false);
+            window.Close();
+            await StopAndFlushAsync(viewModel);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Footer_auto_selection_persists_and_skips_inline_command_approval()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

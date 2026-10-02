@@ -30,6 +30,7 @@ public static class ConversationPersistence
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,
             EnableSemanticSearch = conversation.EnableSemanticSearch,
+            BestOfNAttempts = Math.Clamp(conversation.BestOfNAttempts, 1, BestOfNAttemptCoordinator.MaximumAttempts),
             NumCtx = conversation.NumCtx,
             Temperature = ConversationSamplingSettings.NormalizeTemperature(conversation.Temperature),
             TopP = ConversationSamplingSettings.NormalizeProbability(conversation.TopP),
@@ -72,7 +73,8 @@ public static class ConversationPersistence
                 OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(turn.OpenAiReasoningEffort),
                 OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(turn.OpenAiVerbosity),
                 OpenAiReasoningMode = OpenAiGenerationSettings.NormalizeReasoningMode(turn.OpenAiReasoningMode, turn.Model),
-                AgentProfileName = AgentProfileCatalog.NormalizeReferenceName(turn.AgentProfileName)
+                AgentProfileName = AgentProfileCatalog.NormalizeReferenceName(turn.AgentProfileName),
+                BestOfNAttempts = Math.Clamp(turn.BestOfNAttempts, 1, BestOfNAttemptCoordinator.MaximumAttempts)
             }).ToList() ?? []
         }).ToList();
     }

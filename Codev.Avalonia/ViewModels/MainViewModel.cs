@@ -305,6 +305,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 OnPropertyChanged(nameof(IsPlanMode));
                 OnPropertyChanged(nameof(PlanModeLabel));
                 OnPropertyChanged(nameof(IsCodeTask));
+                OnPropertyChanged(nameof(BestOfNAttemptsForNextTurn));
+                OnPropertyChanged(nameof(BestOfNAttemptsMenuLabel));
+                OnPropertyChanged(nameof(CanSelectBestOfNAttempts));
                 OnPropertyChanged(nameof(CodeTaskLabel));
                 OnPropertyChanged(nameof(CanToggleCodeTaskMode));
                 OnPropertyChanged(nameof(ShouldShowTaskChecklist));
@@ -989,6 +992,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(IsPlanMode));
         OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(IsCodeTask));
+        NotifyBestOfNAttemptsProperties();
         OnPropertyChanged(nameof(CodeTaskLabel));
         OnPropertyChanged(nameof(ConversationModeCycleTooltip));
         OnPropertyChanged(nameof(ShouldShowTaskChecklist));
@@ -1309,6 +1313,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             OnPropertyChanged(nameof(IsHostedModel));
             OnPropertyChanged(nameof(IsOpenAIModel));
             OnPropertyChanged(nameof(IsCodeTask));
+            NotifyBestOfNAttemptsProperties();
             OnPropertyChanged(nameof(CanOpenAdvancedModelSettings));
             OnPropertyChanged(nameof(CanOpenProjectActions));
             OnPropertyChanged(nameof(ProviderStatusLabel));
@@ -1501,6 +1506,29 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
     }
 
+    public int BestOfNAttemptsForNextTurn => Math.Clamp(ActiveConversation?.BestOfNAttempts ?? 1,
+        1, Codev.BestOfNAttemptCoordinator.MaximumAttempts);
+    public string BestOfNAttemptsMenuLabel => $"Best-of-N for next Code task · {BestOfNAttemptsForNextTurn} attempt{(BestOfNAttemptsForNextTurn == 1 ? "" : "s")}";
+    public bool CanSelectBestOfNAttempts => IsCodeTask && IsLocalModel;
+    public string BestOfNAttemptsTooltip => "One-shot choice for the next local Code task. Each attempt runs independently in a private copy; model calls, verification, shell commands, and MCP calls may repeat, and provider/API charges may multiply. Only an attempt with a passing verification can be selected. Defaults to one and resets after submission.";
+
+    private void NotifyBestOfNAttemptsProperties()
+    {
+        OnPropertyChanged(nameof(BestOfNAttemptsForNextTurn));
+        OnPropertyChanged(nameof(BestOfNAttemptsMenuLabel));
+        OnPropertyChanged(nameof(CanSelectBestOfNAttempts));
+    }
+
+    public void SetBestOfNAttemptsForNextTurn(int requested)
+    {
+        if (!CanSelectBestOfNAttempts || ActiveConversation is not { } conversation) return;
+        var normalized = Math.Clamp(requested, 1, Codev.BestOfNAttemptCoordinator.MaximumAttempts);
+        if (conversation.BestOfNAttempts == normalized) return;
+        conversation.BestOfNAttempts = normalized;
+        NotifyBestOfNAttemptsProperties();
+        Persist();
+    }
+
     public async Task UpdateSemanticIndexAsync()
     {
         if (ActiveConversation is not { ProjectPath: { Length: > 0 } path } conversation || !_projectFolderTrust.IsTrusted(path))
@@ -1611,6 +1639,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(IsPlanMode));
         OnPropertyChanged(nameof(PlanModeLabel));
         OnPropertyChanged(nameof(IsCodeTask));
+        NotifyBestOfNAttemptsProperties();
         OnPropertyChanged(nameof(CodeTaskLabel));
         OnPropertyChanged(nameof(HasProject));
         OnPropertyChanged(nameof(IsProjectTrusted));
@@ -2670,13 +2699,22 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var projectTrusted = !string.IsNullOrWhiteSpace(conversation.ProjectPath) && _projectFolderTrust.IsTrusted(conversation.ProjectPath);
         var contextProjectPath = Codev.ProjectContextPolicy.GetProjectPathForQueuedTurn(
             conversation.ProjectPath, hasExplicitProjectFiles, projectTrusted);
+        var bestOfNAttempts = conversation.IsCodeTask && conversation.Provider == "ollama"
+            ? Math.Clamp(conversation.BestOfNAttempts, 1, Codev.BestOfNAttemptCoordinator.MaximumAttempts)
+            : 1;
         var queuedTurn = new Codev.PersistedQueuedTurn(assistantIndex, conversation.Model, conversation.NumCtx,
             conversation.IsCodeTask, conversation.IsPlanMode, contextProjectPath, [.. conversation.ContextFiles], [], DateTimeOffset.Now, conversation.Temperature, conversation.Provider,
             conversation.Provider == "ollama" || conversation.IncludeProjectContextForHosted, conversation.IncludeRepoMap, conversation.OutputStyle, conversation.ThinkEnabled,
             conversation.TopP, conversation.TopK, conversation.PresencePenalty, conversation.RepeatPenalty, conversation.NumPredict,
             OpenAiReasoningEffort: conversation.OpenAiReasoningEffort, OpenAiVerbosity: conversation.OpenAiVerbosity,
             OpenAiReasoningMode: conversation.OpenAiReasoningMode,
-            AgentProfileName: conversation.AgentProfileName, EnableSemanticSearch: conversation.EnableSemanticSearch);
+            AgentProfileName: conversation.AgentProfileName, EnableSemanticSearch: conversation.EnableSemanticSearch,
+            BestOfNAttempts: bestOfNAttempts);
+        if (conversation.BestOfNAttempts != 1)
+        {
+            conversation.BestOfNAttempts = 1;
+            if (ReferenceEquals(ActiveConversation, conversation)) NotifyBestOfNAttemptsProperties();
+        }
         conversation.PendingTurns ??= [];
         conversation.PendingTurns.Add(queuedTurn);
         conversation.PendingRequestCount++;
@@ -2975,11 +3013,19 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         });
     }
 
-    private async Task RunCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
+    private async Task<Codev.CodeTaskToolExecutor?> RunCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
         List<Codev.OllamaCodeTaskMessage> history, Codev.WorkspaceFileService files, Codev.PersistedQueuedTurn turn,
         System.Text.StringBuilder thinking, CancellationToken cancellationToken, IReadOnlyList<string> initialContextSources,
-        IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile)
+        IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile,
+        bool isolatedAttempt = false, Func<string, Task>? publishAttemptTranscript = null,
+        Codev.Conversation? progressConversation = null)
     {
+        if (!isolatedAttempt && turn.BestOfNAttempts > 1)
+        {
+            await RunBestOfNOllamaCodeTaskTurnAsync(conversation, assistantIndex, history, files, turn,
+                cancellationToken, initialContextSources, capturedContextSections, agentProfile);
+            return null;
+        }
         await _managedWorkspacePermissionDefaultsTask;
         if (!string.IsNullOrWhiteSpace(turn.ProjectPath)) await EnsureProjectCommandPermissionModeAsync(turn.ProjectPath);
         var shell = Codev.ShellCommandResolver.ResolveCurrent();
@@ -2988,27 +3034,33 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             message => _ = SetConnectionStatusAsync(message), cancellationToken, _cloudApiKeyVault);
         var agentSkills = await LoadAgentSkillsAsync(conversation, cancellationToken);
         var agentSkillTools = agentSkills.ToDictionary(Codev.AgentSkillTool.FunctionName, StringComparer.Ordinal);
+        // Retrieval is read-only and its index is keyed to the original trusted project root;
+        // use that index while all mutating tools remain bound to the private attempt workspace.
+        var semanticFiles = files;
         var semanticIndex = turn.EnableSemanticSearch && !string.IsNullOrWhiteSpace(turn.ProjectPath)
-            ? CreateProjectEmbeddingIndex(files) : null;
+            ? CreateProjectEmbeddingIndex(semanticFiles) : null;
         var tools = Codev.CodeTaskToolSchemaFactory.CreateOllamaTools(shell, mcpSession.Tools.Values, agentProfile,
-            allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true,
-            allowSemanticSearch: semanticIndex is not null && Codev.ProjectEmbeddingIndex.HasIndex(SemanticIndexDirectory, files.Root));
+            allowDelegation: !isolatedAttempt && CanDelegate(conversation, agentProfile), agentSkills: agentSkills,
+            allowBackgroundCommands: !isolatedAttempt,
+            allowSemanticSearch: semanticIndex is not null && Codev.ProjectEmbeddingIndex.HasIndex(SemanticIndexDirectory, semanticFiles.Root));
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
-            async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
+            isolatedAttempt ? _ => Task.FromResult(true) :
+                async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
             _ => Task.FromResult(false),
             status: message => _ = SetConnectionStatusAsync(message), initialContextSources: initialContextSources,
             permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () => await ApproveCommandWithProjectPolicyAsync(proposal, files.ContextExclusions)),
             turnUserMessageIndex: assistantIndex - 1,
             mcpTools: mcpSession.Tools,
-            mcpPermissionApproval: (tool, args, profileApproved) => ApproveMcpToolWithProjectPolicyAsync(conversation, tool, args, profileApproved),
+            mcpPermissionApproval: (tool, args, profileApproved) => ApproveMcpToolWithProjectPolicyAsync(progressConversation ?? conversation, tool, args, profileApproved),
             mcpCall: (tool, args, token) => mcpSession.CallAsync(tool.FunctionName, args, token),
-            agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
+            agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(progressConversation ?? conversation, agentProfile, name, args),
             agentProfile: agentProfile,
             agentSkills: agentSkillTools,
-            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
-            backgroundCommands: _backgroundCommands,
-            afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
-            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchAsync(query, cancellationToken: token));
+            agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(progressConversation ?? conversation, skill, arguments, token),
+            backgroundCommands: isolatedAttempt ? null : _backgroundCommands,
+            afterFileWrite: isolatedAttempt ? null : (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
+            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchAsync(query, cancellationToken: token),
+            permissionProjectPath: turn.ProjectPath);
         var initialTranscript = mcpSession.ToConnectionTranscript();
         var initialMessageCount = history.Count;
         var maxSteps = Math.Clamp(agentProfile?.MaxSteps ?? Codev.CodeTaskLimits.MaxModelStepsPerTurn, 1, Codev.CodeTaskLimits.MaxModelStepsPerTurn);
@@ -3023,7 +3075,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 var roundSections = Codev.PromptContextBreakdown.BuildCodeTaskRoundSections(capturedContextSections,
                     interactions, JsonSerializer.Serialize(tools, JsonSerializerOptions.Web),
                     $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}; top_p={turn.TopP?.ToString() ?? "model default"}; top_k={turn.TopK?.ToString() ?? "model default"}; presence_penalty={turn.PresencePenalty?.ToString() ?? "model default"}; repeat_penalty={turn.RepeatPenalty?.ToString() ?? "model default"}; num_predict={turn.NumPredict?.ToString() ?? "model default"}");
-                await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create("ollama", turn.Model,
+                await SetLastPromptContextAsync(progressConversation ?? conversation, Codev.PromptContextBreakdown.Create("ollama", turn.Model,
                     turn.NumCtx, roundSections, roundMessages, payloadJson));
             },
             onThinking: async thinkingText =>
@@ -3031,7 +3083,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 if (thinking.Length > 0) thinking.AppendLine().AppendLine();
                 await AppendAssistantThinkingAsync(conversation, assistantIndex, thinking, thinkingText);
             },
-            onPromptTokens: promptTokens => RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, turn.NumCtx, promptTokens),
+            onPromptTokens: promptTokens => RecordPromptTokenUsageAsync(progressConversation ?? conversation, turn.Provider, turn.Model, turn.NumCtx, promptTokens),
             status: SetConnectionStatusAsync,
             executeTool: async (name, arguments, token) =>
             {
@@ -3056,14 +3108,218 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             confirmRepeatedToolCall: async (name, _, token) =>
             {
                 token.ThrowIfCancellationRequested();
+                if (isolatedAttempt) return false;
                 return await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
             },
-            onTranscript: text => SetAssistantTranscriptAsync(conversation, assistantIndex, text),
+            onTranscript: publishAttemptTranscript ?? (text => SetAssistantTranscriptAsync(conversation, assistantIndex, text)),
             initialTranscript: initialTranscript, maxSteps: maxSteps, cancellationToken: cancellationToken);
         var finalTranscript = result.Transcript;
         if (conversation.TaskChecklist.Count > 0)
             finalTranscript += Environment.NewLine + Environment.NewLine + "**Task checklist**" + Environment.NewLine + Environment.NewLine + Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist);
-        await SetAssistantTranscriptAsync(conversation, assistantIndex, finalTranscript);
+        if (publishAttemptTranscript is not null) await publishAttemptTranscript(finalTranscript);
+        else await SetAssistantTranscriptAsync(conversation, assistantIndex, finalTranscript);
+        return executor;
+    }
+
+    private async Task RunBestOfNOllamaCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
+        List<Codev.OllamaCodeTaskMessage> history, Codev.WorkspaceFileService files, Codev.PersistedQueuedTurn turn,
+        CancellationToken cancellationToken, IReadOnlyList<string> initialContextSources,
+        IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile)
+    {
+        if (turn.BestOfNAttempts is < 2 or > Codev.BestOfNAttemptCoordinator.MaximumAttempts ||
+            string.IsNullOrWhiteSpace(turn.ProjectPath))
+            throw new InvalidOperationException("Best-of-N requires a selected count of two or three and a project workspace.");
+
+        var manager = new Codev.BestOfNAttemptWorkspaceManager(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        var service = new Codev.BestOfNAttemptExecutionService(manager, new Codev.BestOfNAttemptCoordinator());
+        var completed = new List<(int Number, string Transcript, bool Passed, string Summary)>();
+        var liveAttempt = 0;
+        var liveTranscript = "";
+
+        string ComposeProgress()
+        {
+            var output = new System.Text.StringBuilder();
+            foreach (var attempt in completed)
+            {
+                output.Append("### Attempt ").Append(attempt.Number).Append(" · ")
+                    .AppendLine(attempt.Passed ? "verification passed" : "verification did not pass")
+                    .AppendLine(attempt.Summary).AppendLine().AppendLine(attempt.Transcript).AppendLine();
+            }
+            if (liveAttempt > 0)
+                output.Append("### Attempt ").Append(liveAttempt).Append("/").Append(turn.BestOfNAttempts)
+                    .AppendLine(" · running").AppendLine().Append(liveTranscript);
+            return output.ToString().TrimEnd();
+        }
+
+        await SetConnectionStatusAsync($"Best-of-N · preparing {turn.BestOfNAttempts} isolated attempts; each can repeat model use, verification commands, and MCP actions…");
+        try
+        {
+            using var execution = await service.RunAsync(turn.ProjectPath, optedIn: true, turn.BestOfNAttempts,
+                async (workspace, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    liveAttempt = workspace.AttemptNumber;
+                    liveTranscript = "Preparing isolated workspace…";
+                    await SetAssistantTranscriptAsync(conversation, assistantIndex, ComposeProgress());
+
+                    var attemptMessages = history.ToList();
+                    var systemMessageIndex = attemptMessages.FindIndex(message => message.Role.Equals("system", StringComparison.OrdinalIgnoreCase));
+                    var attemptInstruction = new Codev.OllamaCodeTaskMessage("system",
+                        $"This is independent attempt {workspace.AttemptNumber} of {turn.BestOfNAttempts}. Work only within this attempt's isolated project copy. Do not delegate or start background commands. A candidate can be selected only if you run verify_command and it reports exit code 0. Commands, MCP calls, and tool side effects may run again in other attempts; avoid irreversible external actions. Automatic post-write formatter hooks are disabled inside attempts.");
+                    attemptMessages.Insert(systemMessageIndex >= 0 ? systemMessageIndex + 1 : 0, attemptInstruction);
+
+                    var scratch = new Codev.Conversation
+                    {
+                        Id = Guid.NewGuid(),
+                        ParentConversationId = conversation.Id,
+                        Title = conversation.Title,
+                        Provider = conversation.Provider,
+                        Model = conversation.Model,
+                        ProjectPath = conversation.ProjectPath,
+                        IsCodeTask = true,
+                        AgentProfileName = conversation.AgentProfileName,
+                        OutputStyle = conversation.OutputStyle,
+                        TaskChecklist = conversation.TaskChecklist.Select(item => item with { }).ToList(),
+                        Messages = conversation.Messages.Take(assistantIndex + 1).Select(message => message with { }).ToList()
+                    };
+                    if (assistantIndex >= scratch.Messages.Count)
+                        throw new InvalidOperationException("The Code task transcript is no longer available for an isolated attempt.");
+                    scratch.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "");
+                    var attemptFiles = new Codev.WorkspaceFileService(workspace.WorkspacePath, turn.ContextExclusions);
+                    var executor = await RunCodeTaskTurnAsync(scratch, assistantIndex, attemptMessages, attemptFiles,
+                        turn with { BestOfNAttempts = 1 }, new System.Text.StringBuilder(), token,
+                        initialContextSources, capturedContextSections, agentProfile,
+                        isolatedAttempt: true,
+                        publishAttemptTranscript: async text =>
+                        {
+                            liveTranscript = text;
+                            await SetAssistantTranscriptAsync(conversation, assistantIndex, ComposeProgress());
+                        },
+                        progressConversation: conversation).ConfigureAwait(false);
+                    var transcript = scratch.Messages[assistantIndex].Content;
+                    return new Codev.BestOfNAttemptOutput(transcript, executor);
+                },
+                async (workspace, output, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    var executor = output.Payload as Codev.CodeTaskToolExecutor;
+                    var passed = executor is { SuccessfulVerificationCount: > 0 };
+                    var summary = passed
+                        ? $"Passed {executor!.SuccessfulVerificationCount} verification command(s)."
+                        : "No verification command completed successfully; this attempt is not eligible for automatic selection.";
+                    completed.Add((workspace.AttemptNumber, output.Transcript, passed, summary));
+                    liveAttempt = 0;
+                    liveTranscript = "";
+                    await SetAssistantTranscriptAsync(conversation, assistantIndex, ComposeProgress());
+                    return new Codev.BestOfNAttemptVerification(passed, summary);
+                }, cancellationToken).ConfigureAwait(false);
+
+            var applyExecutor = new Codev.CodeTaskToolExecutor(files, conversation,
+                async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
+                _ => Task.FromResult(false), initialContextSources: initialContextSources,
+                turnUserMessageIndex: assistantIndex - 1,
+                agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
+                agentProfile: agentProfile,
+                afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
+                permissionProjectPath: turn.ProjectPath);
+
+            var summaryText = new System.Text.StringBuilder();
+            var attemptTable = string.Join(Environment.NewLine, execution.Result.Attempts.Select(attempt =>
+                $"Attempt {attempt.AttemptNumber}: {(attempt.VerificationPassed == true ? "passed" : "did not pass")}" +
+                (string.IsNullOrWhiteSpace(attempt.VerificationSummary) ? "" : " · " + attempt.VerificationSummary) +
+                (string.IsNullOrWhiteSpace(attempt.Error) ? "" : " · " + attempt.Error)));
+            summaryText.AppendLine("## Best-of-N verification").AppendLine(attemptTable);
+
+            if (execution.Result.Winner is { } winner)
+            {
+                var winningWorkspace = new Codev.BestOfNAttemptWorkspace(winner.AttemptNumber, winner.BaselineId,
+                    winner.IsolationId, winner.IsolationId);
+                var review = await manager.ReviewChangesAsync(execution.Snapshot, winningWorkspace, files,
+                    initialContextSources, cancellationToken).ConfigureAwait(false);
+                if (!review.CanApply)
+                    summaryText.AppendLine().AppendLine("Winner changes were not applied because safe review was blocked:")
+                        .AppendLine(string.Join(Environment.NewLine, review.BlockingReasons));
+                else if (review.Proposals.Count == 0)
+                    summaryText.AppendLine().AppendLine("The verified winner made no reviewed project-file changes.");
+                else
+                {
+                    var applicationResults = new List<string>();
+                    foreach (var proposal in review.Proposals)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var result = await applyExecutor.ApplyReviewedProposalAsync(proposal, cancellationToken).ConfigureAwait(false);
+                        applicationResults.Add(proposal.RelativePath + ": " + result);
+                        if (result.StartsWith("Rejected", StringComparison.Ordinal) || result.StartsWith("Denied", StringComparison.Ordinal) ||
+                            result.StartsWith("Error", StringComparison.Ordinal)) break;
+                    }
+                    summaryText.AppendLine().AppendLine("Verified winner review:").AppendLine(string.Join(Environment.NewLine, applicationResults));
+                }
+            }
+            else
+            {
+                var reviewAttempt = execution.Result.Attempts.LastOrDefault(attempt => !string.IsNullOrWhiteSpace(attempt.IsolationId));
+                if (reviewAttempt is null)
+                    summaryText.AppendLine().AppendLine("No attempt produced a reviewable workspace; no changes were applied.");
+                else
+                {
+                    var candidateWorkspace = new Codev.BestOfNAttemptWorkspace(reviewAttempt.AttemptNumber,
+                        execution.Snapshot.BaselineId, reviewAttempt.IsolationId!, reviewAttempt.IsolationId!);
+                    var candidateReview = await manager.ReviewChangesAsync(execution.Snapshot, candidateWorkspace,
+                        files, initialContextSources, cancellationToken).ConfigureAwait(false);
+                    if (!candidateReview.CanApply)
+                        summaryText.AppendLine().AppendLine("No attempt passed verification; no changes were applied. The latest attempt could not be reviewed safely:")
+                            .AppendLine(string.Join(Environment.NewLine, candidateReview.BlockingReasons));
+                    else if (candidateReview.Proposals.Count == 0)
+                        summaryText.AppendLine().AppendLine("No attempt passed verification and the latest attempt made no reviewed project-file changes. Nothing was applied.");
+                    else
+                    {
+                        summaryText.AppendLine().AppendLine("No attempt passed verification. Review the latest candidate below; approving every file is required before any of it is applied.");
+                        var explicitlyApproved = new List<Codev.CodeTaskFileProposal>();
+                        foreach (var proposal in candidateReview.Proposals)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var approved = await Dispatcher.UIThread.InvokeAsync(async () =>
+                                await (ReviewFileChangeAsync?.Invoke(proposal.RelativePath, proposal.Before, proposal.After,
+                                    proposal.IsNewFile, proposal.ProposedPatch, proposal.ContextSources) ?? Task.FromResult(false)));
+                            if (!approved) break;
+                            explicitlyApproved.Add(proposal);
+                        }
+                        if (explicitlyApproved.Count != candidateReview.Proposals.Count)
+                            summaryText.AppendLine("Candidate rejected or left partially reviewed; none of its files were applied.");
+                        else
+                        {
+                            var explicitApplyExecutor = new Codev.CodeTaskToolExecutor(files, conversation,
+                                _ => Task.FromResult(true), _ => Task.FromResult(false),
+                                initialContextSources: initialContextSources, turnUserMessageIndex: assistantIndex - 1,
+                                agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
+                                agentProfile: agentProfile,
+                                afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
+                                permissionProjectPath: turn.ProjectPath);
+                            foreach (var proposal in explicitlyApproved)
+                            {
+                                var result = await explicitApplyExecutor.ApplyReviewedProposalAsync(proposal, cancellationToken).ConfigureAwait(false);
+                                if (result.StartsWith("Rejected", StringComparison.Ordinal) || result.StartsWith("Denied", StringComparison.Ordinal) ||
+                                    result.StartsWith("Error", StringComparison.Ordinal))
+                                {
+                                    summaryText.AppendLine("Explicitly approved candidate application stopped: " + result);
+                                    break;
+                                }
+                            }
+                            summaryText.AppendLine("The user explicitly approved this unverified candidate before its reviewed files were applied.");
+                        }
+                    }
+                }
+            }
+
+            var finalTranscript = ComposeProgress() + Environment.NewLine + Environment.NewLine + summaryText;
+            await SetAssistantTranscriptAsync(conversation, assistantIndex, finalTranscript);
+            Persist();
+        }
+        finally
+        {
+            liveAttempt = 0;
+            liveTranscript = "";
+        }
     }
 
     private async Task RunOpenAiCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,

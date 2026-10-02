@@ -265,6 +265,13 @@ public partial class MainWindow : Window
         await viewModel.SetProjectCommandPermissionModeAsync(mode);
     }
 
+    private void BestOfNAttempts_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && sender is MenuItem { Tag: string value } &&
+            int.TryParse(value, out var attempts))
+            viewModel.SetBestOfNAttemptsForNextTurn(attempts);
+    }
+
     private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

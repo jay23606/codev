@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Codev;
 
 namespace Codev.Tests;
@@ -166,5 +167,64 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             Assert.Contains(review.BlockingReasons, reason => reason.Contains("Original file changed"));
         }
         finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Git_attempt_context_is_private_and_uses_the_snapshot_worktree()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-git-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "git project");
+        Directory.CreateDirectory(project);
+        try
+        {
+            await RunGitAsync(project, "init", "--quiet", "--initial-branch=main");
+            await RunGitAsync(project, "config", "user.name", "Codev Test");
+            await RunGitAsync(project, "config", "user.email", "codev-test@example.invalid");
+            var file = Path.Combine(project, "Program.cs");
+            await File.WriteAllTextAsync(file, "class Before {}\n");
+            await RunGitAsync(project, "add", "Program.cs");
+            await RunGitAsync(project, "commit", "--quiet", "-m", "baseline");
+            await File.WriteAllTextAsync(file, "class ExistingUserChange {}\n");
+            var originalStatus = await RunGitAsync(project, "status", "--short");
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+            var snapshot = await manager.CaptureAsync(project);
+
+            try
+            {
+                var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+                Assert.True(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".git")));
+                Assert.Equal(Path.GetFullPath(workspace.WorkspacePath), Path.GetFullPath(
+                    (await RunGitAsync(workspace.WorkspacePath, "rev-parse", "--show-toplevel")).Trim()));
+                Assert.Contains("Program.cs", await RunGitAsync(workspace.WorkspacePath, "status", "--short"), StringComparison.Ordinal);
+                Assert.Empty(await RunGitAsync(workspace.WorkspacePath, "remote", "-v"));
+
+                await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "Program.cs"), "class AttemptChange {}\n");
+                Assert.Contains("AttemptChange", await RunGitAsync(workspace.WorkspacePath, "diff", "--", "Program.cs"), StringComparison.Ordinal);
+                await RunGitAsync(workspace.WorkspacePath, "branch", "attempt-only");
+
+                Assert.Equal(originalStatus, await RunGitAsync(project, "status", "--short"));
+                Assert.DoesNotContain("attempt-only", await RunGitAsync(project, "branch", "--list"), StringComparison.Ordinal);
+            }
+            finally { manager.Delete(snapshot); }
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
+    {
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Git failed to start in test.");
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {stderr}");
+        return stdout;
     }
 }

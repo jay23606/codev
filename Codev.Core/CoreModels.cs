@@ -7,7 +7,8 @@ public sealed record PersistedQueuedTurn(int AssistantIndex, string Model, int N
     string? ProjectPath, List<string>? ContextFiles, List<string>? ContextExclusions, DateTimeOffset EnqueuedAt, double? Temperature = null, string Provider = "ollama", bool IncludeProjectContext = false, bool IncludeRepoMap = false, string OutputStyle = ConversationOutputStyles.Balanced, bool ThinkEnabled = false,
     double? TopP = null, int? TopK = null, double? PresencePenalty = null, double? RepeatPenalty = null, int? NumPredict = null,
     bool ProjectFolderTrusted = false, string? OpenAiReasoningEffort = null, string? OpenAiVerbosity = null,
-    string? OpenAiReasoningMode = null, string? AgentProfileName = null, bool EnableSemanticSearch = false);
+    string? OpenAiReasoningMode = null, string? AgentProfileName = null, bool EnableSemanticSearch = false,
+    int BestOfNAttempts = 1);
 
 public sealed class Conversation
 {
@@ -46,6 +47,7 @@ public sealed class Conversation
     public bool IncludeProjectContextForHosted { get; set; }
     public bool IncludeRepoMap { get; set; }
     public bool EnableSemanticSearch { get; set; }
+    public int BestOfNAttempts { get; set; } = 1;
     public int NumCtx { get; set; }
     public double? Temperature { get; set; }
     public double? TopP { get; set; }

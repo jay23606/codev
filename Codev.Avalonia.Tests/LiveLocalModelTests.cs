@@ -9,6 +9,78 @@ namespace Codev.Avalonia.Tests;
 public sealed class LiveLocalModelTests
 {
     [AvaloniaFact]
+    public async Task Live_best_of_n_runs_independent_local_code_attempts_and_applies_a_verified_winner()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
+            return;
+
+        var root = Path.Combine(Path.GetTempPath(), "Codev-live-best-of-n", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "app-data");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(appData);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            conversation.Model = Environment.GetEnvironmentVariable("CODEV_OLLAMA_MODEL") ?? "qwen3.6:35b-a3b";
+            conversation.Provider = "ollama";
+            conversation.IsCodeTask = true;
+            conversation.IsPlanMode = false;
+            conversation.AgentProfileName = null;
+            conversation.NumCtx = 8192;
+            conversation.NumPredict = 900;
+            conversation.ThinkEnabled = false;
+            conversation.Temperature = 0;
+            viewModel.SetBestOfNAttemptsForNextTurn(2);
+            viewModel.Draft = "Create sum.js with exactly this code:\nfunction add(a, b) { return a + b; }\nif (add(2, 3) !== 5) throw new Error('bad sum');\n" +
+                "Use write_file to create it, then call verify_command exactly once with `node --check sum.js`. Do not use any other tool. Stop after the verification result.";
+
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            await Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+            var sawGeneration = false;
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(8);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                sawGeneration |= viewModel.IsGenerating;
+                if (sawGeneration && !viewModel.IsGenerating) break;
+                await Task.Delay(100);
+            }
+
+            var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
+            Assert.True(sawGeneration, $"The Best-of-N local Code task did not start. Transcript: {transcript}");
+            Assert.False(viewModel.IsGenerating, $"The Best-of-N local Code task did not finish within eight minutes. Transcript: {transcript}");
+            Assert.Equal(1, conversation.BestOfNAttempts);
+            Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
+            Assert.Contains("Best-of-N verification", transcript, StringComparison.Ordinal);
+            Assert.Contains("verification passed", transcript, StringComparison.OrdinalIgnoreCase);
+            var source = await File.ReadAllTextAsync(Path.Combine(project, "sum.js"));
+            Assert.Contains("function add", source, StringComparison.Ordinal);
+            Assert.Contains("bad sum", source, StringComparison.Ordinal);
+            var change = Assert.Single(conversation.FileChanges);
+            Assert.Equal("Create", change.Kind);
+            Assert.False(change.PreviousFileExisted);
+            Assert.Null(change.CheckpointPath);
+        }
+        finally
+        {
+            if (viewModel is not null)
+            {
+                if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
+                var stopDeadline = DateTimeOffset.UtcNow.AddSeconds(20);
+                while (viewModel.IsGenerating && DateTimeOffset.UtcNow < stopDeadline) await Task.Delay(100);
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                await viewModel.SavePendingDraftAsync();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Live_local_code_task_applies_a_file_edit_in_auto_without_showing_review()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))

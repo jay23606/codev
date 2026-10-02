@@ -458,6 +458,11 @@
                                             <Separator />
                                             <MenuItem Header="Include repository map" ToggleType="CheckBox" IsChecked="{Binding IncludeRepoMap, Mode=TwoWay}" IsEnabled="{Binding CanIncludeRepoMap}" />
                                             <MenuItem Header="Use semantic search" ToggleType="CheckBox" IsChecked="{Binding EnableSemanticSearch, Mode=TwoWay}" IsEnabled="{Binding CanUseSemanticSearch}" ToolTip.Tip="Adds an optional local embeddings search tool to this trusted project Code task. Build the project index in Settings first." />
+                                            <MenuItem Header="{Binding BestOfNAttemptsMenuLabel}" IsEnabled="{Binding CanSelectBestOfNAttempts}" ToolTip.Tip="{Binding BestOfNAttemptsTooltip}">
+                                                <MenuItem Header="1 attempt · default" Tag="1" Click="BestOfNAttempts_Click" />
+                                                <MenuItem Header="2 independent attempts" Tag="2" Click="BestOfNAttempts_Click" />
+                                                <MenuItem Header="3 independent attempts" Tag="3" Click="BestOfNAttempts_Click" />
+                                            </MenuItem>
                                             <MenuItem Header="Clear selected files" IsVisible="{Binding HasSelectedContextFiles}" Command="{Binding ClearContextFilesCommand}" />
                                         </MenuFlyout>
                                     </Button.Flyout>
