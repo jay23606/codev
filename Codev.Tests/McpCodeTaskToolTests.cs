@@ -415,8 +415,10 @@ public sealed class McpCodeTaskToolTests
         public static string Echo(string message) => "Echo from legacy SSE: " + message;
     }
 
-    [Fact]
-    public async Task OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OAuth_http_mcp_server_issuer_mismatch_is_rejected_and_matching_login_persists_refresh_tokens(bool issuerMismatch)
     {
         var useNativeCredentialStore = string.Equals(Environment.GetEnvironmentVariable("CODEV_TEST_NATIVE_MCP_OAUTH_VAULT"), "1", StringComparison.Ordinal);
         if (useNativeCredentialStore && !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
@@ -430,6 +432,7 @@ public sealed class McpCodeTaskToolTests
         portReservation.Stop();
         var origin = new Uri($"http://127.0.0.1:{port}/");
         var issuer = new Uri(origin, "/").AbsoluteUri.TrimEnd('/');
+        var callbackIssuer = issuerMismatch ? new Uri(origin, "other-issuer").AbsoluteUri.TrimEnd('/') : issuer;
         var mcpUri = new Uri(origin, "mcp");
         var resourceMetadataUri = new Uri(origin, ".well-known/oauth-protected-resource/mcp");
         var tokenEndpointUri = new Uri(origin, "token");
@@ -537,7 +540,7 @@ public sealed class McpCodeTaskToolTests
             Assert.Equal("mcp", query["scope"]);
             var redirectUri = new Uri(query["redirect_uri"] ?? throw new InvalidDataException("OAuth redirect URI was not supplied."));
             var callback = new Uri(redirectUri.AbsoluteUri + "?code=authorization-code&state=" +
-                Uri.EscapeDataString(query["state"] ?? "") + "&iss=" + Uri.EscapeDataString(issuer));
+                Uri.EscapeDataString(query["state"] ?? "") + "&iss=" + Uri.EscapeDataString(callbackIssuer));
             browserCallbackTask = CompleteBrowserCallbackAsync(callback, cancellationToken);
             return Task.CompletedTask;
         };
@@ -554,6 +557,20 @@ public sealed class McpCodeTaskToolTests
             {
                 throw new TimeoutException($"OAuth startup did not complete. HTTP events: {string.Join(" | ", requestEvents)}; status: {string.Join(" | ", statusEvents)}; browser launches: {browserLaunches}; browser events: {string.Join(" | ", browserEvents)}.", ex);
             }
+
+            if (issuerMismatch)
+            {
+                await using (session)
+                {
+                    Assert.Empty(session.Tools);
+                    Assert.Contains(session.ConnectionLog, entry => entry.Contains("connection failed", StringComparison.Ordinal));
+                }
+                Assert.Equal(1, Volatile.Read(ref browserLaunches));
+                Assert.Equal(0, Volatile.Read(ref authorizationCodeExchanges));
+                Assert.Null(await vault.GetTokensAsync(vaultAccount!));
+                return;
+            }
+
             await using (session)
             {
                 var tool = Assert.Single(session.Tools.Values, candidate => candidate.Operation == McpCodeTaskOperationKind.Tool);
