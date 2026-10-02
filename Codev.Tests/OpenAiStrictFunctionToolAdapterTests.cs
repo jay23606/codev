@@ -155,6 +155,26 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
         Assert.Throws<ArgumentException>(() => OpenAiStrictFunctionToolAdapter.Convert(source.RootElement));
     }
 
+    [Fact]
+    public void Optional_tool_properties_become_required_nullable_fields_in_strict_schema()
+    {
+        using var source = JsonDocument.Parse("""
+            {"type":"function","function":{"name":"mcp_optional","parameters":{"type":"object","properties":{"required":{"type":"string"},"optional":{"type":"string"},"already_nullable":{"anyOf":[{"type":"string"},{"type":"null"}]}},"required":["required"],"additionalProperties":false}}}
+            """);
+
+        var result = OpenAiStrictFunctionToolAdapter.Convert(source.RootElement);
+        var parameters = result["parameters"]!.AsObject();
+        var properties = parameters["properties"]!.AsObject();
+
+        Assert.Equal(new[] { "required", "optional", "already_nullable" },
+            parameters["required"]!.AsArray().Select(value => value!.GetValue<string>()));
+        Assert.Equal("string", properties["required"]!["type"]!.GetValue<string>());
+        Assert.Equal(new[] { "string", "null" }, properties["optional"]!["anyOf"]!.AsArray()
+            .Select(branch => branch!["type"]!.GetValue<string>()));
+        Assert.Equal(new[] { "string", "null" }, properties["already_nullable"]!["anyOf"]!.AsArray()
+            .Select(branch => branch!["type"]!.GetValue<string>()));
+    }
+
     private static void AssertStrictSchema(JsonElement schema)
     {
         if (schema.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "object")

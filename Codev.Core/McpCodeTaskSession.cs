@@ -84,6 +84,8 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     public const int MaxResourceTemplates = 512;
     public const int MaxModelOperations = 512;
     public const int MaxDescriptionCharacters = 4_000;
+    public const int MaxToolSchemaCharacters = 64 * 1024;
+    public const int MaxTotalToolSchemaCharacters = 1024 * 1024;
     public static readonly TimeSpan TotalStartupTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan OAuthStartupTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TotalShutdownTimeout = TimeSpan.FromSeconds(10);
@@ -97,6 +99,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     private readonly List<string> _connectionLog = [];
     private int _toolCount;
     private int _modelOperationCount;
+    private int _toolSchemaCharacters;
 
     private McpCodeTaskSession() { }
 
@@ -203,11 +206,20 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                             break;
                         }
                         var protocolTool = tool.ProtocolTool;
-                        if (protocolTool.InputSchema.ValueKind != JsonValueKind.Object ||
-                            !protocolTool.InputSchema.TryGetProperty("type", out var schemaType) || schemaType.GetString() != "object")
+                        if (!IsValidToolName(tool.Name))
                         {
-                            session._connectionLog.Add($"{server.Name}/{SafeLabel(tool.Name)}: skipped; tools must use an object input schema.");
+                            session._connectionLog.Add($"{server.Name}: skipped a tool with an invalid or oversized name.");
                             continue;
+                        }
+                        if (!TryValidateToolSchema(protocolTool.InputSchema, session._toolSchemaCharacters, out var schemaCharacters))
+                        {
+                            session._connectionLog.Add($"{server.Name}/{SafeLabel(tool.Name)}: skipped; its input schema is invalid or exceeds Codev's schema size budget.");
+                            continue;
+                        }
+                        if (ExceedsTotalToolSchemaBudget(session._toolSchemaCharacters, schemaCharacters))
+                        {
+                            session._connectionLog.Add($"{server.Name}: tool discovery stopped at Codev's aggregate input-schema size limit.");
+                            break;
                         }
 
                         var functionName = CreateFunctionName(server.Id, tool.Name);
@@ -218,10 +230,11 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                         }
                         var description = Bound(tool.Description ?? "", MaxDescriptionCharacters);
                         session._tools.Add(functionName, new McpCodeTaskTool(functionName, server.Id, server.Name,
-                            tool.Name, description, protocolTool.InputSchema.Clone(), tool,
+                            Bound(tool.Name, 160), description, protocolTool.InputSchema.Clone(), tool,
                             server.ExecutionTimeoutMs ?? McpServerConfigurationStore.DefaultExecutionTimeoutMs));
                         session._toolCount++;
                         session._modelOperationCount++;
+                        session._toolSchemaCharacters += schemaCharacters;
                         added++;
                     }
                     session._clients.Add(client);
@@ -339,6 +352,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
 
         var parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText(), JsonOptions)
             ?? throw new InvalidOperationException("MCP tool arguments could not be read.");
+        OmitNullOptionalArguments(tool.InputSchema, parsed);
         var result = await McpOperationTimeout.RunAsync(
             async token => await tool.ClientTool.CallAsync(parsed, cancellationToken: token).ConfigureAwait(false), tool.ExecutionTimeoutMs, cancellationToken).ConfigureAwait(false);
         var output = new StringBuilder();
@@ -457,6 +471,43 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
         if (remaining <= TimeSpan.Zero) throw new TimeoutException("The total MCP startup budget elapsed.");
         return Math.Max(1, Math.Min(requestedTimeoutMs, (int)Math.Ceiling(remaining.TotalMilliseconds)));
     }
+
+    internal static bool TryValidateToolSchema(JsonElement schema, int existingSchemaCharacters, out int schemaCharacters)
+    {
+        schemaCharacters = 0;
+        if (existingSchemaCharacters < 0 || existingSchemaCharacters > MaxTotalToolSchemaCharacters ||
+            schema.ValueKind != JsonValueKind.Object || !schema.TryGetProperty("type", out var schemaType) ||
+            schemaType.ValueKind != JsonValueKind.String || schemaType.GetString() != "object")
+            return false;
+
+        schemaCharacters = schema.GetRawText().Length;
+        return schemaCharacters <= MaxToolSchemaCharacters;
+    }
+
+    internal static bool ExceedsTotalToolSchemaBudget(int existingSchemaCharacters, int additionalSchemaCharacters) =>
+        existingSchemaCharacters < 0 || additionalSchemaCharacters < 0 ||
+        existingSchemaCharacters > MaxTotalToolSchemaCharacters - additionalSchemaCharacters;
+
+    internal static void OmitNullOptionalArguments(JsonElement schema, IDictionary<string, object?> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object)
+            return;
+        var required = schema.TryGetProperty("required", out var requiredElement) && requiredElement.ValueKind == JsonValueKind.Array
+            ? requiredElement.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in properties.EnumerateObject())
+        {
+            if (required.Contains(property.Name) || !arguments.TryGetValue(property.Name, out var value)) continue;
+            if (value is null || value is JsonElement { ValueKind: JsonValueKind.Null })
+                arguments.Remove(property.Name);
+        }
+    }
+
+    internal static bool IsValidToolName(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && name.Length <= 160 && !name.Any(char.IsControl);
 
     private static async Task<int> DiscoverPromptsAsync(McpCodeTaskSession session, McpClient client,
         McpServerConfiguration server, System.Diagnostics.Stopwatch startup, TimeSpan startupBudget,

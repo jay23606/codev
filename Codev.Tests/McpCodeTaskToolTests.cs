@@ -32,6 +32,46 @@ public sealed class McpCodeTaskToolTests
     }
 
     [Fact]
+    public void Mcp_tool_metadata_is_bounded_before_it_reaches_model_schemas()
+    {
+        using var validSchema = JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}}}""");
+        Assert.True(McpCodeTaskSession.TryValidateToolSchema(validSchema.RootElement, 0, out var schemaCharacters));
+        Assert.True(schemaCharacters > 0);
+        Assert.False(McpCodeTaskSession.ExceedsTotalToolSchemaBudget(
+            McpCodeTaskSession.MaxTotalToolSchemaCharacters - schemaCharacters, schemaCharacters));
+        Assert.True(McpCodeTaskSession.ExceedsTotalToolSchemaBudget(
+            McpCodeTaskSession.MaxTotalToolSchemaCharacters - schemaCharacters + 1, schemaCharacters));
+
+        var oversizedJson = JsonSerializer.Serialize(new
+        {
+            type = "object",
+            description = new string('x', McpCodeTaskSession.MaxToolSchemaCharacters)
+        });
+        using var oversizedSchema = JsonDocument.Parse(oversizedJson);
+        Assert.False(McpCodeTaskSession.TryValidateToolSchema(oversizedSchema.RootElement, 0, out _));
+        using var arraySchema = JsonDocument.Parse("[]");
+        Assert.False(McpCodeTaskSession.TryValidateToolSchema(arraySchema.RootElement, 0, out _));
+
+        Assert.True(McpCodeTaskSession.IsValidToolName("read_resource"));
+        Assert.False(McpCodeTaskSession.IsValidToolName(new string('x', 161)));
+        Assert.False(McpCodeTaskSession.IsValidToolName("tool\nname"));
+    }
+
+    [Fact]
+    public void Null_values_for_optional_mcp_tool_fields_are_omitted_before_server_call()
+    {
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{"required":{"type":"string"},"optional":{"type":"string"}},"required":["required"]}""");
+        using var argumentsJson = JsonDocument.Parse("""{"required":null,"optional":null,"unlisted":null}""");
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argumentsJson.RootElement.GetRawText())!;
+
+        McpCodeTaskSession.OmitNullOptionalArguments(schema.RootElement, arguments);
+
+        Assert.Contains("required", arguments);
+        Assert.DoesNotContain("optional", arguments);
+        Assert.Contains("unlisted", arguments);
+    }
+
+    [Fact]
     public void Ollama_schema_preserves_the_server_input_schema()
     {
         using var schema = JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}""");

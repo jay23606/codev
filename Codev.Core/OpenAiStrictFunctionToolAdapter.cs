@@ -21,7 +21,7 @@ public static class OpenAiStrictFunctionToolAdapter
         var parameters = JsonNode.Parse(parameterElement.GetRawText()) as JsonObject
             ?? throw new ArgumentException("The function tool parameters must be an object schema.", nameof(tool));
         NormalizeSchema(parameters);
-        if (parameters["type"]?.GetValue<string>() != "object")
+        if (GetTypeName(parameters["type"]) != "object")
             throw new ArgumentException("The root function parameter schema must have type object.", nameof(tool));
 
         var result = new JsonObject
@@ -40,20 +40,51 @@ public static class OpenAiStrictFunctionToolAdapter
     {
         foreach (var constraint in RuntimeOnlyConstraints) schema.Remove(constraint);
 
-        if (schema["type"]?.GetValue<string>() == "object")
+        if (GetTypeName(schema["type"]) == "object")
         {
             var properties = schema["properties"] as JsonObject ?? new JsonObject();
+            var required = (schema["required"] as JsonArray ?? [])
+                .Select(value => value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var name) ? name : null)
+                .Where(name => name is not null)
+                .ToHashSet(StringComparer.Ordinal);
             schema["properties"] = properties;
             schema["required"] = new JsonArray(properties.Select(property => (JsonNode?)JsonValue.Create(property.Key)).ToArray());
             schema["additionalProperties"] = false;
             foreach (var property in properties.ToArray())
-                if (property.Value is JsonObject nested) NormalizeSchema(nested);
+            {
+                if (property.Value is not JsonObject nested) continue;
+                NormalizeSchema(nested);
+                if (!required.Contains(property.Key) && !AllowsNull(nested))
+                {
+                    properties[property.Key] = new JsonObject
+                    {
+                        ["anyOf"] = new JsonArray(property.Value!.DeepClone(), new JsonObject { ["type"] = "null" })
+                    };
+                }
+            }
         }
 
         if (schema["items"] is JsonObject items) NormalizeSchema(items);
         foreach (var keyword in new[] { "anyOf", "oneOf", "allOf" })
+        {
             if (schema[keyword] is JsonArray alternatives)
+            {
                 foreach (var alternative in alternatives)
                     if (alternative is JsonObject nested) NormalizeSchema(nested);
+            }
+        }
     }
+
+    private static bool AllowsNull(JsonObject schema)
+    {
+        if (schema["type"] is JsonArray types && types.Any(type =>
+                type is JsonValue jsonType && jsonType.TryGetValue<string>(out var typeName) && typeName == "null")) return true;
+        foreach (var keyword in new[] { "anyOf", "oneOf" })
+            if (schema[keyword] is JsonArray alternatives && alternatives.Any(alternative =>
+                    alternative is JsonObject branch && AllowsNull(branch))) return true;
+        return GetTypeName(schema["type"]) == "null";
+    }
+
+    private static string? GetTypeName(JsonNode? value) =>
+        value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var typeName) ? typeName : null;
 }
