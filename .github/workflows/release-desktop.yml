@@ -47,8 +47,13 @@ jobs:
         run: dotnet restore Codev.Cli/Codev.Cli.csproj
 
       - name: Run portable tests
-        if: matrix.rid != 'osx-x64'
+        if: matrix.rid != 'osx-x64' && matrix.rid != 'osx-arm64'
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
+
+      - name: Run portable tests with hang diagnostics on Apple Silicon
+        if: matrix.rid == 'osx-arm64'
+        timeout-minutes: 8
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 3m --blame-hang-dump-type none --logger "console;verbosity=normal"
 
       - name: Run portable tests with hang diagnostics on macOS Intel
         if: matrix.rid == 'osx-x64'
