@@ -545,7 +545,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public Func<Task<bool>>? ConfirmHostedCodeTaskConsentAsync { get; set; }
     public string ModelPickerPlaceholder => _isLoadingModels ? "Loading Ollama models…" :
         ConnectionStatus.StartsWith("Ollama connected", StringComparison.OrdinalIgnoreCase)
-            ? Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "No local models installed" : "No models available from server"
+            ? Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "No local chat models installed" : "No chat models available from server"
             : "Ollama unavailable";
     public bool IsQueuePaused => _queuePaused;
     public bool CanClearConversation => Codev.ConversationHistoryClearService.CanClear(ActiveConversation,
@@ -4396,9 +4396,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             var response = await _http.GetFromJsonAsync<OllamaTags>(Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/tags"), timeout.Token);
-            var installed = response?.Models?.Select(model => model.Name)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
+            var installed = Codev.OllamaModelSelection.FilterChatCapableModels(response?.Models?.Select(model =>
+                (model.Name, (IReadOnlyCollection<string>?)model.Capabilities)) ?? []);
             var known = new (string Display, string[] Aliases)[]
             {
                 ("Qwen3-Coder-Next · Q2 · 24K", ["qwen3-coder-next-q2-24k", "qwen3-coder-next:q2_k_l", "hf.co/bartowski/Qwen_Qwen3-Coder-Next-GGUF:Q2_K_L"]),
@@ -4435,7 +4434,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 OnPropertyChanged(nameof(SelectedModel));
                 RefreshContextSizes(Model);
                 if (Provider != "ollama") ConnectionStatus = HostedModelStatus(Provider, Model);
-                else if (allChoices.Length == 0) ConnectionStatus = $"Ollama connected · no models installed{(Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "" : " on remote server")}";
+                else if (allChoices.Length == 0) ConnectionStatus = $"Ollama connected · no chat-capable models installed{(Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "" : " on remote server")}";
                 else
                 {
                     ConnectionStatus = $"Ollama connected · {allChoices.Length} model(s) · {(Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) ? "local" : "remote")}";
@@ -5073,7 +5072,11 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }).GetTask();
 
     private sealed class OllamaTags { [JsonPropertyName("models")] public List<OllamaTag>? Models { get; set; } }
-    private sealed class OllamaTag { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
+    private sealed class OllamaTag
+    {
+        [JsonPropertyName("name")] public string Name { get; set; } = "";
+        [JsonPropertyName("capabilities")] public List<string>? Capabilities { get; set; }
+    }
     private sealed class OllamaRunningModels { [JsonPropertyName("models")] public List<OllamaRunningModel>? Models { get; set; } }
     private sealed class OllamaRunningModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed record ChildSessionCreationResult(Codev.Conversation Child, IReadOnlyList<string> DisabledFilters);

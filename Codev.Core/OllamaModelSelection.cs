@@ -3,6 +3,25 @@ namespace Codev;
 /// <summary>Matches a saved model name to Ollama's installed tag, including an optional :latest suffix.</summary>
 public static class OllamaModelSelection
 {
+    /// <summary>Returns installed tags that Ollama reports as supporting chat completion.</summary>
+    /// <remarks>Older Ollama versions omit capabilities, so unknown models remain selectable.</remarks>
+    public static string[] FilterChatCapableModels(
+        IEnumerable<(string Name, IReadOnlyCollection<string>? Capabilities)> installedModels)
+    {
+        ArgumentNullException.ThrowIfNull(installedModels);
+        return installedModels
+            .Where(model => !string.IsNullOrWhiteSpace(model.Name) && SupportsChat(model.Capabilities))
+            .Select(model => model.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static bool SupportsChat(IReadOnlyCollection<string>? capabilities)
+    {
+        if (capabilities is null || capabilities.Count == 0) return true;
+        return capabilities.Contains("completion", StringComparer.OrdinalIgnoreCase);
+    }
+
     public static string? ResolveInstalledTag(string? preferred, IEnumerable<string> installedTags)
     {
         ArgumentNullException.ThrowIfNull(installedTags);
