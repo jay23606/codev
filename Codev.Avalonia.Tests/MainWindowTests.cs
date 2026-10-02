@@ -236,6 +236,65 @@ public sealed class MainWindowTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Debug_profile_ask_rule_does_not_prompt_in_auto_mode()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        var viewModel = new MainViewModel(root);
+        MainWindow? window = null;
+        try
+        {
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            var debugProfile = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Debug");
+            var profilePrompts = 0;
+            var commandPrompts = 0;
+            viewModel.ConfirmAgentProfileToolAsync = (_, _, _) =>
+            {
+                profilePrompts++;
+                return Task.FromResult(false);
+            };
+            viewModel.ApproveProjectCommandAsync = _ =>
+            {
+                commandPrompts++;
+                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+            };
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var profilePermission = typeof(MainViewModel).GetMethod("CheckAgentProfileToolPermissionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var projectApproval = typeof(MainViewModel).GetMethod("ApproveCommandWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var executor = new CodeTaskToolExecutor(new WorkspaceFileService(project), conversation,
+                _ => Task.FromResult(false), _ => Task.FromResult(false),
+                permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () =>
+                    await (Task<CommandApprovalOutcome>)projectApproval.Invoke(viewModel, [proposal, Array.Empty<string>()])!),
+                agentProfilePermission: (name, args) =>
+                    (Task<AgentToolProfileDecision>)profilePermission.Invoke(viewModel, [conversation, debugProfile, name, args])!,
+                agentProfile: debugProfile,
+                permissionProjectPath: project);
+            using var arguments = JsonDocument.Parse("""{"command":"dotnet --version"}""");
+
+            var result = await executor.ExecuteAsync("verify_command", arguments.RootElement.Clone());
+
+            Assert.Contains("Verification PASSED (exit code 0)", result, StringComparison.Ordinal);
+            Assert.Equal(0, profilePrompts);
+            Assert.Equal(0, commandPrompts);
+            Assert.False(Assert.IsType<Border>(window.FindControl<Border>("InlineApprovalPanel")).IsVisible);
+
+        }
+        finally
+        {
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
     private static async Task StopAndFlushAsync(MainViewModel viewModel)
     {
         var startup = typeof(MainViewModel).GetField("_managedWorkspacePermissionDefaultsTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task;
