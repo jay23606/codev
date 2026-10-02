@@ -18,6 +18,61 @@ namespace Codev.Avalonia.Tests;
 public sealed class MainWindowTests
 {
     [AvaloniaFact]
+    public async Task Theme_button_persists_the_selected_theme_across_view_model_restart()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? firstViewModel = null;
+        MainWindow? firstWindow = null;
+        MainViewModel? restoredViewModel = null;
+        MainWindow? restoredWindow = null;
+        try
+        {
+            firstViewModel = new MainViewModel(root);
+            firstWindow = new MainWindow { DataContext = firstViewModel };
+            firstWindow.Show();
+            firstWindow.UpdateLayout();
+
+            Assert.True(firstViewModel.IsDarkTheme);
+            var themeButton = Assert.Single(firstWindow.GetVisualDescendants().OfType<Button>(),
+                button => button.Content?.ToString()?.Contains("Switch to light mode", StringComparison.Ordinal) == true);
+            Assert.NotNull(themeButton.Command);
+            themeButton.Command!.Execute(themeButton.CommandParameter);
+
+            Assert.False(firstViewModel.IsDarkTheme);
+            var settingsPath = Path.Combine(root, "Codev", "avalonia-settings.json");
+            var settingsSave = typeof(MainViewModel).GetField("_settingsPersistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(firstViewModel) as Task;
+            Assert.NotNull(settingsSave);
+            await settingsSave!.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("light", AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).Theme);
+
+            firstWindow.Close();
+            firstWindow = null;
+            await StopAndFlushAsync(firstViewModel);
+            firstViewModel = null;
+
+            restoredViewModel = new MainViewModel(root);
+            restoredWindow = new MainWindow { DataContext = restoredViewModel };
+            restoredWindow.Show();
+            restoredWindow.UpdateLayout();
+
+            Assert.False(restoredViewModel.IsDarkTheme);
+            Assert.Single(restoredWindow.GetVisualDescendants().OfType<Button>(),
+                button => button.Content?.ToString()?.Contains("Switch to dark mode", StringComparison.Ordinal) == true);
+        }
+        finally
+        {
+            firstWindow?.Close();
+            restoredWindow?.Close();
+            if (firstViewModel is not null) await StopAndFlushAsync(firstViewModel);
+            if (restoredViewModel is not null) await StopAndFlushAsync(restoredViewModel);
+            if (global::Avalonia.Application.Current is { } app)
+                app.RequestedThemeVariant = global::Avalonia.Styling.ThemeVariant.Dark;
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public void Attached_project_exposes_a_persistable_auto_command_mode_selector()
     {
         var window = new MainWindow
