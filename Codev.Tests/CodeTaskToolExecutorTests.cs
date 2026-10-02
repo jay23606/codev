@@ -113,6 +113,38 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Agent_profile_mcp_deny_blocks_direct_call_before_server_or_project_approval()
+    {
+        const string profileText = "---\nname: NoGitHubWrites\ndescription: Block GitHub MCP tools.\ntools: mcp_github_*=deny\n---\nDo not call GitHub tools.";
+        Assert.True(AgentProfileCatalog.TryParse("no-github-writes.md", profileText, "user", out var profile, out var error), error);
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"additionalProperties":false}""");
+        var tool = new McpCodeTaskTool("mcp_github_create_issue_0123456789abcdef", "github", "GitHub",
+            "create_issue", "Create a GitHub issue.", schema.RootElement.Clone(), null!);
+        var serverCalled = false;
+        var projectApprovalCalled = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false),
+            mcpTools: new Dictionary<string, McpCodeTaskTool> { [tool.FunctionName] = tool },
+            agentProfilePermission: (name, _) => Task.FromResult(
+                AgentProfilePolicy.PermissionFor(profile!, name) == AgentToolPermission.Deny
+                    ? AgentToolProfileDecision.Denied
+                    : AgentToolProfileDecision.DeferToProjectPolicy),
+            agentProfile: profile,
+            mcpCall: (_, _, _) => { serverCalled = true; return Task.FromResult("must not run"); },
+            mcpPermissionApproval: (_, _, _) =>
+            {
+                projectApprovalCalled = true;
+                return Task.FromResult(CommandApprovalOutcome.Approved);
+            });
+
+        var result = await ExecuteAsync(executor, tool.FunctionName, "{}");
+
+        Assert.Contains("Denied by the selected agent profile", result, StringComparison.Ordinal);
+        Assert.False(serverCalled);
+        Assert.False(projectApprovalCalled);
+    }
+
+    [Fact]
     public async Task Agent_skill_tool_loads_guidance_and_profile_can_deny_it()
     {
         Assert.True(AgentProfileCatalog.TryParse("limited.md", "---\nname: Limited\ndescription: Limited skill access.\ntools: load_skill_* = deny\n---\nNo skills.",
