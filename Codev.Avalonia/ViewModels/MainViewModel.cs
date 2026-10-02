@@ -1767,7 +1767,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             child.UpdatedAt = DateTimeOffset.Now;
             Persist();
             RebuildLists();
-            ReportContextActionStatus($"Recovered child worktree · {branch}");
+            ReportContextActionStatus($"Recovered child worktree · {branch}{GetDisabledFilterNotice(recovered.DisabledFilters)}");
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TimeoutException)
@@ -1777,7 +1777,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
     }
 
-    private async Task<Codev.Conversation?> CreateIsolatedChildSessionCoreAsync(Codev.Conversation parent, bool selectChild,
+    private async Task<ChildSessionCreationResult?> CreateIsolatedChildSessionCoreAsync(Codev.Conversation parent, bool selectChild,
         bool invokedFromCurrentParentTurn = false)
     {
         if (!_conversations.Contains(parent)) return null;
@@ -1862,8 +1862,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             RebuildLists();
             Persist();
             await _persistenceTask;
-            ReportContextActionStatus($"Created isolated child session · {worktree.Branch}");
-            return child;
+            ReportContextActionStatus($"Created isolated child session · {worktree.Branch}{GetDisabledFilterNotice(worktree.DisabledFilters)}");
+            return new ChildSessionCreationResult(child, worktree.DisabledFilters ?? []);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TimeoutException)
         {
@@ -1914,8 +1914,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             return "An Orchestrator cannot delegate to another Orchestrator.";
         if (target.Mode == "primary") return $"Agent profile '{target.Name}' is configured for primary use and cannot be delegated to.";
 
-        var child = await CreateIsolatedChildSessionCoreAsync(parent, selectChild: false, invokedFromCurrentParentTurn: true);
-        if (child is null) return ContextActionStatus;
+        var creation = await CreateIsolatedChildSessionCoreAsync(parent, selectChild: false, invokedFromCurrentParentTurn: true);
+        if (creation is null) return ContextActionStatus;
+        var child = creation.Child;
         child.Title = task.Length <= 72 ? task : task[..69].TrimEnd() + "…";
         child.AgentProfileName = target.Name;
         child.DelegatedFromMessageIndex = parentAssistantIndex;
@@ -1948,8 +1949,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(HasQueuedTurns));
         _ = SetConnectionStatusAsync($"Parallel child started · {target.Name}");
         _ = RunDelegatedChildAsync(child, queuedTurn, cancellationToken);
-        return $"Started child task · {target.Name}. It is running in its own Git worktree alongside this response; the completed result will return here as untrusted output.";
+        return $"Started child task · {target.Name}. It is running in its own Git worktree alongside this response; the completed result will return here as untrusted output.{GetDisabledFilterNotice(creation.DisabledFilters)}";
     }
+
+    private static string GetDisabledFilterNotice(IReadOnlyList<string>? disabledFilters) => disabledFilters is { Count: > 0 }
+        ? " Git checkout filters were disabled in this isolated child, so Git LFS and custom-filtered files may remain unexpanded; review those files before relying on them."
+        : "";
 
     private async Task RunDelegatedChildAsync(Codev.Conversation child, Codev.PersistedQueuedTurn turn,
         CancellationToken parentCancellationToken)
@@ -5070,6 +5075,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private sealed class OllamaTag { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed class OllamaRunningModels { [JsonPropertyName("models")] public List<OllamaRunningModel>? Models { get; set; } }
     private sealed class OllamaRunningModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
+    private sealed record ChildSessionCreationResult(Codev.Conversation Child, IReadOnlyList<string> DisabledFilters);
     private sealed record QueuedChatTurn(Codev.Conversation Conversation, Codev.PersistedQueuedTurn Turn,
         bool PausedForRecovery = false);
     private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;

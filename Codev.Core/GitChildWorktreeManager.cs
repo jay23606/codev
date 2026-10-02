@@ -4,7 +4,8 @@ using System.Text;
 namespace Codev;
 
 public sealed record GitChildWorktree(Guid ParentConversationId, Guid ChildConversationId,
-    string RepositoryRoot, string WorktreePath, string Branch, string StartCommit);
+    string RepositoryRoot, string WorktreePath, string Branch, string StartCommit,
+    IReadOnlyList<string>? DisabledFilters = null);
 public sealed record GitChildWorktreeReview(string Branch, string BaseBranch, string StartCommit,
     string BaseHead, string ChildHead, IReadOnlyList<string> Files, string Diff, bool Truncated,
     bool HasUncommittedChanges);
@@ -17,12 +18,14 @@ public sealed class GitChildWorktreeManager
     private static readonly SemaphoreSlim WorktreeAddGate = new(1, 1);
     private readonly string _codevRoot;
     private readonly string _worktreeRoot;
+    private readonly string _hooksDisabledPath;
 
     public GitChildWorktreeManager(string localApplicationDataPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(localApplicationDataPath);
         _codevRoot = Path.GetFullPath(Path.Combine(localApplicationDataPath, "Codev"));
         _worktreeRoot = Path.Combine(_codevRoot, "child-worktrees");
+        _hooksDisabledPath = Path.Combine(_codevRoot, "child-worktree-hooks-disabled");
     }
 
     public async Task<GitChildWorktree> CreateAsync(string repositoryPath, Guid parentConversationId,
@@ -48,6 +51,8 @@ public sealed class GitChildWorktreeManager
         RejectLink(_codevRoot, "The Codev data folder cannot be a link for child worktrees.");
         Directory.CreateDirectory(_worktreeRoot);
         RejectLink(_worktreeRoot, "The Codev child-worktrees folder cannot be a link.");
+        Directory.CreateDirectory(_hooksDisabledPath);
+        RejectLink(_hooksDisabledPath, "The Codev child-worktree hook override folder cannot be a link.");
 
         var id = childConversationId.ToString("N");
         var branch = $"codev/child-{id}";
@@ -58,12 +63,15 @@ public sealed class GitChildWorktreeManager
             if (Directory.Exists(worktreePath) || File.Exists(worktreePath))
                 throw new IOException("A worktree folder already exists for this child conversation.");
 
-            var add = await RunGitAsync(repositoryRoot, ["worktree", "add", "-b", branch, worktreePath, commit], cancellationToken);
+            var addPlan = await SafeWorktreeAddArgumentsAsync(repositoryRoot,
+                ["worktree", "add", "-b", branch, worktreePath, commit], cancellationToken);
+            var add = await RunGitAsync(repositoryRoot, addPlan.Arguments, cancellationToken);
             EnsureSuccess(add, "Git could not create the isolated child worktree.");
             RejectLink(worktreePath, "Git created a linked worktree folder; Codev will not use it.");
+            return new GitChildWorktree(parentConversationId, childConversationId, repositoryRoot, worktreePath, branch, commit,
+                addPlan.DisabledFilters);
         }
         finally { WorktreeAddGate.Release(); }
-        return new GitChildWorktree(parentConversationId, childConversationId, repositoryRoot, worktreePath, branch, commit);
     }
 
     public async Task<GitChildWorktree> RecoverAsync(string repositoryPath, Guid parentConversationId,
@@ -81,9 +89,8 @@ public sealed class GitChildWorktreeManager
         RejectLink(_codevRoot, "The Codev data folder cannot be a link for child worktrees.");
         Directory.CreateDirectory(_worktreeRoot);
         RejectLink(_worktreeRoot, "The Codev child-worktrees folder cannot be a link.");
-        if (Directory.Exists(expectedPath) || File.Exists(expectedPath))
-            throw new IOException("The child folder already exists and will not be overwritten during recovery.");
-
+        Directory.CreateDirectory(_hooksDisabledPath);
+        RejectLink(_hooksDisabledPath, "The Codev child-worktree hook override folder cannot be a link.");
         var baseResult = await RunGitAsync(repositoryRoot, ["rev-parse", "--verify", "--end-of-options", startCommit + "^{commit}"], cancellationToken);
         EnsureSuccess(baseResult, "The child's recorded starting commit is unavailable.");
         var branchResult = await RunGitAsync(repositoryRoot, ["rev-parse", "--verify", "--end-of-options", $"refs/heads/{branch}^{{commit}}"], cancellationToken);
@@ -91,12 +98,22 @@ public sealed class GitChildWorktreeManager
         var ancestor = await RunGitAsync(repositoryRoot, ["merge-base", "--is-ancestor", startCommit, branch], cancellationToken);
         if (ancestor.ExitCode != 0) throw new InvalidOperationException("The child branch no longer descends from its recorded starting commit.");
 
-        var prune = await RunGitAsync(repositoryRoot, ["worktree", "prune", "--expire", "now"], cancellationToken);
-        EnsureSuccess(prune, "Git could not clear stale metadata for missing worktrees.");
-        var add = await RunGitAsync(repositoryRoot, ["worktree", "add", expectedPath, branch], cancellationToken);
-        EnsureSuccess(add, "Git could not restore the child worktree from its retained branch.");
-        RejectLink(expectedPath, "Git created a linked child folder; Codev will not trust it.");
-        return new GitChildWorktree(parentConversationId, childConversationId, repositoryRoot, expectedPath, branch, startCommit);
+        await WorktreeAddGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (Directory.Exists(expectedPath) || File.Exists(expectedPath))
+                throw new IOException("The child folder already exists and will not be overwritten during recovery.");
+            var prune = await RunGitAsync(repositoryRoot, ["worktree", "prune", "--expire", "now"], cancellationToken);
+            EnsureSuccess(prune, "Git could not clear stale metadata for missing worktrees.");
+            var addPlan = await SafeWorktreeAddArgumentsAsync(repositoryRoot,
+                ["worktree", "add", expectedPath, branch], cancellationToken);
+            var add = await RunGitAsync(repositoryRoot, addPlan.Arguments, cancellationToken);
+            EnsureSuccess(add, "Git could not restore the child worktree from its retained branch.");
+            RejectLink(expectedPath, "Git created a linked child folder; Codev will not trust it.");
+            return new GitChildWorktree(parentConversationId, childConversationId, repositoryRoot, expectedPath, branch, startCommit,
+                addPlan.DisabledFilters);
+        }
+        finally { WorktreeAddGate.Release(); }
     }
 
     public bool IsManagedWorktreePath(string path)
@@ -224,6 +241,54 @@ public sealed class GitChildWorktreeManager
         return Path.GetFullPath(result.Output.Trim());
     }
 
+    private async Task<SafeWorktreeAddPlan> SafeWorktreeAddArgumentsAsync(string repositoryRoot,
+        IReadOnlyList<string> worktreeArguments, CancellationToken cancellationToken)
+    {
+        const int maximumFilterDrivers = 64;
+        const int maximumFilterConfigCharacters = 8192;
+        var drivers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var suffix in new[] { "smudge", "process" })
+        {
+            var configured = await RunGitAsync(repositoryRoot,
+                ["config", "--name-only", "--get-regexp", $"^filter\\..*\\.{suffix}$"], cancellationToken,
+                maximumFilterConfigCharacters + 1).ConfigureAwait(false);
+            if (configured.ExitCode is not (0 or 1))
+                throw new InvalidOperationException("Git filter configuration could not be inspected; Codev refused to create a child worktree.");
+            if (configured.Output.Length > maximumFilterConfigCharacters)
+                throw new InvalidOperationException("The Git filter configuration is too large to inspect safely; Codev refused to create a child worktree.");
+
+            var ending = "." + suffix;
+            foreach (var key in configured.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!key.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) ||
+                    !key.EndsWith(ending, StringComparison.OrdinalIgnoreCase) || key.Length <= 6 + ending.Length)
+                    throw new InvalidOperationException("Git returned an invalid filter configuration key; Codev refused to create a child worktree.");
+                drivers.Add(key[7..^ending.Length]);
+                if (drivers.Count > maximumFilterDrivers)
+                    throw new InvalidOperationException("Too many Git filters are configured for a safe child worktree checkout.");
+            }
+        }
+
+        var arguments = new List<string>(worktreeArguments.Count + 8 + drivers.Count * 6)
+        {
+            "-c", $"core.hooksPath={ToGitConfigPath(_hooksDisabledPath)}",
+            "-c", "core.fsmonitor=false"
+        };
+        foreach (var driver in drivers)
+        {
+            if (driver.Length is 0 or > 128 || driver.Any(char.IsControl))
+                throw new InvalidOperationException("A Git filter name is invalid for a safe child worktree checkout.");
+            arguments.Add("-c");
+            arguments.Add($"filter.{driver}.smudge=cat");
+            arguments.Add("-c");
+            arguments.Add($"filter.{driver}.process=");
+            arguments.Add("-c");
+            arguments.Add($"filter.{driver}.required=false");
+        }
+        arguments.AddRange(worktreeArguments);
+        return new SafeWorktreeAddPlan(arguments, drivers.OrderBy(driver => driver, StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
     private async Task<string> FindWorktreePathAsync(string repository, string branch, CancellationToken cancellationToken)
     {
         var result = await RunGitAsync(repository, ["worktree", "list", "--porcelain"], cancellationToken);
@@ -328,8 +393,11 @@ public sealed class GitChildWorktreeManager
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new IOException(message);
     }
 
+    private static string ToGitConfigPath(string path) => OperatingSystem.IsWindows() ? path.Replace('\\', '/') : path;
+
     private static StringComparison PathComparison => OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+    private sealed record SafeWorktreeAddPlan(IReadOnlyList<string> Arguments, IReadOnlyList<string> DisabledFilters);
     private sealed record GitResult(int ExitCode, string Output, string Error);
 }

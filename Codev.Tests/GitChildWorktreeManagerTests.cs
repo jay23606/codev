@@ -75,7 +75,60 @@ public sealed class GitChildWorktreeManagerTests
             Assert.False(File.Exists(Path.Combine(children[1].WorktreePath, "first.txt")));
             Assert.False(File.Exists(Path.Combine(repo, "first.txt")));
             Assert.False(File.Exists(Path.Combine(repo, "second.txt")));
+            await RunGitAsync(children[0].WorktreePath, "add", "--", "first.txt");
+            await RunGitAsync(children[0].WorktreePath, "commit", "-m", "first child change");
+            await RunGitAsync(children[1].WorktreePath, "add", "--", "second.txt");
+            await RunGitAsync(children[1].WorktreePath, "commit", "-m", "second child change");
+            foreach (var child in children) Directory.Delete(child.WorktreePath, recursive: true);
+
+            var recovered = await Task.WhenAll(children.Select(child => manager.RecoverAsync(repo, parentId,
+                child.ChildConversationId, child.Branch, child.StartCommit)));
+
+            Assert.All(recovered, child => Assert.True(manager.IsManagedWorktreePath(child.WorktreePath)));
+            Assert.Equal("first child\n", Normalize(await File.ReadAllTextAsync(Path.Combine(recovered[0].WorktreePath, "first.txt"))));
+            Assert.Equal("second child\n", Normalize(await File.ReadAllTextAsync(Path.Combine(recovered[1].WorktreePath, "second.txt"))));
             Assert.False((await new GitRepositoryService(repo).GetStatusAsync()).HasChanges);
+        }
+        finally { try { Directory.Delete(temp, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Child_worktree_creation_and_recovery_skip_repository_hooks_and_smudge_filters()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "codev-child-worktree-tests", Guid.NewGuid().ToString("N"));
+        var repo = Path.Combine(temp, "repo");
+        Directory.CreateDirectory(repo);
+        try
+        {
+            await RunGitAsync(repo, "init", "-b", "main");
+            await RunGitAsync(repo, "config", "user.name", "Codev Tests");
+            await RunGitAsync(repo, "config", "user.email", "codev-tests@example.invalid");
+            await File.WriteAllTextAsync(Path.Combine(repo, ".gitattributes"), "tracked.txt filter=codevtest\n");
+            await File.WriteAllTextAsync(Path.Combine(repo, "tracked.txt"), "committed\n");
+            await RunGitAsync(repo, "config", "filter.codevtest.smudge", "printf 'filter ran\\n' > smudge-filter-ran; cat");
+            await RunGitAsync(repo, "add", "--", ".gitattributes", "tracked.txt");
+            await RunGitAsync(repo, "commit", "-m", "initial");
+            var hooks = Path.Combine(repo, ".git", "hooks");
+            Directory.CreateDirectory(hooks);
+            await File.WriteAllTextAsync(Path.Combine(hooks, "post-checkout"), "#!/bin/sh\nprintf 'hook ran\\n' > post-checkout-hook-ran\n");
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(Path.Combine(hooks, "post-checkout"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+            var parentId = Guid.NewGuid();
+            var childId = Guid.NewGuid();
+            var manager = new GitChildWorktreeManager(Path.Combine(temp, "appdata"));
+            var child = await manager.CreateAsync(repo, parentId, childId);
+
+            Assert.Contains("codevtest", child.DisabledFilters!);
+            Assert.False(File.Exists(Path.Combine(child.WorktreePath, "post-checkout-hook-ran")));
+            Assert.False(File.Exists(Path.Combine(child.WorktreePath, "smudge-filter-ran")));
+            Assert.Equal("committed\n", Normalize(await File.ReadAllTextAsync(Path.Combine(child.WorktreePath, "tracked.txt"))));
+            Directory.Delete(child.WorktreePath, recursive: true);
+            var recovered = await manager.RecoverAsync(repo, parentId, childId, child.Branch, child.StartCommit);
+            Assert.Contains("codevtest", recovered.DisabledFilters!);
+            Assert.False(File.Exists(Path.Combine(recovered.WorktreePath, "post-checkout-hook-ran")));
+            Assert.False(File.Exists(Path.Combine(recovered.WorktreePath, "smudge-filter-ran")));
+            Assert.Equal("committed\n", Normalize(await File.ReadAllTextAsync(Path.Combine(recovered.WorktreePath, "tracked.txt"))));
         }
         finally { try { Directory.Delete(temp, recursive: true); } catch { } }
     }

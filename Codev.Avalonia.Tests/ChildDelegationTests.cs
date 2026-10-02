@@ -30,9 +30,11 @@ public sealed class ChildDelegationTests
 
             var createChild = typeof(MainViewModel).GetMethod("CreateIsolatedChildSessionCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(createChild);
-            var childTask = Assert.IsAssignableFrom<Task<Codev.Conversation?>>(createChild!.Invoke(viewModel,
+            var childTask = Assert.IsAssignableFrom<Task>(createChild!.Invoke(viewModel,
                 [parent, false, true]));
-            child = await childTask;
+            await childTask;
+            var creation = childTask.GetType().GetProperty("Result")?.GetValue(childTask);
+            child = creation?.GetType().GetProperty("Child")?.GetValue(creation) as Codev.Conversation;
 
             Assert.NotNull(child);
             Assert.Equal(parent.Id, child!.ParentConversationId);
