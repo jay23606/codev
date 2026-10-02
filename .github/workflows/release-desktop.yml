@@ -18,6 +18,7 @@ jobs:
   publish:
     name: Test and publish Avalonia ${{ matrix.rid }} preview
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +49,7 @@ jobs:
 
       - name: Run portable tests with hang diagnostics on macOS Intel
         if: matrix.rid == 'osx-x64'
+        timeout-minutes: 8
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 3m --blame-hang-dump-type none --logger "console;verbosity=normal"
 
       - name: Publish self-contained Avalonia app
