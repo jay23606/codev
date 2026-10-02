@@ -358,6 +358,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         Codev.ConversationCompactionService.ShouldOfferCompaction(conversation.LastPromptTokens, conversation.LastPromptContext);
     public bool ShouldWarnUnknownContext => ActiveConversation is { } conversation && !IsGenerating &&
         conversation.PendingRequestCount == 0 && !_queueProcessorRunning && _requestQueue.Count == 0 &&
+        string.IsNullOrWhiteSpace(Draft) &&
         _lastPromptMessageCounts.TryGetValue(conversation.Id, out var messageCount) && messageCount == conversation.Messages.Count &&
         conversation.NumCtx <= 0 && conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
         Codev.ConversationCompactionService.ShouldWarnUnknownContext(conversation.LastPromptProvider, conversation.LastPromptTokens, conversation.LastPromptContext);
@@ -597,6 +598,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             if (ActiveConversation is { } conversation) conversation.Draft = value;
             ((RelayCommand)SendCommand).NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(SendButtonLabel));
+            OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             _draftSaveTimer.Stop();
             _draftSaveTimer.Start();
         }

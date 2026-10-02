@@ -173,6 +173,52 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Unknown_context_warning_is_visible_after_completed_ollama_turn_using_model_default()
+    {
+        var viewModel = new MainViewModel(Path.Combine(Path.GetTempPath(), "Codev-context-warning", Guid.NewGuid().ToString("N")));
+        var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+        conversation.Provider = "ollama";
+        conversation.Model = "qwen3.8:27b";
+        conversation.NumCtx = 0;
+        conversation.Messages.Add(new ChatMessage("user", "hi"));
+        conversation.Messages.Add(new ChatMessage("assistant", "hello"));
+        conversation.LastPromptProvider = "ollama";
+        conversation.LastPromptModel = conversation.Model;
+        conversation.LastPromptTokens = 12000;
+        conversation.LastPromptContext = 0;
+        var messageCounts = Assert.IsType<Dictionary<Guid, int>>(typeof(MainViewModel)
+            .GetField("_lastPromptMessageCounts", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewModel));
+        messageCounts[conversation.Id] = conversation.Messages.Count;
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            var warning = Assert.Single(window.GetVisualDescendants().OfType<TextBlock>(),
+                block => block.Text == viewModel.UnknownContextWarningLabel);
+            Assert.True(warning.IsVisible);
+            Assert.Contains("compact manually", warning.Text, StringComparison.OrdinalIgnoreCase);
+
+            viewModel.Draft = "A new unsent question";
+            window.UpdateLayout();
+            Assert.False(warning.IsVisible);
+            viewModel.Draft = "";
+            window.UpdateLayout();
+            Assert.True(warning.IsVisible);
+
+            viewModel.ContextSize = 8192;
+            window.UpdateLayout();
+            Assert.False(warning.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+            await StopAndFlushAsync(viewModel);
+        }
+    }
+
+    [AvaloniaFact]
     public void Attached_project_exposes_a_persistable_auto_command_mode_selector()
     {
         var window = new MainWindow
