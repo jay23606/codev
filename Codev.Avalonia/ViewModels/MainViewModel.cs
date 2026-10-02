@@ -2975,7 +2975,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private async Task ProcessQueuedTurnsAsync()
     {
         if (_queueProcessorRunning || _requestQueue.Count == 0 || !HasRunnableQueuedTurn()) return;
-        _queueProcessorRunning = true;
+        SetQueueProcessorRunning(true);
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
         try
@@ -3000,13 +3000,21 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
         finally
         {
-            _queueProcessorRunning = false;
+            SetQueueProcessorRunning(false);
             ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
             ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(QueueStatusLabel));
             OnPropertyChanged(nameof(HasQueuedTurns));
             ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
         }
+    }
+
+    private void SetQueueProcessorRunning(bool running)
+    {
+        if (_queueProcessorRunning == running) return;
+        _queueProcessorRunning = running;
+        OnPropertyChanged(nameof(ShouldOfferCompaction));
+        OnPropertyChanged(nameof(ShouldWarnUnknownContext));
     }
 
     private async Task AppendAssistantDeltaAsync(Codev.Conversation conversation, int assistantIndex, System.Text.StringBuilder output, string delta)

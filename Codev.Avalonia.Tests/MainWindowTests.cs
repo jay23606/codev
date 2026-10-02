@@ -200,6 +200,15 @@ public sealed class MainWindowTests
             Assert.True(warning.IsVisible);
             Assert.Contains("compact manually", warning.Text, StringComparison.OrdinalIgnoreCase);
 
+            var setQueueProcessorRunning = typeof(MainViewModel).GetMethod("SetQueueProcessorRunning", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(setQueueProcessorRunning);
+            setQueueProcessorRunning!.Invoke(viewModel, [true]);
+            window.UpdateLayout();
+            Assert.False(warning.IsVisible);
+            setQueueProcessorRunning.Invoke(viewModel, [false]);
+            window.UpdateLayout();
+            Assert.True(warning.IsVisible);
+
             viewModel.Draft = "A new unsent question";
             window.UpdateLayout();
             Assert.False(warning.IsVisible);
