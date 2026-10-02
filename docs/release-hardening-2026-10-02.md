@@ -33,6 +33,7 @@ This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-p
 
 ## Data safety — partial
 
+- A new Avalonia headless view-model integration test passed the real backup export/import path: after import, history survives while runtime queue entries, hosted workspace-sharing consent, and local checkpoint paths are discarded; the original conversation remains unchanged, the project remains untrusted, and the imported conversation persists after restarting the view model. The complete Avalonia headless suite passed 34/34. This is automated integration evidence, not the remaining manual process-kill, previous-release-store, interactive backup, and uninstall-preservation checks.
 - Existing tests cover atomic replacement/temporary-file cleanup and conversation backup export/import, including omission of runtime permissions, queue execution state, and local checkpoint paths.
 - This run did not kill the packaged app mid-write, reopen a previous-release data store in the shipped package, test backup import interactively, or verify uninstall data preservation. Those checks remain open.
 

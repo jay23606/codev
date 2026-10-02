@@ -18,6 +18,68 @@ namespace Codev.Avalonia.Tests;
 public sealed class MainWindowTests
 {
     [AvaloniaFact]
+    public async Task Backup_round_trip_through_view_model_keeps_existing_history_and_drops_runtime_authority()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            viewModel.SetProjectFolder(project);
+            var source = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            source.Title = "Backup safety smoke";
+            source.Provider = CloudModelProviders.OpenAI;
+            source.Model = "gpt-5.6";
+            source.IsCodeTask = true;
+            source.AllowHostedCodeTask = true;
+            source.IncludeProjectContextForHosted = true;
+            source.Messages = [new("user", "Keep this history"), new("assistant", "History retained")];
+            source.PendingRequestCount = 1;
+            source.PendingTurns = [new PersistedQueuedTurn(1, source.Model, 8192, true, false, project, [], [], DateTimeOffset.UtcNow)];
+            source.FileChanges = [new FileChangeRecord("src/app.cs", Path.Combine(root, "checkpoint.txt"), DateTimeOffset.UtcNow, "Modified")];
+
+            var backup = await viewModel.ExportConversationBackupAsync();
+            Assert.DoesNotContain("PendingTurns", backup, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("checkpoint.txt", backup, StringComparison.OrdinalIgnoreCase);
+
+            Assert.Equal(1, await viewModel.ImportConversationBackupAsync(backup));
+            var imported = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            Assert.NotEqual(source.Id, imported.Id);
+            Assert.Equal("History retained", imported.Messages[1].Content);
+            Assert.False(imported.AllowHostedCodeTask);
+            Assert.False(imported.IncludeProjectContextForHosted);
+            Assert.False(imported.IsCodeTask);
+            Assert.Empty(imported.PendingTurns);
+            Assert.Equal(0, imported.PendingRequestCount);
+            Assert.Null(imported.FileChanges[0].CheckpointPath);
+            Assert.False(viewModel.IsProjectTrusted);
+
+            Assert.Equal("History retained", source.Messages[1].Content);
+            Assert.Single(source.PendingTurns);
+            Assert.Equal(1, source.PendingRequestCount);
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            var restored = new MainViewModel(root);
+            try
+            {
+                Assert.Equal(imported.Id, restored.ActiveConversation?.Id);
+                Assert.False(restored.ActiveConversation!.AllowHostedCodeTask);
+                Assert.Empty(restored.ActiveConversation.PendingTurns);
+                Assert.False(restored.IsProjectTrusted);
+            }
+            finally { await StopAndFlushAsync(restored); }
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Theme_button_persists_the_selected_theme_across_view_model_restart()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
