@@ -79,6 +79,16 @@ public sealed class McpBoundedHttpMessageHandlerTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bounded.ReadAsync(new byte[1], timeout.Token).AsTask());
     }
 
+    [Fact]
+    public async Task Bounded_sse_stream_honors_cancellation_after_partial_event()
+    {
+        await using var source = new BlockingAtEndStream(Encoding.UTF8.GetBytes("data:partial"));
+        await using var bounded = new BoundedSseEventReadStream(source, maximumEventBytes: 64, leaveOpen: true);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bounded.ReadAsync(new byte[64], timeout.Token).AsTask());
+    }
+
     private sealed class StaticResponseHandler(Func<HttpContent> contentFactory) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

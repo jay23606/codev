@@ -40,6 +40,16 @@ public sealed class McpBoundedStdioClientTransportTests
     }
 
     [Fact]
+    public async Task Bounded_stream_honors_cancellation_after_partial_frame()
+    {
+        await using var source = new BlockingAtEndStream(Encoding.UTF8.GetBytes("partial"));
+        await using var bounded = new BoundedLineReadStream(source, maximumLineBytes: 64, leaveOpen: true);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bounded.ReadAsync(new byte[64], timeout.Token).AsTask());
+    }
+
+    [Fact]
     public async Task Process_transport_rejects_an_oversized_server_frame()
     {
         var options = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -89,5 +99,32 @@ public sealed class McpBoundedStdioClientTransportTests
         var received = await session.MessageReader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.NotNull(received);
+    }
+
+    private sealed class BlockingAtEndStream(byte[] data) : Stream
+    {
+        private int _position;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => data.Length;
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position < data.Length)
+            {
+                var count = Math.Min(buffer.Length, data.Length - _position);
+                data.AsMemory(_position, count).CopyTo(buffer);
+                _position += count;
+                return count;
+            }
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }
