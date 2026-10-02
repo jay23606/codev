@@ -18,6 +18,7 @@ namespace Codev.Avalonia.ViewModels;
 /// <summary>Local conversation browser for the Avalonia renderer prototype.</summary>
 public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorService
 {
+    private const string ChildWorktreeBoundaryNotice = "Shell commands still run with your account permissions and are not sandboxed; they can affect files or services outside this child worktree.";
     private readonly string StorePath;
     private readonly string SettingsPath;
     private readonly string LegacySettingsPath;
@@ -1862,7 +1863,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             RebuildLists();
             Persist();
             await _persistenceTask;
-            ReportContextActionStatus($"Created isolated child session · {worktree.Branch}{GetDisabledFilterNotice(worktree.DisabledFilters)}");
+            ReportContextActionStatus($"Created isolated child session · {worktree.Branch}. Codev-managed file changes and Git history are isolated. {ChildWorktreeBoundaryNotice}{GetDisabledFilterNotice(worktree.DisabledFilters)}");
             return new ChildSessionCreationResult(child, worktree.DisabledFilters ?? []);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TimeoutException)
@@ -1927,7 +1928,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
         var userMessage = new Codev.ChatMessage("user", task) { MessageIndex = 0, IsQueued = true };
         var assistantIndex = 1;
-        var placeholder = new Codev.ChatMessage("assistant", "Starting in an isolated Git worktree…");
+        var placeholder = new Codev.ChatMessage("assistant", $"Starting in an isolated Git worktree. {ChildWorktreeBoundaryNotice}");
         child.Messages.Add(userMessage);
         child.Messages.Add(placeholder);
         child.PendingTurns ??= [];
@@ -1949,7 +1950,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(HasQueuedTurns));
         _ = SetConnectionStatusAsync($"Parallel child started · {target.Name}");
         _ = RunDelegatedChildAsync(child, queuedTurn, cancellationToken);
-        return $"Started child task · {target.Name}. It is running in its own Git worktree alongside this response; the completed result will return here as untrusted output.{GetDisabledFilterNotice(creation.DisabledFilters)}";
+        return $"Started child task · {target.Name}. Codev-managed file changes and Git history are isolated in its own worktree; the completed result will return here as untrusted output. {ChildWorktreeBoundaryNotice}{GetDisabledFilterNotice(creation.DisabledFilters)}";
     }
 
     private static string GetDisabledFilterNotice(IReadOnlyList<string>? disabledFilters) => disabledFilters is { Count: > 0 }

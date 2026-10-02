@@ -41,6 +41,7 @@ public sealed class ChildDelegationTests
             Assert.True(Directory.Exists(child.ProjectPath));
             Assert.True(new Codev.GitChildWorktreeManager(appData).IsManagedWorktreePath(child.ProjectPath!));
             Assert.False((await new Codev.GitRepositoryService(repository).GetStatusAsync()).HasChanges);
+            Assert.Contains("Shell commands still run with your account permissions and are not sandboxed", viewModel.ContextActionStatus, StringComparison.Ordinal);
             Assert.False(await viewModel.CreateIsolatedChildSessionAsync(parent));
         }
         finally
