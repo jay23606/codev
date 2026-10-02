@@ -2976,7 +2976,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     }
 
     private async Task RunCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
-        List<OllamaChatMessage> history, Codev.WorkspaceFileService files, Codev.PersistedQueuedTurn turn,
+        List<Codev.OllamaCodeTaskMessage> history, Codev.WorkspaceFileService files, Codev.PersistedQueuedTurn turn,
         System.Text.StringBuilder thinking, CancellationToken cancellationToken, IReadOnlyList<string> initialContextSources,
         IReadOnlyList<Codev.PromptContextSection> capturedContextSections, Codev.AgentProfile? agentProfile)
     {
@@ -2993,7 +2993,6 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var tools = Codev.CodeTaskToolSchemaFactory.CreateOllamaTools(shell, mcpSession.Tools.Values, agentProfile,
             allowDelegation: CanDelegate(conversation, agentProfile), agentSkills: agentSkills, allowBackgroundCommands: true,
             allowSemanticSearch: semanticIndex is not null && Codev.ProjectEmbeddingIndex.HasIndex(SemanticIndexDirectory, files.Root));
-        var repeatedCalls = new Codev.RepeatedToolCallGuard();
         var executor = new Codev.CodeTaskToolExecutor(files, conversation,
             async proposal => await Dispatcher.UIThread.InvokeAsync(async () => await ReviewOrAutoApplyFileChangeAsync(conversation, proposal)),
             _ => Task.FromResult(false),
@@ -3010,91 +3009,40 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             backgroundCommands: _backgroundCommands,
             afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
             semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchAsync(query, cancellationToken: token));
-        var transcript = new System.Text.StringBuilder(mcpSession.ToConnectionTranscript());
+        var initialTranscript = mcpSession.ToConnectionTranscript();
         var initialMessageCount = history.Count;
         var maxSteps = Math.Clamp(agentProfile?.MaxSteps ?? Codev.CodeTaskLimits.MaxModelStepsPerTurn, 1, Codev.CodeTaskLimits.MaxModelStepsPerTurn);
-        for (var round = 0; round < maxSteps; round++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await SetConnectionStatusAsync($"Code task · thinking · step {round + 1}/{maxSteps}");
-            var payload = new Dictionary<string, object>
+        var runner = new Codev.OllamaCodeTaskRunner(_http);
+        var result = await runner.RunAsync(_ollamaEndpoint, turn.Model, history, tools,
+            turn.ThinkEnabled, turn.NumCtx, turn.Temperature, turn.TopP, turn.TopK,
+            turn.PresencePenalty, turn.RepeatPenalty, turn.NumPredict,
+            onRequest: async (_, currentHistory, payloadJson) =>
             {
-                ["model"] = turn.Model,
-                ["messages"] = history,
-                ["keep_alive"] = Codev.OllamaRuntimeClient.ConversationKeepAlive,
-                ["tools"] = tools,
-                ["think"] = turn.ThinkEnabled,
-                ["stream"] = false
-            };
-            if (Codev.OllamaRequestOptions.Build(turn.NumCtx, turn.Temperature, turn.TopP, turn.TopK,
-                turn.PresencePenalty, turn.RepeatPenalty, turn.NumPredict) is { } options) payload["options"] = options;
-            using var request = new HttpRequestMessage(HttpMethod.Post,
-                Codev.OllamaEndpoint.ApiUri(_ollamaEndpoint, "api/chat"));
-            var payloadJson = JsonSerializer.Serialize(payload, JsonSerializerOptions.Web);
-            request.Content = new StringContent(payloadJson, System.Text.Encoding.UTF8, "application/json");
-            var roundMessages = history.Select(message => new Codev.ChatMessage(message.Role, message.Content)).ToArray();
-            var interactions = JsonSerializer.Serialize(history.Skip(initialMessageCount), JsonSerializerOptions.Web);
-            var roundSections = Codev.PromptContextBreakdown.BuildCodeTaskRoundSections(capturedContextSections,
-                interactions, JsonSerializer.Serialize(tools, JsonSerializerOptions.Web),
-                $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}; top_p={turn.TopP?.ToString() ?? "model default"}; top_k={turn.TopK?.ToString() ?? "model default"}; presence_penalty={turn.PresencePenalty?.ToString() ?? "model default"}; repeat_penalty={turn.RepeatPenalty?.ToString() ?? "model default"}; num_predict={turn.NumPredict?.ToString() ?? "model default"}");
-            await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create("ollama", turn.Model,
-                turn.NumCtx, roundSections, roundMessages, payloadJson));
-            using var response = await _http.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException($"Ollama returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).\n{body}");
-            using var document = JsonDocument.Parse(body);
-            var root = document.RootElement;
-            if (root.TryGetProperty("error", out var apiError)) throw new InvalidOperationException(apiError.GetString() ?? apiError.ToString());
-            if (root.TryGetProperty("prompt_eval_count", out var promptCount) && promptCount.TryGetInt32(out var promptTokens))
-            {
-                await RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, turn.NumCtx, promptTokens);
-            }
-            var message = root.GetProperty("message");
-            if (message.TryGetProperty("thinking", out var thinkingChunk) && thinkingChunk.GetString() is { Length: > 0 } thinkingText)
+                var roundMessages = currentHistory.Select(message => new Codev.ChatMessage(message.Role, message.Content)).ToArray();
+                var interactions = JsonSerializer.Serialize(currentHistory.Skip(initialMessageCount), JsonSerializerOptions.Web);
+                var roundSections = Codev.PromptContextBreakdown.BuildCodeTaskRoundSections(capturedContextSections,
+                    interactions, JsonSerializer.Serialize(tools, JsonSerializerOptions.Web),
+                    $"think={turn.ThinkEnabled}; num_ctx={turn.NumCtx}; temperature={turn.Temperature?.ToString() ?? "model default"}; top_p={turn.TopP?.ToString() ?? "model default"}; top_k={turn.TopK?.ToString() ?? "model default"}; presence_penalty={turn.PresencePenalty?.ToString() ?? "model default"}; repeat_penalty={turn.RepeatPenalty?.ToString() ?? "model default"}; num_predict={turn.NumPredict?.ToString() ?? "model default"}");
+                await SetLastPromptContextAsync(conversation, Codev.PromptContextBreakdown.Create("ollama", turn.Model,
+                    turn.NumCtx, roundSections, roundMessages, payloadJson));
+            },
+            onThinking: async thinkingText =>
             {
                 if (thinking.Length > 0) thinking.AppendLine().AppendLine();
                 await AppendAssistantThinkingAsync(conversation, assistantIndex, thinking, thinkingText);
-            }
-            var text = message.TryGetProperty("content", out var content) ? content.GetString() ?? "" : "";
-            var calls = message.TryGetProperty("tool_calls", out var callArray) && callArray.ValueKind == JsonValueKind.Array
-                ? callArray.EnumerateArray().Select(call => call.Clone()).ToArray() : [];
-            if (calls.Length == 0)
+            },
+            onPromptTokens: promptTokens => RecordPromptTokenUsageAsync(conversation, turn.Provider, turn.Model, turn.NumCtx, promptTokens),
+            status: SetConnectionStatusAsync,
+            executeTool: async (name, arguments, token) =>
             {
-                if (!string.IsNullOrWhiteSpace(text)) transcript.Append(text);
-                if (conversation.TaskChecklist.Count > 0)
-                    transcript.AppendLine().AppendLine().Append("**Task checklist**").AppendLine().AppendLine(Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist));
-                await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
-                return;
-            }
-
-            history.Add(new OllamaChatMessage("assistant", text, JsonSerializer.SerializeToElement(calls)));
-            if (!string.IsNullOrWhiteSpace(text)) transcript.AppendLine(text);
-            foreach (var call in calls)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var function = call.GetProperty("function");
-                var name = function.GetProperty("name").GetString() ?? "";
-                var arguments = function.TryGetProperty("arguments", out var args) ? args : default;
+                token.ThrowIfCancellationRequested();
                 if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !_projectFolderTrust.IsTrusted(turn.ProjectPath))
                     throw new InvalidOperationException("Project trust was revoked during the Code task. No further tools will run until it is trusted again.");
-                await SetConnectionStatusAsync($"Code task · {name.Replace('_', ' ')}");
-                if (repeatedCalls.Record(name, arguments) >= Codev.RepeatedToolCallGuard.ConfirmationThreshold)
-                {
-                    var confirmed = await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
-                    if (!confirmed)
-                    {
-                        transcript.AppendLine().AppendLine("Code task stopped because the same tool call repeated. Send a follow-up with more guidance to continue.");
-                        await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
-                        return;
-                    }
-                    repeatedCalls.AllowOneMore();
-                }
-                var result = name switch
+                var toolResult = name switch
                 {
                     "update_task_checklist" => await UpdateTaskChecklistFromModelAsync(conversation, arguments),
-                    "delegate_task" => await DelegateTaskAsync(conversation, arguments, assistantIndex, cancellationToken),
-                    _ => await executor.ExecuteAsync(name, arguments, cancellationToken)
+                    "delegate_task" => await DelegateTaskAsync(conversation, arguments, assistantIndex, token),
+                    _ => await executor.ExecuteAsync(name, arguments, token)
                 };
                 Persist();
                 await Dispatcher.UIThread.InvokeAsync(() =>
@@ -3103,18 +3051,19 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                     OnPropertyChanged(nameof(FileChangesLabel));
                     OnPropertyChanged(nameof(CanReviewFileChanges));
                 });
-                history.Add(new OllamaChatMessage("tool", result, null, name));
-                transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**").AppendLine(TruncateToolOutput(result));
-                await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
-            }
-            await SetConnectionStatusAsync("Code task · Thinking…");
-        }
-        transcript.AppendLine().AppendLine().Append($"Code task reached its {maxSteps}-step limit. The completed tool results are shown above; send a follow-up to continue.");
+                return toolResult;
+            },
+            confirmRepeatedToolCall: async (name, _, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                return await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
+            },
+            onTranscript: text => SetAssistantTranscriptAsync(conversation, assistantIndex, text),
+            initialTranscript: initialTranscript, maxSteps: maxSteps, cancellationToken: cancellationToken);
+        var finalTranscript = result.Transcript;
         if (conversation.TaskChecklist.Count > 0)
-            transcript.AppendLine().AppendLine().Append("**Task checklist**").AppendLine().AppendLine(Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist));
-        await SetAssistantTranscriptAsync(conversation, assistantIndex, transcript.ToString());
-        await SetConnectionStatusAsync("Code task · profile step limit reached");
-        return;
+            finalTranscript += Environment.NewLine + Environment.NewLine + "**Task checklist**" + Environment.NewLine + Environment.NewLine + Codev.TaskChecklistService.FormatForDisplay(conversation.TaskChecklist);
+        await SetAssistantTranscriptAsync(conversation, assistantIndex, finalTranscript);
     }
 
     private async Task RunOpenAiCodeTaskTurnAsync(Codev.Conversation conversation, int assistantIndex,
@@ -3606,7 +3555,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             Codev.OllamaGenerationStats? generationStats = null;
             if (savedTurn.Provider == "ollama")
             {
-                var history = normalizedHistory.Select(message => new OllamaChatMessage(message.Role, message.Content)).ToList();
+                var history = normalizedHistory.Select(message => new Codev.OllamaCodeTaskMessage(message.Role, message.Content)).ToList();
                 if (savedTurn.IsCodeTask)
                 {
                     if (string.IsNullOrWhiteSpace(savedTurn.ProjectPath) || !_projectFolderTrust.IsTrusted(savedTurn.ProjectPath) || !Directory.Exists(savedTurn.ProjectPath))
@@ -4854,11 +4803,6 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private sealed class OllamaTag { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
     private sealed class OllamaRunningModels { [JsonPropertyName("models")] public List<OllamaRunningModel>? Models { get; set; } }
     private sealed class OllamaRunningModel { [JsonPropertyName("name")] public string Name { get; set; } = ""; }
-    private sealed record OllamaChatMessage(
-        [property: JsonPropertyName("role")] string Role,
-        [property: JsonPropertyName("content")] string Content,
-        [property: JsonPropertyName("tool_calls"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? ToolCalls = null,
-        [property: JsonPropertyName("tool_name"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolName = null);
     private sealed record QueuedChatTurn(Codev.Conversation Conversation, Codev.PersistedQueuedTurn Turn,
         bool PausedForRecovery = false);
     private static string RemoveLatestTag(string name) => name.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? name[..^7] : name;
