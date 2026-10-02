@@ -179,7 +179,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     public MainViewModel(string? localDataRoot = null)
     {
-        var dataRoot = Path.GetFullPath(localDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        var dataRoot = Path.GetFullPath(localDataRoot ?? Codev.CodevDataPaths.LocalDataRoot);
         var appData = Path.Combine(dataRoot, "Codev");
         StorePath = Path.Combine(appData, "avalonia-conversations.json");
         SettingsPath = Path.Combine(appData, "avalonia-settings.json");
@@ -3146,7 +3146,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             string.IsNullOrWhiteSpace(turn.ProjectPath))
             throw new InvalidOperationException("Best-of-N requires a selected count of two or three and a project workspace.");
 
-        var manager = new Codev.BestOfNAttemptWorkspaceManager(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        var manager = new Codev.BestOfNAttemptWorkspaceManager(Codev.CodevDataPaths.LocalDataRoot);
         var service = new Codev.BestOfNAttemptExecutionService(manager, new Codev.BestOfNAttemptCoordinator());
         var completed = new List<(int Number, string Transcript, bool Passed, string Summary)>();
         var liveAttempt = 0;

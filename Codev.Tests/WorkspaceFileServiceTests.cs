@@ -194,7 +194,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     {
         var id = Guid.NewGuid();
         var path = Path.Combine(_root, "Program.cs");
-        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
         try
         {
             await File.WriteAllTextAsync(path, "before edit");
@@ -217,7 +217,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         var id = Guid.NewGuid();
         var path = Path.Combine(_root, "src", "Feature.cs");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
         try
         {
             var service = Service;
@@ -240,7 +240,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         var id = Guid.NewGuid();
         var path = Path.Combine(_root, "source.txt");
         var originalBytes = new byte[] { 0xFF, 0x00, 0xC3, 0x28, 0x0D, 0x0A };
-        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
         try
         {
             await File.WriteAllBytesAsync(path, originalBytes);
@@ -269,7 +269,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     {
         var path = Path.Combine(_root, "rapid.js");
         var id = Guid.NewGuid();
-        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
         try
         {
             await File.WriteAllTextAsync(path, "first");

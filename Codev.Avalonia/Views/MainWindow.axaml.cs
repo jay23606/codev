@@ -2851,7 +2851,7 @@ public partial class MainWindow : Window
         header.Children.Add(summary);
         var activeConversation = viewModel.ActiveConversation;
         var childWorktreeManager = new Codev.GitChildWorktreeManager(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            Codev.CodevDataPaths.LocalDataRoot);
         Codev.Conversation[] childChoices = activeConversation is null ? [] : activeConversation.ParentConversationId is not null
             ? new[] { activeConversation }
             : activeConversation.ChildConversations.ToArray();

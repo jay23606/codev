@@ -20,6 +20,28 @@ public sealed class CloudApiKeyVaultTests
     }
 
     [Fact]
+    public async Task Redirected_data_root_uses_a_separate_credential_vault_namespace()
+    {
+        var store = new MemoryCredentialStore();
+        var normalProfile = new CloudApiKeyVault(() => store);
+        var isolatedProfile = new CloudApiKeyVault(() => store, Path.Combine(Path.GetTempPath(), "codev-isolated-vault-profile"));
+        await normalProfile.SaveAsync(CloudModelProviders.OpenAI, "normal-profile-key");
+
+        Assert.Null(await isolatedProfile.GetAsync(CloudModelProviders.OpenAI));
+        await isolatedProfile.SaveAsync(CloudModelProviders.OpenAI, "isolated-profile-key");
+
+        Assert.Equal("normal-profile-key", await normalProfile.GetAsync(CloudModelProviders.OpenAI));
+        Assert.Equal("isolated-profile-key", await isolatedProfile.GetAsync(CloudModelProviders.OpenAI));
+
+        var oauthAccount = new string('c', 64);
+        await normalProfile.SaveTokensAsync(oauthAccount, "normal-profile-token");
+        Assert.Null(await isolatedProfile.GetTokensAsync(oauthAccount));
+        await isolatedProfile.SaveTokensAsync(oauthAccount, "isolated-profile-token");
+        Assert.Equal("normal-profile-token", await normalProfile.GetTokensAsync(oauthAccount));
+        Assert.Equal("isolated-profile-token", await isolatedProfile.GetTokensAsync(oauthAccount));
+    }
+
+    [Fact]
     public async Task Save_replaces_and_remove_forgets_only_selected_provider()
     {
         var store = new MemoryCredentialStore();

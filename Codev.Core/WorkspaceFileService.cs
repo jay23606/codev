@@ -377,7 +377,7 @@ public sealed class WorkspaceFileService
         if (bytes.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB cannot be checkpointed or restored.");
         if (expectedHash is not null && !HashMatches(bytes, expectedHash))
             throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversationId.ToString("N"));
+        var directory = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", conversationId.ToString("N"));
         Directory.CreateDirectory(directory);
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(relativePath)))[..12];
         var backup = Path.Combine(directory, $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{hash}_{Guid.NewGuid():N}.bak");
@@ -516,7 +516,7 @@ public sealed class WorkspaceFileService
 
     private static string ValidateCheckpointPath(Guid conversationId, string checkpointPath)
     {
-        var expectedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversationId.ToString("N"));
+        var expectedRoot = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", conversationId.ToString("N"));
         if (!IsPathWithinRoot(expectedRoot, checkpointPath) || !File.Exists(checkpointPath) || (File.GetAttributes(checkpointPath) & FileAttributes.ReparsePoint) != 0)
             throw new UnauthorizedAccessException("The checkpoint is not a valid local backup for this conversation.");
         return Path.GetFullPath(checkpointPath);

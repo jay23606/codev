@@ -44,7 +44,7 @@ public static class ConversationForkService
         fork.UpdatedAt = DateTimeOffset.Now;
 
         var root = Path.GetFullPath(checkpointRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints"));
+            CodevDataPaths.LocalDataRoot, "Codev", "checkpoints"));
         var sourceDirectory = Path.Combine(root, sourceId.ToString("N"));
         var targetDirectory = Path.Combine(root, fork.Id.ToString("N"));
         if (Directory.Exists(root) && (File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)

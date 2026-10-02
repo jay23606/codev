@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<Conversation> _conversations = [];
     private readonly ObservableCollection<WorkspaceProject> _projects = [];
     private readonly List<ModelOption> _models = [];
-    private static readonly string UserAgentProfilesPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "agents");
+    private static readonly string UserAgentProfilesPath = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "agents");
     private IReadOnlyList<AgentProfile> _availableAgentProfiles = AgentProfileCatalog.BuiltInProfiles
         .Where(profile => !profile.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase)).ToArray();
     private readonly Dictionary<string, string> _hostedApiKeys = new(StringComparer.Ordinal);
@@ -43,14 +43,14 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _storeGate = new(1, 1);
     private readonly SemaphoreSlim _projectsStoreGate = new(1, 1);
     private readonly ProjectCommandPermissionRegistry _projectCommandPermissions = ProjectCommandPermissionRegistry.Load(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-command-permissions.json"));
+        Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "avalonia-command-permissions.json"));
     private readonly Codev.McpServerConfigurationStore _mcpServerConfigurations = new(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "mcp-servers.json"));
+        Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "mcp-servers.json"));
     private readonly Codev.ProjectMcpToolPermissionRegistry _projectMcpPermissions = Codev.ProjectMcpToolPermissionRegistry.Load(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-mcp-permissions.json"));
+        Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "avalonia-mcp-permissions.json"));
     private readonly ProjectFolderTrustRegistry _projectFolderTrust = ProjectFolderTrustRegistry.Load(TrustPath);
     private readonly ConversationWorkspaceManager _conversationWorkspaces = new(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        CodevDataPaths.LocalDataRoot);
     private string? _projectPath;
     private CancellationTokenSource? _requestCancellation;
     private Conversation? _activeRequestConversation;
@@ -78,12 +78,12 @@ public partial class MainWindow : Window
     private string _personalInstructions = "";
     private string _historyStorePath = StorePath;
 
-    private static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.json");
-    private static string RecoveryStorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "conversations.recovered.json");
-    private static string ThemePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "settings.json");
-    private static string ProjectsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "projects.json");
-    private static string UserSlashCommandsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "commands");
-    private static string TrustPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "wpf-trusted-folders.json");
+    private static string StorePath => Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "conversations.json");
+    private static string RecoveryStorePath => Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "conversations.recovered.json");
+    private static string ThemePath => Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "settings.json");
+    private static string ProjectsPath => Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "projects.json");
+    private static string UserSlashCommandsPath => Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "commands");
+    private static string TrustPath => Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "wpf-trusted-folders.json");
 
     public MainWindow()
     {
@@ -1983,7 +1983,7 @@ public partial class MainWindow : Window
         if (answer != MessageBoxResult.Yes) return;
         var wasActive = ReferenceEquals(_active, conversation);
         _conversations.Remove(conversation);
-        var checkpointDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversation.Id.ToString("N"));
+        var checkpointDirectory = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", conversation.Id.ToString("N"));
         try { if (Directory.Exists(checkpointDirectory)) Directory.Delete(checkpointDirectory, recursive: true); } catch { }
         if (wasActive)
         {

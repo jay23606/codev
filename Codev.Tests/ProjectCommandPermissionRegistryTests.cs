@@ -172,7 +172,7 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     [Fact]
     public async Task Protected_commands_cannot_be_saved_as_allows_but_auto_still_honors_deny_rules()
     {
-        var codevDataFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "avalonia-settings.json");
+        var codevDataFile = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "avalonia-settings.json");
         Assert.False(ProjectCommandPermissionRegistry.CanCreateAllowRule("git status --short"));
         Assert.False(ProjectCommandPermissionRegistry.CanCreateAllowRule("Remove-Item .git/config"));
         Assert.False(ProjectCommandPermissionRegistry.CanCreateAllowRule("type " + codevDataFile));

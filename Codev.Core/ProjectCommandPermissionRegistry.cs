@@ -230,7 +230,7 @@ public sealed class ProjectCommandPermissionRegistry
         if (string.IsNullOrWhiteSpace(command)) return true;
         if (GitCommand.IsMatch(command) || GitMetadataPath.IsMatch(command)) return true;
         var normalizedCommand = command.Replace('\\', '/');
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appData = CodevDataPaths.LocalDataRoot;
         if (!string.IsNullOrWhiteSpace(appData))
         {
             var protectedPath = Path.Combine(appData, "Codev").Replace('\\', '/').TrimEnd('/');

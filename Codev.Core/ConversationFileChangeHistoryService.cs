@@ -71,7 +71,7 @@ public static class ConversationFileChangeHistoryService
     {
         try
         {
-            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", conversationId.ToString("N"));
+            var root = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", conversationId.ToString("N"));
             var fullPath = Path.GetFullPath(checkpointPath);
             if (!WorkspaceFileService.IsPathWithinRoot(root, fullPath) ||
                 string.Equals(Path.TrimEndingDirectorySeparator(root), Path.TrimEndingDirectorySeparator(fullPath),

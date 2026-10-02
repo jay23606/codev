@@ -147,6 +147,8 @@ dotnet test Codev.Windows.Tests/Codev.Windows.Tests.csproj    # WPF renderer and
 
 GitHub Actions builds `Codev.Core` and the Avalonia UI and runs the portable tests on Windows, Linux and macOS for every push and pull request. The desktop workflow also publishes and launch-smokes self-contained Windows x64, Linux x64, macOS Apple silicon, and macOS Intel packages on pull requests and manual dispatch, without creating a release; only `v*` tag pushes publish the archives as a GitHub Release. The Windows-only tests and legacy WPF publish run on Windows. Native macOS/Linux interaction checks remain open.
 
+To run Codev with a separate local profile, set `CODEV_DATA_ROOT` to an absolute directory before starting the app. Codev stores its settings, conversations, projects, workspaces, and checkpoints under `<directory>/Codev`; hosted API keys and MCP OAuth tokens use a separate OS credential-vault namespace for that profile. No existing data is copied or changed. For example, in PowerShell set `$env:CODEV_DATA_ROOT = 'C:\Codev-test-profile'` before launching `Codev.Avalonia.exe`.
+
 ## Repository layout
 
 | Path | What it is |

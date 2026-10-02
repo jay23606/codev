@@ -124,7 +124,7 @@ public static class ReadOnlyCommandClassifier
 
     private static bool IsProtectedProjectPath(string root)
     {
-        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localData = CodevDataPaths.LocalDataRoot;
         if (string.IsNullOrWhiteSpace(localData)) return false;
         var protectedRoot = Path.GetFullPath(Path.Combine(localData, "Codev"));
         var relative = Path.GetRelativePath(protectedRoot, root);

@@ -253,7 +253,7 @@ public sealed class ConversationCodeRewindServiceTests : IDisposable
     {
         try { File.Delete(_linkedHardLinkPath); } catch { }
         try { Directory.Delete(_root, recursive: true); } catch { }
-        var checkpointRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints");
+        var checkpointRoot = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints");
         foreach (var id in _conversationIds)
             try { Directory.Delete(Path.Combine(checkpointRoot, id.ToString("N")), recursive: true); } catch { }
     }

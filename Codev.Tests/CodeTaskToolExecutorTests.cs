@@ -826,7 +826,7 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
 
     public void Dispose()
     {
-        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localData = CodevDataPaths.LocalDataRoot;
         var checkpointFolder = Path.GetFullPath(Path.Combine(localData, "Codev", "checkpoints", _conversation.Id.ToString("N")));
         var checkpointRoot = Path.GetFullPath(Path.Combine(localData, "Codev", "checkpoints")) + Path.DirectorySeparatorChar;
         if (checkpointFolder.StartsWith(checkpointRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
