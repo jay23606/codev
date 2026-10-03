@@ -23,6 +23,12 @@ public sealed class ChildDelegationTests
             viewModel.SetProjectFolder(repository);
             await viewModel.TrustProjectFolderAsync(repository);
             parent.AgentProfileName = "Orchestrator";
+            await viewModel.SetProjectCommandPermissionModeAsync(Codev.ProjectCommandPermissionMode.Auto);
+            var permissionField = typeof(MainViewModel).GetField("_projectCommandPermissions", BindingFlags.Instance | BindingFlags.NonPublic);
+            var permissions = Assert.IsType<Codev.ProjectCommandPermissionRegistry>(permissionField?.GetValue(viewModel));
+            const string deniedCommand = "Remove-Item protected.txt";
+            await permissions.SetRuleAsync(repository, deniedCommand, Codev.ProjectCommandPermissionDecision.Deny);
+            await permissions.SetRuleAsync(repository, "dotnet test", Codev.ProjectCommandPermissionDecision.Allow);
 
             var generationField = typeof(MainViewModel).GetField("_generationConversation", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(generationField);
@@ -40,6 +46,13 @@ public sealed class ChildDelegationTests
             Assert.Equal(parent.Id, child!.ParentConversationId);
             Assert.True(Directory.Exists(child.ProjectPath));
             Assert.True(new Codev.GitChildWorktreeManager(appData).IsManagedWorktreePath(child.ProjectPath!));
+            Assert.Equal(Codev.ProjectCommandPermissionMode.Auto, permissions.GetMode(child.ProjectPath!));
+            Assert.Contains(permissions.GetRules(child.ProjectPath!), rule =>
+                rule.Command == deniedCommand && rule.Decision == Codev.ProjectCommandPermissionDecision.Deny);
+            Assert.Contains(permissions.GetRules(child.ProjectPath!), rule =>
+                rule.Command == "dotnet test" && rule.Decision == Codev.ProjectCommandPermissionDecision.Allow);
+            Assert.Equal(Codev.ProjectCommandPermissionDecision.Deny, permissions.Evaluate(child.ProjectPath!, deniedCommand));
+            Assert.Equal(Codev.ProjectCommandPermissionDecision.Allow, permissions.Evaluate(child.ProjectPath!, "dotnet build"));
             Assert.False((await new Codev.GitRepositoryService(repository).GetStatusAsync()).HasChanges);
             Assert.Contains("Shell commands still run with your account permissions and are not sandboxed", viewModel.ContextActionStatus, StringComparison.Ordinal);
             Assert.False(await viewModel.CreateIsolatedChildSessionAsync(parent));
