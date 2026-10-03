@@ -98,7 +98,7 @@ internal static class WorkspaceFileSystemOperations
         const byte whiteoutType = 14;
         var duplicate = Dup(directory.DangerousGetHandle().ToInt32());
         if (duplicate < 0) throw new IOException("The project folder could not be safely enumerated.", new Win32Exception(Marshal.GetLastPInvokeError()));
-        var stream = OpenDirectoryStream(duplicate);
+        var stream = OpenDirectoryStreamForCurrentMacAbi(duplicate);
         if (stream == IntPtr.Zero)
         {
             var error = Marshal.GetLastPInvokeError();
@@ -198,6 +198,9 @@ internal static class WorkspaceFileSystemOperations
 
     private static IntPtr ReadDirectoryForCurrentMacAbi(IntPtr stream) =>
         RuntimeInformation.ProcessArchitecture == Architecture.X64 ? ReadDirectoryInode64(stream) : ReadDirectory(stream);
+
+    private static IntPtr OpenDirectoryStreamForCurrentMacAbi(int fileDescriptor) =>
+        RuntimeInformation.ProcessArchitecture == Architecture.X64 ? OpenDirectoryStreamInode64(fileDescriptor) : OpenDirectoryStream(fileDescriptor);
 
     private static async Task WriteUnixAsync(SafeFileHandle parent, string temporaryName, string fileName, byte[] content, bool overwrite, CancellationToken cancellationToken,
         Func<CancellationToken, Task<bool>>? validateBeforeCommit)
@@ -434,6 +437,9 @@ internal static class WorkspaceFileSystemOperations
 
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "fdopendir", SetLastError = true)]
     private static extern IntPtr OpenDirectoryStream(int fileDescriptor);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "fdopendir$INODE64", SetLastError = true)]
+    private static extern IntPtr OpenDirectoryStreamInode64(int fileDescriptor);
 
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "readdir", SetLastError = true)]
     private static extern IntPtr ReadDirectory(IntPtr directoryStream);
