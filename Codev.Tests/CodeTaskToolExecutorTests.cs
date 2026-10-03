@@ -637,7 +637,8 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
 
         var result = await ExecuteAsync(executor, "write_file", """{"relative_path":"Program.cs","content":"class New {}\n"}""");
 
-        Assert.Contains("formatter completed", result);
+        using var resultDocument = JsonDocument.Parse(result);
+        Assert.Contains("formatter completed", resultDocument.RootElement.GetProperty("content").GetString());
         var change = Assert.Single(_conversation.FileChanges);
         Assert.Equal(FileSnapshot.ComputeSha256("class New { }\n"), change.ResultSha256);
         Assert.Equal("class Old {}\n", await new WorkspaceFileService(_root).ReadCheckpointAsync("Program.cs", _conversation.Id, change.CheckpointPath!));
