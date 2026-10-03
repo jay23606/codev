@@ -33,10 +33,10 @@ jobs:
             rid: osx-x64
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -239,7 +239,7 @@ jobs:
           (cd artifacts/publish-cli/${{ matrix.rid }} && zip -r "$GITHUB_WORKSPACE/artifacts/Codev-CLI-preview-${{ matrix.rid }}.zip" .)
 
       - name: Upload release archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Codev-${{ matrix.rid }}
           path: |
@@ -256,7 +256,7 @@ jobs:
       contents: write
     steps:
       - name: Check out repository history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -270,7 +270,7 @@ jobs:
           fi
 
       - name: Download release archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
