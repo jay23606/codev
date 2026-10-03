@@ -681,8 +681,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         set
         {
             var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-            if (normalized is null && ActiveConversation is { AgentProfileName: { Length: > 0 } } conversation &&
-                _agentProfilesLoadedForConversationId != conversation.Id)
+            if (normalized is null && ActiveConversation is { AgentProfileName: { Length: > 0 } } savedConversation &&
+                _agentProfilesLoadedForConversationId != savedConversation.Id)
                 return;
             if (normalized is { Length: > 80 } || normalized is not null && !AgentProfiles.Any(profile => profile.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase)))
                 return;
