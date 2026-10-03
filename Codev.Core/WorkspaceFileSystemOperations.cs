@@ -125,7 +125,7 @@ internal static class WorkspaceFileSystemOperations
                 var recordLength = unchecked((ushort)Marshal.ReadInt16(entry, recordLengthOffset));
                 var nameLength = unchecked((ushort)Marshal.ReadInt16(entry, nameLengthOffset));
                 if (recordLength < nameOffset + 1 || nameLength == 0 || nameLength > maxNameLength || nameOffset + nameLength >= recordLength)
-                    throw new IOException("The project folder returned an invalid directory entry.");
+                    throw new IOException($"The project folder returned an invalid directory entry (reclen={recordLength}, namlen={nameLength}, arch={RuntimeInformation.ProcessArchitecture}).");
                 var nameBytes = new byte[nameLength];
                 Marshal.Copy(IntPtr.Add(entry, nameOffset), nameBytes, 0, nameBytes.Length);
                 var name = Encoding.UTF8.GetString(nameBytes);
