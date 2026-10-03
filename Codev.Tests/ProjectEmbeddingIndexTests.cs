@@ -69,7 +69,7 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => constrainedIndex.UpdateAsync());
 
-        Assert.Contains("size limit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("byte limit", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("existing index was left unchanged", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(originalContents, await File.ReadAllTextAsync(indexPath));
         Assert.Equal(1, handler.InputCount);
@@ -87,7 +87,7 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => index.UpdateAsync());
 
-        Assert.Contains("size limit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("byte limit", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.False(ProjectEmbeddingIndex.HasIndex(_data, _root));
         Assert.Equal(0, handler.InputCount);
     }
