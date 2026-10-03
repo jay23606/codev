@@ -66,38 +66,42 @@ public sealed class McpOAuthSupportTests
     }
 
     [Fact]
-    public async Task Loopback_callback_rejects_an_oversized_request_line_without_reading_it_unbounded()
+    public async Task Loopback_callback_rejects_an_oversized_request_then_accepts_the_real_callback()
     {
         Uri? callbackBase = null;
-        TcpClient? client = null;
-        Task<string>? responseTask = null;
-        await using var listener = new McpOAuthCallbackListener("Docs", openBrowser: async (_, cancellationToken) =>
+        string? rejectedResponse = null;
+        HttpStatusCode? browserResponse = null;
+        Task? browserFlow = null;
+        await using var listener = new McpOAuthCallbackListener("Docs", openBrowser: (_, cancellationToken) =>
         {
-            client = new TcpClient();
-            await client.ConnectAsync(IPAddress.Loopback, callbackBase!.Port, cancellationToken);
-            var stream = client.GetStream();
-            await stream.WriteAsync(Enumerable.Repeat((byte)'A', 8_193).ToArray(), cancellationToken);
-            responseTask = Task.Run(async () =>
+            browserFlow = Task.Run(async () =>
             {
-                using var reader = new StreamReader(stream);
-                return await reader.ReadToEndAsync(cancellationToken);
+                using var client = new TcpClient();
+                await client.ConnectAsync(IPAddress.Loopback, callbackBase!.Port, cancellationToken);
+                var stream = client.GetStream();
+                await stream.WriteAsync(Enumerable.Repeat((byte)'A', 8_193).ToArray(), cancellationToken);
+                using (var reader = new StreamReader(stream))
+                    rejectedResponse = await reader.ReadToEndAsync(cancellationToken);
+
+                using var http = new HttpClient();
+                using var response = await http.GetAsync(new Uri(callbackBase.AbsoluteUri + "?code=auth-code&state=csrf-value"), cancellationToken);
+                browserResponse = response.StatusCode;
             }, cancellationToken);
+            return Task.CompletedTask;
         });
         callbackBase = listener.RedirectUri;
 
-        try
+        var result = await listener.HandleAsync(new AuthorizationCallbackContext
         {
-            var result = await listener.HandleAsync(new AuthorizationCallbackContext
-            {
-                AuthorizationUri = new Uri("https://identity.example.test/authorize"),
-                RedirectUri = listener.RedirectUri
-            }, CancellationToken.None);
+            AuthorizationUri = new Uri("https://identity.example.test/authorize"),
+            RedirectUri = listener.RedirectUri
+        }, CancellationToken.None);
+        await browserFlow!;
 
-            var response = await responseTask!;
-            Assert.Null(result);
-            Assert.StartsWith("HTTP/1.1 400 Bad Request\r\n", response, StringComparison.Ordinal);
-        }
-        finally { client?.Dispose(); }
+        Assert.StartsWith("HTTP/1.1 400 Bad Request\r\n", rejectedResponse, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, browserResponse);
+        Assert.Equal("auth-code", result?.Code);
+        Assert.Equal("csrf-value", result?.State);
     }
 
     [Theory]

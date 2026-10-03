@@ -65,6 +65,7 @@ public sealed class McpOAuthCallbackListener : IAsyncDisposable
     private const int MaxRequestLineCharacters = 8_192;
     private const int MaxHeaderLines = 64;
     private const int MaxHeaderCharacters = 16_384;
+    private static readonly TimeSpan ConnectionReadTimeout = TimeSpan.FromSeconds(10);
     private readonly TcpListener _listener;
     private readonly Func<Uri, CancellationToken, Task> _openBrowser;
     private readonly Action<string>? _status;
@@ -99,23 +100,38 @@ public sealed class McpOAuthCallbackListener : IAsyncDisposable
         _status?.Invoke($"MCP · sign in to {_serverName} in your browser to continue.");
         await _openBrowser(context.AuthorizationUri, cancellationToken).ConfigureAwait(false);
 
-        using var client = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
-        var request = await ReadRequestAsync(client.GetStream(), cancellationToken).ConfigureAwait(false);
-        if (request is null)
+        while (true)
         {
-            await WriteResponseAsync(client.GetStream(), success: false, cancellationToken).ConfigureAwait(false);
-            return null;
-        }
+            using var client = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+            using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            readTimeout.CancelAfter(ConnectionReadTimeout);
+            Uri? request;
+            try
+            {
+                request = await ReadRequestAsync(client.GetStream(), readTimeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A local port probe or abandoned browser connection must not consume the callback.
+                continue;
+            }
 
-        var values = ParseQuery(request.Query);
-        var code = Single(values, "code");
-        var state = Single(values, "state");
-        var issuer = Single(values, "iss");
-        var error = Single(values, "error");
-        var success = string.IsNullOrWhiteSpace(error) && !string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(state);
-        await WriteResponseAsync(client.GetStream(), success, cancellationToken).ConfigureAwait(false);
-        if (!success) return null;
-        return new AuthorizationResult { Code = code, State = state, Iss = issuer };
+            if (request is null)
+            {
+                await TryWriteResponseAsync(client.GetStream(), success: false, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            var values = ParseQuery(request.Query);
+            var code = Single(values, "code");
+            var state = Single(values, "state");
+            var issuer = Single(values, "iss");
+            var error = Single(values, "error");
+            var success = string.IsNullOrWhiteSpace(error) && !string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(state);
+            await TryWriteResponseAsync(client.GetStream(), success, cancellationToken).ConfigureAwait(false);
+            if (!success) return null;
+            return new AuthorizationResult { Code = code, State = state, Iss = issuer };
+        }
     }
 
     public ValueTask DisposeAsync()
@@ -194,6 +210,12 @@ public sealed class McpOAuthCallbackListener : IAsyncDisposable
         await stream.WriteAsync(header, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task TryWriteResponseAsync(NetworkStream stream, bool success, CancellationToken cancellationToken)
+    {
+        try { await WriteResponseAsync(stream, success, cancellationToken).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is IOException or SocketException) { }
     }
 
     private static Task OpenSystemBrowserAsync(Uri uri, CancellationToken cancellationToken)
