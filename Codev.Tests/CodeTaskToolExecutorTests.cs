@@ -626,12 +626,21 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     {
         var filePath = Path.Combine(_root, "Program.cs");
         await File.WriteAllTextAsync(filePath, "class Old {}\n");
+        Exception? formatterException = null;
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
             _ => Task.FromResult(true), _ => Task.FromResult(false),
             afterFileWrite: async (relativePath, token) =>
             {
-                Assert.Equal("Program.cs", relativePath);
-                await File.WriteAllTextAsync(filePath, "class New { }\n", token);
+                try
+                {
+                    Assert.Equal("Program.cs", relativePath);
+                    await File.WriteAllTextAsync(filePath, "class New { }\n", token);
+                }
+                catch (Exception exception)
+                {
+                    formatterException = exception;
+                    throw;
+                }
                 return "formatter completed";
             });
 
@@ -639,7 +648,8 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
 
         using var resultDocument = JsonDocument.Parse(result);
         var outputContent = resultDocument.RootElement.GetProperty("content").GetString();
-        Assert.True(outputContent?.Contains("formatter completed", StringComparison.Ordinal) == true, outputContent);
+        Assert.True(outputContent?.Contains("formatter completed", StringComparison.Ordinal) == true,
+            formatterException?.ToString() ?? outputContent);
         var change = Assert.Single(_conversation.FileChanges);
         Assert.Equal(FileSnapshot.ComputeSha256("class New { }\n"), change.ResultSha256);
         Assert.Equal("class Old {}\n", await new WorkspaceFileService(_root).ReadCheckpointAsync("Program.cs", _conversation.Id, change.CheckpointPath!));
