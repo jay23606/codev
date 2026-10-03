@@ -70,10 +70,9 @@ internal static class WorkspaceFileSystemOperations
         var maximum = Math.Max(1, maxEntries);
         using var directory = FileHardLinkInspector.OpenDirectoryBeneathRoot(root, relativeDirectory, forEnumeration: true);
         if (OperatingSystem.IsWindows()) return EnumerateWindows(directory, maximum);
+        if (OperatingSystem.IsMacOS()) return EnumerateMacOs(directory, maximum);
 
-        var handlePath = OperatingSystem.IsLinux()
-            ? $"/proc/self/fd/{directory.DangerousGetHandle().ToInt32()}"
-            : $"/dev/fd/{directory.DangerousGetHandle().ToInt32()}";
+        var handlePath = $"/proc/self/fd/{directory.DangerousGetHandle().ToInt32()}";
         var entries = new List<WorkspaceDirectoryEntry>();
         foreach (var entry in Directory.EnumerateFileSystemEntries(handlePath))
         {
@@ -83,6 +82,55 @@ internal static class WorkspaceFileSystemOperations
             entries.Add(new WorkspaceDirectoryEntry(name, File.GetAttributes(entry)));
         }
         return entries;
+    }
+
+    private static IReadOnlyList<WorkspaceDirectoryEntry> EnumerateMacOs(SafeFileHandle directory, int maximum)
+    {
+        const int recordLengthOffset = 16;
+        const int nameLengthOffset = 18;
+        const int typeOffset = 20;
+        const int nameOffset = 21;
+        const byte directoryType = 4;
+        const byte symbolicLinkType = 10;
+        const byte whiteoutType = 14;
+        var duplicate = Dup(directory.DangerousGetHandle().ToInt32());
+        if (duplicate < 0) throw new IOException("The project folder could not be safely enumerated.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        var stream = OpenDirectoryStream(duplicate);
+        if (stream == IntPtr.Zero)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            _ = Close(duplicate);
+            throw new IOException("The project folder could not be safely enumerated.", new Win32Exception(error));
+        }
+
+        var results = new List<WorkspaceDirectoryEntry>();
+        try
+        {
+            while (results.Count < maximum)
+            {
+                var entry = ReadDirectory(stream);
+                if (entry == IntPtr.Zero) break;
+                var recordLength = unchecked((ushort)Marshal.ReadInt16(entry, recordLengthOffset));
+                var nameLength = unchecked((ushort)Marshal.ReadInt16(entry, nameLengthOffset));
+                if (recordLength < nameOffset + 1 || nameLength == 0 || nameLength > 255 || nameOffset + nameLength >= recordLength)
+                    throw new IOException("The project folder returned an invalid directory entry.");
+                var nameBytes = new byte[nameLength];
+                Marshal.Copy(IntPtr.Add(entry, nameOffset), nameBytes, 0, nameBytes.Length);
+                var name = Encoding.UTF8.GetString(nameBytes);
+                if (name is "." or "..") continue;
+                var type = Marshal.ReadByte(entry, typeOffset);
+                var attributes = type switch
+                {
+                    directoryType => FileAttributes.Directory,
+                    symbolicLinkType or whiteoutType => FileAttributes.ReparsePoint,
+                    0 => FileAttributes.ReparsePoint, // Unknown entries fail closed and are not traversed or exposed.
+                    _ => FileAttributes.Normal
+                };
+                results.Add(new WorkspaceDirectoryEntry(name, attributes));
+            }
+        }
+        finally { _ = CloseDirectoryStream(stream); }
+        return results;
     }
 
     private static IReadOnlyList<WorkspaceDirectoryEntry> EnumerateWindows(SafeFileHandle directory, int maximum)
@@ -335,6 +383,21 @@ internal static class WorkspaceFileSystemOperations
 
     [DllImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
     private static extern int UnlinkAt(int directoryFileDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "dup", SetLastError = true)]
+    private static extern int Dup(int fileDescriptor);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "fdopendir", SetLastError = true)]
+    private static extern IntPtr OpenDirectoryStream(int fileDescriptor);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "readdir", SetLastError = true)]
+    private static extern IntPtr ReadDirectory(IntPtr directoryStream);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "closedir", SetLastError = true)]
+    private static extern int CloseDirectoryStream(IntPtr directoryStream);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "close", SetLastError = true)]
+    private static extern int Close(int fileDescriptor);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct UnicodeString
