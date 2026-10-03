@@ -166,9 +166,10 @@ public static class FileHardLinkInspector
         var pathBuffer = Marshal.AllocHGlobal(MacMaxPathLength);
         try
         {
+            Marshal.Copy(new byte[MacMaxPathLength], 0, pathBuffer, MacMaxPathLength);
             if (FcntlMacOs(descriptor, MacFcntlGetPath, pathBuffer) != 0)
                 throw new IOException("The opened file path could not be verified on macOS.", new Win32Exception(Marshal.GetLastPInvokeError()));
-            var path = Marshal.PtrToStringUTF8(pathBuffer);
+            var path = Marshal.PtrToStringUTF8(pathBuffer, MacMaxPathLength);
             if (string.IsNullOrEmpty(path)) throw new IOException("The opened file path could not be verified on macOS.");
             return path;
         }
