@@ -293,7 +293,8 @@ public static class AgentProfileCatalog
             else return Fail($"Unsupported agent profile field '{key}'.", out error);
         }
 
-        if (NormalizeReferenceName(displayName) is null)
+        var normalizedDisplayName = NormalizeReferenceName(displayName);
+        if (normalizedDisplayName is null)
             return Fail("Add a display name of 1–80 printable characters without path separators.", out error);
         if (string.IsNullOrWhiteSpace(description) || description.Length > 180)
             return Fail("Add a short description of at most 180 characters.", out error);
@@ -302,7 +303,7 @@ public static class AgentProfileCatalog
         if (instructions.Length > MaxInstructionsCharacters) return Fail("Profile instructions exceed the size limit.", out error);
         if (instructions.Length == 0) return Fail("Add the agent instructions after the frontmatter.", out error);
 
-        profile = new AgentProfile(displayName, description, string.IsNullOrWhiteSpace(model) ? null : model,
+        profile = new AgentProfile(normalizedDisplayName, description, string.IsNullOrWhiteSpace(model) ? null : model,
             temperature, maxSteps, defaultPermission, permissions, instructions, scope, "",
             allowedEditPaths, deniedEditPaths, commandPermissions);
         return true;
