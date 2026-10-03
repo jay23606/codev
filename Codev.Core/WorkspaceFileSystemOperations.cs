@@ -114,7 +114,7 @@ internal static class WorkspaceFileSystemOperations
                 // readdir returns null for both EOF and errors; clear errno first so an
                 // enumeration error cannot silently look like a successfully complete list.
                 Marshal.SetLastPInvokeError(0);
-                var entry = ReadDirectory(stream);
+                var entry = ReadDirectoryForCurrentMacAbi(stream);
                 if (entry == IntPtr.Zero)
                 {
                     var error = Marshal.GetLastPInvokeError();
@@ -195,6 +195,9 @@ internal static class WorkspaceFileSystemOperations
         finally { Marshal.FreeHGlobal(buffer); }
         return results;
     }
+
+    private static IntPtr ReadDirectoryForCurrentMacAbi(IntPtr stream) =>
+        RuntimeInformation.ProcessArchitecture == Architecture.X64 ? ReadDirectoryInode64(stream) : ReadDirectory(stream);
 
     private static async Task WriteUnixAsync(SafeFileHandle parent, string temporaryName, string fileName, byte[] content, bool overwrite, CancellationToken cancellationToken,
         Func<CancellationToken, Task<bool>>? validateBeforeCommit)
@@ -434,6 +437,9 @@ internal static class WorkspaceFileSystemOperations
 
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "readdir", SetLastError = true)]
     private static extern IntPtr ReadDirectory(IntPtr directoryStream);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "readdir$INODE64", SetLastError = true)]
+    private static extern IntPtr ReadDirectoryInode64(IntPtr directoryStream);
 
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "closedir", SetLastError = true)]
     private static extern int CloseDirectoryStream(IntPtr directoryStream);
