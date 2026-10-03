@@ -92,6 +92,14 @@ public sealed class WorkspaceFileService
         return full;
     }
 
+    /// <summary>Refuses to read a project file whose contents are shared through a hard link.</summary>
+    internal void EnsureFileIsNotHardLinked(string relativePath)
+    {
+        var full = ResolvePath(relativePath);
+        if (!File.Exists(full)) return;
+        FileHardLinkInspector.EnsureSingleLinkFile(full, relativePath);
+    }
+
     private void EnsureRootIsNotLink()
     {
         try
@@ -256,6 +264,7 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are opened by the agent.");
+        EnsureFileIsNotHardLinked(relativePath);
         var info = new FileInfo(full);
         if (!info.Exists) throw new FileNotFoundException("File not found in the selected project.", relativePath);
         if (info.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
@@ -288,6 +297,7 @@ public sealed class WorkspaceFileService
             try
             {
                 var full = ResolvePath(relative);
+                EnsureFileIsNotHardLinked(relative);
                 if (new FileInfo(full).Length > 500_000) continue;
                 lines = await File.ReadAllLinesAsync(full, cancellationToken);
             }
@@ -373,6 +383,7 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!File.Exists(full)) return null;
+        EnsureFileIsNotHardLinked(relativePath);
         var bytes = await File.ReadAllBytesAsync(full, cancellationToken);
         if (bytes.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB cannot be checkpointed or restored.");
         if (expectedHash is not null && !HashMatches(bytes, expectedHash))
@@ -522,9 +533,12 @@ public sealed class WorkspaceFileService
         return Path.GetFullPath(checkpointPath);
     }
 
-    private static async Task<bool> CurrentFileMatchesAsync(string path, string expectedHash, CancellationToken cancellationToken)
+    private async Task<bool> CurrentFileMatchesAsync(string path, string expectedHash, CancellationToken cancellationToken)
     {
         if (!File.Exists(path)) return false;
+        // Do not snapshot shared external content into a checkpoint or use it to approve a replacement.
+        // ResolvePath is repeated here to revalidate path containment immediately before the read.
+        EnsureFileIsNotHardLinked(Path.GetRelativePath(_root, path));
         return HashMatches(await File.ReadAllBytesAsync(path, cancellationToken), expectedHash);
     }
 

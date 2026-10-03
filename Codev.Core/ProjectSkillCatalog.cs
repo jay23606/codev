@@ -122,6 +122,11 @@ public static class ProjectSkillCatalog
 
         try
         {
+            if (skill.Scope == "skill-project")
+            {
+                var projectFiles = new WorkspaceFileService(root);
+                projectFiles.EnsureFileIsNotHardLinked(Path.GetRelativePath(root, skillFile));
+            }
             var bytes = await ReadBoundedAsync(skillFile, cancellationToken).ConfigureAwait(false);
             var text = StrictUtf8.GetString(bytes);
             if (!TryParseSkillFile(directoryName, text, skill.Scope == "skill-project" ? "project" : "user",
@@ -186,6 +191,8 @@ public static class ProjectSkillCatalog
                         warnings.Add($"Skill '{name}' exceeds the size limit and was skipped.");
                         continue;
                     }
+                    if (scope == "project")
+                        FileHardLinkInspector.EnsureSingleLinkFile(skillFile, Path.GetRelativePath(directory, skillFile));
                     var bytes = await ReadBoundedAsync(skillFile, cancellationToken).ConfigureAwait(false);
                     var text = StrictUtf8.GetString(bytes);
                     if (TryParseSkillFile(name, text, scope, out var parsed, out var error) && parsed is not null)

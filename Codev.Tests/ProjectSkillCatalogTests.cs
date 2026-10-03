@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Codev.Tests;
 
 public sealed class ProjectSkillCatalogTests
@@ -191,6 +193,33 @@ public sealed class ProjectSkillCatalogTests
     }
 
     [Fact]
+    public async Task Project_skills_are_not_loaded_or_inserted_when_hard_linked_outside_the_project()
+    {
+        if (!FileHardLinkInspector.IsSupportedPlatform) return;
+        var root = CreateTempDirectory();
+        try
+        {
+            var project = Path.Combine(root, "project");
+            var skillDirectory = Path.Combine(project, ".codev", "skills", "review");
+            var external = Path.Combine(root, "external-SKILL.md");
+            var skillFile = Path.Combine(skillDirectory, "SKILL.md");
+            Directory.CreateDirectory(skillDirectory);
+            await File.WriteAllTextAsync(external, Markdown("Outside instructions."));
+            if (!TryCreateHardLink(external, skillFile)) return;
+
+            var loaded = await ProjectSkillCatalog.LoadAsync(Path.Combine(root, "user-skills"), project, includeProjectSkills: true);
+            Assert.Empty(loaded.Skills);
+
+            var stale = new SlashCommandDefinition("/skill-review", "review", SlashCommandAction.UserPrompt,
+                null, null, "skill-project", FilePath: skillFile);
+            var expanded = await ProjectSkillCatalog.ReadPromptAsync(stale, Path.Combine(root, "user-skills"), project,
+                projectTrusted: true, stale.Name);
+            Assert.False(expanded.Success);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task Skill_is_reloaded_before_inserting_so_changed_files_are_not_stale()
     {
         var root = CreateTempDirectory();
@@ -270,4 +299,20 @@ public sealed class ProjectSkillCatalogTests
         Directory.CreateDirectory(path);
         return path;
     }
+
+    private static bool TryCreateHardLink(string existingPath, string newPath)
+    {
+        if (OperatingSystem.IsWindows()) return CreateHardLinkWindows(newPath, existingPath, IntPtr.Zero);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return CreateHardLinkUnix(existingPath, newPath) == 0;
+        return false;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 }

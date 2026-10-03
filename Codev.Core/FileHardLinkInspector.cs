@@ -46,6 +46,19 @@ public static class FileHardLinkInspector
             throw new InvalidOperationException($"'{displayPath}' has {linkCount} hard links. Nothing was overwritten; restoring it could break its shared-file relationship.");
     }
 
+    /// <summary>Fails closed when a file could be shared with a path outside its trusted directory.</summary>
+    public static void EnsureSingleLinkFile(string path, string displayPath)
+    {
+        if (!IsSupportedPlatform)
+            throw new UnauthorizedAccessException($"The hard-link status for '{displayPath}' cannot be checked on this platform, so it was not read.");
+
+        var linkCount = TryGetLinkCount(path);
+        if (linkCount is null)
+            throw new UnauthorizedAccessException($"The hard-link status for '{displayPath}' could not be verified, so it was not read.");
+        if (linkCount > 1)
+            throw new UnauthorizedAccessException($"'{displayPath}' is shared through a hard link, so it was not read.");
+    }
+
     private static int? TryGetWindowsLinkCount(string path)
     {
         using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);

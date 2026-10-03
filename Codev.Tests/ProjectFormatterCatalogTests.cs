@@ -1,4 +1,5 @@
 using Codev;
+using System.Runtime.InteropServices;
 namespace Codev.Tests;
 
 public sealed class ProjectFormatterCatalogTests : IDisposable
@@ -19,6 +20,30 @@ public sealed class ProjectFormatterCatalogTests : IDisposable
         Assert.Null(trusted.Warning);
         Assert.Null(ProjectFormatterCatalog.ForPath(trusted.Formatters, "README.md"));
         Assert.Equal("prettier", ProjectFormatterCatalog.ForPath(trusted.Formatters, "src/app.TS")!.Name);
+    }
+
+    [Fact]
+    public async Task Formatter_configuration_is_rejected_when_it_is_hard_linked_outside_the_project()
+    {
+        if (!FileHardLinkInspector.IsSupportedPlatform) return;
+        Directory.CreateDirectory(Path.Combine(_root, ".codev"));
+        var outside = Path.Combine(Path.GetDirectoryName(_root)!, Path.GetFileName(_root) + "-outside.json");
+        var config = Path.Combine(_root, ProjectFormatterCatalog.RelativeConfigPath.Replace('/', Path.DirectorySeparatorChar));
+        try
+        {
+            await File.WriteAllTextAsync(outside, ValidJson);
+            if (!TryCreateHardLink(outside, config)) return;
+
+            var loaded = await ProjectFormatterCatalog.LoadAsync(_root, isTrusted: true);
+
+            Assert.Empty(loaded.Formatters);
+            Assert.NotNull(loaded.Warning);
+        }
+        finally
+        {
+            try { File.Delete(config); } catch { }
+            try { File.Delete(outside); } catch { }
+        }
     }
 
     [Fact]
@@ -136,4 +161,20 @@ public sealed class ProjectFormatterCatalogTests : IDisposable
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
+
+    private static bool TryCreateHardLink(string existingPath, string newPath)
+    {
+        if (OperatingSystem.IsWindows()) return CreateHardLinkWindows(newPath, existingPath, IntPtr.Zero);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return CreateHardLinkUnix(existingPath, newPath) == 0;
+        return false;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 }

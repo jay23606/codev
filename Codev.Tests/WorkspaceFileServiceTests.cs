@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 
 namespace Codev.Tests;
 
@@ -157,6 +158,33 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         Assert.Equal(2, match.LineNumber);
         Assert.Equal("// startup marker", match.LineText);
         Assert.Contains(agentMatches, result => result.StartsWith($"generated{Path.DirectorySeparatorChar}client.cs:1:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Does_not_read_or_index_a_project_file_that_is_hard_linked_outside_the_project()
+    {
+        if (!FileHardLinkInspector.IsSupportedPlatform) return;
+        var outside = Path.Combine(Path.GetDirectoryName(_root)!, Path.GetFileName(_root) + "-outside.cs");
+        var linked = Path.Combine(_root, "linked.cs");
+        try
+        {
+            await File.WriteAllTextAsync(outside, "outside-private-marker");
+            if (!TryCreateHardLink(outside, linked)) return;
+            Assert.Equal(2, FileHardLinkInspector.TryGetLinkCount(linked));
+
+            var service = Service;
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.ReadFileAsync("linked.cs"));
+            Assert.Throws<UnauthorizedAccessException>(() => ProjectPathInstructionRuleParser.ReadDefinition(service, "linked.cs"));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.CreateCheckpointAsync("linked.cs", Guid.NewGuid()));
+            Assert.DoesNotContain(await service.SearchFilesAsync("outside-private-marker"), match => match.Contains("linked.cs", StringComparison.Ordinal));
+            var context = await ProjectContextReader.ReadAsync(_root, ["linked.cs"]);
+            Assert.DoesNotContain("outside-private-marker", context, StringComparison.Ordinal);
+        }
+        finally
+        {
+            try { File.Delete(linked); } catch { }
+            try { File.Delete(outside); } catch { }
+        }
     }
 
     [Fact]
@@ -350,4 +378,20 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     {
         try { Directory.Delete(_root, recursive: true); } catch { }
     }
+
+    private static bool TryCreateHardLink(string existingPath, string newPath)
+    {
+        if (OperatingSystem.IsWindows()) return CreateHardLinkWindows(newPath, existingPath, IntPtr.Zero);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return CreateHardLinkUnix(existingPath, newPath) == 0;
+        return false;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 }

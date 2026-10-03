@@ -84,6 +84,7 @@ public sealed class ProjectEmbeddingIndex
             try
             {
                 var full = files.ResolvePath(relative);
+                files.EnsureFileIsNotHardLinked(relative);
                 info = new FileInfo(full);
                 if (!info.Exists || info.Length > 500_000) continue;
             }
