@@ -34,6 +34,22 @@ public sealed class AtomicTextFileTests : IDisposable
         Assert.Empty(Directory.GetFiles(_root, "*.tmp", SearchOption.TopDirectoryOnly));
     }
 
+    [Fact]
+    public async Task Keeps_the_previous_file_when_a_write_is_interrupted_before_replacement()
+    {
+        Directory.CreateDirectory(_root);
+        var path = Path.Combine(_root, "conversations.json");
+        await File.WriteAllTextAsync(path, "complete previous store");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            AtomicTextFile.WriteAsync(path, "incomplete next store", cancellation.Token));
+
+        Assert.Equal("complete previous store", await File.ReadAllTextAsync(path));
+        Assert.Empty(Directory.GetFiles(_root, "*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
     public void Dispose()
     {
         try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch { }
