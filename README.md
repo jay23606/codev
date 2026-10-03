@@ -29,7 +29,7 @@ Trusted Avalonia projects can opt into formatters that run after accepted Code t
 - Conversation rename and archive/restore, with permanent deletion available from the archive view
 - Regenerate the latest answer, edit/resend the last prompt, and branch a new conversation from a message
 - Continue an explicitly stopped answer from its partial text
-- Keyboard shortcuts include quick new chat, search, composer focus, Settings, rename, and stop; press F1 for the in-app reference
+- Avalonia keyboard shortcuts include new conversation, conversation search, composer focus, mode and primary-agent cycling, and stopping a response; press F1 for the in-app shortcut reference. WPF additionally supports shortcuts for Settings and renaming.
 - Save reusable local prompt templates and insert them into the composer for editing before sending
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with friendly quick choices for the original three and automatic discovery of other installed models

@@ -135,6 +135,44 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task F1_opens_keyboard_shortcuts_reference_in_Avalonia()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            window.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Key = Key.F1,
+                KeyModifiers = KeyModifiers.None
+            });
+
+            var dialog = Assert.IsType<Window>(typeof(MainWindow)
+                .GetField("_keyboardShortcutsWindow", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(window));
+            Assert.True(dialog.IsVisible);
+            var lines = dialog.GetVisualDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
+            Assert.Contains(lines, line => line?.Contains("Ctrl/⌘+Shift+M", StringComparison.Ordinal) == true);
+            Assert.Contains(lines, line => line?.Contains("/status", StringComparison.Ordinal) == true);
+            Assert.Contains(lines, line => line?.Contains("F1  Show these shortcuts", StringComparison.Ordinal) == true);
+            dialog.Close();
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Context_size_picker_tracks_each_conversation_and_applies_model_cap()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

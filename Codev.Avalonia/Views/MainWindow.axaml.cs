@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private TaskCompletionSource<Codev.ProjectCommandApprovalChoice>? _pendingCommandApproval;
     private TaskCompletionSource<Codev.ProjectCommandApprovalChoice>? _pendingMcpApproval;
     private TaskCompletionSource<bool>? _pendingProfileToolApproval;
+    private Window? _keyboardShortcutsWindow;
 
     public MainWindow()
     {
@@ -3957,7 +3958,9 @@ public partial class MainWindow : Window
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         var primaryModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
-        if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.M)
+        if (e.Key == Key.F1)
+            ShowKeyboardShortcuts();
+        else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.M)
             viewModel.CycleConversationMode();
         else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.A)
             viewModel.CyclePrimaryAgent();
@@ -3972,5 +3975,54 @@ public partial class MainWindow : Window
         else
             return;
         e.Handled = true;
+    }
+
+    private void ShowKeyboardShortcuts()
+    {
+        if (_keyboardShortcutsWindow is { IsVisible: true } existing)
+        {
+            existing.Activate();
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Keyboard shortcuts",
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            MinWidth = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        _keyboardShortcutsWindow = dialog;
+        dialog.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_keyboardShortcutsWindow, dialog)) _keyboardShortcutsWindow = null;
+        };
+
+        var shortcuts = new StackPanel { Spacing = 8 };
+        foreach (var shortcut in new[]
+        {
+            "Ctrl/⌘+N  New conversation",
+            "Ctrl/⌘+F  Search conversations",
+            "Ctrl/⌘+L  Focus the composer",
+            "Ctrl/⌘+Shift+M  Cycle Chat, Plan, and Code task",
+            "Ctrl/⌘+Shift+A  Cycle the primary agent",
+            "Esc  Stop the active response",
+            "F1  Show these shortcuts",
+            "/status  Show local conversation and project status"
+        })
+            shortcuts.Children.Add(new TextBlock { Text = shortcut, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
+
+        var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, IsCancel = true };
+        close.Click += (_, _) => dialog.Close();
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 16,
+            Children = { shortcuts, close }
+        };
+        dialog.Show(this);
+        dialog.Activate();
     }
 }
