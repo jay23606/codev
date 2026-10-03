@@ -514,7 +514,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public string CodeTaskTooltip => IsCodeTask
         ? $"Code task is on. {(IsOpenAIModel && ActiveConversation?.AllowHostedCodeTask != true ? "The first prompt asks permission to send prompts and tool results to OpenAI. " : "")}{(IsOpenAIModel ? Codev.OpenAiCodeTaskLimits.Description + " " : "")}{ProjectCommandPermissionMode switch
         {
-            Codev.ProjectCommandPermissionMode.Auto => "Auto applies ordinary file changes with checkpoints and runs all shell commands unless an exact saved deny rule blocks them. Commands use your account permissions and are not sandboxed to the project folder.",
+            Codev.ProjectCommandPermissionMode.Auto => "Auto applies ordinary file changes with checkpoints, runs shell commands, and calls configured MCP tools without approval unless an exact saved project deny rule blocks that command or MCP server/tool. Shell commands use your account permissions and are not sandboxed to the project folder; MCP tools may affect external services.",
             Codev.ProjectCommandPermissionMode.Allowlist => "Exact saved allow rules can skip approval; unlisted commands still ask.",
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
             _ => "Commands ask every time."

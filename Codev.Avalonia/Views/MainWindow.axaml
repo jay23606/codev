@@ -467,7 +467,7 @@
                                         </MenuFlyout>
                                     </Button.Flyout>
                                 </Button>
-                                <Button x:Name="ProjectCommandModeButton" Classes="soft" Content="{Binding ProjectCommandPermissionModeLabel}" Padding="8,4" FontSize="10" IsEnabled="{Binding CanPersistProjectCommandPermissions}" ToolTip.Tip="With a project attached, this mode is saved for that project. Without one, it sets the default for new projects and Code task workspaces. Auto runs commands without approval unless their exact text has a saved deny rule. Commands use your account permissions and are not sandboxed to the project folder.">
+                                <Button x:Name="ProjectCommandModeButton" Classes="soft" Content="{Binding ProjectCommandPermissionModeLabel}" Padding="8,4" FontSize="10" IsEnabled="{Binding CanPersistProjectCommandPermissions}" ToolTip.Tip="With a project attached, this mode is saved for that project. Without one, it sets the default for new projects and Code task workspaces. Auto runs shell commands and calls configured MCP tools without approval unless an exact saved project deny rule blocks that command or MCP server/tool. Shell commands use your account permissions and are not sandboxed to the project folder; MCP tools may affect external services.">
                                     <Button.Flyout>
                                         <MenuFlyout>
                                             <MenuItem Header="Auto · approve unless denied" Tag="Auto" Click="ProjectCommandMode_Click" />

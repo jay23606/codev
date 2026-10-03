@@ -557,6 +557,7 @@ public sealed class MainWindowTests
             viewModel.SetProjectFolder(project);
             await viewModel.TrustProjectFolderAsync(project);
             await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            Assert.Contains("configured MCP tools", viewModel.CodeTaskTooltip, StringComparison.OrdinalIgnoreCase);
             var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
             var debugProfile = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Debug");
             var profilePrompts = 0;
