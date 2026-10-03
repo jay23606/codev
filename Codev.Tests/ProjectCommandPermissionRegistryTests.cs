@@ -140,6 +140,52 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     }
 
     [Fact]
+    public async Task Copying_project_settings_persists_mode_and_rules_as_one_complete_snapshot()
+    {
+        var childProject = Path.Combine(_root, "child-worktree");
+        const string deniedCommand = "Remove-Item protected.txt";
+        const string allowedCommand = "dotnet test";
+        const string protectedAllowCommand = "git status --short";
+        await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(new[]
+        {
+            new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Auto,
+            [
+                new ProjectCommandPermissionRule(deniedCommand, ProjectCommandPermissionDecision.Deny),
+                new ProjectCommandPermissionRule(allowedCommand, ProjectCommandPermissionDecision.Allow),
+                new ProjectCommandPermissionRule(protectedAllowCommand, ProjectCommandPermissionDecision.Allow)
+            ])
+        }));
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+
+        await registry.CopyProjectSettingsAsync(_project, childProject);
+        var reloaded = ProjectCommandPermissionRegistry.Load(_path);
+
+        Assert.Equal(ProjectCommandPermissionMode.Auto, reloaded.GetMode(childProject));
+        Assert.Equal(ProjectCommandPermissionDecision.Deny, reloaded.Evaluate(childProject, deniedCommand));
+        Assert.Contains(reloaded.GetRules(childProject), rule => rule.Command == allowedCommand && rule.Decision == ProjectCommandPermissionDecision.Allow);
+        Assert.DoesNotContain(reloaded.GetRules(childProject), rule => rule.Command == protectedAllowCommand);
+    }
+
+    [Fact]
+    public async Task Failed_project_settings_copy_does_not_publish_partial_auto_mode()
+    {
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+        var childProject = Path.Combine(_root, "child-worktree");
+        const string deniedCommand = "Remove-Item protected.txt";
+        await registry.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);
+        await registry.SetRuleAsync(_project, deniedCommand, ProjectCommandPermissionDecision.Deny);
+
+        File.Delete(_path);
+        Directory.CreateDirectory(_path);
+        await Assert.ThrowsAsync<IOException>(() => registry.CopyProjectSettingsAsync(_project, childProject));
+
+        Assert.False(registry.HasProjectSettings(childProject));
+        Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, registry.GetMode(childProject));
+        Assert.Empty(registry.GetRules(childProject));
+        Assert.Equal(ProjectCommandPermissionDecision.Deny, registry.Evaluate(_project, deniedCommand));
+    }
+
+    [Fact]
     public async Task Corrupt_permission_file_fails_closed_and_is_preserved()
     {
         const string contents = "not valid json";

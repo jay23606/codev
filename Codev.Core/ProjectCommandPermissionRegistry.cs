@@ -142,6 +142,40 @@ public sealed class ProjectCommandPermissionRegistry
         return UpdateProjectAsync(projectPath, project => project with { Mode = mode }, cancellationToken);
     }
 
+    /// <summary>Copies a project's mode and eligible exact rules to a new isolated project in one durable update.</summary>
+    public async Task CopyProjectSettingsAsync(string sourceProjectPath, string destinationProjectPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CanPersist) throw new InvalidOperationException(LoadError ?? "Command permissions are read-only.");
+        var sourcePath = NormalizeProjectPath(sourceProjectPath);
+        var destinationPath = NormalizeProjectPath(destinationProjectPath);
+        if (PathComparer.Equals(sourcePath, destinationPath)) return;
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var source = _projects.TryGetValue(sourcePath, out var currentSource)
+                ? currentSource
+                : new ProjectCommandPermissions(sourcePath, ProjectCommandPermissionMode.AskEveryTime, []);
+            var rules = source.Rules.Where(rule => rule.Decision == ProjectCommandPermissionDecision.Deny ||
+                CanCreateAllowRule(rule.Command)).ToList();
+            if (rules.Count > MaxRulesPerProject)
+                throw new InvalidOperationException("Copied command permissions exceed the per-project rule limit.");
+            var next = new ProjectCommandPermissions(destinationPath, source.Mode, rules);
+            var candidate = new Dictionary<string, ProjectCommandPermissions>(_projects, PathComparer)
+            {
+                [destinationPath] = next
+            };
+            if (candidate.Count > MaxProjects) throw new InvalidOperationException("Too many projects have saved command permissions.");
+            var json = JsonSerializer.Serialize(candidate.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
+            if (Encoding.UTF8.GetByteCount(json) > MaxFileBytes)
+                throw new InvalidOperationException("Saved command permissions would exceed the size limit.");
+            await AtomicTextFile.WriteAsync(_path, json, cancellationToken).ConfigureAwait(false);
+            _projects[destinationPath] = next;
+        }
+        finally { _gate.Release(); }
+    }
+
     public Task SetRuleAsync(string projectPath, string command, ProjectCommandPermissionDecision decision,
         ProjectCommandPermissionMode? mode = null,
         CancellationToken cancellationToken = default)

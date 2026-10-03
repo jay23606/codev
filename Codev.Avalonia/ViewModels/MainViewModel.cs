@@ -1847,12 +1847,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
             await _projectFolderTrust.TrustAsync(worktree.WorktreePath);
 
-            var inheritedMode = _projectCommandPermissions.GetMode(parentProjectPath);
-            await _projectCommandPermissions.SetModeAsync(worktree.WorktreePath, inheritedMode);
-            foreach (var rule in _projectCommandPermissions.GetRules(parentProjectPath)
-                         .Where(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Deny ||
-                             Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command)))
-                await _projectCommandPermissions.SetRuleAsync(worktree.WorktreePath, rule.Command, rule.Decision);
+            await _projectCommandPermissions.CopyProjectSettingsAsync(parentProjectPath, worktree.WorktreePath);
 
             if (selectChild) SelectConversation(child);
             RebuildLists();
