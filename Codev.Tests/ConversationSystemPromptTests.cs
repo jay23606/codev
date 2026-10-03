@@ -50,7 +50,7 @@ public sealed class ConversationSystemPromptTests
         Assert.Contains("approve all shell commands and call configured MCP tools without approval unless the exact command or MCP server/tool is blocked by a saved project deny rule", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("MCP tools may affect external services according to the server's behavior", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Every file replacement needs user approval", prompt, StringComparison.Ordinal);
-        Assert.Contains("A saved exact command deny rule always blocks that exact command in every mode", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("A saved exact command deny rule always blocks its exact command in every mode", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("allow rules never authorize file tools", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("untrusted data", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("as untrusted data", prompt, StringComparison.OrdinalIgnoreCase);
