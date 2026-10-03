@@ -68,7 +68,7 @@ public sealed class ProjectEmbeddingIndex
         var oldByKey = previous?.Chunks.GroupBy(Key, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, ProjectEmbeddingChunk>(StringComparer.OrdinalIgnoreCase);
         var oldByContent = previous?.Model == model
-            ? previous.Chunks.GroupBy(chunk => chunk.Hash + "\0" + chunk.Content, StringComparer.Ordinal)
+            ? previous.Chunks.GroupBy(ContentKey, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal)
             : new Dictionary<string, ProjectEmbeddingChunk>(StringComparer.OrdinalIgnoreCase);
         var updated = new List<ProjectEmbeddingChunk>();
@@ -110,7 +110,7 @@ public sealed class ProjectEmbeddingIndex
                 var key = relative + "\0" + ordinal;
                 if (previous?.Model == model && oldByKey.TryGetValue(key, out var cached) && cached.Hash == hash && cached.Content == chunk)
                     updated.Add(cached);
-                else if (previous?.Model == model && oldByContent.TryGetValue(hash + "\0" + chunk, out var moved))
+                else if (previous?.Model == model && oldByContent.TryGetValue(relative + "\0" + hash + "\0" + chunk, out var moved))
                     updated.Add(moved with { RelativePath = relative, Chunk = ordinal });
                 else inputs.Add((relative, ordinal, chunk, hash));
                 ordinal++;
@@ -200,6 +200,7 @@ public sealed class ProjectEmbeddingIndex
     }
 
     private static string Key(ProjectEmbeddingChunk chunk) => chunk.RelativePath + "\0" + chunk.Chunk;
+    private static string ContentKey(ProjectEmbeddingChunk chunk) => chunk.RelativePath + "\0" + chunk.Hash + "\0" + chunk.Content;
     private static IEnumerable<string> Chunk(string content)
     {
         if (string.IsNullOrWhiteSpace(content)) yield break;

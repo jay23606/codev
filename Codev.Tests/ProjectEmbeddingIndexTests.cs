@@ -52,7 +52,7 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
-    public async Task Reuses_a_moved_chunks_embedding_but_updates_its_source_path()
+    public async Task Reembeds_a_moved_chunk_so_its_vector_matches_the_new_path()
     {
         const string content = "class MovedImplementation { void FindMe() { } }";
         await File.WriteAllTextAsync(Path.Combine(_root, "old.cs"), content);
@@ -72,7 +72,8 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
         Assert.Single(results);
         Assert.Equal("new.cs", results[0].RelativePath);
         Assert.Equal(content, results[0].Content);
-        Assert.Equal(inputsBeforeMove + 1, handler.InputCount); // only the search query was embedded
+        Assert.Equal(inputsBeforeMove + 2, handler.InputCount); // re-embed the new path plus the search query
+        Assert.Contains(handler.Inputs, input => input == $"File: new.cs\n\n{content}");
     }
 
     [Fact]
@@ -231,6 +232,7 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
         public int InputCount { get; private set; }
         public int LastBatchSize { get; private set; }
         public HttpRequestMessage? LastRequest { get; private set; }
+        public List<string> Inputs { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequest = request;
@@ -238,6 +240,9 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
             var input = body.RootElement.GetProperty("input");
             LastBatchSize = input.ValueKind == JsonValueKind.Array ? input.GetArrayLength() : 1;
             InputCount += LastBatchSize;
+            if (input.ValueKind == JsonValueKind.Array)
+                Inputs.AddRange(input.EnumerateArray().Select(value => value.GetString() ?? ""));
+            else Inputs.Add(input.GetString() ?? "");
             var embeddings = Enumerable.Range(0, LastBatchSize).Select(_ => new[] { 1.0, 0.0, 0.5 });
             var response = JsonSerializer.Serialize(new { embeddings });
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(response) };
