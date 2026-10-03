@@ -204,6 +204,21 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Atomic_write_preserves_existing_unix_permissions()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead;
+        var path = Path.Combine(_root, "Program.cs");
+        await File.WriteAllTextAsync(path, "class Original {}\n");
+        File.SetUnixFileMode(path, expected);
+
+        await Service.WriteFileAtomicAsync("Program.cs", "class Updated {}\n");
+
+        Assert.Equal(expected, File.GetUnixFileMode(path));
+    }
+
+    [Fact]
     public async Task Refuses_to_overwrite_a_file_changed_after_its_review_snapshot()
     {
         var path = Path.Combine(_root, "Program.cs");

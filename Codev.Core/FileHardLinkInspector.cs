@@ -366,6 +366,29 @@ public static class FileHardLinkInspector
         return null;
     }
 
+    internal static uint GetUnixPermissions(SafeFileHandle handle)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            var descriptor = handle.DangerousGetHandle().ToInt32();
+            if (Statx(descriptor, string.Empty, AtEmptyPath, LinuxStatxMode, out var info) != 0 ||
+                (info.Mask & LinuxStatxMode) == 0)
+                throw new IOException("The existing project file permissions could not be verified.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            return (uint)(info.Mode & 0x1FF);
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            var descriptor = handle.DangerousGetHandle().ToInt32();
+            var result = RuntimeInformation.ProcessArchitecture == Architecture.X64
+                ? FStatMacOsInode64(descriptor, out var info)
+                : FStatMacOs(descriptor, out info);
+            if (result != 0)
+                throw new IOException("The existing project file permissions could not be verified.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            return (uint)(info.Mode & 0x1FF);
+        }
+        throw new PlatformNotSupportedException("Unix file permissions are available only on Linux and macOS.");
+    }
+
     private static int? TryGetWindowsLinkCount(string path)
     {
         using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);

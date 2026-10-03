@@ -34,7 +34,7 @@ internal static class WorkspaceFileSystemOperations
     private const int MacOpenExclusive = 0x00000800;
     private const int MacOpenNoFollow = 0x00000100;
     private const int MacOpenCloseOnExec = 0x01000000;
-    private const uint UnixFileMode = 0x1B6; // 0666, subject to the process umask.
+    private const uint DefaultMacFileMode = 0x180; // 0600: keep newly-created source private and writable by its owner.
 
     internal static async Task WriteAtomicallyAsync(string root, string destinationPath, byte[] content, bool overwrite, CancellationToken cancellationToken,
         Func<CancellationToken, Task<bool>>? validateBeforeCommit = null)
@@ -197,15 +197,19 @@ internal static class WorkspaceFileSystemOperations
     private static async Task WriteUnixAsync(SafeFileHandle parent, string temporaryName, string fileName, byte[] content, bool overwrite, CancellationToken cancellationToken,
         Func<CancellationToken, Task<bool>>? validateBeforeCommit)
     {
+        var parentDescriptor = parent.DangerousGetHandle().ToInt32();
+        var targetMode = GetUnixTargetMode(parentDescriptor, fileName, overwrite);
         var flags = OperatingSystem.IsLinux()
             ? LinuxOpenWriteOnly | LinuxOpenCreate | LinuxOpenExclusive | LinuxOpenCloseOnExec | LinuxOpenNoFollow
             : MacOpenWriteOnly | MacOpenCreate | MacOpenExclusive | MacOpenCloseOnExec | MacOpenNoFollow;
-        var descriptor = OpenAtCreate(parent.DangerousGetHandle().ToInt32(), temporaryName, flags, UnixFileMode);
+        var descriptor = OpenAtCreate(parentDescriptor, temporaryName, flags, OperatingSystem.IsLinux() ? 0x1B6u : 0u);
         if (descriptor < 0) throw new IOException("A temporary project file could not be created safely.", new Win32Exception(Marshal.GetLastPInvokeError()));
         using var handle = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
         var temporaryExists = true;
         try
         {
+            if (targetMode is { } mode && Fchmod(descriptor, mode) != 0)
+                throw new IOException("The temporary project file permissions could not be set safely.", new Win32Exception(Marshal.GetLastPInvokeError()));
             using (var stream = new FileStream(handle, FileAccess.Write, 4096, isAsync: false))
             {
                 await stream.WriteAsync(content, cancellationToken);
@@ -233,6 +237,26 @@ internal static class WorkspaceFileSystemOperations
         {
             if (temporaryExists) _ = UnlinkAt(parent.DangerousGetHandle().ToInt32(), temporaryName, 0);
         }
+    }
+
+    private static uint? GetUnixTargetMode(int parentDescriptor, string fileName, bool overwrite)
+    {
+        var flags = OperatingSystem.IsLinux()
+            ? LinuxOpenCloseOnExec | LinuxOpenNoFollow | LinuxOpenNonBlock
+            : MacOpenCloseOnExec | MacOpenNoFollow | MacOpenNonBlock;
+        var existing = OpenAtReadOnly(parentDescriptor, fileName, flags);
+        if (existing < 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            if (error == 2) return OperatingSystem.IsMacOS() ? DefaultMacFileMode : null; // Linux create mode is 0666, subject to umask.
+            throw new IOException("The existing project file could not be opened safely to preserve its permissions.", new Win32Exception(error));
+        }
+
+        using var handle = new SafeFileHandle((IntPtr)existing, ownsHandle: true);
+        if (!overwrite)
+            throw new IOException("A project file already exists at this path or could not be created.");
+        var mode = FileHardLinkInspector.GetUnixPermissions(handle);
+        return mode;
     }
 
     private static async Task WriteWindowsAsync(string root, SafeFileHandle parent, string temporaryName, string fileName, byte[] content, bool overwrite, CancellationToken cancellationToken,
@@ -382,6 +406,12 @@ internal static class WorkspaceFileSystemOperations
 
     [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
     private static extern int OpenAtCreate(int directoryFileDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mode);
+
+    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
+    private static extern int OpenAtReadOnly(int directoryFileDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [DllImport("libc", EntryPoint = "fchmod", SetLastError = true)]
+    private static extern int Fchmod(int fileDescriptor, uint mode);
 
     [DllImport("libc", EntryPoint = "renameat", SetLastError = true)]
     private static extern int RenameAt(int oldDirectoryFileDescriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string oldPath,
