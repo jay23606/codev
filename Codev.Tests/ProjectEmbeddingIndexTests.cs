@@ -52,6 +52,30 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task Reuses_a_moved_chunks_embedding_but_updates_its_source_path()
+    {
+        const string content = "class MovedImplementation { void FindMe() { } }";
+        await File.WriteAllTextAsync(Path.Combine(_root, "old.cs"), content);
+        var handler = new EmbeddingHandler();
+        using var http = new HttpClient(handler);
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
+
+        await index.UpdateAsync();
+        var inputsBeforeMove = handler.InputCount;
+        File.Delete(Path.Combine(_root, "old.cs"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "new.cs"), content);
+        await index.UpdateAsync();
+
+        var results = await index.SearchAsync("find implementation");
+
+        Assert.Single(results);
+        Assert.Equal("new.cs", results[0].RelativePath);
+        Assert.Equal(content, results[0].Content);
+        Assert.Equal(inputsBeforeMove + 1, handler.InputCount); // only the search query was embedded
+    }
+
+    [Fact]
     public async Task Refuses_to_save_a_partial_index_when_the_project_size_limit_is_exceeded()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), "class A {}");

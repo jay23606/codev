@@ -111,7 +111,7 @@ public sealed class ProjectEmbeddingIndex
                 if (previous?.Model == model && oldByKey.TryGetValue(key, out var cached) && cached.Hash == hash && cached.Content == chunk)
                     updated.Add(cached);
                 else if (previous?.Model == model && oldByContent.TryGetValue(hash + "\0" + chunk, out var moved))
-                    updated.Add(moved with { Chunk = ordinal });
+                    updated.Add(moved with { RelativePath = relative, Chunk = ordinal });
                 else inputs.Add((relative, ordinal, chunk, hash));
                 ordinal++;
             }
