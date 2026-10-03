@@ -215,7 +215,7 @@ public static class ProjectSkillCatalog
         await using Stream stream = projectRoot is null
             ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 4096, FileOptions.Asynchronous | FileOptions.SequentialScan)
-            : FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetRelativePath(projectRoot, path));
+            : FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetRelativePath(projectRoot, path), projectRoot);
         if (stream.Length > CustomSlashCommandService.MaxCommandFileBytes)
             throw new IOException("Skill file exceeds the size limit.");
         var buffer = new byte[CustomSlashCommandService.MaxCommandFileBytes + 1];

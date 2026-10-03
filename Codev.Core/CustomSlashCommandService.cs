@@ -207,7 +207,7 @@ public static partial class CustomSlashCommandService
         await using Stream stream = projectRoot is null
             ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 4096, FileOptions.Asynchronous | FileOptions.SequentialScan)
-            : FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetRelativePath(projectRoot, path));
+            : FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetRelativePath(projectRoot, path), projectRoot);
         if (stream.Length > MaxCommandFileBytes) throw new IOException("Command file exceeds the size limit.");
         var buffer = new byte[MaxCommandFileBytes + 1];
         var total = 0;

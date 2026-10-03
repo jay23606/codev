@@ -362,6 +362,35 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Rejects_a_parent_directory_link_swapped_after_path_validation()
+    {
+        var parent = Path.Combine(_root, "race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        var validatedPath = Service.ResolvePath("race/inside.cs");
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-parent-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "inside.cs"), "must not be read");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            Assert.Throws<UnauthorizedAccessException>(() =>
+            {
+                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(validatedPath, "race/inside.cs", _root);
+            });
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public void Refuses_a_symbolic_link_used_as_the_project_root()
     {
         var target = Path.Combine(_root, "real-project");

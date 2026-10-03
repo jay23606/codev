@@ -256,7 +256,7 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are opened by the agent.");
-        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath, _root);
         if (stream.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken);
@@ -289,7 +289,7 @@ public sealed class WorkspaceFileService
             try
             {
                 var full = ResolvePath(relative);
-                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative);
+                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative, _root);
                 if (stream.Length > 500_000) continue;
                 using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                 var fileLines = new List<string>();
@@ -378,7 +378,7 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!File.Exists(full)) return null;
-        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath, _root);
         if (stream.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB cannot be checkpointed or restored.");
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken);
@@ -536,7 +536,7 @@ public sealed class WorkspaceFileService
         if (!File.Exists(path)) return false;
         // Hash the same regular-file handle that passed the hard-link check before using it to approve a replacement.
         var relativePath = Path.GetRelativePath(_root, path);
-        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, relativePath);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, relativePath, _root);
         if (stream.Length > 500_000) return false;
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken);

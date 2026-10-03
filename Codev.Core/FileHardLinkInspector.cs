@@ -1,5 +1,8 @@
 using System.Runtime.InteropServices;
 using System.ComponentModel;
+using System.Text;
+using System.IO;
+using System.Linq;
 using Microsoft.Win32.SafeHandles;
 
 namespace Codev;
@@ -12,6 +15,13 @@ public static class FileHardLinkInspector
     private const int AtCurrentWorkingDirectory = -100;
     private const int AtSymlinkNoFollow = 0x0100;
     private const int AtEmptyPath = 0x1000;
+    private const uint WindowsFileReadAttributes = 0x00000080;
+    private const uint WindowsFileFlagBackupSemantics = 0x02000000;
+    private const uint WindowsFileNameNormalized = 0x0;
+    private const int LinuxOpenDirectory = 0x00010000;
+    private const int MacOpenDirectory = 0x00100000;
+    private const int MacFcntlGetPath = 50;
+    private const int MacMaxPathLength = 1024;
 
     public static bool IsSupportedPlatform => OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
 
@@ -50,10 +60,11 @@ public static class FileHardLinkInspector
     /// Opens a regular file without following a final symbolic link, checks the link count on
     /// that same open file, and returns the handle that callers must use for the read.
     /// </summary>
-    public static FileStream OpenSingleLinkReadStream(string path, string displayPath)
+    public static FileStream OpenSingleLinkReadStream(string path, string displayPath, string trustedRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(trustedRoot);
         if (!IsSupportedPlatform)
             throw new UnauthorizedAccessException($"The hard-link status for '{displayPath}' cannot be checked on this platform, so it was not read.");
 
@@ -69,12 +80,113 @@ public static class FileHardLinkInspector
             if (linkCount > 1)
                 throw new UnauthorizedAccessException($"'{displayPath}' is shared through a hard link, so it was not read.");
 
+            EnsureHandleIsWithinRoot(handle, trustedRoot, displayPath);
+
             var stream = new FileStream(handle, FileAccess.Read, 4096, isAsync: false);
             handle = null; // FileStream now owns the verified handle.
             return stream;
         }
         finally { handle?.Dispose(); }
     }
+
+    private static void EnsureHandleIsWithinRoot(SafeFileHandle fileHandle, string trustedRoot, string displayPath)
+    {
+        using var rootHandle = OpenDirectoryHandle(trustedRoot);
+        var expectedRoot = NormalizeHandlePath(Path.GetFullPath(trustedRoot));
+        var actualRoot = NormalizeHandlePath(GetFinalPath(rootHandle));
+        if (!PathsEqual(expectedRoot, actualRoot))
+            throw new UnauthorizedAccessException("The project folder changed while its file boundary was being verified.");
+
+        var actualFile = NormalizeHandlePath(GetFinalPath(fileHandle));
+        var rootPrefix = actualRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!actualFile.StartsWith(rootPrefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new UnauthorizedAccessException($"'{displayPath}' resolved outside the trusted project folder, so it was not read.");
+    }
+
+    private static SafeFileHandle OpenDirectoryHandle(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var handle = CreateFileWindows(path, WindowsFileReadAttributes, ShareRead | ShareWrite | ShareDelete,
+                IntPtr.Zero, OpenExisting, FileFlagOpenReparsePoint | WindowsFileFlagBackupSemantics, IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                var error = Marshal.GetLastPInvokeError();
+                handle.Dispose();
+                throw new IOException("The trusted project folder could not be opened for boundary verification.", new Win32Exception(error));
+            }
+            if (!GetFileInformationByHandle(handle, out var info) ||
+                (info.Attributes & FileAttributeDirectory) == 0 || (info.Attributes & FileAttributeReparsePoint) != 0)
+            {
+                handle.Dispose();
+                throw new UnauthorizedAccessException("The trusted project folder is not an ordinary directory.");
+            }
+            return handle;
+        }
+
+        var flags = OperatingSystem.IsLinux()
+            ? LinuxOpenReadOnly | LinuxOpenCloseOnExec | LinuxOpenNoFollow | LinuxOpenDirectory
+            : MacOpenReadOnly | MacOpenCloseOnExec | MacOpenNoFollow | MacOpenDirectory;
+        var descriptor = OpenUnix(path, flags);
+        if (descriptor < 0)
+            throw new IOException("The trusted project folder could not be opened without following a symbolic link.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        return new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
+    }
+
+    private static string GetFinalPath(SafeFileHandle handle)
+    {
+        var descriptor = handle.DangerousGetHandle().ToInt32();
+        if (OperatingSystem.IsWindows())
+        {
+            var buffer = new StringBuilder(512);
+            var length = GetFinalPathNameByHandleWindows(handle, buffer, (uint)buffer.Capacity, WindowsFileNameNormalized);
+            if (length == 0)
+                throw new IOException("The opened file path could not be verified.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            if (length >= buffer.Capacity)
+            {
+                buffer = new StringBuilder(checked((int)length + 1));
+                length = GetFinalPathNameByHandleWindows(handle, buffer, (uint)buffer.Capacity, WindowsFileNameNormalized);
+            }
+            if (length == 0 || length >= buffer.Capacity)
+                throw new IOException("The opened file path could not be verified.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            return buffer.ToString();
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            var target = new byte[4096];
+            var length = ReadLink($"/proc/self/fd/{descriptor}", target, (nuint)target.Length);
+            if (length <= 0 || length >= target.Length)
+                throw new IOException("The opened file path could not be verified through /proc/self/fd.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            var path = Encoding.UTF8.GetString(target, 0, checked((int)length));
+            if (path.EndsWith(" (deleted)", StringComparison.Ordinal))
+                throw new UnauthorizedAccessException("A project file was removed while its path was being verified.");
+            return path;
+        }
+
+        var pathBuffer = Marshal.AllocHGlobal(MacMaxPathLength);
+        try
+        {
+            if (FcntlMacOs(descriptor, MacFcntlGetPath, pathBuffer) != 0)
+                throw new IOException("The opened file path could not be verified on macOS.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            var path = Marshal.PtrToStringUTF8(pathBuffer);
+            if (string.IsNullOrEmpty(path)) throw new IOException("The opened file path could not be verified on macOS.");
+            return path;
+        }
+        finally { Marshal.FreeHGlobal(pathBuffer); }
+    }
+
+    private static string NormalizeHandlePath(string path)
+    {
+        var normalized = Path.GetFullPath(path);
+        if (OperatingSystem.IsWindows() && normalized.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
+            normalized = "\\\\" + normalized[8..];
+        else if (OperatingSystem.IsWindows() && normalized.StartsWith("\\\\?\\", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized[4..];
+        return normalized.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static bool PathsEqual(string left, string right) => string.Equals(left, right,
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private static SafeFileHandle OpenReadHandle(string path)
     {
@@ -176,6 +288,9 @@ public static class FileHardLinkInspector
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation information);
 
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleWindows(SafeFileHandle file, StringBuilder path, uint pathLength, uint flags);
+
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFileWindows(string fileName, uint desiredAccess, uint shareMode,
         IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
@@ -186,6 +301,12 @@ public static class FileHardLinkInspector
     [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
     private static extern int Statx(int directoryFileDescriptor,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mask, out LinuxStatx information);
+
+    [DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
+    private static extern nint ReadLink([MarshalAs(UnmanagedType.LPUTF8Str)] string path, [Out] byte[] buffer, nuint bufferSize);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "fcntl", SetLastError = true)]
+    private static extern int FcntlMacOs(int fileDescriptor, int command, IntPtr pathBuffer);
 
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "fstat", SetLastError = true)]
     private static extern int FStatMacOs(int fileDescriptor, out MacStat information);

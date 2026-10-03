@@ -138,7 +138,8 @@ public sealed class BestOfNAttemptWorkspaceManager
                 blockers.Add($"File deletion cannot be applied through the reviewed proposal path: {relativePath}");
                 continue;
             }
-            if (hadOriginal && hasResult && await FileContentsMatchAsync(beforePath!, afterPath!, cancellationToken).ConfigureAwait(false))
+            var baselineRoot = Path.Combine(snapshot.RootPath, "baseline");
+            if (hadOriginal && hasResult && await FileContentsMatchAsync(beforePath!, afterPath!, baselineRoot, expectedWorkspace, cancellationToken).ConfigureAwait(false))
                 continue;
             if (!targetFiles.IsSupportedContextFile(relativePath) || targetFiles.IsContextExcluded(relativePath) ||
                 WorkspaceFileService.IsSensitiveFileName(Path.GetFileName(relativePath)))
@@ -151,8 +152,8 @@ public sealed class BestOfNAttemptWorkspaceManager
             string after;
             try
             {
-                before = hadOriginal ? await ReadBoundedTextFileAsync(beforePath!, cancellationToken).ConfigureAwait(false) : "";
-                after = await ReadBoundedTextFileAsync(afterPath!, cancellationToken).ConfigureAwait(false);
+                before = hadOriginal ? await ReadBoundedTextFileAsync(beforePath!, baselineRoot, cancellationToken).ConfigureAwait(false) : "";
+                after = await ReadBoundedTextFileAsync(afterPath!, expectedWorkspace, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DecoderFallbackException or InvalidOperationException)
             {
@@ -253,7 +254,7 @@ public sealed class BestOfNAttemptWorkspaceManager
                 totalBytes = checked(totalBytes + length);
                 if (totalBytes > MaximumBytes)
                     throw new InvalidOperationException($"Project snapshot exceeds the {MaximumBytes / (1024 * 1024 * 1024)} GiB limit.");
-                await CopyFileAsync(entry, target, makeWritable, cancellationToken).ConfigureAwait(false);
+                await CopyFileAsync(entry, target, source, makeWritable, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -410,9 +411,9 @@ public sealed class BestOfNAttemptWorkspaceManager
         return Task.FromResult(files);
     }
 
-    private static async Task<string> ReadBoundedTextFileAsync(string path, CancellationToken cancellationToken)
+    private static async Task<string> ReadBoundedTextFileAsync(string path, string trustedRoot, CancellationToken cancellationToken)
     {
-        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetFileName(path));
+        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetFileName(path), trustedRoot);
         if (stream.Length > 200_000) throw new InvalidOperationException("The file exceeds Codev's 200 KB reviewed-write limit.");
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -421,19 +422,20 @@ public sealed class BestOfNAttemptWorkspaceManager
         return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
     }
 
-    private static async Task<bool> FileContentsMatchAsync(string firstPath, string secondPath, CancellationToken cancellationToken)
+    private static async Task<bool> FileContentsMatchAsync(string firstPath, string secondPath, string firstRoot,
+        string secondRoot, CancellationToken cancellationToken)
     {
-        await using var first = FileHardLinkInspector.OpenSingleLinkReadStream(firstPath, Path.GetFileName(firstPath));
-        await using var second = FileHardLinkInspector.OpenSingleLinkReadStream(secondPath, Path.GetFileName(secondPath));
+        await using var first = FileHardLinkInspector.OpenSingleLinkReadStream(firstPath, Path.GetFileName(firstPath), firstRoot);
+        await using var second = FileHardLinkInspector.OpenSingleLinkReadStream(secondPath, Path.GetFileName(secondPath), secondRoot);
         if (first.Length != second.Length) return false;
         var firstHash = await SHA256.HashDataAsync(first, cancellationToken).ConfigureAwait(false);
         var secondHash = await SHA256.HashDataAsync(second, cancellationToken).ConfigureAwait(false);
         return CryptographicOperations.FixedTimeEquals(firstHash, secondHash);
     }
 
-    private static async Task CopyFileAsync(string source, string destination, bool makeWritable, CancellationToken cancellationToken)
+    private static async Task CopyFileAsync(string source, string destination, string trustedRoot, bool makeWritable, CancellationToken cancellationToken)
     {
-        await using var input = FileHardLinkInspector.OpenSingleLinkReadStream(source, Path.GetFileName(source));
+        await using var input = FileHardLinkInspector.OpenSingleLinkReadStream(source, Path.GetFileName(source), trustedRoot);
         var initialLength = input.Length;
         var initialWriteTime = File.GetLastWriteTimeUtc(source);
         await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
@@ -500,7 +502,7 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if (++fileCount > MaximumFiles)
                     throw new InvalidOperationException($"Project snapshot exceeds the {MaximumFiles:N0}-file limit.");
                 hash.AppendData([0x46]);
-                await using var input = FileHardLinkInspector.OpenSingleLinkReadStream(entry.Path, relative);
+                await using var input = FileHardLinkInspector.OpenSingleLinkReadStream(entry.Path, relative, root);
                 var length = input.Length;
                 hash.AppendData(Encoding.UTF8.GetBytes(length.ToString(CultureInfo.InvariantCulture)));
                 hash.AppendData([0]);
