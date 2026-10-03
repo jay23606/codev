@@ -1,6 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Diagnostics;
-using System.Globalization;
 using System.ComponentModel;
 using Microsoft.Win32.SafeHandles;
 
@@ -74,41 +72,8 @@ public static class FileHardLinkInspector
 
     private static int? TryGetMacOsLinkCount(string path)
     {
-        // macOS stat(1) exposes st_nlink as %l. Use ArgumentList rather than a shell,
-        // and keep the process bounded so a platform/tooling failure fails closed.
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "/usr/bin/stat",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            }
-        };
-        process.StartInfo.ArgumentList.Add("-f");
-        process.StartInfo.ArgumentList.Add("%l");
-        process.StartInfo.ArgumentList.Add(Path.GetFullPath(path));
-        if (!process.Start()) return null;
-
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(milliseconds: 2000))
-        {
-            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-            try { process.WaitForExit(milliseconds: 1000); } catch (InvalidOperationException) { }
-            return null;
-        }
-
-        // Drain both redirected streams before disposing the process. stat's successful
-        // output is one short integer, while errors are ignored and never exposed.
-        _ = errorTask.GetAwaiter().GetResult();
-        if (process.ExitCode != 0) return null;
-        var output = outputTask.GetAwaiter().GetResult().Trim();
-        return int.TryParse(output, NumberStyles.None, CultureInfo.InvariantCulture, out var count) && count >= 1
-            ? count
-            : null;
+        if (LStatMacOs(Path.GetFullPath(path), out var info) != 0) return null;
+        return info.LinkCount >= 1 ? info.LinkCount : null;
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -118,6 +83,12 @@ public static class FileHardLinkInspector
     [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
     private static extern int Statx(int directoryFileDescriptor,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mask, out LinuxStatx information);
+
+    // Darwin's LP64 struct stat declares dev_t (32 bits), mode_t (16 bits), then
+    // nlink_t (16 bits). Allocate more than the current ABI structure size while
+    // reading the stable field at offset 6; this works on macOS x64 and arm64.
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "lstat", SetLastError = true)]
+    private static extern int LStatMacOs([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out MacStat information);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ByHandleFileInformation
@@ -142,5 +113,11 @@ public static class FileHardLinkInspector
     {
         [FieldOffset(0)] public uint Mask;
         [FieldOffset(16)] public uint LinkCount;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 256)]
+    private struct MacStat
+    {
+        [FieldOffset(6)] public ushort LinkCount;
     }
 }
