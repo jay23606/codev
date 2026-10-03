@@ -9,7 +9,7 @@ public sealed record ProjectEmbeddingIndexData(string Model, List<ProjectEmbeddi
 public sealed record SemanticSearchResult(string RelativePath, int Chunk, double Score, string Content);
 
 /// <summary>Opt-in, per-project local vector index stored under the caller's Codev data directory.</summary>
-public sealed class ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileService files, OllamaEmbeddingClient client, string model)
+public sealed class ProjectEmbeddingIndex
 {
     public const int ChunkCharacters = 1800;
     public const int ChunkOverlap = 240;
@@ -18,7 +18,31 @@ public sealed class ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileSer
     public const int MaxSearchResults = 8;
     public const int MaxStoredChunks = 40_000;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-    private readonly string _indexPath = GetIndexPath(dataDirectory, files.Root);
+    private readonly WorkspaceFileService files;
+    private readonly OllamaEmbeddingClient client;
+    private readonly string model;
+    private readonly string _indexPath;
+    private readonly long _maxIndexedBytes;
+
+    public ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileService files, OllamaEmbeddingClient client, string model)
+        : this(dataDirectory, files, client, model, MaxIndexedBytes)
+    {
+    }
+
+    internal ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileService files, OllamaEmbeddingClient client, string model,
+        long maxIndexedBytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        if (maxIndexedBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxIndexedBytes));
+        this.files = files;
+        this.client = client;
+        this.model = model;
+        _maxIndexedBytes = maxIndexedBytes;
+        _indexPath = GetIndexPath(dataDirectory, files.Root);
+    }
 
     public static string GetIndexPath(string dataDirectory, string projectPath)
     {
@@ -56,15 +80,24 @@ public sealed class ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileSer
         foreach (var relative in candidates)
         {
             EnsureCanContinue(canContinue, cancellationToken);
-            string content;
+            FileInfo info;
             try
             {
                 var full = files.ResolvePath(relative);
-                var info = new FileInfo(full);
+                info = new FileInfo(full);
                 if (!info.Exists || info.Length > 500_000) continue;
-                totalBytes += info.Length;
-                if (totalBytes > MaxIndexedBytes) break;
-                content = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { continue; }
+
+            totalBytes += info.Length;
+            if (totalBytes > _maxIndexedBytes)
+                throw new InvalidOperationException($"This project exceeds the semantic-index byte limit of {_maxIndexedBytes:N0} bytes. Narrow context exclusions and retry; the existing index was left unchanged.");
+
+            string content;
+            try
+            {
+                content = await File.ReadAllTextAsync(info.FullName, cancellationToken).ConfigureAwait(false);
                 if (content.Contains('\0')) continue;
             }
             catch (OperationCanceledException) { throw; }

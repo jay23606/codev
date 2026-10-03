@@ -235,7 +235,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | A6 | `/status` | S | D1 | Core · implemented in WPF and Avalonia; manual UI smoke remains |
 | A7 | `@`-mention files in the composer | S | none | Core · implemented in both apps; manual UI smoke remains |
 | A8 | Repo map | M | none | Later · bounded Avalonia map implemented; heuristic C#/JS/TS/Python symbol scan masks comments and strings; full syntax-aware parsing and WPF port remain |
-| A9 | Embeddings search | M | A8 helpful, not required | Later · implemented in Avalonia; usefulness measurement is recorded in V5 and needs follow-up because semantic search was unused in the focused pair and the combined literal-plus-semantic setup added noise |
+| A9 | Embeddings search | M | A8 helpful, not required | Later · implemented in Avalonia; usefulness measurement is recorded in V5 and needs follow-up because semantic search was unused in the focused pair and the combined literal-plus-semantic setup added noise; indexing now refuses to save a partial index when the project exceeds its byte budget |
 | A10 | Small helper model for chores | S | none | Later |
 | A11 | Conversation recall | S | none | Speculative |
 | A12 | Multi-folder projects | M | none | Later |

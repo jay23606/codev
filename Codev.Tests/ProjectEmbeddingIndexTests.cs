@@ -52,6 +52,47 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task Refuses_to_save_a_partial_index_when_the_project_size_limit_is_exceeded()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), "class A {}");
+        var handler = new EmbeddingHandler();
+        using var http = new HttpClient(handler);
+        var client = new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed");
+        var originalIndex = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root), client, "test-embed");
+        await originalIndex.UpdateAsync();
+        var indexPath = ProjectEmbeddingIndex.GetIndexPath(_data, _root);
+        var originalContents = await File.ReadAllTextAsync(indexPath);
+        await File.WriteAllTextAsync(Path.Combine(_root, "b.cs"), "class B {}");
+
+        var constrainedIndex = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            client, "test-embed", maxIndexedBytes: 12);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => constrainedIndex.UpdateAsync());
+
+        Assert.Contains("size limit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("existing index was left unchanged", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalContents, await File.ReadAllTextAsync(indexPath));
+        Assert.Equal(1, handler.InputCount);
+    }
+
+    [Fact]
+    public async Task Does_not_create_an_index_when_the_first_update_exceeds_the_project_size_limit()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), "class A {}");
+        await File.WriteAllTextAsync(Path.Combine(_root, "b.cs"), "class B {}");
+        var handler = new EmbeddingHandler();
+        using var http = new HttpClient(handler);
+        var client = new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed");
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root), client, "test-embed", maxIndexedBytes: 12);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => index.UpdateAsync());
+
+        Assert.Contains("size limit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(ProjectEmbeddingIndex.HasIndex(_data, _root));
+        Assert.Equal(0, handler.InputCount);
+    }
+
+    [Fact]
     public async Task Stops_without_saving_when_project_trust_is_revoked()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), "class First { }");

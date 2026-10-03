@@ -56,3 +56,9 @@ This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-p
 ## Release decision
 
 Q3 is **not complete** under Q4: multiple rows are incomplete, and none have been waived. PR #1 is ready and its required CI checks are green, but a public release should wait until the remaining checks are run or explicitly waived with written reasons.
+
+## Adversarial review follow-up
+
+- Review of current PR head `ac6e76b` found that A9 stopped at its 80 MiB project-size cap and silently saved the partial index. `ProjectEmbeddingIndex.UpdateAsync` now fails with the configured size limit and leaves any prior index unchanged. A regression uses a small injected test limit to verify that oversized projects do not create a partial index or send partial batches for embedding. The full regression remains to be run with .NET 10; this environment only has SDK 9.0.305, while the project targets .NET 10.
+- Auto mode intentionally approves all shell command proposals unless an exact deny rule matches. This includes destructive commands and Git commit/push, which run unsandboxed with the user's account permissions; the behavior is explicitly covered by the command-policy tests. The mode must remain clearly disclosed as broad execution consent.
+- Current hosted Windows/Linux/macOS CI and four-RID app/CLI package-launch checks pass for the PR head. Native interactive QA, performance budgets, process-kill/uninstall data safety, accessibility, complete documentation alignment, and the full manual security review remain release gates. The native Windows automation retry failed to activate the packaged Codev window, so no interaction result is claimed.
