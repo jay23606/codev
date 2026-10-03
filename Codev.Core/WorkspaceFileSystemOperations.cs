@@ -25,11 +25,13 @@ internal static class WorkspaceFileSystemOperations
     private const int StatusNoMoreFiles = unchecked((int)0x80000006);
     private const int StatusBufferOverflow = unchecked((int)0x80000005);
     private const int LinuxOpenWriteOnly = 1;
+    private const int LinuxOpenNonBlock = 0x00000800;
     private const int LinuxOpenCreate = 0x40;
     private const int LinuxOpenExclusive = 0x80;
     private const int LinuxOpenCloseOnExec = 0x00080000;
     private const int LinuxOpenNoFollow = 0x00020000;
     private const int MacOpenWriteOnly = 1;
+    private const int MacOpenNonBlock = 0x00000004;
     private const int MacOpenCreate = 0x00000200;
     private const int MacOpenExclusive = 0x00000800;
     private const int MacOpenNoFollow = 0x00000100;
