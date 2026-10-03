@@ -34,7 +34,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore portable tests
         run: dotnet restore Codev.Tests/Codev.Tests.csproj
@@ -91,7 +91,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
 
       - name: Build Avalonia UI
         run: dotnet build Codev.Avalonia/Codev.Avalonia.csproj --configuration Release
@@ -107,7 +107,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set +e
-          xvfb-run -a timeout --signal=TERM --kill-after=5s 15s ./Codev.Avalonia/bin/Release/net9.0/Codev.Avalonia
+          xvfb-run -a timeout --signal=TERM --kill-after=5s 15s ./Codev.Avalonia/bin/Release/net10.0/Codev.Avalonia
           status=$?
           if [ "$status" -eq 124 ]; then
             exit 0
@@ -123,7 +123,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore test project and application
         run: dotnet restore Codev.Windows.Tests\Codev.Windows.Tests.csproj

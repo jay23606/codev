@@ -38,10 +38,14 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore test projects
         run: dotnet restore Codev.Tests/Codev.Tests.csproj
+
+      - name: Restore Avalonia UI tests on Windows
+        if: matrix.os == 'windows-latest'
+        run: dotnet restore Codev.Avalonia.Tests/Codev.Avalonia.Tests.csproj
 
       - name: Restore headless CLI
         run: dotnet restore Codev.Cli/Codev.Cli.csproj
@@ -59,6 +63,10 @@ jobs:
         if: matrix.rid == 'osx-x64'
         timeout-minutes: 8
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 3m --blame-hang-dump-type none --logger "console;verbosity=normal"
+
+      - name: Run Avalonia headless UI tests on Windows
+        if: matrix.os == 'windows-latest'
+        run: dotnet test Codev.Avalonia.Tests/Codev.Avalonia.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
 
       - name: Publish self-contained Avalonia app
         run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish/${{ matrix.rid }}
@@ -247,6 +255,20 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require the release tag to point to main history
+        shell: bash
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Refusing to publish a release from a commit outside main history: $GITHUB_SHA" >&2
+            exit 1
+          fi
+
       - name: Download release archives
         uses: actions/download-artifact@v4
         with:
