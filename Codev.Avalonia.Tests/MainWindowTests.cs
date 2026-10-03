@@ -378,13 +378,11 @@ public sealed class MainWindowTests
             menu.ShowAt(selector);
             var askItem = Assert.Single(menu.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "Ask every time");
             await Dispatcher.UIThread.InvokeAsync(() => askItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)));
+            Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, viewModel.ProjectCommandPermissionMode);
+            var settingsPersistenceTask = typeof(MainViewModel).GetField("_settingsPersistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task
+                ?? throw new InvalidOperationException("The footer mode selection did not start settings persistence.");
+            await settingsPersistenceTask;
             var settingsPath = Path.Combine(appData, "avalonia-settings.json");
-            var settingsDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
-            while (DateTimeOffset.UtcNow < settingsDeadline)
-            {
-                if (File.Exists(settingsPath) && AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).DefaultProjectCommandPermissionMode == ProjectCommandPermissionMode.AskEveryTime) break;
-                await Task.Delay(20);
-            }
             Assert.True(File.Exists(settingsPath));
             Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, AvaloniaUiSettings.Deserialize(await File.ReadAllTextAsync(settingsPath)).DefaultProjectCommandPermissionMode);
 
