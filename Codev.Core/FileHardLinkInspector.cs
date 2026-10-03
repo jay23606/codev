@@ -191,7 +191,7 @@ public static class FileHardLinkInspector
                     throw new UnauthorizedAccessException("The trusted project folder path contains an unsafe component.");
                 var child = OpenAt(current.DangerousGetHandle().ToInt32(), component, flags);
                 if (child < 0)
-                    throw new IOException("A trusted project folder component could not be opened without following a symbolic link.", new Win32Exception(Marshal.GetLastPInvokeError()));
+                    throw CreateUnixPathOpenException("A trusted project folder component could not be opened without following a symbolic link.");
                 var next = new SafeFileHandle((IntPtr)child, ownsHandle: true);
                 current.Dispose();
                 current = next;
@@ -222,9 +222,9 @@ public static class FileHardLinkInspector
                 var flags = isFile ? UnixFileOpenFlags : UnixDirectoryOpenFlags;
                 var descriptor = OpenAt(current.DangerousGetHandle().ToInt32(), components[index], flags);
                 if (descriptor < 0)
-                    throw new IOException(isFile
+                    throw CreateUnixPathOpenException(isFile
                         ? "The project file could not be opened without following a symbolic link."
-                        : "A project folder component could not be opened without following a symbolic link.", new Win32Exception(Marshal.GetLastPInvokeError()));
+                        : "A project folder component could not be opened without following a symbolic link.");
                 var next = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
                 if (isFile)
                 {
@@ -250,6 +250,15 @@ public static class FileHardLinkInspector
     private static int UnixFileOpenFlags => OperatingSystem.IsLinux()
         ? LinuxOpenReadOnly | LinuxOpenNonBlock | LinuxOpenCloseOnExec | LinuxOpenNoFollow
         : MacOpenReadOnly | MacOpenNonBlock | MacOpenCloseOnExec | MacOpenNoFollow;
+
+    private static Exception CreateUnixPathOpenException(string message)
+    {
+        var error = Marshal.GetLastPInvokeError();
+        var inner = new Win32Exception(error);
+        return error == 20 || error == (OperatingSystem.IsLinux() ? 40 : 62)
+            ? new UnauthorizedAccessException(message, inner)
+            : new IOException(message, inner);
+    }
 
     private static int? TryGetLinkCount(SafeFileHandle handle, out bool isRegularFile)
     {
