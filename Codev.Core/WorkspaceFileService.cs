@@ -534,8 +534,7 @@ public sealed class WorkspaceFileService
     private async Task<bool> CurrentFileMatchesAsync(string path, string expectedHash, CancellationToken cancellationToken)
     {
         if (!File.Exists(path)) return false;
-        // Do not snapshot shared external content into a checkpoint or use it to approve a replacement.
-        // ResolvePath is repeated here to revalidate path containment immediately before the read.
+        // Hash the same regular-file handle that passed the hard-link check before using it to approve a replacement.
         var relativePath = Path.GetRelativePath(_root, path);
         using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, relativePath);
         if (stream.Length > 500_000) return false;
