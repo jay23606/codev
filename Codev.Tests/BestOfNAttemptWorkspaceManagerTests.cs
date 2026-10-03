@@ -1,10 +1,31 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Codev;
 
 namespace Codev.Tests;
 
 public sealed class BestOfNAttemptWorkspaceManagerTests
 {
+    [Fact]
+    public async Task Capture_rejects_a_project_file_hard_linked_outside_the_project()
+    {
+        if (!FileHardLinkInspector.IsSupportedPlatform) return;
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-hardlink-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        var external = Path.Combine(root, "outside.cs");
+        var linked = Path.Combine(project, "linked.cs");
+        Directory.CreateDirectory(project);
+        try
+        {
+            await File.WriteAllTextAsync(external, "outside-private-marker");
+            if (!TryCreateHardLink(external, linked)) return;
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => manager.CaptureAsync(project));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
     [Fact]
     public async Task Attempts_are_independent_copies_of_one_captured_uncommitted_project_tree()
     {
@@ -264,4 +285,20 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {stderr}");
         return stdout;
     }
+
+    private static bool TryCreateHardLink(string existingPath, string newPath)
+    {
+        if (OperatingSystem.IsWindows()) return CreateHardLinkWindows(newPath, existingPath, IntPtr.Zero);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return CreateHardLinkUnix(existingPath, newPath) == 0;
+        return false;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 }

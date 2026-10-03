@@ -435,6 +435,7 @@ public sealed class BestOfNAttemptWorkspaceManager
 
     private static async Task CopyFileAsync(string source, string destination, bool makeWritable, CancellationToken cancellationToken)
     {
+        FileHardLinkInspector.EnsureSingleLinkFile(source, Path.GetFileName(source));
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
         var initialLength = input.Length;
         var initialWriteTime = File.GetLastWriteTimeUtc(source);
@@ -501,6 +502,7 @@ public sealed class BestOfNAttemptWorkspaceManager
             {
                 if (++fileCount > MaximumFiles)
                     throw new InvalidOperationException($"Project snapshot exceeds the {MaximumFiles:N0}-file limit.");
+                FileHardLinkInspector.EnsureSingleLinkFile(entry.Path, Path.GetRelativePath(root, entry.Path));
                 hash.AppendData([0x46]);
                 var length = new FileInfo(entry.Path).Length;
                 hash.AppendData(Encoding.UTF8.GetBytes(length.ToString(CultureInfo.InvariantCulture)));
@@ -563,6 +565,7 @@ public sealed class BestOfNAttemptWorkspaceManager
     {
         if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("Attempt review cannot read a missing file, symbolic link, or reparse point.");
+        FileHardLinkInspector.EnsureSingleLinkFile(path, Path.GetFileName(path));
     }
 
     private static void RestrictDirectoryToCurrentUser(string path)
