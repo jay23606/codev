@@ -72,7 +72,11 @@ public static class FileHardLinkInspector
 
     private static int? TryGetMacOsLinkCount(string path)
     {
-        if (LStatMacOs(Path.GetFullPath(path), out var info) != 0) return null;
+        var fullPath = Path.GetFullPath(path);
+        var result = RuntimeInformation.ProcessArchitecture == Architecture.X64
+            ? LStatMacOsInode64(fullPath, out var info)
+            : LStatMacOs(fullPath, out info);
+        if (result != 0) return null;
         return info.LinkCount >= 1 ? info.LinkCount : null;
     }
 
@@ -84,11 +88,14 @@ public static class FileHardLinkInspector
     private static extern int Statx(int directoryFileDescriptor,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mask, out LinuxStatx information);
 
-    // Darwin's LP64 struct stat declares dev_t (32 bits), mode_t (16 bits), then
-    // nlink_t (16 bits). Allocate more than the current ABI structure size while
-    // reading the stable field at offset 6; this works on macOS x64 and arm64.
+    // Darwin's 64-bit-inode struct stat declares dev_t (32 bits), mode_t (16 bits),
+    // then nlink_t (16 bits). On Intel macOS the symbol is versioned; Apple Silicon
+    // exposes the 64-bit-inode ABI as the default lstat entry point.
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "lstat", SetLastError = true)]
     private static extern int LStatMacOs([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out MacStat information);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "lstat$INODE64", SetLastError = true)]
+    private static extern int LStatMacOsInode64([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out MacStat information);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ByHandleFileInformation
