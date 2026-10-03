@@ -285,7 +285,7 @@ public sealed class LiveLocalModelTests
         var project = Path.Combine(root, "project");
         Directory.CreateDirectory(project);
         const string original = "Greeting before Auto mode.\n";
-        const string expected = "Auto mode applied the local model's file edit.\n";
+        const string expected = "Auto mode applied the local model's file edit.";
         var filePath = Path.Combine(project, "greeting.txt");
         await File.WriteAllTextAsync(filePath, original);
         MainViewModel? viewModel = null;
@@ -311,7 +311,7 @@ public sealed class LiveLocalModelTests
                 reviewWasShown = true;
                 return Task.FromResult(false);
             };
-            viewModel.Draft = "Use write_file exactly once to replace greeting.txt with this exact content, including the final newline: " +
+            viewModel.Draft = "Use write_file exactly once to replace greeting.txt with this exact text: " +
                 JsonSerializer.Serialize(expected) + ". Do not call another tool. Do not say the edit is complete until Codev reports the tool result.";
 
             var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -331,8 +331,9 @@ public sealed class LiveLocalModelTests
             var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
             Assert.True(sawGeneration, $"The local Code task did not start. Transcript: {transcript}");
             Assert.False(viewModel.IsGenerating, $"The local Code task did not finish within four minutes. Transcript: {transcript}");
-            Assert.True(string.Equals(expected, await File.ReadAllTextAsync(filePath), StringComparison.Ordinal),
-                $"The requested Auto file edit was not applied. Transcript: {transcript}");
+            var actual = await File.ReadAllTextAsync(filePath);
+            Assert.True(string.Equals(expected, actual.TrimEnd('\r', '\n'), StringComparison.Ordinal),
+                $"The requested Auto file edit was not applied. Expected {JsonSerializer.Serialize(expected)} but found {JsonSerializer.Serialize(actual)}. Transcript: {transcript}");
             Assert.False(reviewWasShown, $"Auto mode opened the file review callback. Transcript: {transcript}");
             Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
             var change = Assert.Single(conversation.FileChanges);
