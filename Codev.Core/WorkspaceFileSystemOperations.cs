@@ -90,6 +90,7 @@ internal static class WorkspaceFileSystemOperations
         const int nameLengthOffset = 18;
         const int typeOffset = 20;
         const int nameOffset = 21;
+        const int maxNameLength = 1023; // 64-bit Darwin dirent uses MAXPATHLEN, not MAXNAMLEN.
         const byte directoryType = 4;
         const byte symbolicLinkType = 10;
         const byte whiteoutType = 14;
@@ -108,11 +109,20 @@ internal static class WorkspaceFileSystemOperations
         {
             while (results.Count < maximum)
             {
+                // readdir returns null for both EOF and errors; clear errno first so an
+                // enumeration error cannot silently look like a successfully complete list.
+                Marshal.SetLastPInvokeError(0);
                 var entry = ReadDirectory(stream);
-                if (entry == IntPtr.Zero) break;
+                if (entry == IntPtr.Zero)
+                {
+                    var error = Marshal.GetLastPInvokeError();
+                    if (error != 0)
+                        throw new IOException("The project folder could not be safely enumerated.", new Win32Exception(error));
+                    break;
+                }
                 var recordLength = unchecked((ushort)Marshal.ReadInt16(entry, recordLengthOffset));
                 var nameLength = unchecked((ushort)Marshal.ReadInt16(entry, nameLengthOffset));
-                if (recordLength < nameOffset + 1 || nameLength == 0 || nameLength > 255 || nameOffset + nameLength >= recordLength)
+                if (recordLength < nameOffset + 1 || nameLength == 0 || nameLength > maxNameLength || nameOffset + nameLength >= recordLength)
                     throw new IOException("The project folder returned an invalid directory entry.");
                 var nameBytes = new byte[nameLength];
                 Marshal.Copy(IntPtr.Add(entry, nameOffset), nameBytes, 0, nameBytes.Length);
