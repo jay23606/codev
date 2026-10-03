@@ -2044,10 +2044,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!ReferenceEquals(ActiveConversation, conversation)) return;
-                _agentProfilesLoadedForConversationId = conversation?.Id;
+                _agentProfilesLoadedForConversationId = null;
                 Reset(AgentProfiles, choices);
                 OnPropertyChanged(nameof(SelectedAgentProfileName));
                 OnPropertyChanged(nameof(PrimaryAgentLabel));
+                _agentProfilesLoadedForConversationId = conversation?.Id;
+                OnPropertyChanged(nameof(SelectedAgentProfileName));
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
