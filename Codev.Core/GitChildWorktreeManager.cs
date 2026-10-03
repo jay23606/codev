@@ -279,7 +279,9 @@ public sealed class GitChildWorktreeManager
             if (driver.Length is 0 or > 128 || driver.Any(char.IsControl))
                 throw new InvalidOperationException("A Git filter name is invalid for a safe child worktree checkout.");
             arguments.Add("-c");
-            arguments.Add($"filter.{driver}.smudge=cat");
+            // An empty smudge command makes Git pass the checked-out blob through unchanged.
+            // Do not use `cat` here: Git would launch a PATH-resolved executable during checkout.
+            arguments.Add($"filter.{driver}.smudge=");
             arguments.Add("-c");
             arguments.Add($"filter.{driver}.process=");
             arguments.Add("-c");
