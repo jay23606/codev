@@ -99,24 +99,34 @@ public sealed class ProjectCommandPermissionRegistry
     public IReadOnlyList<ProjectCommandPermissionRule> GetRules(string projectPath) => GetProject(projectPath)?.Rules.ToArray() ?? [];
 
     public ProjectCommandPermissionDecision Evaluate(string projectPath, string command, string shellName = "", bool allowReadOnly = true,
-        IReadOnlyList<string>? contextExclusions = null, bool isVerification = false)
+        IReadOnlyList<string>? contextExclusions = null, bool isVerification = false,
+        ProjectCommandPermissionMode? modeWhenUnconfigured = null)
     {
         var project = GetProject(projectPath);
-        if (project is null) return ProjectCommandPermissionDecision.Ask;
+        var mode = project?.Mode ?? modeWhenUnconfigured ?? ProjectCommandPermissionMode.AskEveryTime;
+        var rules = project?.Rules ?? [];
         var normalizedCommand = NormalizeCommand(command);
-        if (project.Rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Deny &&
+        if (rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Deny &&
                                       string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal)))
             return ProjectCommandPermissionDecision.Deny;
         // Auto is an explicit trust decision: resolve every outstanding command prompt as allow,
         // while preserving per-project exact deny rules. This mirrors OpenCode's --auto behavior.
-        if (project.Mode == ProjectCommandPermissionMode.Auto) return ProjectCommandPermissionDecision.Allow;
-        if ((project.Mode is ProjectCommandPermissionMode.Auto or ProjectCommandPermissionMode.Allowlist) && CanCreateAllowRule(normalizedCommand) &&
-            project.Rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Allow &&
+        if (mode == ProjectCommandPermissionMode.Auto) return ProjectCommandPermissionDecision.Allow;
+        if ((mode is ProjectCommandPermissionMode.Auto or ProjectCommandPermissionMode.Allowlist) && CanCreateAllowRule(normalizedCommand) &&
+            rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Allow &&
                                       string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal)))
             return ProjectCommandPermissionDecision.Allow;
-        if (allowReadOnly && project.Mode is (ProjectCommandPermissionMode.ReadOnly or ProjectCommandPermissionMode.Auto) &&
-            ReadOnlyCommandClassifier.IsReadOnly(normalizedCommand, project.ProjectPath, shellName, contextExclusions))
-            return ProjectCommandPermissionDecision.Allow;
+        if (allowReadOnly && mode is (ProjectCommandPermissionMode.ReadOnly or ProjectCommandPermissionMode.Auto))
+        {
+            string classificationRoot;
+            try { classificationRoot = project?.ProjectPath ?? NormalizePath(projectPath); }
+            catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+            {
+                return ProjectCommandPermissionDecision.Ask;
+            }
+            if (ReadOnlyCommandClassifier.IsReadOnly(normalizedCommand, classificationRoot, shellName, contextExclusions))
+                return ProjectCommandPermissionDecision.Allow;
+        }
         return ProjectCommandPermissionDecision.Ask;
     }
 

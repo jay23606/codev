@@ -239,6 +239,12 @@ async function buildIndex(chunks, model) {
 }
 
 function relevant(item, task) { return task.targets.includes(item.relativePath) }
+function scoreTask(task, finalText, readFiles, finalResponseReceived) {
+  const normalize = value => value.replaceAll('\\', '/').replace(/^\.\//, '')
+  const pathMentioned = task.targets.some(target => normalize(finalText).includes(normalize(target)))
+  const targetFileRead = task.targets.some(target => readFiles.some(file => normalize(file) === normalize(target)))
+  return { pathMentioned, targetFileRead, passed: finalResponseReceived && pathMentioned && targetFileRead }
+}
 function resultMetrics(results, task) {
   const targetMatches = results.filter(item => relevant(item, task)).length
   const returnedFiles = new Set(results.map(item => item.relativePath))
@@ -347,7 +353,7 @@ async function runModelTask(model, mode, task, chunks, literalFiles, files, embe
     }
   }
   const elapsedMs = Math.round(performance.now() - start)
-  const passed = task.targets.some(target => finalText.replaceAll('\\', '/').includes(target))
+  const score = scoreTask(task, finalText, readFiles, !endedWithToolCalls)
   const relevantCount = returned.filter(item => relevant(item, task)).length
   const duplicateSearchQueries = searchQueries.length - new Set(searchQueries).size
   const returnedFiles = new Set(returned.map(item => item.relativePath))
@@ -356,7 +362,8 @@ async function runModelTask(model, mode, task, chunks, literalFiles, files, embe
     run, task: task.id, mode, model, rounds, hitRoundLimit: endedWithToolCalls,
     finalResponseReceived: !endedWithToolCalls,
     toolCalls: calls, searchCalls, readFiles, duplicateSearchQueries, toolCallsValid: valid && calls > 0,
-    taskPassed: passed, returnedChunks: returned.length, relevantChunks: relevantCount,
+    taskPassed: score.passed, targetPathMentioned: score.pathMentioned, targetFileRead: score.targetFileRead,
+    returnedChunks: returned.length, relevantChunks: relevantCount,
     irrelevantChunks: returned.length - relevantCount,
     returnedFiles: returnedFiles.size, relevantFiles: targetFiles.size,
     irrelevantFiles: returnedFiles.size - targetFiles.size,
@@ -446,6 +453,12 @@ async function selftest() {
   assert.match(selectiveSchemas.semantic_search, /Choose this instead of search_files/i)
   assert.equal(legacySchemas.search_files, 'Search supported project source files for a literal string.')
   assert(schemas('both', 'legacy').some(tool => tool.function.name === 'read_file'))
+  const scoringTask = { targets: ['src/WorkspaceFileService.cs'] }
+  assert.deepEqual(scoreTask(scoringTask, 'src/WorkspaceFileService.cs', [], true),
+    { pathMentioned: true, targetFileRead: false, passed: false })
+  assert.deepEqual(scoreTask(scoringTask, 'src\\WorkspaceFileService.cs', ['./src/WorkspaceFileService.cs'], true),
+    { pathMentioned: true, targetFileRead: true, passed: true })
+  assert.equal(scoreTask(scoringTask, 'src/WorkspaceFileService.cs', ['src/WorkspaceFileService.cs'], false).passed, false)
   const combined = combineResults(literal, semanticSearch(rows, [0.9, 0.1]))
   assert.equal(combined.length, 2)
   assert.equal(combined.filter(item => item.relativePath === 'WorkspaceFileService.cs').length, 1)

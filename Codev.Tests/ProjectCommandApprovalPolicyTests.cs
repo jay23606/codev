@@ -38,6 +38,45 @@ public sealed class ProjectCommandApprovalPolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_default_applies_when_project_mode_could_not_be_saved()
+    {
+        var callsToApprovalUi = 0;
+        var proposal = new CodeTaskCommandProposal("cargo check", _project, "PowerShell", IsVerification: true);
+
+        var result = await new ProjectCommandApprovalPolicy(_permissions).ApproveAsync(proposal,
+            requestApproval: _ =>
+            {
+                callsToApprovalUi++;
+                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+            },
+            modeWhenUnconfigured: ProjectCommandPermissionMode.Auto);
+
+        Assert.Equal(CommandApprovalOutcome.Approved, result.Outcome);
+        Assert.Equal(ProjectCommandPermissionMode.Auto, result.Mode);
+        Assert.Equal(0, callsToApprovalUi);
+    }
+
+    [Fact]
+    public async Task Saved_project_mode_takes_precedence_over_the_global_default()
+    {
+        await _permissions.SetModeAsync(_project, ProjectCommandPermissionMode.AskEveryTime);
+        var callsToApprovalUi = 0;
+
+        var result = await new ProjectCommandApprovalPolicy(_permissions).ApproveAsync(
+            new CodeTaskCommandProposal("cargo check", _project, "PowerShell", IsVerification: true),
+            requestApproval: _ =>
+            {
+                callsToApprovalUi++;
+                return Task.FromResult(ProjectCommandApprovalChoice.RunOnce);
+            },
+            modeWhenUnconfigured: ProjectCommandPermissionMode.Auto);
+
+        Assert.Equal(CommandApprovalOutcome.Approved, result.Outcome);
+        Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, result.Mode);
+        Assert.Equal(1, callsToApprovalUi);
+    }
+
+    [Fact]
     public async Task Auto_starts_background_commands_without_a_prompt_even_for_read_only_shell_text()
     {
         await _permissions.SetModeAsync(_project, ProjectCommandPermissionMode.Auto);

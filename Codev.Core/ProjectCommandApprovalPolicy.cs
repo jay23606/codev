@@ -9,16 +9,19 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
 {
     public async Task<ProjectCommandApprovalResult> ApproveAsync(CodeTaskCommandProposal proposal,
         IReadOnlyList<string>? contextExclusions = null,
-        Func<CodeTaskCommandProposal, Task<ProjectCommandApprovalChoice>>? requestApproval = null)
+        Func<CodeTaskCommandProposal, Task<ProjectCommandApprovalChoice>>? requestApproval = null,
+        ProjectCommandPermissionMode? modeWhenUnconfigured = null)
     {
         ArgumentNullException.ThrowIfNull(proposal);
         var permissionProjectPath = proposal.PermissionProjectPath ?? proposal.ProjectPath;
-        var mode = permissions.GetMode(permissionProjectPath);
+        var mode = permissions.HasProjectSettings(permissionProjectPath)
+            ? permissions.GetMode(permissionProjectPath)
+            : modeWhenUnconfigured ?? ProjectCommandPermissionMode.AskEveryTime;
         // Resolve saved modes and exact rules against the trusted source project, but classify and
         // execute relative inspection commands against ProjectPath (the isolated attempt workspace).
         var decision = permissions.Evaluate(permissionProjectPath, proposal.Command, proposal.ShellName,
             allowReadOnly: false, contextExclusions: contextExclusions,
-            isVerification: proposal.IsVerification);
+            isVerification: proposal.IsVerification, modeWhenUnconfigured: modeWhenUnconfigured);
 
         var readOnlyInspection = !proposal.IsVerification && !proposal.IsBackground &&
             (mode is ProjectCommandPermissionMode.Auto or ProjectCommandPermissionMode.ReadOnly) &&

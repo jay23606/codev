@@ -383,12 +383,13 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         get
         {
             if (ActiveConversation?.ProjectPath is not { Length: > 0 } path) return _defaultProjectCommandPermissionMode;
-            if (_projectCommandPermissions.HasProjectSettings(path)) return _projectCommandPermissions.GetMode(path);
-            return _projectCommandPermissions.CanPersist ? _defaultProjectCommandPermissionMode : Codev.ProjectCommandPermissionMode.AskEveryTime;
+            return GetProjectCommandPermissionMode(path);
         }
     }
     public Codev.ProjectCommandPermissionMode GetProjectCommandPermissionMode(string projectPath) =>
-        _projectCommandPermissions.GetMode(projectPath);
+        _projectCommandPermissions.HasProjectSettings(projectPath)
+            ? _projectCommandPermissions.GetMode(projectPath)
+            : _projectCommandPermissions.CanPersist ? _defaultProjectCommandPermissionMode : Codev.ProjectCommandPermissionMode.AskEveryTime;
     public string ProjectCommandPermissionModeLabel => ProjectCommandPermissionMode switch
     {
         Codev.ProjectCommandPermissionMode.Auto => "Auto ▾",
@@ -1040,7 +1041,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private async Task<Codev.CommandApprovalOutcome> ApproveCommandWithProjectPolicyAsync(Codev.CodeTaskCommandProposal proposal,
         IReadOnlyList<string> contextExclusions)
     {
-        var result = await _projectCommandApprovalPolicy.ApproveAsync(proposal, contextExclusions, ApproveProjectCommandAsync);
+        var result = await _projectCommandApprovalPolicy.ApproveAsync(proposal, contextExclusions, ApproveProjectCommandAsync,
+            _projectCommandPermissions.CanPersist ? _defaultProjectCommandPermissionMode : Codev.ProjectCommandPermissionMode.AskEveryTime);
         if (result.RulesChanged)
         {
             OnPropertyChanged(nameof(ProjectCommandPermissionMode));
@@ -1080,7 +1082,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private async Task<Codev.CommandApprovalOutcome> ApproveMcpToolWithProjectPolicyAsync(Codev.Conversation conversation, Codev.McpCodeTaskTool tool, JsonElement arguments, bool profileApprovalSatisfied)
     {
         if (string.IsNullOrWhiteSpace(conversation.ProjectPath)) return Codev.CommandApprovalOutcome.Rejected;
-        var mode = _projectCommandPermissions.GetMode(conversation.ProjectPath);
+        var mode = GetProjectCommandPermissionMode(conversation.ProjectPath);
         var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName);
         if (decision == Codev.ProjectCommandPermissionDecision.Deny) return Codev.CommandApprovalOutcome.Denied;
         if (decision == Codev.ProjectCommandPermissionDecision.Allow) return Codev.CommandApprovalOutcome.Approved;
@@ -1116,7 +1118,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var permission = Codev.AgentProfilePolicy.PermissionFor(profile, toolName, command);
         if (permission == Codev.AgentToolPermission.Deny) return Codev.AgentToolProfileDecision.Denied;
         var projectMode = conversation.ProjectPath is { Length: > 0 } path
-            ? _projectCommandPermissions.GetMode(path)
+            ? GetProjectCommandPermissionMode(path)
             : Codev.ProjectCommandPermissionMode.AskEveryTime;
         if (permission == Codev.AgentToolPermission.Allow ||
             !Codev.AgentProfilePolicy.RequiresOneCallApproval(permission, projectMode))
@@ -1128,7 +1130,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             var shell = Codev.ShellCommandResolver.ResolveCurrent();
             var isVerification = toolName == "verify_command";
             if (_projectCommandPermissions.Evaluate(projectPath, commandElement.GetString() ?? "", shell.DisplayName,
-                    contextExclusions: [], isVerification: isVerification) == Codev.ProjectCommandPermissionDecision.Deny)
+                    contextExclusions: [], isVerification: isVerification,
+                    modeWhenUnconfigured: _projectCommandPermissions.CanPersist ? _defaultProjectCommandPermissionMode : Codev.ProjectCommandPermissionMode.AskEveryTime)
+                == Codev.ProjectCommandPermissionDecision.Deny)
                 return Codev.AgentToolProfileDecision.Denied;
         }
 
@@ -1140,7 +1144,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private async Task<bool> ReviewOrAutoApplyFileChangeAsync(Codev.Conversation conversation, Codev.CodeTaskFileProposal proposal)
     {
         var mode = conversation.ProjectPath is { Length: > 0 } path
-            ? _projectCommandPermissions.GetMode(path)
+            ? GetProjectCommandPermissionMode(path)
             : Codev.ProjectCommandPermissionMode.AskEveryTime;
         if (!Codev.ProjectFileChangePolicy.RequiresReview(mode))
         {
@@ -1755,7 +1759,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             var recovered = await _childWorktrees.RecoverAsync(repositoryPath, parent.Id, child.Id, branch, startCommit);
             child.ProjectPath = recovered.WorktreePath;
             await _projectFolderTrust.TrustAsync(recovered.WorktreePath);
-            await _projectCommandPermissions.SetModeAsync(recovered.WorktreePath, _projectCommandPermissions.GetMode(repositoryPath));
+            await _projectCommandPermissions.SetModeAsync(recovered.WorktreePath, GetProjectCommandPermissionMode(repositoryPath));
             foreach (var rule in _projectCommandPermissions.GetRules(repositoryPath)
                          .Where(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Deny ||
                              Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command)))
@@ -2763,7 +2767,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             conversation, IsConversationBusy(conversation),
             conversation.PendingRequestCount, _queuePaused, _cloudRequestsEnabled,
             trustRoot is not null, trustRoot, OllamaEndpointDisplay, Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint), instructionFiles,
-            _projectCommandPermissions.GetMode(conversation.ProjectPath ?? ""),
+            conversation.ProjectPath is { Length: > 0 } statusProjectPath
+                ? GetProjectCommandPermissionMode(statusProjectPath)
+                : _defaultProjectCommandPermissionMode,
             _projectCommandPermissions.GetRules(conversation.ProjectPath ?? "").Count(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Allow && Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command)),
             _projectCommandPermissions.GetRules(conversation.ProjectPath ?? "").Count(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Deny)));
         conversation.Messages.Add(userMessage);
@@ -3569,7 +3575,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
-            await SetConnectionStatusAsync($"Could not save the default command mode for this project ({ex.GetType().Name}); commands will ask for approval.");
+            await SetConnectionStatusAsync($"Could not save the default command mode for this project ({ex.GetType().Name}); using the default mode for this session.");
         }
     }
 
