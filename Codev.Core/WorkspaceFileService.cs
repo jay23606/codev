@@ -125,19 +125,20 @@ public sealed class WorkspaceFileService
     public IReadOnlyList<string> ListDirectoryEntries(string relativeDirectory = "", int maxEntries = 200)
     {
         var directory = ResolvePath(relativeDirectory, allowWorkspaceRoot: true);
-        if (!Directory.Exists(directory)) throw new DirectoryNotFoundException($"Folder not found: {relativeDirectory}");
+        var relativeDirectoryPath = Path.GetRelativePath(_root, directory);
+        if (relativeDirectoryPath == ".") relativeDirectoryPath = "";
         var results = new List<string>();
         var maximum = Math.Clamp(maxEntries, 1, 200);
-        foreach (var entry in Directory.EnumerateFileSystemEntries(directory).Take(10_000))
+        foreach (var entry in WorkspaceFileSystemOperations.EnumerateDirectory(_root, relativeDirectoryPath, 10_000))
         {
             if (results.Count >= maximum) break;
-            var attributes = File.GetAttributes(entry);
+            var attributes = entry.Attributes;
             if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System)) != 0) continue;
-            var name = Path.GetFileName(entry);
+            var name = entry.Name;
             if (string.IsNullOrWhiteSpace(name) || name[0] == '.' || IsSensitiveFileName(name)) continue;
             var isDirectory = (attributes & FileAttributes.Directory) != 0;
             if (isDirectory && IsIgnoredDirectory(name)) continue;
-            var relative = Path.GetRelativePath(_root, entry);
+            var relative = string.IsNullOrEmpty(relativeDirectoryPath) ? name : Path.Combine(relativeDirectoryPath, name);
             if (IsContextExcluded(relative)) continue;
             results.Add(isDirectory ? name + Path.DirectorySeparatorChar : name);
         }
@@ -150,33 +151,34 @@ public sealed class WorkspaceFileService
     private IReadOnlyList<string> ListFilesCore(string relativeDirectory, int maxEntries, bool applyContextExclusions)
     {
         var directory = ResolvePath(relativeDirectory, allowWorkspaceRoot: true);
-        if (!Directory.Exists(directory)) throw new DirectoryNotFoundException($"Folder not found: {relativeDirectory}");
+        var relativeRoot = Path.GetRelativePath(_root, directory);
+        if (relativeRoot == ".") relativeRoot = "";
         var results = new List<string>();
         var pending = new Stack<string>();
         const int maxScannedEntries = 10_000;
         var scannedEntries = 0;
-        pending.Push(directory);
+        pending.Push(relativeRoot);
         while (pending.Count > 0 && results.Count < maxEntries && scannedEntries < maxScannedEntries)
         {
             var current = pending.Pop();
-            foreach (var entry in Directory.EnumerateFileSystemEntries(current).Take(maxScannedEntries - scannedEntries).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+            foreach (var entry in WorkspaceFileSystemOperations.EnumerateDirectory(_root, current, maxScannedEntries - scannedEntries)
+                         .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
             {
                 if (results.Count >= maxEntries || scannedEntries >= maxScannedEntries) break;
                 scannedEntries++;
-                var attributes = File.GetAttributes(entry);
-                var name = Path.GetFileName(entry);
+                var attributes = entry.Attributes;
+                var name = entry.Name;
+                var relative = string.IsNullOrEmpty(current) ? name : Path.Combine(current, name);
                 if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
-                    var relative = Path.GetRelativePath(_root, entry);
-                    if (!IsIgnoredDirectory(name) && (!applyContextExclusions || !IsContextExcluded(relative))) pending.Push(entry);
+                    if (!IsIgnoredDirectory(name) && (!applyContextExclusions || !IsContextExcluded(relative))) pending.Push(relative);
                     continue;
                 }
-                if (IsSensitivePath(entry)) continue;
-                if (!SourceExtensions.Contains(Path.GetExtension(entry))) continue;
-                var relativeFile = Path.GetRelativePath(_root, entry);
-                if (applyContextExclusions && IsContextExcluded(relativeFile)) continue;
-                results.Add(relativeFile);
+                if (IsSensitivePath(Path.Combine(_root, relative))) continue;
+                if (!SourceExtensions.Contains(Path.GetExtension(name))) continue;
+                if (applyContextExclusions && IsContextExcluded(relative)) continue;
+                results.Add(relative);
             }
         }
         return results;
@@ -403,19 +405,10 @@ public sealed class WorkspaceFileService
             throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
         var parent = Path.GetDirectoryName(full)!;
         if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The parent folder must already exist; Codev will not create new directory trees yet.");
-        var temp = Path.Combine(parent, $".codev-{Guid.NewGuid():N}.tmp");
-        try
-        {
-            await File.WriteAllTextAsync(temp, content, cancellationToken);
-            ResolvePath(relativePath);
-            if (expectedOriginalHash is not null && !await CurrentFileMatchesAsync(full, expectedOriginalHash, cancellationToken))
-                throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
-            File.Move(temp, full, overwrite: true);
-        }
-        finally
-        {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
-        }
+        if (expectedOriginalHash is not null && !await CurrentFileMatchesAsync(full, expectedOriginalHash, cancellationToken))
+            throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
+        await WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, full, Encoding.UTF8.GetBytes(content), overwrite: true, cancellationToken,
+            expectedOriginalHash is null ? null : token => CurrentFileMatchesAsync(full, expectedOriginalHash, token));
     }
 
     public async Task CreateFileAtomicAsync(string relativePath, string content, CancellationToken cancellationToken = default)
@@ -426,14 +419,7 @@ public sealed class WorkspaceFileService
         if (File.Exists(full)) throw new IOException("A file already exists at this path. Review it as an edit instead.");
         var parent = Path.GetDirectoryName(full)!;
         if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The parent folder must already exist; Codev will not create new directory trees yet.");
-        var temp = Path.Combine(parent, $".codev-{Guid.NewGuid():N}.tmp");
-        try
-        {
-            await File.WriteAllTextAsync(temp, content, cancellationToken);
-            ResolvePath(relativePath);
-            File.Move(temp, full, overwrite: false);
-        }
-        finally { try { if (File.Exists(temp)) File.Delete(temp); } catch { } }
+        await WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, full, Encoding.UTF8.GetBytes(content), overwrite: false, cancellationToken);
     }
 
     public async Task<string> ReadCheckpointAsync(string relativePath, Guid conversationId, string checkpointPath, CancellationToken cancellationToken = default)
@@ -494,7 +480,7 @@ public sealed class WorkspaceFileService
             if (!currentExists) return null;
             if (!await CurrentFileMatchesAsync(full, expectedCurrentHash!, cancellationToken))
                 throw new IOException("The file changed while it was being removed. Nothing was deleted; review its current contents first.");
-            File.Delete(full);
+            WorkspaceFileSystemOperations.DeleteFile(_root, full);
         }
         return rollback;
     }
@@ -509,18 +495,12 @@ public sealed class WorkspaceFileService
             throw new IOException("A file appeared while its checkpoint was being restored. Nothing was overwritten; review it again.");
         var parent = Path.GetDirectoryName(full)!;
         if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The parent folder must already exist; Codev will not create new directory trees yet.");
-        var temp = Path.Combine(parent, $".codev-{Guid.NewGuid():N}.tmp");
-        try
-        {
-            await File.WriteAllBytesAsync(temp, content, cancellationToken);
-            ResolvePath(relativePath);
-            if (expectedCurrentHash is not null && !await CurrentFileMatchesAsync(full, expectedCurrentHash, cancellationToken))
-                throw new IOException("The file changed while its checkpoint was being restored. Nothing was overwritten; review it again.");
-            if (expectedCurrentHash is null && File.Exists(full))
-                throw new IOException("A file appeared while its checkpoint was being restored. Nothing was overwritten; review it again.");
-            File.Move(temp, full, overwrite: expectedCurrentHash is not null);
-        }
-        finally { try { if (File.Exists(temp)) File.Delete(temp); } catch { } }
+        if (expectedCurrentHash is not null && !await CurrentFileMatchesAsync(full, expectedCurrentHash, cancellationToken))
+            throw new IOException("The file changed while its checkpoint was being restored. Nothing was overwritten; review it again.");
+        if (expectedCurrentHash is null && File.Exists(full))
+            throw new IOException("A file appeared while its checkpoint was being restored. Nothing was overwritten; review it again.");
+        await WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, full, content, overwrite: expectedCurrentHash is not null, cancellationToken,
+            expectedCurrentHash is null ? null : token => CurrentFileMatchesAsync(full, expectedCurrentHash, token));
     }
 
     private static string ValidateCheckpointPath(Guid conversationId, string checkpointPath)

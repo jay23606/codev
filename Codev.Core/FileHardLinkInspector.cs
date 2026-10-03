@@ -98,7 +98,7 @@ public static class FileHardLinkInspector
             throw new UnauthorizedAccessException($"'{displayPath}' resolved outside the trusted project folder, so it was not read.");
     }
 
-    private static SafeFileHandle OpenDirectoryHandle(string path)
+    internal static SafeFileHandle OpenDirectoryHandle(string path)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -122,7 +122,7 @@ public static class FileHardLinkInspector
         return OpenUnixDirectoryTree(Path.GetFullPath(path));
     }
 
-    private static string GetFinalPath(SafeFileHandle handle)
+    internal static string GetFinalPath(SafeFileHandle handle)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -142,7 +142,7 @@ public static class FileHardLinkInspector
         throw new PlatformNotSupportedException("Handle-path lookup is required only on Windows; Unix reads are opened beneath a pinned root handle.");
     }
 
-    private static string NormalizeHandlePath(string path)
+    internal static string NormalizeHandlePath(string path)
     {
         var normalized = Path.GetFullPath(path);
         if (OperatingSystem.IsWindows() && normalized.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
@@ -152,8 +152,84 @@ public static class FileHardLinkInspector
         return normalized.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
-    private static bool PathsEqual(string left, string right) => string.Equals(left, right,
+    internal static bool PathsEqual(string left, string right) => string.Equals(left, right,
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    internal static SafeFileHandle OpenDirectoryBeneathRoot(string trustedRoot, string relativeDirectory, bool forMutation = false, bool forEnumeration = false)
+    {
+        var fullRoot = Path.GetFullPath(trustedRoot);
+        var relative = string.IsNullOrWhiteSpace(relativeDirectory) ? "" : relativeDirectory
+            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        var components = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        if (Path.IsPathRooted(relative) || components.Any(component => component is "." or ".."))
+            throw new UnauthorizedAccessException("The project folder is outside the trusted project root.");
+
+        if (OperatingSystem.IsWindows())
+        {
+            using var root = OpenDirectoryHandle(fullRoot);
+            var expectedRoot = NormalizeHandlePath(fullRoot);
+            var actualRoot = NormalizeHandlePath(GetFinalPath(root));
+            if (!PathsEqual(expectedRoot, actualRoot))
+                throw new UnauthorizedAccessException("The project folder changed while its boundary was being verified.");
+            var expectedDirectory = components.Aggregate(fullRoot, Path.Combine);
+            var directory = forMutation || forEnumeration
+                ? OpenOperationalDirectoryHandle(expectedDirectory, forMutation)
+                : OpenDirectoryHandle(expectedDirectory);
+            var actualDirectory = NormalizeHandlePath(GetFinalPath(directory));
+            var rootPrefix = actualRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if ((!PathsEqual(actualRoot, actualDirectory) && !actualDirectory.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)) ||
+                !PathsEqual(NormalizeHandlePath(expectedDirectory), actualDirectory))
+            {
+                directory.Dispose();
+                throw new UnauthorizedAccessException("A project folder resolved outside the trusted project root.");
+            }
+            return directory;
+        }
+
+        var current = OpenUnixDirectoryTree(fullRoot);
+        try
+        {
+            foreach (var component in components)
+            {
+                var child = OpenAt(current.DangerousGetHandle().ToInt32(), component, UnixDirectoryOpenFlags);
+                if (child < 0)
+                    throw CreateUnixPathOpenException("A project folder component could not be opened without following a symbolic link.");
+                var next = new SafeFileHandle((IntPtr)child, ownsHandle: true);
+                current.Dispose();
+                current = next;
+            }
+            var result = current;
+            current = null!;
+            return result;
+        }
+        finally { current?.Dispose(); }
+    }
+
+    private static SafeFileHandle OpenOperationalDirectoryHandle(string path, bool forMutation)
+    {
+        const uint fileListDirectory = 0x00000001;
+        const uint fileAddFile = 0x00000002;
+        const uint fileDeleteChild = 0x00000040;
+        const uint synchronize = 0x00100000;
+        var desiredAccess = WindowsFileReadAttributes | fileListDirectory | synchronize;
+        if (forMutation) desiredAccess |= fileAddFile | fileDeleteChild;
+        var handle = CreateFileWindows(path, desiredAccess,
+            ShareRead | ShareWrite | ShareDelete, IntPtr.Zero, OpenExisting,
+            FileFlagOpenReparsePoint | WindowsFileFlagBackupSemantics, IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            handle.Dispose();
+            throw new IOException("The project folder could not be opened for a safe file operation.", new Win32Exception(error));
+        }
+        if (!GetFileInformationByHandle(handle, out var info) ||
+            (info.Attributes & FileAttributeDirectory) == 0 || (info.Attributes & FileAttributeReparsePoint) != 0)
+        {
+            handle.Dispose();
+            throw new UnauthorizedAccessException("The project folder is not an ordinary directory.");
+        }
+        return handle;
+    }
 
     private static SafeFileHandle OpenReadHandle(string path, string trustedRoot)
     {

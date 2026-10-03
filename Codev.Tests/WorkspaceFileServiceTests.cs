@@ -391,6 +391,105 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Rejects_a_parent_directory_link_swapped_after_write_path_validation()
+    {
+        var parent = Path.Combine(_root, "write-race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        var validatedPath = Service.ResolvePath("write-race/inside.cs");
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-write-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        var outsideFile = Path.Combine(outside, "inside.cs");
+        File.WriteAllText(outsideFile, "must stay unchanged");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var error = await Record.ExceptionAsync(() =>
+                WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, validatedPath, "escaped"u8.ToArray(), overwrite: true, CancellationToken.None));
+            Assert.True(error is UnauthorizedAccessException or IOException, error?.ToString() ?? "Expected the linked parent directory to be rejected.");
+            Assert.Equal("must stay unchanged", await File.ReadAllTextAsync(outsideFile));
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Keeps_the_current_file_when_precommit_validation_fails()
+    {
+        var filePath = Path.Combine(_root, "src.cs");
+        File.WriteAllText(filePath, "changed during the staged write");
+
+        await Assert.ThrowsAsync<IOException>(() => WorkspaceFileSystemOperations.WriteAtomicallyAsync(
+            _root, filePath, "stale proposal"u8.ToArray(), overwrite: true, CancellationToken.None,
+            _ => Task.FromResult(false)));
+
+        Assert.Equal("changed during the staged write", await File.ReadAllTextAsync(filePath));
+    }
+
+    [Fact]
+    public void Rejects_a_parent_directory_link_swapped_after_delete_path_validation()
+    {
+        var parent = Path.Combine(_root, "delete-race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        var validatedPath = Service.ResolvePath("delete-race/inside.cs");
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-delete-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        var outsideFile = Path.Combine(outside, "inside.cs");
+        File.WriteAllText(outsideFile, "must remain");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var error = Record.Exception(() => WorkspaceFileSystemOperations.DeleteFile(_root, validatedPath));
+            Assert.True(error is UnauthorizedAccessException or IOException, error?.ToString() ?? "Expected the linked parent directory to be rejected.");
+            Assert.Equal("must remain", File.ReadAllText(outsideFile));
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Rejects_a_parent_directory_link_swapped_after_directory_validation()
+    {
+        var parent = Path.Combine(_root, "list-race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        _ = Service.ResolvePath("list-race", allowWorkspaceRoot: true);
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-list-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "private-name.cs"), "must not be listed");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var error = Record.Exception(() => WorkspaceFileSystemOperations.EnumerateDirectory(_root, "list-race"));
+            Assert.True(error is UnauthorizedAccessException or IOException, error?.ToString() ?? "Expected the linked parent directory to be rejected.");
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public void Refuses_a_symbolic_link_used_as_the_project_root()
     {
         var target = Path.Combine(_root, "real-project");
