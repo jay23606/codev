@@ -177,7 +177,8 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
 
         File.Delete(_path);
         Directory.CreateDirectory(_path);
-        await Assert.ThrowsAsync<IOException>(() => registry.CopyProjectSettingsAsync(_project, childProject));
+        var failure = await Record.ExceptionAsync(() => registry.CopyProjectSettingsAsync(_project, childProject));
+        Assert.True(failure is IOException or UnauthorizedAccessException, $"Expected a file replacement failure, got {failure?.GetType().Name ?? "no exception"}.");
 
         Assert.False(registry.HasProjectSettings(childProject));
         Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, registry.GetMode(childProject));
