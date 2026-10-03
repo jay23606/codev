@@ -638,7 +638,8 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
                 }
                 catch (Exception exception)
                 {
-                    formatterException = exception;
+                    var mode = OperatingSystem.IsWindows() ? "Windows" : File.GetUnixFileMode(filePath).ToString();
+                    formatterException = new InvalidOperationException($"Formatter callback failed; file mode is {mode}.", exception);
                     throw;
                 }
                 return "formatter completed";
