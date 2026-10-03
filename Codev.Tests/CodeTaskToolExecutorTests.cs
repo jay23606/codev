@@ -570,7 +570,6 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     {
         var filePath = Path.Combine(_root, "Program.cs");
         await File.WriteAllTextAsync(filePath, "class Old {}\n");
-        var initialMode = OperatingSystem.IsWindows() ? "Windows" : File.GetUnixFileMode(filePath).ToString();
         CodeTaskFileProposal? reviewed = null;
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
             proposal => { reviewed = proposal; return Task.FromResult(true); }, _ => Task.FromResult(false));
@@ -627,6 +626,7 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     {
         var filePath = Path.Combine(_root, "Program.cs");
         await File.WriteAllTextAsync(filePath, "class Old {}\n");
+        var initialMode = OperatingSystem.IsWindows() ? "Windows" : File.GetUnixFileMode(filePath).ToString();
         Exception? formatterException = null;
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
             _ => Task.FromResult(true), _ => Task.FromResult(false),
