@@ -91,6 +91,28 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task Shared_project_index_applies_context_exclusions_per_searching_turn()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), "class AlphaSecret { }");
+        await File.WriteAllTextAsync(Path.Combine(_root, "b.cs"), "class BetaVisible { }");
+        var handler = new EmbeddingHandler();
+        using var http = new HttpClient(handler);
+        var client = new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed");
+        var projectIndex = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root), client, "test-embed");
+        await projectIndex.UpdateAsync();
+
+        var unrestrictedResults = await projectIndex.SearchAsync("find relevant source");
+        var restrictedIndex = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root, ["a.cs"]), client, "test-embed");
+        var restrictedResults = await restrictedIndex.SearchAsync("find relevant source");
+
+        Assert.Equal(2, unrestrictedResults.Count);
+        Assert.Contains(unrestrictedResults, result => result.RelativePath == "a.cs");
+        Assert.Contains(unrestrictedResults, result => result.RelativePath == "b.cs");
+        Assert.DoesNotContain(restrictedResults, result => result.RelativePath == "a.cs");
+        Assert.Contains(restrictedResults, result => result.RelativePath == "b.cs");
+    }
+
+    [Fact]
     public async Task Rejects_a_corrupt_or_oversized_index_before_deserializing_it()
     {
         var path = ProjectEmbeddingIndex.GetIndexPath(_data, _root);

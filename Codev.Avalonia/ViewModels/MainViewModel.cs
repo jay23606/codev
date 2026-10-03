@@ -1556,7 +1556,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             SemanticIndexStatus = $"Indexing with {EmbeddingModel}…";
             var progress = new Progress<(int Done, int Total)>(value => SemanticIndexStatus = value.Total == 0
                 ? "Checking files and existing index…" : $"Indexing · {value.Done:N0}/{value.Total:N0} changed chunks · {EmbeddingModel}");
-            var count = await index.UpdateAsync(progress, additionalExclusions: GetProjectExclusions(path),
+            // Keep the project index independent of queued-turn exclusions. Each turn's
+            // WorkspaceFileService filters semantic results against that turn's own scope.
+            var count = await index.UpdateAsync(progress,
                 canContinue: () => _projectFolderTrust.IsTrusted(path));
             SemanticIndexStatus = $"Index ready · {count:N0} chunks · {EmbeddingModel}";
             OnPropertyChanged(nameof(HasSemanticIndexForProject));
@@ -1583,15 +1585,6 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     private Codev.ProjectEmbeddingIndex CreateProjectEmbeddingIndex(Codev.WorkspaceFileService files) =>
         new(SemanticIndexDirectory, files, new Codev.OllamaEmbeddingClient(_http, _ollamaEndpoint, EmbeddingModel), EmbeddingModel);
-
-    private IReadOnlyList<string> GetProjectExclusions(string projectPath)
-    {
-        var exclusions = new List<string>();
-        foreach (var conversation in _conversations.Where(item => string.Equals(item.ProjectPath, projectPath, StringComparison.OrdinalIgnoreCase)))
-            foreach (var turn in conversation.PendingTurns ?? [])
-                exclusions.AddRange(turn.ContextExclusions ?? []);
-        return exclusions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    }
 
     private void SelectConversation(Codev.Conversation conversation)
     {
