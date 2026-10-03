@@ -67,14 +67,14 @@ jobs:
           chmod 700 "$keyring_home" "$runtime_dir"
           HOME="$keyring_home" XDG_RUNTIME_DIR="$runtime_dir" dbus-run-session -- bash -euo pipefail -c '
             od -An -N32 -tx1 /dev/urandom | tr -d "[:space:]" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
-            CODEV_TEST_NATIVE_MCP_OAUTH_VAULT=1 xvfb-run -a dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
+            CODEV_TEST_NATIVE_MCP_OAUTH_VAULT=1 xvfb-run -a dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
           '
 
       - name: Run native macOS MCP OAuth Keychain smoke
         if: runner.os == 'macOS'
         env:
           CODEV_TEST_NATIVE_MCP_OAUTH_VAULT: '1'
-        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
 
   avalonia-headless-ui:
     name: Avalonia headless UI (${{ matrix.os }})
@@ -143,7 +143,7 @@ jobs:
       - name: Run native Windows MCP OAuth credential-vault smoke
         env:
           CODEV_TEST_NATIVE_MCP_OAUTH_VAULT: '1'
-        run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_signs_in_persists_tokens_and_refreshes_them_without_reauthorization" --logger "console;verbosity=minimal"
+        run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
 
       - name: Run Windows UI tests
         run: dotnet test Codev.Windows.Tests\Codev.Windows.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-windows-tests.trx"
