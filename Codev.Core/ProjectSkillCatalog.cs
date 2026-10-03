@@ -64,7 +64,7 @@ public static class ProjectSkillCatalog
                 }
                 var remaining = MaxSkillsPerScope - project.Count;
                 if (remaining <= 0) break;
-                project.AddRange(await LoadScopeAsync(skillsDirectory, "project", warnings, cancellationToken, remaining).ConfigureAwait(false));
+                project.AddRange(await LoadScopeAsync(skillsDirectory, "project", warnings, cancellationToken, remaining, projectRoot).ConfigureAwait(false));
             }
         }
 
@@ -122,12 +122,8 @@ public static class ProjectSkillCatalog
 
         try
         {
-            if (skill.Scope == "skill-project")
-            {
-                var projectFiles = new WorkspaceFileService(root);
-                projectFiles.EnsureFileIsNotHardLinked(Path.GetRelativePath(root, skillFile));
-            }
-            var bytes = await ReadBoundedAsync(skillFile, cancellationToken).ConfigureAwait(false);
+            var projectRootForFile = skill.Scope == "skill-project" ? root : null;
+            var bytes = await ReadBoundedAsync(skillFile, cancellationToken, projectRootForFile).ConfigureAwait(false);
             var text = StrictUtf8.GetString(bytes);
             if (!TryParseSkillFile(directoryName, text, skill.Scope == "skill-project" ? "project" : "user",
                     out var parsed, out var error) || parsed is null)
@@ -147,7 +143,7 @@ public static class ProjectSkillCatalog
     }
 
     private static async Task<List<SlashCommandDefinition>> LoadScopeAsync(string directory, string scope,
-        List<string> warnings, CancellationToken cancellationToken, int maxSkills = MaxSkillsPerScope)
+        List<string> warnings, CancellationToken cancellationToken, int maxSkills = MaxSkillsPerScope, string? projectRoot = null)
     {
         var skills = new List<SlashCommandDefinition>();
         try
@@ -191,9 +187,7 @@ public static class ProjectSkillCatalog
                         warnings.Add($"Skill '{name}' exceeds the size limit and was skipped.");
                         continue;
                     }
-                    if (scope == "project")
-                        FileHardLinkInspector.EnsureSingleLinkFile(skillFile, Path.GetRelativePath(directory, skillFile));
-                    var bytes = await ReadBoundedAsync(skillFile, cancellationToken).ConfigureAwait(false);
+                    var bytes = await ReadBoundedAsync(skillFile, cancellationToken, scope == "project" ? projectRoot : null).ConfigureAwait(false);
                     var text = StrictUtf8.GetString(bytes);
                     if (TryParseSkillFile(name, text, scope, out var parsed, out var error) && parsed is not null)
                         skills.Add(parsed with { Prompt = null, Scope = scope == "project" ? "skill-project" : "skill-user", FilePath = skillFile });
@@ -216,10 +210,12 @@ public static class ProjectSkillCatalog
         return skills;
     }
 
-    private static async Task<byte[]> ReadBoundedAsync(string path, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBoundedAsync(string path, CancellationToken cancellationToken, string? projectRoot = null)
     {
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using Stream stream = projectRoot is null
+            ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                4096, FileOptions.Asynchronous | FileOptions.SequentialScan)
+            : FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetRelativePath(projectRoot, path));
         if (stream.Length > CustomSlashCommandService.MaxCommandFileBytes)
             throw new IOException("Skill file exceeds the size limit.");
         var buffer = new byte[CustomSlashCommandService.MaxCommandFileBytes + 1];

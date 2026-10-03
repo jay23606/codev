@@ -42,10 +42,11 @@ public static partial class ProjectFormatterCatalog
             if (!Directory.Exists(codevDirectory) || !File.Exists(path)) return new([], null);
             if (IsLink(codevDirectory) || IsLink(path))
                 return new([], "Project formatter configuration was ignored because .codev or formatters.json is a symbolic link.");
-            new WorkspaceFileService(projectRoot).EnsureFileIsNotHardLinked(RelativeConfigPath);
-            var info = new FileInfo(path);
-            if (info.Length > MaxConfigBytes) return new([], $"Project formatter configuration exceeds the {MaxConfigBytes / 1024} KB limit.");
-            var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, RelativeConfigPath);
+            if (stream.Length > MaxConfigBytes) return new([], $"Project formatter configuration exceeds the {MaxConfigBytes / 1024} KB limit.");
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            var bytes = buffer.ToArray();
             return ValidateJson(Encoding.UTF8.GetString(bytes), out var validated, out var error)
                 ? new(validated, null) : new([], error);
         }
@@ -108,10 +109,11 @@ public static partial class ProjectFormatterCatalog
         var path = Path.Combine(codevDirectory, "formatters.json");
         if (!Directory.Exists(codevDirectory) || !File.Exists(path)) return EmptyConfiguration;
         if (IsLink(codevDirectory) || IsLink(path)) throw new UnauthorizedAccessException("Project formatter configuration cannot follow symbolic links.");
-        new WorkspaceFileService(projectRoot).EnsureFileIsNotHardLinked(RelativeConfigPath);
-        var info = new FileInfo(path);
-        if (info.Length > MaxConfigBytes) throw new InvalidDataException($"Formatter configuration exceeds {MaxConfigBytes / 1024} KB.");
-        return await File.ReadAllTextAsync(path, new UTF8Encoding(false, true), cancellationToken).ConfigureAwait(false);
+        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, RelativeConfigPath);
+        if (stream.Length > MaxConfigBytes) throw new InvalidDataException($"Formatter configuration exceeds {MaxConfigBytes / 1024} KB.");
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+        return new UTF8Encoding(false, true).GetString(buffer.ToArray());
     }
 
     public static ProjectFormatterDefinition? ForPath(IReadOnlyList<ProjectFormatterDefinition> formatters, string relativePath)

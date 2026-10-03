@@ -92,14 +92,6 @@ public sealed class WorkspaceFileService
         return full;
     }
 
-    /// <summary>Refuses to read a project file whose contents are shared through a hard link.</summary>
-    internal void EnsureFileIsNotHardLinked(string relativePath)
-    {
-        var full = ResolvePath(relativePath);
-        if (!File.Exists(full)) return;
-        FileHardLinkInspector.EnsureSingleLinkFile(full, relativePath);
-    }
-
     private void EnsureRootIsNotLink()
     {
         try
@@ -264,11 +256,11 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are opened by the agent.");
-        EnsureFileIsNotHardLinked(relativePath);
-        var info = new FileInfo(full);
-        if (!info.Exists) throw new FileNotFoundException("File not found in the selected project.", relativePath);
-        if (info.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
-        var bytes = await File.ReadAllBytesAsync(full, cancellationToken);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath);
+        if (stream.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        var bytes = buffer.ToArray();
         return new FileSnapshot(Encoding.UTF8.GetString(bytes), Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
@@ -297,9 +289,12 @@ public sealed class WorkspaceFileService
             try
             {
                 var full = ResolvePath(relative);
-                EnsureFileIsNotHardLinked(relative);
-                if (new FileInfo(full).Length > 500_000) continue;
-                lines = await File.ReadAllLinesAsync(full, cancellationToken);
+                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative);
+                if (stream.Length > 500_000) continue;
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                var fileLines = new List<string>();
+                while (await reader.ReadLineAsync(cancellationToken) is { } line) fileLines.Add(line);
+                lines = fileLines.ToArray();
             }
             catch (OperationCanceledException) { throw; }
             catch { continue; }
@@ -383,8 +378,11 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!File.Exists(full)) return null;
-        EnsureFileIsNotHardLinked(relativePath);
-        var bytes = await File.ReadAllBytesAsync(full, cancellationToken);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath);
+        if (stream.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB cannot be checkpointed or restored.");
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        var bytes = buffer.ToArray();
         if (bytes.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB cannot be checkpointed or restored.");
         if (expectedHash is not null && !HashMatches(bytes, expectedHash))
             throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
@@ -538,8 +536,12 @@ public sealed class WorkspaceFileService
         if (!File.Exists(path)) return false;
         // Do not snapshot shared external content into a checkpoint or use it to approve a replacement.
         // ResolvePath is repeated here to revalidate path containment immediately before the read.
-        EnsureFileIsNotHardLinked(Path.GetRelativePath(_root, path));
-        return HashMatches(await File.ReadAllBytesAsync(path, cancellationToken), expectedHash);
+        var relativePath = Path.GetRelativePath(_root, path);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, relativePath);
+        if (stream.Length > 500_000) return false;
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        return HashMatches(buffer.ToArray(), expectedHash);
     }
 
     private static bool HashMatches(byte[] bytes, string expectedHash) =>

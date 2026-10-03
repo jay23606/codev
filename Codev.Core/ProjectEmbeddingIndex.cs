@@ -80,29 +80,24 @@ public sealed class ProjectEmbeddingIndex
         foreach (var relative in candidates)
         {
             EnsureCanContinue(canContinue, cancellationToken);
-            FileInfo info;
+            string content;
+            long fileLength;
             try
             {
                 var full = files.ResolvePath(relative);
-                files.EnsureFileIsNotHardLinked(relative);
-                info = new FileInfo(full);
-                if (!info.Exists || info.Length > 500_000) continue;
-            }
-            catch (OperationCanceledException) { throw; }
-            catch { continue; }
-
-            totalBytes += info.Length;
-            if (totalBytes > _maxIndexedBytes)
-                throw new InvalidOperationException($"This project exceeds the semantic-index byte limit of {_maxIndexedBytes:N0} bytes. Narrow context exclusions and retry; the existing index was left unchanged.");
-
-            string content;
-            try
-            {
-                content = await File.ReadAllTextAsync(info.FullName, cancellationToken).ConfigureAwait(false);
+                await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative);
+                if (stream.Length > 500_000) continue;
+                fileLength = stream.Length;
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                content = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
                 if (content.Contains('\0')) continue;
             }
             catch (OperationCanceledException) { throw; }
             catch { continue; }
+
+            totalBytes += fileLength;
+            if (totalBytes > _maxIndexedBytes)
+                throw new InvalidOperationException($"This project exceeds the semantic-index byte limit of {_maxIndexedBytes:N0} bytes. Narrow context exclusions and retry; the existing index was left unchanged.");
 
             var ordinal = 0;
             foreach (var chunk in Chunk(content))

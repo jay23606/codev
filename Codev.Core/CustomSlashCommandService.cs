@@ -37,7 +37,7 @@ public static partial class CustomSlashCommandService
         {
             var commandsDirectory = Path.Combine(Path.GetFullPath(projectRoot), ".codev", "commands");
             if (IsSafeProjectCommandDirectory(projectRoot, commandsDirectory))
-                project = await LoadScopeAsync(commandsDirectory, "project", warnings, cancellationToken).ConfigureAwait(false);
+                project = await LoadScopeAsync(commandsDirectory, "project", warnings, cancellationToken, projectRoot).ConfigureAwait(false);
             else
                 warnings.Add("Project commands were skipped because .codev/commands is a symbolic link or resolves outside the project.");
         }
@@ -146,7 +146,7 @@ public static partial class CustomSlashCommandService
     }
 
     private static async Task<List<SlashCommandDefinition>> LoadScopeAsync(string directory, string scope,
-        List<string> warnings, CancellationToken cancellationToken)
+        List<string> warnings, CancellationToken cancellationToken, string? projectRoot = null)
     {
         var commands = new List<SlashCommandDefinition>();
         try
@@ -179,7 +179,7 @@ public static partial class CustomSlashCommandService
                         warnings.Add($"Command file '{file.Name}' exceeds the size limit and was skipped.");
                         continue;
                     }
-                    var bytes = await ReadBoundedAsync(path, cancellationToken).ConfigureAwait(false);
+                    var bytes = await ReadBoundedAsync(path, cancellationToken, scope == "project" ? projectRoot : null).ConfigureAwait(false);
                     var text = StrictUtf8.GetString(bytes);
                     if (TryParseFile(file.Name, text, scope, out var command, out var error) && command is not null)
                         commands.Add(command with { FilePath = file.FullName });
@@ -202,10 +202,12 @@ public static partial class CustomSlashCommandService
         return commands;
     }
 
-    private static async Task<byte[]> ReadBoundedAsync(string path, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBoundedAsync(string path, CancellationToken cancellationToken, string? projectRoot = null)
     {
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using Stream stream = projectRoot is null
+            ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                4096, FileOptions.Asynchronous | FileOptions.SequentialScan)
+            : FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetRelativePath(projectRoot, path));
         if (stream.Length > MaxCommandFileBytes) throw new IOException("Command file exceeds the size limit.");
         var buffer = new byte[MaxCommandFileBytes + 1];
         var total = 0;
