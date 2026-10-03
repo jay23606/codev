@@ -30,6 +30,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private readonly string UserSlashCommandsPath;
     private readonly string UserSkillsPath;
     private readonly string UserAgentProfilesPath;
+    private Guid? _agentProfilesLoadedForConversationId;
     private readonly string SemanticIndexDirectory;
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
@@ -680,6 +681,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         set
         {
             var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (normalized is null && ActiveConversation is { AgentProfileName: { Length: > 0 } } conversation &&
+                _agentProfilesLoadedForConversationId != conversation.Id)
+                return;
             if (normalized is { Length: > 80 } || normalized is not null && !AgentProfiles.Any(profile => profile.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase)))
                 return;
             if (string.Equals(ActiveConversation?.AgentProfileName, normalized, StringComparison.Ordinal)) return;
@@ -2040,6 +2044,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!ReferenceEquals(ActiveConversation, conversation)) return;
+                _agentProfilesLoadedForConversationId = conversation?.Id;
                 Reset(AgentProfiles, choices);
                 OnPropertyChanged(nameof(SelectedAgentProfileName));
                 OnPropertyChanged(nameof(PrimaryAgentLabel));

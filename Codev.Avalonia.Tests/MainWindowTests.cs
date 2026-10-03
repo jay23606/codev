@@ -1124,12 +1124,12 @@ public sealed class MainWindowTests
         try
         {
             viewModel = new MainViewModel(root);
-            await viewModel.RefreshAgentProfilesAsync();
             typeof(MainViewModel).GetMethod("SetConversationMode", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(viewModel, [ConversationMode.CodeTask]);
             window = new MainWindow { DataContext = viewModel };
             window.Show();
             window.UpdateLayout();
+            await viewModel.RefreshAgentProfilesAsync();
 
             var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.Equal("", viewModel.SelectedAgentProfileName);
@@ -1158,10 +1158,10 @@ public sealed class MainWindowTests
             viewModel = null;
 
             restoredViewModel = new MainViewModel(root);
-            await restoredViewModel.RefreshAgentProfilesAsync();
             restoredWindow = new MainWindow { DataContext = restoredViewModel };
             restoredWindow.Show();
             restoredWindow.UpdateLayout();
+            await restoredViewModel.RefreshAgentProfilesAsync();
 
             var restoredPicker = Assert.IsType<ComboBox>(restoredWindow.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.Equal("Smoke QA", restoredViewModel.SelectedAgentProfileName);
