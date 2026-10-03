@@ -119,7 +119,7 @@ public sealed class ProjectCommandPermissionRegistry
         if (allowReadOnly && mode is (ProjectCommandPermissionMode.ReadOnly or ProjectCommandPermissionMode.Auto))
         {
             string classificationRoot;
-            try { classificationRoot = project?.ProjectPath ?? NormalizePath(projectPath); }
+            try { classificationRoot = project?.ProjectPath ?? NormalizeProjectPath(projectPath); }
             catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
             {
                 return ProjectCommandPermissionDecision.Ask;
