@@ -79,7 +79,7 @@ public sealed class ConversationCodeRewindServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Plan_reports_and_refuses_to_rewind_a_hard_linked_file()
+    public async Task Checkpoint_creation_refuses_to_read_a_hard_linked_file()
     {
         if (!FileHardLinkInspector.IsSupportedPlatform) return;
         var path = Path.Combine(_root, "shared.js");
@@ -87,17 +87,12 @@ public sealed class ConversationCodeRewindServiceTests : IDisposable
         await File.WriteAllTextAsync(path, "before");
         Assert.True(TryCreateHardLink(path, linkedPath));
         var conversation = NewConversation();
-        var checkpoint = await Files.CreateCheckpointAsync("shared.js", conversation.Id);
-        await File.WriteAllTextAsync(path, "after");
-        conversation.FileChanges.Add(new FileChangeRecord("shared.js", checkpoint, DateTimeOffset.UnixEpoch, "Edit",
-            TurnUserMessageIndex: 2, ResultFileExisted: true, ResultSha256: FileSnapshot.ComputeSha256("after")));
 
         Assert.Equal(2, FileHardLinkInspector.TryGetLinkCount(path));
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => ConversationCodeRewindService.BuildPlanAsync(conversation, 2, Files));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Files.CreateCheckpointAsync("shared.js", conversation.Id));
 
-        Assert.Contains("2 hard links", error.Message, StringComparison.Ordinal);
-        Assert.Equal("after", await File.ReadAllTextAsync(path));
-        Assert.Equal("after", await File.ReadAllTextAsync(linkedPath));
+        Assert.Equal("before", await File.ReadAllTextAsync(path));
+        Assert.Equal("before", await File.ReadAllTextAsync(linkedPath));
     }
 
     [Fact]
