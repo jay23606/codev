@@ -204,13 +204,16 @@ public sealed class ConversationBackupServiceTests
     [Fact]
     public void Backup_keeps_the_selected_agent_profile_but_rejects_invalid_profile_names()
     {
-        var conversation = new Conversation { AgentProfileName = "Debug" };
+        var conversation = new Conversation { AgentProfileName = "Code Reviewer" };
         var backup = ConversationBackupService.Export([conversation], Options);
         var imported = Assert.Single(ConversationBackupService.Import(backup, Options));
 
-        Assert.Equal("Debug", imported.AgentProfileName);
+        Assert.Equal("Code Reviewer", imported.AgentProfileName);
         var invalid = Assert.Single(ConversationBackupService.Import("""[{"AgentProfileName":"../secrets"}]""", Options));
         Assert.Null(invalid.AgentProfileName);
+
+        var invalidExport = ConversationBackupService.Export([new Conversation { AgentProfileName = ".." }], Options);
+        Assert.Null(Assert.Single(ConversationBackupService.Import(invalidExport, Options)).AgentProfileName);
     }
 
     [Fact]

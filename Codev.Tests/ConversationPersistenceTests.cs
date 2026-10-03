@@ -64,7 +64,7 @@ public sealed class ConversationPersistenceTests
             Provider = CloudModelProviders.OpenAI,
             IsPlanMode = false,
             IsCodeTask = true,
-            AgentProfileName = "Code",
+            AgentProfileName = "Code Reviewer",
             QueueEnabled = false,
             ThinkEnabled = true,
             Temperature = 0.25,
@@ -122,7 +122,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal(CloudModelProviders.OpenAI, snapshot.Provider);
         Assert.False(snapshot.IsPlanMode);
         Assert.True(snapshot.IsCodeTask);
-        Assert.Equal("Code", snapshot.AgentProfileName);
+        Assert.Equal("Code Reviewer", snapshot.AgentProfileName);
         Assert.False(snapshot.QueueEnabled);
         Assert.True(snapshot.ThinkEnabled);
         Assert.Equal(0.25, snapshot.Temperature);

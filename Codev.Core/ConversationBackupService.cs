@@ -26,7 +26,7 @@ public static class ConversationBackupService
             Provider = conversation.Provider,
             IsPlanMode = conversation.IsPlanMode,
             IsCodeTask = conversation.IsCodeTask,
-            AgentProfileName = conversation.AgentProfileName,
+            AgentProfileName = AgentProfileCatalog.NormalizeReferenceName(conversation.AgentProfileName),
             ThinkEnabled = conversation.ThinkEnabled,
             OutputStyle = conversation.OutputStyle,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,

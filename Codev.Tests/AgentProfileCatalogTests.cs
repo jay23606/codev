@@ -25,6 +25,33 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
+    public void Profile_references_accept_display_names_while_file_stems_stay_slug_only()
+    {
+        Assert.Equal("Smoke QA", AgentProfileCatalog.NormalizeReferenceName("Smoke QA"));
+        Assert.Null(AgentProfileCatalog.NormalizeReferenceName("../secrets"));
+        Assert.Null(AgentProfileCatalog.NormalizeReferenceName("."));
+        Assert.Null(AgentProfileCatalog.NormalizeReferenceName(".."));
+        Assert.Null(AgentProfileCatalog.NormalizeReferenceName("Smoke\\QA"));
+        Assert.Null(AgentProfileCatalog.NormalizeReferenceName(" Smoke QA"));
+        Assert.Null(AgentProfileCatalog.NormalizeReferenceName(new string('x', 81)));
+        Assert.Equal("smoke-qa", AgentProfileCatalog.NormalizeProfileFileStem("smoke-qa"));
+        Assert.Null(AgentProfileCatalog.NormalizeProfileFileStem("Smoke QA"));
+    }
+
+    [Theory]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("path/name")]
+    [InlineData("path\\name")]
+    public void Rejects_path_like_profile_display_names(string name)
+    {
+        var contents = $"---\nname: {name}\ndescription: Test profile\n---\nInstructions.";
+
+        Assert.False(AgentProfileCatalog.TryParse("test.md", contents, "user", out _, out var error));
+        Assert.Contains("display name", error);
+    }
+
+    [Fact]
     public void Parses_and_enforces_edit_path_allow_and_deny_globs()
     {
         const string contents = "---\nname: Frontend\ndescription: Edit frontend files only.\nedit_paths: src/**, index.html\ndeny_edit_paths: src/secrets/**\n---\nKeep changes focused.";
@@ -111,6 +138,7 @@ public sealed class AgentProfileCatalogTests : IDisposable
         Assert.Equal(updated, Assert.Single(await store.LoadDocumentsAsync()).Contents);
 
         await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("invalid.md", "not a profile"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("profile with spaces.md", Profile("Profile With Spaces")));
         await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("other.md", Profile("Reviewer")));
         await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("orchestrator.md", Profile("Orchestrator")));
         await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync("plan.md", Profile("Plan")));

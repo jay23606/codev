@@ -125,7 +125,15 @@ public static class AgentProfileCatalog
             ("list_files", AgentToolPermission.Allow), ("read_file", AgentToolPermission.Allow), ("search_files", AgentToolPermission.Allow))
     ];
 
+    /// <summary>Validates a stored display-name reference. Profile filenames remain restricted to short slugs.</summary>
     public static string? NormalizeReferenceName(string? name) =>
+        name is { Length: > 0 and <= 80 } &&
+        string.Equals(name, name.Trim(), StringComparison.Ordinal) &&
+        name is not "." and not ".." &&
+        !name.Any(char.IsControl) && !name.Contains('/') && !name.Contains('\\')
+            ? name : null;
+
+    public static string? NormalizeProfileFileStem(string? name) =>
         name is { Length: <= 40 } && SafeName.IsMatch(name) ? name : null;
 
     /// <summary>Moves the former built-in Code profile selection to the new default Build agent without overriding custom profiles.</summary>
@@ -285,8 +293,8 @@ public static class AgentProfileCatalog
             else return Fail($"Unsupported agent profile field '{key}'.", out error);
         }
 
-        if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 80 || displayName.Any(char.IsControl))
-            return Fail("Add a display name of 1–80 printable characters.", out error);
+        if (NormalizeReferenceName(displayName) is null)
+            return Fail("Add a display name of 1–80 printable characters without path separators.", out error);
         if (string.IsNullOrWhiteSpace(description) || description.Length > 180)
             return Fail("Add a short description of at most 180 characters.", out error);
         if (model is { Length: > 160 } || model?.Any(char.IsControl) == true) return Fail("The model value is too long or contains control characters.", out error);

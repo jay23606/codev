@@ -1115,7 +1115,7 @@ public sealed class MainWindowTests
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
         var store = new UserAgentProfileStore(Path.Combine(root, "Codev", "agents"));
-        await store.SaveAsync("reviewer.md", "---\nname: Reviewer\ndescription: Review source changes.\n---\nInspect first, then report clearly.\n");
+        await store.SaveAsync("smoke-qa.md", "---\nname: Smoke QA\ndescription: Review source changes.\n---\nInspect first, then report clearly.\n");
 
         MainViewModel? viewModel = null;
         MainWindow? window = null;
@@ -1133,7 +1133,7 @@ public sealed class MainWindowTests
 
             var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.Equal("", viewModel.SelectedAgentProfileName);
-            var reviewerIndex = viewModel.AgentProfiles.ToList().FindIndex(profile => profile.Name == "Reviewer");
+            var reviewerIndex = viewModel.AgentProfiles.ToList().FindIndex(profile => profile.Name == "Smoke QA");
             Assert.True(reviewerIndex > 0);
             var pickerCenter = global::Avalonia.VisualExtensions.TranslatePoint(picker,
                 new global::Avalonia.Point(picker.Bounds.Width / 2, picker.Bounds.Height / 2), window);
@@ -1143,9 +1143,9 @@ public sealed class MainWindowTests
             window.UpdateLayout();
             Assert.True(picker.IsDropDownOpen);
             picker.IsDropDownOpen = false;
-            picker.SelectedValue = "Reviewer";
+            picker.SelectedValue = "Smoke QA";
             await Dispatcher.UIThread.InvokeAsync(() => { });
-            Assert.Equal("Reviewer", viewModel.ActiveConversation!.AgentProfileName);
+            Assert.Equal("Smoke QA", viewModel.ActiveConversation!.AgentProfileName);
 
             var persistence = typeof(MainViewModel).GetField("_persistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(viewModel) as Task;
@@ -1164,9 +1164,9 @@ public sealed class MainWindowTests
             restoredWindow.UpdateLayout();
 
             var restoredPicker = Assert.IsType<ComboBox>(restoredWindow.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
-            Assert.Equal("Reviewer", restoredViewModel.SelectedAgentProfileName);
-            Assert.Equal("Reviewer", restoredPicker.SelectedValue);
-            Assert.Equal("Reviewer agent", restoredViewModel.PrimaryAgentLabel);
+            Assert.Equal("Smoke QA", restoredViewModel.SelectedAgentProfileName);
+            Assert.Equal("Smoke QA", restoredPicker.SelectedValue);
+            Assert.Equal("Smoke QA agent", restoredViewModel.PrimaryAgentLabel);
         }
         finally
         {

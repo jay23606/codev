@@ -40,7 +40,7 @@ public sealed class UserAgentProfileStore(string directory)
         var stem = Path.GetFileNameWithoutExtension(fileName);
         if (!fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(fileName, stem + ".md", StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(AgentProfileCatalog.NormalizeReferenceName(stem), stem, StringComparison.OrdinalIgnoreCase))
+            !string.Equals(AgentProfileCatalog.NormalizeProfileFileStem(stem), stem, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Use a simple profile filename such as 'reviewer.md'.");
         if (Encoding.UTF8.GetByteCount(contents) > AgentProfileCatalog.MaxProfileFileBytes)
             throw new InvalidDataException("Agent profile files are limited to 32 KB.");
