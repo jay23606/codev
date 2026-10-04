@@ -1598,6 +1598,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         var previousModel = Model;
         var previousProvider = Provider;
+        EnsureSavedAgentProfileChoice(conversation.AgentProfileName);
         ActiveConversation = conversation;
         RefreshBackgroundCommands();
         _ = RefreshAgentProfilesAsync();
@@ -1681,6 +1682,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(PinLabel));
         OnPropertyChanged(nameof(ArchiveLabel));
         PersistLastActiveConversationId(conversation.Id);
+    }
+
+    private void EnsureSavedAgentProfileChoice(string? profileName)
+    {
+        if (string.IsNullOrWhiteSpace(profileName) ||
+            AgentProfiles.Any(profile => profile.Name.Equals(profileName, StringComparison.OrdinalIgnoreCase))) return;
+        AgentProfiles.Add(new AgentProfileChoice(profileName, profileName + " · loading",
+            "Restoring this conversation's saved agent profile."));
     }
 
     private async Task StopBackgroundCommandAsync(Codev.BackgroundCommandSnapshot command)
