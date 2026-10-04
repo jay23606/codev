@@ -116,13 +116,13 @@ public sealed class McpBoundedStdioClientTransportTests
             {
                 Command = "powershell.exe",
                 Arguments = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-                    $"Set-Content -LiteralPath '{safeProcessIdPath}' -Value $PID; Start-Sleep -Seconds 30"],
+                    $"$child = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -LiteralPath '{safeProcessIdPath}' -Value \"$PID $($child.Id)\"; Start-Sleep -Seconds 30"],
                 Name = "process-tree-lifecycle-test"
             }
             : new StdioClientTransportOptions
             {
                 Command = "/bin/sh",
-                Arguments = ["-c", $"echo $$ > '{safeProcessIdPath}'; sleep 30"],
+                Arguments = ["-c", $"sleep 30 & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > '{safeProcessIdPath}'; wait"],
                 Name = "process-tree-lifecycle-test"
             };
 
@@ -131,13 +131,16 @@ public sealed class McpBoundedStdioClientTransportTests
             var clientTransport = new McpBoundedStdioClientTransport(options);
             var session = await clientTransport.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(30));
             await using var lifetime = (IAsyncDisposable)session;
-            var processId = await WaitForProcessIdAsync(processIdPath, TimeSpan.FromSeconds(10));
-            Assert.True(IsProcessRunning(processId), "The fixture server should still be running before transport disposal.");
+            var processIds = await WaitForProcessIdsAsync(processIdPath, TimeSpan.FromSeconds(10));
+            Assert.Equal(2, processIds.Length);
+            Assert.All(processIds, processId => Assert.True(IsProcessRunning(processId),
+                "The fixture server and child should still be running before transport disposal."));
 
             await lifetime.DisposeAsync();
 
-            await WaitForProcessExitAsync(processId, TimeSpan.FromSeconds(10));
-            Assert.False(IsProcessRunning(processId), "Disposing the stdio transport should terminate its server process tree.");
+            await WaitForProcessesExitAsync(processIds, TimeSpan.FromSeconds(10));
+            Assert.All(processIds, processId => Assert.False(IsProcessRunning(processId),
+                "Disposing the stdio transport should terminate its server process tree."));
         }
         finally
         {
@@ -145,26 +148,31 @@ public sealed class McpBoundedStdioClientTransportTests
         }
     }
 
-    private static async Task<int> WaitForProcessIdAsync(string path, TimeSpan timeout)
+    private static async Task<int[]> WaitForProcessIdsAsync(string path, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
-            if (File.Exists(path) && int.TryParse(await File.ReadAllTextAsync(path), out var processId)) return processId;
+            if (File.Exists(path))
+            {
+                var processIds = (await File.ReadAllTextAsync(path)).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(value => int.TryParse(value, out var processId) ? processId : 0).ToArray();
+                if (processIds.Length == 2 && processIds.All(processId => processId > 0)) return processIds;
+            }
             await Task.Delay(50);
         }
-        throw new TimeoutException("The MCP fixture server did not write its process ID.");
+        throw new TimeoutException("The MCP fixture server did not write both process IDs.");
     }
 
-    private static async Task WaitForProcessExitAsync(int processId, TimeSpan timeout)
+    private static async Task WaitForProcessesExitAsync(IReadOnlyList<int> processIds, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
-            if (!IsProcessRunning(processId)) return;
+            if (processIds.All(processId => !IsProcessRunning(processId))) return;
             await Task.Delay(50);
         }
-        throw new TimeoutException("The MCP stdio server process remained alive after its transport was disposed.");
+        throw new TimeoutException("An MCP stdio server process or child remained alive after its transport was disposed.");
     }
 
     private static bool IsProcessRunning(int processId)
