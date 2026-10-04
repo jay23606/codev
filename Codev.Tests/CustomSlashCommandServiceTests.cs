@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Codev.Tests;
 
 public sealed class CustomSlashCommandServiceTests
@@ -105,6 +107,30 @@ Review {{area}} in {{file}}.
     }
 
     [Fact]
+    public async Task Does_not_load_a_project_slash_command_hard_linked_outside_the_project()
+    {
+        if (!FileHardLinkInspector.IsSupportedPlatform) return;
+        var root = CreateTempDirectory();
+        var project = Path.Combine(root, "project");
+        var user = Path.Combine(root, "user-commands");
+        var commands = Path.Combine(project, ".codev", "commands");
+        var outside = Path.Combine(root, "private-prompt.md");
+        var linked = Path.Combine(commands, "private-prompt.md");
+        try
+        {
+            Directory.CreateDirectory(commands);
+            Directory.CreateDirectory(user);
+            await File.WriteAllTextAsync(outside, "---\ndescription: private\n---\nexternal-only-prompt-marker");
+            if (!TryCreateHardLink(outside, linked)) return;
+
+            var result = await CustomSlashCommandService.LoadAsync(user, project, includeProjectCommands: true);
+
+            Assert.DoesNotContain(result.Commands, command => command.Name == "/private-prompt");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void Suggestion_token_supports_named_argument_entry_and_rejects_multiline_input()
     {
         Assert.True(SlashCommandCatalog.TryGetCommandToken("/inspect area=login", 19, out var token, out var hasArguments));
@@ -126,4 +152,20 @@ Review {{area}} in {{file}}.
         Directory.CreateDirectory(path);
         return path;
     }
+
+    private static bool TryCreateHardLink(string existingPath, string newPath)
+    {
+        if (OperatingSystem.IsWindows()) return CreateHardLinkWindows(newPath, existingPath, IntPtr.Zero);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return CreateHardLinkUnix(existingPath, newPath) == 0;
+        return false;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 }

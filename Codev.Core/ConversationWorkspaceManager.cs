@@ -69,6 +69,18 @@ public sealed class ConversationWorkspaceManager
         }
     }
 
+    /// <summary>Returns only existing, unlinked private workspaces owned by the supplied conversations.</summary>
+    public IReadOnlyList<string> FindExistingConversationWorkspaces(IEnumerable<Conversation> conversations)
+    {
+        ArgumentNullException.ThrowIfNull(conversations);
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        return conversations
+            .Where(conversation => conversation is not null && IsConversationWorkspace(conversation.Id, conversation.ProjectPath))
+            .Select(conversation => Path.GetFullPath(conversation.ProjectPath!))
+            .Distinct(comparer)
+            .ToArray();
+    }
+
     private static StringComparison PathComparison => OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 }

@@ -10,7 +10,7 @@ public sealed class ConversationQueueRecoveryTests
         var invalid = new Conversation { Messages = [new("user", "not an assistant placeholder")] };
         var earlyTurn = new PersistedQueuedTurn(1, "model-a", 8192, true, false, @"C:\project", ["a.cs"], ["obj"], DateTimeOffset.UnixEpoch, 0.2, ThinkEnabled: true,
             TopP: 0.8, TopK: 40, PresencePenalty: 0.2, RepeatPenalty: 1.1, NumPredict: 4096);
-        var lateTurn = new PersistedQueuedTurn(1, "model-b", 16384, false, true, null, [], [], DateTimeOffset.UnixEpoch.AddMinutes(1), Provider: CloudModelProviders.OpenAI, IncludeProjectContext: true, IncludeRepoMap: true);
+        var lateTurn = new PersistedQueuedTurn(1, "model-b", 16384, false, true, null, [], [], DateTimeOffset.UnixEpoch.AddMinutes(1), Provider: CloudModelProviders.OpenAI, IncludeProjectContext: true, IncludeRepoMap: true, EnableSemanticSearch: true);
         early.PendingTurns = [earlyTurn];
         late.PendingTurns = [lateTurn];
         invalid.PendingTurns = [new PersistedQueuedTurn(0, "model-c", 0, false, false, null, [], [], DateTimeOffset.UnixEpoch)];
@@ -33,6 +33,7 @@ public sealed class ConversationQueueRecoveryTests
         Assert.True(restored[1].Turn.IsPlanMode);
         Assert.True(restored[1].Turn.IncludeProjectContext);
         Assert.True(restored[1].Turn.IncludeRepoMap);
+        Assert.True(restored[1].Turn.EnableSemanticSearch);
         Assert.Single(early.PendingTurns);
         Assert.Empty(invalid.PendingTurns);
     }

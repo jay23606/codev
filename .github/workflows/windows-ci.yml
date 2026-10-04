@@ -14,41 +14,116 @@ jobs:
   portable-core:
     name: Portable core (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js for A9 benchmark checks
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Validate A9 retrieval benchmark
+        run: node bench/a9-retrieval.cjs --selftest
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore portable tests
         run: dotnet restore Codev.Tests/Codev.Tests.csproj
 
+      - name: Restore headless CLI
+        run: dotnet restore Codev.Cli/Codev.Cli.csproj
+
       - name: Build portable core
         run: dotnet build Codev.Core/Codev.Core.csproj --configuration Release --no-restore
 
+      - name: Build headless CLI
+        run: dotnet build Codev.Cli/Codev.Cli.csproj --configuration Release --no-restore
+
       - name: Run portable tests
+        if: runner.os != 'macOS'
         run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
 
-      - name: Build Avalonia UI spike
+      - name: Run portable tests with hang diagnostics on macOS
+        if: runner.os == 'macOS'
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 5m --blame-hang-dump-type none --logger "console;verbosity=normal"
+
+      - name: Run native Linux MCP OAuth Secret Service smoke
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring xvfb
+          keyring_home="$(mktemp -d)"
+          runtime_dir="$(mktemp -d)"
+          chmod 700 "$keyring_home" "$runtime_dir"
+          HOME="$keyring_home" XDG_RUNTIME_DIR="$runtime_dir" dbus-run-session -- bash -euo pipefail -c '
+            od -An -N32 -tx1 /dev/urandom | tr -d "[:space:]" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
+            CODEV_TEST_NATIVE_MCP_OAUTH_VAULT=1 xvfb-run -a dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
+          '
+
+      - name: Run native macOS MCP OAuth Keychain smoke
+        if: runner.os == 'macOS'
+        env:
+          CODEV_TEST_NATIVE_MCP_OAUTH_VAULT: '1'
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
+
+  avalonia-headless-ui:
+    name: Avalonia headless UI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build Avalonia UI
         run: dotnet build Codev.Avalonia/Codev.Avalonia.csproj --configuration Release
+
+      - name: Run Avalonia headless UI tests
+        run: dotnet test Codev.Avalonia.Tests/Codev.Avalonia.Tests.csproj --configuration Release --logger "console;verbosity=minimal"
+
+      - name: Install Xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends xvfb
+
+      - name: Launch Avalonia under a virtual Linux display
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          xvfb-run -a timeout --signal=TERM --kill-after=5s 15s ./Codev.Avalonia/bin/Release/net10.0/Codev.Avalonia
+          status=$?
+          if [ "$status" -eq 124 ]; then
+            exit 0
+          fi
+          exit "$status"
 
   build-and-test:
     runs-on: windows-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore test project and application
         run: dotnet restore Codev.Windows.Tests\Codev.Windows.Tests.csproj
@@ -65,12 +140,17 @@ jobs:
       - name: Run portable tests
         run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-portable-tests.trx"
 
+      - name: Run native Windows MCP OAuth credential-vault smoke
+        env:
+          CODEV_TEST_NATIVE_MCP_OAUTH_VAULT: '1'
+        run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
+
       - name: Run Windows UI tests
         run: dotnet test Codev.Windows.Tests\Codev.Windows.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-windows-tests.trx"
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codev-test-results
           path: |

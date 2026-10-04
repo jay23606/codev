@@ -86,6 +86,72 @@ public sealed class ProjectFolderTrustRegistryTests : IDisposable
         Assert.False(registry.IsTrusted(_root));
     }
 
+    [Fact]
+    public async Task Trust_fails_closed_when_a_trusted_root_becomes_a_symbolic_link()
+    {
+        var project = Path.Combine(_root, "project");
+        var outside = Path.Combine(_root, "outside");
+        Directory.CreateDirectory(project);
+        Directory.CreateDirectory(outside);
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+        await registry.TrustAsync(project);
+
+        Directory.Delete(project);
+        try { Directory.CreateSymbolicLink(project, outside); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+        Assert.False(registry.IsTrusted(project));
+        Assert.Throws<UnauthorizedAccessException>(() => new WorkspaceFileService(project));
+    }
+
+    [Fact]
+    public async Task Trust_refuses_a_project_path_under_a_symbolic_link_parent()
+    {
+        var outside = Path.Combine(_root, "outside");
+        var linkedParent = Path.Combine(_root, "linked-parent");
+        Directory.CreateDirectory(outside);
+        try { Directory.CreateSymbolicLink(linkedParent, outside); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+        var project = Path.Combine(linkedParent, "project");
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => registry.TrustAsync(project));
+        Assert.False(registry.IsTrusted(project));
+    }
+
+    [Fact]
+    public async Task Concurrent_trust_reads_observe_safe_snapshots_during_updates()
+    {
+        var registry = ProjectFolderTrustRegistry.Load(SettingsPath);
+        var folders = Enumerable.Range(0, 32).Select(index => Path.Combine(_root, $"concurrent-{index}")).ToArray();
+        using var start = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, 4).Select(readerIndex => Task.Run(() =>
+        {
+            start.Wait();
+            for (var iteration = 0; iteration < 5_000; iteration++)
+            {
+                registry.TrustedRoots.ToArray();
+                registry.IsKnown(folders[(iteration + readerIndex) % folders.Length]);
+                registry.IsTrusted(folders[(iteration + readerIndex) % folders.Length]);
+                registry.FindTrustedRoot(folders[(iteration + readerIndex) % folders.Length]);
+            }
+        })).ToArray();
+        var writer = Task.Run(async () =>
+        {
+            start.Set();
+            foreach (var folder in folders)
+            {
+                await registry.TrustAsync(folder);
+                await registry.RevokeAsync(folder);
+                await registry.MarkKnownAsync(folder);
+            }
+        });
+
+        await Task.WhenAll(readers.Append(writer));
+        Assert.All(folders, folder => Assert.True(registry.IsKnown(folder)));
+        Assert.Empty(registry.TrustedRoots);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

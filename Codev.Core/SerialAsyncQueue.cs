@@ -44,6 +44,24 @@ public sealed class SerialAsyncQueue<T>
         }
     }
 
+    public bool MoveToFront(Predicate<T> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        lock (_gate)
+        {
+            var items = _items.ToList();
+            var index = items.FindIndex(item => predicate(item));
+            if (index < 0) return false;
+            if (index == 0) return true;
+            var prioritized = items[index];
+            items.RemoveAt(index);
+            items.Insert(0, prioritized);
+            _items.Clear();
+            foreach (var item in items) _items.Enqueue(item);
+            return true;
+        }
+    }
+
     public async Task ProcessPendingAsync(Func<T, Task> processAsync, Func<T, Exception, Task> onErrorAsync, Func<bool>? shouldContinue = null)
     {
         var processor = new object();

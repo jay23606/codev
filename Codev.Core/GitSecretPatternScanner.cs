@@ -15,6 +15,8 @@ public static partial class GitSecretPatternScanner
     private static partial Regex AwsAccessKey();
     [GeneratedRegex(@"(?i)(?:sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,})")]
     private static partial Regex AiProviderKey();
+    [GeneratedRegex(@"(?i)\bhf_(?:oauth_)?[A-Za-z0-9_-]{20,}\b")]
+    private static partial Regex HuggingFaceToken();
     [GeneratedRegex(@"\bsk_live_[A-Za-z0-9]{20,}\b")]
     private static partial Regex StripeSecretKey();
     [GeneratedRegex(@"\bAIza[0-9A-Za-z_-]{35}\b")]
@@ -52,6 +54,7 @@ public static partial class GitSecretPatternScanner
                     AddIfMatched(GitHubToken(), "GitHub token");
                     AddIfMatched(AwsAccessKey(), "AWS access key");
                     AddIfMatched(AiProviderKey(), "AI provider key");
+                    AddIfMatched(HuggingFaceToken(), "Hugging Face token");
                     AddIfMatched(StripeSecretKey(), "Stripe secret key");
                     AddIfMatched(GoogleApiKey(), "Google API key");
                     AddIfMatched(NpmToken(), "npm token");

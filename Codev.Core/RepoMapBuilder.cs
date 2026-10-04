@@ -20,6 +20,12 @@ public static partial class RepoMapBuilder
     [GeneratedRegex(@"\bexport\s+(?:default\s+)?(?:async\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)", RegexOptions.CultureInvariant)]
     private static partial Regex ExportedValueRegex();
 
+    [GeneratedRegex("//[^\\r\\n]*|/\\*[\\s\\S]*?\\*/|\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|`(?:\\\\.|[^`\\\\])*`", RegexOptions.CultureInvariant)]
+    private static partial Regex CStyleCommentOrStringRegex();
+
+    [GeneratedRegex("\"\"\"[\\s\\S]*?\"\"\"|'''[\\s\\S]*?'''|#[^\\r\\n]*|\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'", RegexOptions.CultureInvariant)]
+    private static partial Regex PythonCommentOrStringRegex();
+
     public static async Task<string> BuildAsync(string projectPath, IReadOnlyList<string>? selectedFiles = null,
         IReadOnlyList<string>? contextExclusions = null, CancellationToken cancellationToken = default)
     {
@@ -69,20 +75,23 @@ public static partial class RepoMapBuilder
     private static IReadOnlyList<string> ExtractSymbols(string relativePath, string content)
     {
         var extension = Path.GetExtension(relativePath);
+        var masked = extension.Equals(".py", StringComparison.OrdinalIgnoreCase) || extension.Equals(".pyi", StringComparison.OrdinalIgnoreCase)
+            ? PythonCommentOrStringRegex().Replace(content, match => new string('\n', match.Value.Count(character => character == '\n')))
+            : CStyleCommentOrStringRegex().Replace(content, match => new string('\n', match.Value.Count(character => character == '\n')));
         var matches = new List<string>();
-        void AddMatches(Regex regex)
+        AddMatches(DeclarationRegex(), masked);
+        if (extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)) AddMatches(CSharpMemberRegex(), masked);
+        if (extension is ".js" or ".jsx" or ".ts" or ".tsx") AddMatches(ExportedValueRegex(), masked);
+        return matches.Take(MaxSymbolsPerFile).ToArray();
+
+        void AddMatches(Regex regex, string searchable)
         {
-            foreach (Match match in regex.Matches(content))
+            foreach (Match match in regex.Matches(searchable))
             {
                 var name = match.Groups.Cast<Group>().Skip(1).FirstOrDefault(group => group.Success && group.Length > 0)?.Value;
                 if (!string.IsNullOrEmpty(name) && !matches.Contains(name, StringComparer.Ordinal)) matches.Add(name);
                 if (matches.Count >= MaxSymbolsPerFile) break;
             }
         }
-
-        AddMatches(DeclarationRegex());
-        if (extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)) AddMatches(CSharpMemberRegex());
-        if (extension is ".js" or ".jsx" or ".ts" or ".tsx") AddMatches(ExportedValueRegex());
-        return matches.Take(MaxSymbolsPerFile).ToArray();
     }
 }

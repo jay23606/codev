@@ -99,9 +99,10 @@ public static class ConversationStatusReport
             $"Repository map: {(!conversation.IncludeRepoMap ? "off" : canIncludeRepoMap ? "included" : "unavailable under the current context policy")}",
             $"Queue: {queue}",
             $"Hosted requests: {(CloudModelProviders.IsCloud(conversation.Provider) ? hostedRequestsEnabled ? "enabled for this session" : "disabled" : "not in use")}",
-            $"Tools and file changes: {(conversation.IsCodeTask ? "available with per-change review and project command permissions" : "unavailable outside Code task mode")}",
+            $"Tools and file changes: {(conversation.IsCodeTask ? "available with project file-review and command approval policies" : "unavailable outside Code task mode")}",
             $"Project command permissions: {(commandPermissionMode switch
             {
+                ProjectCommandPermissionMode.Auto => $"Auto · ordinary file changes apply with rollback checkpoints; all commands run unless exactly denied · {deniedCommandRules} saved deny rule(s)",
                 ProjectCommandPermissionMode.Allowlist => $"exact allowlist · {allowedCommandRules} allow rule(s), {deniedCommandRules} deny rule(s); unlisted commands ask",
                 ProjectCommandPermissionMode.ReadOnly => $"read-only classifier · {deniedCommandRules} saved deny rule(s); unrecognized commands ask",
                 _ => $"ask every time · {deniedCommandRules} saved deny rule(s)"

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 
 namespace Codev.Tests;
 
@@ -160,6 +161,33 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Does_not_read_or_index_a_project_file_that_is_hard_linked_outside_the_project()
+    {
+        if (!FileHardLinkInspector.IsSupportedPlatform) return;
+        var outside = Path.Combine(Path.GetDirectoryName(_root)!, Path.GetFileName(_root) + "-outside.cs");
+        var linked = Path.Combine(_root, "linked.cs");
+        try
+        {
+            await File.WriteAllTextAsync(outside, "outside-private-marker");
+            if (!TryCreateHardLink(outside, linked)) return;
+            Assert.Equal(2, FileHardLinkInspector.TryGetLinkCount(linked));
+
+            var service = Service;
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.ReadFileAsync("linked.cs"));
+            Assert.Throws<UnauthorizedAccessException>(() => ProjectPathInstructionRuleParser.ReadDefinition(service, "linked.cs"));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.CreateCheckpointAsync("linked.cs", Guid.NewGuid()));
+            Assert.DoesNotContain(await service.SearchFilesAsync("outside-private-marker"), match => match.Contains("linked.cs", StringComparison.Ordinal));
+            var context = await ProjectContextReader.ReadAsync(_root, ["linked.cs"]);
+            Assert.DoesNotContain("outside-private-marker", context, StringComparison.Ordinal);
+        }
+        finally
+        {
+            try { File.Delete(linked); } catch { }
+            try { File.Delete(outside); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task Reads_files_and_creates_a_recoverable_checkpoint_before_replacement()
     {
         var relative = "Program.cs";
@@ -173,6 +201,21 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         Assert.NotNull(checkpoint);
         Assert.Equal("old version", await File.ReadAllTextAsync(checkpoint!));
         Assert.Equal("new version", await File.ReadAllTextAsync(Path.Combine(_root, relative)));
+    }
+
+    [Fact]
+    public async Task Atomic_write_preserves_existing_unix_permissions()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead;
+        var path = Path.Combine(_root, "Program.cs");
+        await File.WriteAllTextAsync(path, "class Original {}\n");
+        File.SetUnixFileMode(path, expected);
+
+        await Service.WriteFileAtomicAsync("Program.cs", "class Updated {}\n");
+
+        Assert.Equal(expected, File.GetUnixFileMode(path));
     }
 
     [Fact]
@@ -194,7 +237,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     {
         var id = Guid.NewGuid();
         var path = Path.Combine(_root, "Program.cs");
-        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
         try
         {
             await File.WriteAllTextAsync(path, "before edit");
@@ -217,7 +260,7 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         var id = Guid.NewGuid();
         var path = Path.Combine(_root, "src", "Feature.cs");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var checkpoints = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codev", "checkpoints", id.ToString("N"));
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
         try
         {
             var service = Service;
@@ -230,6 +273,56 @@ public sealed class WorkspaceFileServiceTests : IDisposable
             var redo = await service.RestoreFileStateAsync("src/Feature.cs", id, previousFileExisted: true, checkpointPath: rollback, expectedCurrentHash: null);
             Assert.Null(redo);
             Assert.Equal("class Feature {}", await File.ReadAllTextAsync(path));
+        }
+        finally { try { if (Directory.Exists(checkpoints)) Directory.Delete(checkpoints, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Restoring_a_checkpoint_preserves_original_bytes_even_when_text_is_invalid_utf8()
+    {
+        var id = Guid.NewGuid();
+        var path = Path.Combine(_root, "source.txt");
+        var originalBytes = new byte[] { 0xFF, 0x00, 0xC3, 0x28, 0x0D, 0x0A };
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
+        try
+        {
+            await File.WriteAllBytesAsync(path, originalBytes);
+            var service = Service;
+            var checkpoint = await service.CreateCheckpointAsync("source.txt", id);
+            await File.WriteAllTextAsync(path, "replacement");
+            var replacement = await service.ReadFileSnapshotAsync("source.txt");
+
+            await service.RestoreFileStateAsync("source.txt", id, previousFileExisted: true, checkpoint, replacement.Sha256);
+
+            Assert.Equal(originalBytes, await File.ReadAllBytesAsync(path));
+        }
+        finally { try { if (Directory.Exists(checkpoints)) Directory.Delete(checkpoints, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Refuses_to_create_a_checkpoint_larger_than_the_restore_limit()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(_root, "large.txt"), new byte[500_001]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Service.CreateCheckpointAsync("large.txt", Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task Checkpoint_paths_remain_unique_for_rapid_changes_to_the_same_file()
+    {
+        var path = Path.Combine(_root, "rapid.js");
+        var id = Guid.NewGuid();
+        var checkpoints = Path.Combine(CodevDataPaths.LocalDataRoot, "Codev", "checkpoints", id.ToString("N"));
+        try
+        {
+            await File.WriteAllTextAsync(path, "first");
+            var first = await Service.CreateCheckpointAsync("rapid.js", id);
+            await File.WriteAllTextAsync(path, "second");
+            var second = await Service.CreateCheckpointAsync("rapid.js", id);
+
+            Assert.NotEqual(first, second);
+            Assert.Equal("first", await Service.ReadCheckpointAsync("rapid.js", id, first!));
+            Assert.Equal("second", await Service.ReadCheckpointAsync("rapid.js", id, second!));
         }
         finally { try { if (Directory.Exists(checkpoints)) Directory.Delete(checkpoints, recursive: true); } catch { } }
     }
@@ -283,8 +376,165 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Rejects_a_parent_directory_link_swapped_after_path_validation()
+    {
+        var parent = Path.Combine(_root, "race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        var validatedPath = Service.ResolvePath("race/inside.cs");
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-parent-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "inside.cs"), "must not be read");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            Assert.Throws<UnauthorizedAccessException>(() =>
+            {
+                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(validatedPath, "race/inside.cs", _root);
+            });
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Rejects_a_parent_directory_link_swapped_after_write_path_validation()
+    {
+        var parent = Path.Combine(_root, "write-race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        var validatedPath = Service.ResolvePath("write-race/inside.cs");
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-write-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        var outsideFile = Path.Combine(outside, "inside.cs");
+        File.WriteAllText(outsideFile, "must stay unchanged");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var error = await Record.ExceptionAsync(() =>
+                WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, validatedPath, "escaped"u8.ToArray(), overwrite: true, CancellationToken.None));
+            Assert.True(error is UnauthorizedAccessException or IOException, error?.ToString() ?? "Expected the linked parent directory to be rejected.");
+            Assert.Equal("must stay unchanged", await File.ReadAllTextAsync(outsideFile));
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Keeps_the_current_file_when_precommit_validation_fails()
+    {
+        var filePath = Path.Combine(_root, "src.cs");
+        File.WriteAllText(filePath, "changed during the staged write");
+
+        await Assert.ThrowsAsync<IOException>(() => WorkspaceFileSystemOperations.WriteAtomicallyAsync(
+            _root, filePath, "stale proposal"u8.ToArray(), overwrite: true, CancellationToken.None,
+            _ => Task.FromResult(false)));
+
+        Assert.Equal("changed during the staged write", await File.ReadAllTextAsync(filePath));
+    }
+
+    [Fact]
+    public void Rejects_a_parent_directory_link_swapped_after_delete_path_validation()
+    {
+        var parent = Path.Combine(_root, "delete-race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        var validatedPath = Service.ResolvePath("delete-race/inside.cs");
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-delete-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        var outsideFile = Path.Combine(outside, "inside.cs");
+        File.WriteAllText(outsideFile, "must remain");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var error = Record.Exception(() => WorkspaceFileSystemOperations.DeleteFile(_root, validatedPath));
+            Assert.True(error is UnauthorizedAccessException or IOException, error?.ToString() ?? "Expected the linked parent directory to be rejected.");
+            Assert.Equal("must remain", File.ReadAllText(outsideFile));
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Rejects_a_parent_directory_link_swapped_after_directory_validation()
+    {
+        var parent = Path.Combine(_root, "list-race");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(parent, "inside.cs"), "project content");
+        _ = Service.ResolvePath("list-race", allowWorkspaceRoot: true);
+
+        var outside = Path.Combine(Path.GetTempPath(), "outside-codev-list-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "private-name.cs"), "must not be listed");
+        try
+        {
+            Directory.Delete(parent, recursive: true);
+            try { Directory.CreateSymbolicLink(parent, outside); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+            var error = Record.Exception(() => WorkspaceFileSystemOperations.EnumerateDirectory(_root, "list-race"));
+            Assert.True(error is UnauthorizedAccessException or IOException, error?.ToString() ?? "Expected the linked parent directory to be rejected.");
+        }
+        finally
+        {
+            try { if (Directory.Exists(parent)) Directory.Delete(parent); } catch { }
+            try { Directory.Delete(outside, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Refuses_a_symbolic_link_used_as_the_project_root()
+    {
+        var target = Path.Combine(_root, "real-project");
+        var linkedRoot = Path.Combine(_root, "linked-project");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "outside.cs"), "class Outside {}");
+        try { Directory.CreateSymbolicLink(linkedRoot, target); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { return; }
+
+        Assert.Throws<UnauthorizedAccessException>(() => new WorkspaceFileService(linkedRoot));
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_root, recursive: true); } catch { }
     }
+
+    private static bool TryCreateHardLink(string existingPath, string newPath)
+    {
+        if (OperatingSystem.IsWindows()) return CreateHardLinkWindows(newPath, existingPath, IntPtr.Zero);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return CreateHardLinkUnix(existingPath, newPath) == 0;
+        return false;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 }
