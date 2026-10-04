@@ -95,6 +95,21 @@ public sealed class BackgroundCommandManagerTests
     }
 
     [Fact]
+    public async Task Throwing_change_observer_cannot_interrupt_start_or_process_cleanup()
+    {
+        await using var manager = new BackgroundCommandManager();
+        var owner = Guid.NewGuid();
+        manager.Changed += (_, _) => throw new InvalidOperationException("broken UI observer");
+        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+
+        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+
+        Assert.Equal("Running", started.Status);
+        Assert.True(await manager.StopAsync(owner, started.Id));
+        Assert.Equal("Exited", manager.Read(owner, started.Id)!.Status);
+    }
+
+    [Fact]
     public async Task Manager_shutdown_stops_every_running_process()
     {
         var manager = new BackgroundCommandManager();

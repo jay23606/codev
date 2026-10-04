@@ -71,7 +71,7 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
             }
             throw;
         }
-        Changed?.Invoke(this, EventArgs.Empty);
+        RaiseChanged();
         return Task.FromResult(Snapshot(entry));
     }
 
@@ -94,7 +94,7 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
             if (!_entries.TryGetValue(id, out entry) || entry.ConversationId != conversationId || entry.Status != "Running") return false;
             entry.Status = "Stopping";
         }
-        Changed?.Invoke(this, EventArgs.Empty);
+        RaiseChanged();
         await KillAndWaitAsync(entry);
         return true;
     }
@@ -107,7 +107,7 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
             entries = _entries.Values.Where(item => item.ConversationId == conversationId && item.Status == "Running").ToArray();
             foreach (var entry in entries) entry.Status = "Stopping";
         }
-        if (entries.Length > 0) Changed?.Invoke(this, EventArgs.Empty);
+        if (entries.Length > 0) RaiseChanged();
         await Task.WhenAll(entries.Select(KillAndWaitAsync));
     }
 
@@ -139,7 +139,7 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
         }
         catch (ObjectDisposedException) { return; }
         catch (InvalidOperationException) { lock (_gate) entry.Status = "Exited"; }
-        finally { Changed?.Invoke(this, EventArgs.Empty); }
+        finally { RaiseChanged(); }
     }
 
     private static async Task DrainAsync(StreamReader reader, Entry entry, string prefix)
@@ -198,6 +198,19 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
     }
 
     private static bool IsActive(Entry entry) => entry.Status is "Running" or "Stopping";
+
+    // Observers update UI state; a faulty observer must never interrupt process cleanup or
+    // make a completed start/stop operation appear to have failed to its caller.
+    private void RaiseChanged()
+    {
+        var handlers = Changed;
+        if (handlers is null) return;
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            try { handler(this, EventArgs.Empty); }
+            catch { }
+        }
+    }
 
     private sealed class Entry(string id, Guid conversationId, string command, string workingDirectory, Process process, DateTimeOffset startedAt)
     {
