@@ -39,6 +39,23 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task Index_storage_is_private_to_the_current_user_on_unix()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        await File.WriteAllTextAsync(Path.Combine(_root, "source.cs"), "class PrivateSource { }");
+        using var http = new HttpClient(new EmbeddingHandler());
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
+
+        await index.UpdateAsync();
+
+        var path = ProjectEmbeddingIndex.GetIndexPath(_data, _root);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(Path.GetDirectoryName(path)!));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+    }
+
+    [Fact]
     public async Task Reembeds_only_the_changed_chunk()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), "class First { }");

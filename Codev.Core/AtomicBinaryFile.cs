@@ -9,7 +9,16 @@ public static class AtomicBinaryFile
         ArgumentNullException.ThrowIfNull(writeContents);
         var fullPath = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(fullPath) ?? throw new ArgumentException("A destination directory is required.", nameof(path));
-        Directory.CreateDirectory(directory);
+        const UnixFileMode privateDirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        const UnixFileMode privateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(directory);
+        else
+        {
+            Directory.CreateDirectory(directory, privateDirectoryMode);
+            // Existing directories retain their old permissions when CreateDirectory is called.
+            // Tighten them too, so data written before this protection is no longer exposed.
+            File.SetUnixFileMode(directory, privateDirectoryMode);
+        }
         var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
@@ -19,7 +28,8 @@ public static class AtomicBinaryFile
                 Access = FileAccess.Write,
                 Share = FileShare.None,
                 BufferSize = 64 * 1024,
-                Options = FileOptions.Asynchronous | FileOptions.WriteThrough
+                Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
+                UnixCreateMode = OperatingSystem.IsWindows() ? null : privateFileMode
             }))
             {
                 await writeContents(stream, cancellationToken).ConfigureAwait(false);
