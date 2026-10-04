@@ -42,6 +42,9 @@ public sealed class OllamaCodeTaskRunner(HttpClient httpClient)
         var repeatedCalls = new RepeatedToolCallGuard();
         var stepLimit = Math.Clamp(maxSteps ?? CodeTaskLimits.MaxModelStepsPerTurn, 1, CodeTaskLimits.MaxModelStepsPerTurn);
         var requests = 0;
+        var executedTools = 0;
+        var protocolCorrectionAttempts = 0;
+        var executedToolsAtLastCorrection = 0;
 
         async Task PublishTranscriptAsync() =>
             await (onTranscript?.Invoke(transcript.ToString()) ?? Task.CompletedTask).ConfigureAwait(false);
@@ -90,6 +93,32 @@ public sealed class OllamaCodeTaskRunner(HttpClient httpClient)
 
             if (calls.Length == 0)
             {
+                if (ToolOutputTranscriptParser.Parse(text).Outputs.Count > 0)
+                {
+                    if (protocolCorrectionAttempts == 0 && round + 1 < stepLimit)
+                    {
+                        protocolCorrectionAttempts++;
+                        executedToolsAtLastCorrection = executedTools;
+                        history.Add(new OllamaCodeTaskMessage("assistant", text));
+                        history.Add(new OllamaCodeTaskMessage("user",
+                            "Your previous message contained text formatted like Codev tool output, but it did not contain a structured tool call and was not executed. Do not imitate tool headings or tool-output JSON. If the user's request requires an action, call the corresponding structured tool now and report only its real result. Otherwise answer normally without a tool-output envelope."));
+                        continue;
+                    }
+
+                    const string warning = "Codev could not verify the tool-shaped text in this response because no structured tool call executed for it. Treat any action claims in that text as unverified; only the expanded tool entries above represent actions Codev actually ran.";
+                    transcript.AppendLine().AppendLine(warning);
+                    await PublishTranscriptAsync().ConfigureAwait(false);
+                    return new OllamaCodeTaskRunResult(transcript.ToString(), false, requests);
+                }
+
+                if (protocolCorrectionAttempts > 0 && executedTools == executedToolsAtLastCorrection)
+                {
+                    transcript.AppendLine().AppendLine(
+                        "Codev received no structured tool call after correcting tool-shaped text, so this turn did not perform or verify a requested action. Inspect the workspace before relying on any action claim.");
+                    await PublishTranscriptAsync().ConfigureAwait(false);
+                    return new OllamaCodeTaskRunResult(transcript.ToString(), false, requests);
+                }
+
                 if (!string.IsNullOrWhiteSpace(text)) transcript.Append(text);
                 await PublishTranscriptAsync().ConfigureAwait(false);
                 return new OllamaCodeTaskRunResult(transcript.ToString(), false, requests);
@@ -116,6 +145,7 @@ public sealed class OllamaCodeTaskRunner(HttpClient httpClient)
                     repeatedCalls.AllowOneMore();
                 }
                 var result = await executeTool(name, arguments, cancellationToken).ConfigureAwait(false);
+                executedTools++;
                 history.Add(new OllamaCodeTaskMessage("tool", result, null, name));
                 transcript.AppendLine().Append("**").Append(name.Replace('_', ' ')).AppendLine("**")
                     .AppendLine(UntrustedToolOutput.Truncate(result, 6_000));

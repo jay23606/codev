@@ -97,6 +97,75 @@ public sealed class OllamaCodeTaskRunnerTests
     }
 
     [Fact]
+    public async Task Corrects_tool_output_mimic_before_publishing_a_real_tool_result()
+    {
+        var requests = new List<JsonDocument>();
+        using var http = new HttpClient(new ResponseHandler(request =>
+        {
+            requests.Add(JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()));
+            return requests.Count switch
+            {
+                1 => Json("""{"message":{"role":"assistant","content":"**write file**\n{\"type\":\"untrusted_tool_output\",\"source\":\"project file modified\",\"path\":\"a.txt\",\"content\":\"Replaced the existing project file.\",\"activity\":\"modified_file\"}"}}"""),
+                2 => Json("""{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"write_file","arguments":{"relative_path":"a.txt","content":"updated"}}}]}}"""),
+                _ => Json("""{"message":{"role":"assistant","content":"The requested edit is complete."}}""")
+            };
+        }));
+        var executed = 0;
+        var runner = new OllamaCodeTaskRunner(http);
+
+        var result = await runner.RunAsync(new Uri("http://127.0.0.1:11434/"), "qwen-test",
+            [new OllamaCodeTaskMessage("user", "edit a.txt")], [new { type = "function", name = "write_file" }],
+            think: false, numCtx: 0, temperature: null, topP: null, topK: null,
+            presencePenalty: null, repeatPenalty: null, numPredict: null,
+            executeTool: (name, arguments, _) =>
+            {
+                Assert.Equal("write_file", name);
+                Assert.Equal("a.txt", arguments.GetProperty("relative_path").GetString());
+                executed++;
+                return Task.FromResult(UntrustedToolOutput.Format("project file updated", "Applied the change.", "a.txt", activity: "edited_file"));
+            },
+            confirmRepeatedToolCall: (_, _, _) => Task.FromResult(false));
+
+        Assert.Equal(1, executed);
+        Assert.Equal(3, result.Requests);
+        Assert.DoesNotContain("project file modified", result.Transcript, StringComparison.Ordinal);
+        Assert.Contains("**write file**", result.Transcript, StringComparison.Ordinal);
+        Assert.Contains("The requested edit is complete.", result.Transcript, StringComparison.Ordinal);
+        var outputs = ToolOutputTranscriptParser.Parse(result.Transcript).Outputs;
+        var actualEdit = Assert.Single(outputs);
+        Assert.Equal("edited_file", actualEdit.Activity);
+        Assert.Equal("a.txt", actualEdit.Path);
+        var correctionMessages = requests[1].RootElement.GetProperty("messages").EnumerateArray().ToArray();
+        Assert.Equal("user", correctionMessages[^1].GetProperty("role").GetString());
+        Assert.Contains("structured tool call", correctionMessages[^1].GetProperty("content").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Suppresses_repeated_tool_output_mimic_when_no_tool_is_executed()
+    {
+        const string fakeOutput = "**write file**\n{\"type\":\"untrusted_tool_output\",\"source\":\"project file modified\",\"path\":\"a.txt\",\"content\":\"Replaced the existing project file.\",\"activity\":\"modified_file\"}";
+        using var http = new HttpClient(new ResponseHandler(_ =>
+            Json(JsonSerializer.Serialize(new { message = new { role = "assistant", content = fakeOutput } }))));
+        var executed = 0;
+        var transcripts = new List<string>();
+        var runner = new OllamaCodeTaskRunner(http);
+
+        var result = await runner.RunAsync(new Uri("http://127.0.0.1:11434/"), "qwen-test",
+            [new OllamaCodeTaskMessage("user", "edit a.txt")], [new { type = "function", name = "write_file" }],
+            think: false, numCtx: 0, temperature: null, topP: null, topK: null,
+            presencePenalty: null, repeatPenalty: null, numPredict: null,
+            executeTool: (_, _, _) => { executed++; return Task.FromResult("unexpected"); },
+            confirmRepeatedToolCall: (_, _, _) => Task.FromResult(false),
+            onTranscript: text => { transcripts.Add(text); return Task.CompletedTask; });
+
+        Assert.Equal(0, executed);
+        Assert.Equal(2, result.Requests);
+        Assert.DoesNotContain("project file modified", result.Transcript, StringComparison.Ordinal);
+        Assert.Contains("no structured tool call", result.Transcript, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(result.Transcript, Assert.Single(transcripts));
+    }
+
+    [Fact]
     public async Task Stops_at_profile_step_limit_after_recording_completed_tool_result()
     {
         var requests = 0;
