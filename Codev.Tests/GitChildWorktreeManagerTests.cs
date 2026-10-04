@@ -133,6 +133,46 @@ public sealed class GitChildWorktreeManagerTests
         finally { try { Directory.Delete(temp, recursive: true); } catch { } }
     }
 
+    [Fact]
+    public async Task Review_does_not_run_repository_fsmonitor_or_textconv_helpers()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "codev-child-worktree-tests", Guid.NewGuid().ToString("N"));
+        var repo = Path.Combine(temp, "repo");
+        var appData = Path.Combine(temp, "appdata");
+        var marker = Path.Combine(temp, "review-helper-ran.txt");
+        var helper = Path.Combine(temp, "review-helper.cjs");
+        Directory.CreateDirectory(repo);
+        try
+        {
+            await RunGitAsync(repo, "init", "-b", "main");
+            await RunGitAsync(repo, "config", "user.name", "Codev Tests");
+            await RunGitAsync(repo, "config", "user.email", "codev-tests@example.invalid");
+            var helperSource = "require('fs').writeFileSync('" + marker.Replace('\\', '/') + "', 'executed'); " +
+                "process.stdout.write(require('fs').readFileSync(process.argv[2]));";
+            await File.WriteAllTextAsync(helper, helperSource);
+            var helperPath = helper.Replace('\\', '/');
+            await RunGitAsync(repo, "config", "core.fsmonitor", $"node \"{helperPath}\"");
+            await RunGitAsync(repo, "config", "diff.codev-audit.textconv", $"node \"{helperPath}\"");
+            await File.WriteAllTextAsync(Path.Combine(repo, ".gitattributes"), "fixture.txt diff=codev-audit\n");
+            await File.WriteAllTextAsync(Path.Combine(repo, "fixture.txt"), "baseline\n");
+            await RunGitAsync(repo, "add", "--", ".gitattributes", "fixture.txt");
+            await RunGitAsync(repo, "commit", "-m", "initial");
+
+            var manager = new GitChildWorktreeManager(appData);
+            var child = await manager.CreateAsync(repo, Guid.NewGuid(), Guid.NewGuid());
+            await File.WriteAllTextAsync(Path.Combine(child.WorktreePath, "fixture.txt"), "child change\n");
+            await RunGitAsync(child.WorktreePath, "add", "--", "fixture.txt");
+            await RunGitAsync(child.WorktreePath, "commit", "-m", "child change");
+            File.Delete(marker);
+
+            var review = await manager.GetReviewAsync(repo, child.Branch, child.StartCommit);
+
+            Assert.False(File.Exists(marker));
+            Assert.Contains("child change", review.Diff, StringComparison.Ordinal);
+        }
+        finally { try { Directory.Delete(temp, recursive: true); } catch { } }
+    }
+
     private static string Normalize(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
 
     [Fact]

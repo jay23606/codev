@@ -166,7 +166,7 @@ public sealed class GitChildWorktreeManager
             throw new InvalidOperationException("The child changed too many paths to produce a complete review. Reduce the change set and try again.");
         var allFiles = filesResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var files = allFiles.Take(GitRepositoryService.MaxReviewFiles).ToArray();
-        var diffArguments = new List<string> { "diff", "--no-ext-diff", "--no-color", "--no-renames", "--unified=3", $"{startCommit}...{branch}", "--" };
+        var diffArguments = new List<string> { "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--unified=3", $"{startCommit}...{branch}", "--" };
         diffArguments.AddRange(files.Select(path => ":(literal)" + path));
         var diffResult = await RunGitAsync(repository, diffArguments, cancellationToken, GitRepositoryService.MaxReviewDiffCharacters + 1);
         EnsureSuccess(diffResult, "Git could not read the child's committed diff.");
@@ -348,6 +348,11 @@ public sealed class GitChildWorktreeManager
             }
         };
         process.StartInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        // Even commands used only to display a review can run repository-configured helpers:
+        // `git status` invokes core.fsmonitor, and `git diff` may invoke textconv drivers.
+        // Disable fsmonitor for every invocation; the review diff separately opts out of textconv.
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("core.fsmonitor=false");
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         try
         {
