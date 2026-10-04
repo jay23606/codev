@@ -18,9 +18,21 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
     public const int MaxRunningTotal = 8;
     public const int MaxOutputCharacters = 24_000;
     public const int MaxRetainedEntries = 100;
+    private static readonly TimeSpan DefaultProcessExitTimeout = TimeSpan.FromSeconds(5);
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private readonly Action<Process> _killProcessTree;
+    private readonly TimeSpan _processExitTimeout;
     private bool _disposed;
+
+    public BackgroundCommandManager() : this(static process => process.Kill(entireProcessTree: true), DefaultProcessExitTimeout) { }
+
+    internal BackgroundCommandManager(Action<Process> killProcessTree, TimeSpan processExitTimeout)
+    {
+        _killProcessTree = killProcessTree ?? throw new ArgumentNullException(nameof(killProcessTree));
+        if (processExitTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(processExitTimeout));
+        _processExitTimeout = processExitTimeout;
+    }
 
     public event EventHandler? Changed;
 
@@ -169,11 +181,29 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
         }
     }
 
-    private static async Task KillAndWaitAsync(Entry entry)
+    private async Task KillAndWaitAsync(Entry entry)
     {
-        try { if (!entry.Process.HasExited) entry.Process.Kill(entireProcessTree: true); } catch { }
-        try { await entry.WaitForExit; } catch { }
-        try { await Task.WhenAll(entry.ReadStdout, entry.ReadStderr); } catch { }
+        try
+        {
+            if (!HasExited(entry.Process))
+            {
+                try { _killProcessTree(entry.Process); }
+                catch (InvalidOperationException) when (HasExited(entry.Process)) { }
+                catch (System.ComponentModel.Win32Exception) when (HasExited(entry.Process)) { }
+            }
+            await entry.WaitForExit.WaitAsync(_processExitTimeout).ConfigureAwait(false);
+            await Task.WhenAll(entry.ReadStdout, entry.ReadStderr).WaitAsync(_processExitTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            RestoreRunningAfterFailedStop(entry);
+            throw new IOException("The background command process tree did not exit after termination was requested.", ex);
+        }
+        catch
+        {
+            RestoreRunningAfterFailedStop(entry);
+            throw;
+        }
         lock (entry.OutputGate)
         {
             if (entry.OutputTruncated && !entry.Output.ToString().EndsWith("\n[output truncated]", StringComparison.Ordinal))
@@ -183,6 +213,22 @@ public sealed class BackgroundCommandManager : IAsyncDisposable
                 entry.Output.Append(marker);
             }
         }
+    }
+
+    private static bool HasExited(Process process)
+    {
+        try { return process.HasExited; }
+        catch (ObjectDisposedException) { return true; }
+        catch (InvalidOperationException) { return true; }
+    }
+
+    private void RestoreRunningAfterFailedStop(Entry entry)
+    {
+        lock (_gate)
+        {
+            if (!_disposed && entry.Status == "Stopping" && !HasExited(entry.Process)) entry.Status = "Running";
+        }
+        RaiseChanged();
     }
 
     private static BackgroundCommandSnapshot Snapshot(Entry entry)

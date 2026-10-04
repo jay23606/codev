@@ -95,6 +95,26 @@ public sealed class BackgroundCommandManagerTests
     }
 
     [Fact]
+    public async Task Failed_process_termination_times_out_and_can_be_retried()
+    {
+        var killAttempts = 0;
+        await using var manager = new BackgroundCommandManager(process =>
+        {
+            if (Interlocked.Increment(ref killAttempts) > 1) process.Kill(entireProcessTree: true);
+        }, TimeSpan.FromSeconds(2));
+        var owner = Guid.NewGuid();
+        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+
+        var error = await Assert.ThrowsAsync<IOException>(() => manager.StopAsync(owner, started.Id));
+
+        Assert.Contains("did not exit", error.Message, StringComparison.Ordinal);
+        Assert.Equal("Running", manager.Read(owner, started.Id)!.Status);
+        Assert.True(await manager.StopAsync(owner, started.Id));
+        Assert.Equal("Exited", manager.Read(owner, started.Id)!.Status);
+    }
+
+    [Fact]
     public async Task Throwing_change_observer_cannot_interrupt_start_or_process_cleanup()
     {
         await using var manager = new BackgroundCommandManager();
