@@ -754,6 +754,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Packaged Windows queue interaction (2026-10-04, preview head `2f54399`).** On the self-contained win-x64 preview with an isolated `CODEV_DATA_ROOT`, a second local Qwen3.6 prompt was queued while the first was generating; the UI labeled it `Queued locally · waiting for the current response`, and both answers appeared in order. The cold first turn took 31.6 seconds to first token and the follow-up 495 ms. Both turns finished before the app closed, so this did not verify paused-queue persistence or explicit resume after relaunch; that manual card remains open. This is a partial queue-order smoke only, not the clean-machine whole-app run.
 
+**Live saved-queue resume and conversation isolation (2026-10-04, code head `fa14f75`).** With `CODEV_OLLAMA_LIVE_TESTS=1` and Qwen3.6, the Avalonia headless integration resumed a persisted paused turn, received the expected reply, and cleared queue state in 34 seconds. Its companion test ran a fresh conversation while the saved turn remained paused and verified the paused turn was untouched in 33 seconds. These are real local-model `MainViewModel` integrations, not native app close/relaunch evidence; the packaged Windows pause-and-resume checklist card remains open.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
