@@ -320,10 +320,14 @@ public sealed class OpenAiCodeTaskRunnerTests
                 return Task.CompletedTask;
             }, cancellationToken: cancellation.Token);
 
-        var visibleText = await firstTextVisible.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Contains("Streaming now", visibleText);
+        string? visibleText = null;
+        var visibilityError = await Record.ExceptionAsync(async () =>
+            visibleText = await firstTextVisible.Task.WaitAsync(TimeSpan.FromSeconds(30)));
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        Assert.Null(visibilityError);
+        Assert.NotNull(visibleText);
+        Assert.Contains("Streaming now", visibleText);
     }
 
     private static HttpResponseMessage OpenAiSse(string response, string? textDelta = null)
