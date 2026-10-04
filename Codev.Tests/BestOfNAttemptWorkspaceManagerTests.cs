@@ -77,7 +77,17 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
         try
         {
             Directory.CreateDirectory(Path.Combine(project, "secrets"));
+            Directory.CreateDirectory(Path.Combine(project, ".docker"));
+            Directory.CreateDirectory(Path.Combine(project, ".aws"));
             await File.WriteAllTextAsync(Path.Combine(project, ".env"), "API_KEY=must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, ".npmrc"), "//registry.npmjs.org/:_authToken=must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, ".pypirc"), "password=must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, ".netrc"), "password must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, "NuGet.Config"), "<packageSourceCredentials>must-not-be-copied</packageSourceCredentials>");
+            await File.WriteAllTextAsync(Path.Combine(project, "appsettings.Production.json"), "{\"ConnectionStrings\":{\"db\":\"must-not-be-copied\"}}");
+            await File.WriteAllTextAsync(Path.Combine(project, ".docker", "config.json"), "{\"auths\":{\"registry\":{\"auth\":\"must-not-be-copied\"}}}");
+            await File.WriteAllTextAsync(Path.Combine(project, ".aws", "credentials"), "aws_secret_access_key=must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, "prod.tfvars"), "api_token = \"must-not-be-copied\"");
             await File.WriteAllTextAsync(Path.Combine(project, "api-credential.json"), "{\"token\":\"must-not-be-copied\"}");
             await File.WriteAllTextAsync(Path.Combine(project, "id_ed25519"), "private-key-material");
             await File.WriteAllTextAsync(Path.Combine(project, "secrets", "config.json"), "{\"token\":\"nested-secret\"}");
@@ -88,13 +98,17 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             await File.WriteAllTextAsync(Path.Combine(project, ".env"), "API_KEY=rotated-after-capture");
             var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
 
-            foreach (var relativePath in new[] { ".env", "api-credential.json", "id_ed25519" })
+            foreach (var relativePath in new[] { ".env", ".npmrc", ".pypirc", ".netrc", "NuGet.Config", "appsettings.Production.json", "prod.tfvars", "api-credential.json", "id_ed25519" })
             {
                 Assert.False(File.Exists(Path.Combine(snapshot.RootPath, "baseline", relativePath)));
                 Assert.False(File.Exists(Path.Combine(workspace.WorkspacePath, relativePath)));
             }
             Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", "secrets")));
             Assert.False(File.Exists(Path.Combine(workspace.WorkspacePath, "secrets", "config.json")));
+            Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", ".docker")));
+            Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".docker")));
+            Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", ".aws")));
+            Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".aws")));
             Assert.Equal("{\"theme\":\"dark\"}", await File.ReadAllTextAsync(Path.Combine(workspace.WorkspacePath, "settings.json")));
         }
         finally
