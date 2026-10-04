@@ -818,6 +818,48 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Main_window_waits_for_background_command_shutdown_before_closing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var viewModel = new MainViewModel(root);
+        var window = new MainWindow { DataContext = viewModel };
+        var backgroundCommands = (BackgroundCommandManager)typeof(MainViewModel)
+            .GetField("_backgroundCommands", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(viewModel)!;
+        var persistGate = (SemaphoreSlim)typeof(MainViewModel)
+            .GetField("_persistGate", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(viewModel)!;
+        var owner = viewModel.ActiveConversation!.Id;
+        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var started = await backgroundCommands.StartAsync(owner, command, root, ShellCommandResolver.ResolveCurrent());
+        var closedStatus = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        window.Closed += (_, _) => closedStatus.TrySetResult(backgroundCommands.Read(owner, started.Id)?.Status);
+        var persistGateHeld = false;
+
+        try
+        {
+            window.Show();
+            persistGate.Wait();
+            persistGateHeld = true;
+            window.Close();
+
+            Assert.True(window.IsVisible, "The window should remain open while its asynchronous shutdown work is pending.");
+
+            persistGate.Release();
+            persistGateHeld = false;
+            Assert.Equal("Exited", await closedStatus.Task.WaitAsync(TimeSpan.FromSeconds(15)));
+        }
+        finally
+        {
+            if (persistGateHeld) persistGate.Release();
+            window.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Verification_approval_is_rendered_inline_and_run_once_resolves_the_request()
     {
         var window = new MainWindow();

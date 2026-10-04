@@ -25,6 +25,8 @@ public partial class MainWindow : Window
     private TaskCompletionSource<Codev.ProjectCommandApprovalChoice>? _pendingMcpApproval;
     private TaskCompletionSource<bool>? _pendingProfileToolApproval;
     private Window? _keyboardShortcutsWindow;
+    private bool _shutdownStarted;
+    private bool _closeAfterShutdown;
 
     public MainWindow()
     {
@@ -33,6 +35,7 @@ public partial class MainWindow : Window
         DragDrop.SetAllowDrop(ComposerTextBox, true);
         DragDrop.AddDragOverHandler(ComposerTextBox, Composer_DragOver);
         DragDrop.AddDropHandler(ComposerTextBox, Composer_Drop);
+        Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
             _fileMentionSearch?.Cancel();
@@ -44,14 +47,36 @@ public partial class MainWindow : Window
         ObserveMessages();
         ConfigureAgentInteractions();
         Opened += (_, _) => ScheduleScrollToLatest();
-        Closed += async (_, _) =>
+    }
+
+    private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_closeAfterShutdown) return;
+        e.Cancel = true;
+        if (_shutdownStarted) return;
+        _shutdownStarted = true;
+        _ = FinishShutdownBeforeClosingAsync();
+    }
+
+    private async Task FinishShutdownBeforeClosingAsync()
+    {
+        try
         {
             if (DataContext is ViewModels.MainViewModel viewModel)
             {
                 try { await viewModel.SavePendingDraftAsync(); }
                 finally { await viewModel.StopBackgroundCommandsAndShutdownAsync(); }
             }
-        };
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Codev shutdown cleanup failed: {ex}");
+        }
+        finally
+        {
+            _closeAfterShutdown = true;
+            Dispatcher.UIThread.Post(() => Close());
+        }
     }
 
     private void ObserveMessages()
