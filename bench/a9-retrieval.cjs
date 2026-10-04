@@ -111,13 +111,28 @@ function semanticSearch(chunks, vector, limit = TOP_K) {
 }
 
 function combineResults(left, right, limit = TOP_K) {
-  const out = [], seen = new Set()
-  for (const item of [...left, ...right]) {
-    const key = `${item.relativePath}\0${item.chunk}`
-    if (!seen.has(key)) { seen.add(key); out.push(item) }
-    if (out.length >= limit) break
+  const merged = new Map()
+  const pathKey = value => process.platform === 'win32' ? value.toLowerCase() : value
+  for (const [source, items] of [['literal', left], ['semantic', right]]) {
+    for (const [index, item] of items.entries()) {
+      const key = `${pathKey(item.relativePath)}\0${item.chunk}`
+      const current = merged.get(key) || { ...item, fusedScore: 0, literalRank: Infinity, semanticRank: Infinity }
+      const rank = index + 1
+      current.fusedScore += 1 / (60 + rank)
+      current[`${source}Rank`] = rank
+      // Keep the semantic chunk for duplicate hits; the literal line remains represented by its rank.
+      if (source === 'semantic') {
+        current.content = item.content
+        current.score = item.score
+      }
+      merged.set(key, current)
+    }
   }
-  return out
+  return [...merged.values()]
+    .sort((a, b) => b.fusedScore - a.fusedScore || a.semanticRank - b.semanticRank ||
+      a.literalRank - b.literalRank || ordinalIgnoreCaseCompare(a.relativePath, b.relativePath) || a.chunk - b.chunk)
+    .slice(0, limit)
+    .map(({ fusedScore, literalRank, semanticRank, ...item }) => item)
 }
 
 function safeName(name) {
@@ -462,6 +477,12 @@ async function selftest() {
   const combined = combineResults(literal, semanticSearch(rows, [0.9, 0.1]))
   assert.equal(combined.length, 2)
   assert.equal(combined.filter(item => item.relativePath === 'WorkspaceFileService.cs').length, 1)
+  const semanticTarget = { relativePath: 'Target.cs', chunk: 0, content: 'conceptual match', score: 0.9 }
+  const literalNoise = Array.from({ length: TOP_K }, (_, index) => ({
+    relativePath: `Noise${index}.cs`, chunk: 0, content: 'literal match', line: index + 1
+  }))
+  assert(combineResults(literalNoise, [semanticTarget, ...rows.slice(1)]).some(item => item.relativePath === 'Target.cs'),
+    'A full literal result list must not crowd a top-ranked semantic match out of the fused top-k.')
   assert.equal(cosine([1, 0], [0, 1]), 0)
   assert(safeName('WorkspaceFileService.cs'))
   assert(!safeName('.env.local'))
