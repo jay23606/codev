@@ -15,6 +15,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Channels;
 
 namespace Codev.Tests;
 
@@ -334,6 +335,52 @@ public sealed class McpCodeTaskToolTests
             await serverToClient.Writer.CompleteAsync();
             await serverToClient.Reader.CompleteAsync();
             try { Directory.Delete(workspace, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Session_disposal_surfaces_transport_cleanup_failures()
+    {
+        var clientToServer = new Pipe();
+        var serverToClient = new Pipe();
+        await using var server = McpServer.Create(
+            new StreamServerTransport(clientToServer.Reader.AsStream(), serverToClient.Writer.AsStream()), new McpServerOptions());
+        var serverRun = server.RunAsync();
+        var inner = new StreamClientTransport(clientToServer.Writer.AsStream(), serverToClient.Reader.AsStream());
+        var transport = new ThrowOnDisposeClientTransport(inner);
+        var session = await McpCodeTaskSession.ConnectWithTransportFactoryAsync(
+            [new McpServerConfiguration("throw-on-dispose", "Throw on dispose", McpServerTransportKind.Stdio, Enabled: true, Command: "unused")],
+            _ => transport);
+
+        var error = await Record.ExceptionAsync(() => session.DisposeAsync().AsTask());
+
+        Assert.NotNull(error);
+        Assert.Contains("failed to shut down cleanly", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("injected transport cleanup failure", error.ToString(), StringComparison.Ordinal);
+        await server.DisposeAsync();
+        await serverRun.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private sealed class ThrowOnDisposeClientTransport(StreamClientTransport inner) : IClientTransport
+    {
+        public string Name => "throw-on-dispose-test";
+
+        public async Task<ITransport> ConnectAsync(CancellationToken cancellationToken = default) =>
+            new ThrowOnDisposeTransport(await inner.ConnectAsync(cancellationToken));
+    }
+
+    private sealed class ThrowOnDisposeTransport(ITransport inner) : ITransport, IAsyncDisposable
+    {
+        public string SessionId => inner.SessionId ?? string.Empty;
+        public ChannelReader<JsonRpcMessage> MessageReader => inner.MessageReader;
+        public Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default) =>
+            inner.SendMessageAsync(message, cancellationToken);
+
+        public async ValueTask DisposeAsync()
+        {
+            if (inner is IAsyncDisposable asyncDisposable) await asyncDisposable.DisposeAsync();
+            else if (inner is IDisposable disposable) disposable.Dispose();
+            throw new IOException("injected transport cleanup failure");
         }
     }
 

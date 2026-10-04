@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Authentication;
 using ModelContextProtocol.Client;
@@ -418,28 +419,43 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        var disposal = Task.WhenAll(_clients.Select(DisposeClientAsync)
-            .Concat(_transports.Select(DisposeTransportAsync))
-            .Concat(_oauthListeners.Select(listener => listener.DisposeAsync().AsTask())));
-        try { await disposal.WaitAsync(TotalShutdownTimeout).ConfigureAwait(false); }
-        catch (TimeoutException) { _ = ObserveDisposalAsync(disposal); }
-        _clients.Clear();
-        _transports.Clear();
-        _oauthListeners.Clear();
-        _tools.Clear();
-        _prompts.Clear();
-        _resources.Clear();
-        _resourceTemplates.Clear();
+        var failures = new ConcurrentQueue<Exception>();
+        var disposal = Task.WhenAll(_clients.Select(client => CaptureCleanupFailureAsync(() => DisposeClientAsync(client), failures))
+            .Concat(_transports.Select(transport => CaptureCleanupFailureAsync(() => DisposeTransportAsync(transport), failures)))
+            .Concat(_oauthListeners.Select(listener => CaptureCleanupFailureAsync(() => listener.DisposeAsync().AsTask(), failures))));
+        try
+        {
+            await disposal.WaitAsync(TotalShutdownTimeout).ConfigureAwait(false);
+            if (!failures.IsEmpty)
+                throw new IOException("One or more MCP connections failed to shut down cleanly.", new AggregateException(failures));
+        }
+        catch (TimeoutException ex)
+        {
+            _ = ObserveDisposalAsync(disposal);
+            throw new IOException("MCP connection shutdown exceeded its time limit; cleanup may still be running.", ex);
+        }
+        finally
+        {
+            _clients.Clear();
+            _transports.Clear();
+            _oauthListeners.Clear();
+            _tools.Clear();
+            _prompts.Clear();
+            _resources.Clear();
+            _resourceTemplates.Clear();
+        }
     }
 
     private static async Task DisposeClientBoundedAsync(McpClient client)
     {
-        var disposal = DisposeClientAsync(client);
+        var disposal = DisposeClientBestEffortAsync(client);
         try { await disposal.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false); }
         catch (TimeoutException) { _ = ObserveDisposalAsync(disposal); }
     }
 
-    private static async Task DisposeClientAsync(McpClient client)
+    private static async Task DisposeClientAsync(McpClient client) => await client.DisposeAsync().ConfigureAwait(false);
+
+    private static async Task DisposeClientBestEffortAsync(McpClient client)
     {
         try { await client.DisposeAsync().ConfigureAwait(false); }
         catch { /* A broken server transport must not prevent other MCP clients from closing. */ }
@@ -447,14 +463,16 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
 
     private static async Task DisposeTransportAsync(IClientTransport transport)
     {
-        try
-        {
-            if (transport is IAsyncDisposable asyncDisposable)
-                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-            else if (transport is IDisposable disposable)
-                disposable.Dispose();
-        }
-        catch { /* Failed transports must not prevent other MCP clients from closing. */ }
+        if (transport is IAsyncDisposable asyncDisposable)
+            await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+        else if (transport is IDisposable disposable)
+            disposable.Dispose();
+    }
+
+    private static async Task CaptureCleanupFailureAsync(Func<Task> cleanup, ConcurrentQueue<Exception> failures)
+    {
+        try { await cleanup().ConfigureAwait(false); }
+        catch (Exception ex) { failures.Enqueue(ex); }
     }
 
     private static async Task ObserveDisposalAsync(Task disposal)
