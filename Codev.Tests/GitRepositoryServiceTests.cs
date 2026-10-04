@@ -6,6 +6,51 @@ namespace Codev.Tests;
 public sealed class GitRepositoryServiceTests
 {
     [Fact]
+    public async Task Status_and_review_diffs_do_not_run_repository_fsmonitor_or_textconv_helpers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-git-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var marker = Path.Combine(root, "review-helper-ran.txt");
+        var helper = Path.Combine(root, "review-helper.cjs");
+        try
+        {
+            await RunGitAsync(root, "init", "-b", "main");
+            await RunGitAsync(root, "config", "user.name", "Codev Tests");
+            await RunGitAsync(root, "config", "user.email", "codev-tests@example.invalid");
+            var helperSource = "require('fs').writeFileSync('" + marker.Replace('\\', '/') + "', 'executed'); " +
+                "process.stdout.write(require('fs').readFileSync(process.argv[2]));";
+            await File.WriteAllTextAsync(helper, helperSource);
+            var helperPath = helper.Replace('\\', '/');
+            await RunGitAsync(root, "config", "core.fsmonitor", $"node \"{helperPath}\"");
+            await RunGitAsync(root, "config", "diff.codev-audit.textconv", $"node \"{helperPath}\"");
+            await File.WriteAllTextAsync(Path.Combine(root, ".gitattributes"), "fixture.txt diff=codev-audit\n");
+            var fixture = Path.Combine(root, "fixture.txt");
+            await File.WriteAllTextAsync(fixture, "baseline\n");
+            await RunGitAsync(root, "add", "--", ".gitattributes", "fixture.txt");
+            await RunGitAsync(root, "commit", "-m", "initial");
+            await RunGitAsync(root, "branch", "review-base");
+            await File.WriteAllTextAsync(fixture, "working change\n");
+            var service = new GitRepositoryService(root);
+
+            var status = await service.GetStatusAsync();
+            var file = Assert.Single(status.Files);
+            var workingDiff = await service.GetFileDiffAsync(file);
+            var workingReview = await service.GetWorkingTreeReviewAsync();
+            Assert.Contains("working change", workingDiff, StringComparison.Ordinal);
+            Assert.Contains("working change", workingReview.Diff, StringComparison.Ordinal);
+            Assert.False(File.Exists(marker));
+
+            await service.StageFileAsync("fixture.txt");
+            Assert.Contains("working change", await service.GetStagedDiffAsync(), StringComparison.Ordinal);
+            await RunGitAsync(root, "commit", "-m", "review change");
+            Assert.Contains("working change", (await service.GetCommitReviewAsync((await RunGitAsync(root, "rev-parse", "HEAD")).Trim())).Diff, StringComparison.Ordinal);
+            Assert.Contains("working change", (await service.GetBranchReviewAsync("review-base")).Diff, StringComparison.Ordinal);
+            Assert.False(File.Exists(marker));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task Stage_all_stages_tracked_and_untracked_changes_but_unstage_all_preserves_working_files()
     {
         var root = Path.Combine(Path.GetTempPath(), "codev-git-tests", Guid.NewGuid().ToString("N"));

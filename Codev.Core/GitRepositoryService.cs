@@ -128,20 +128,20 @@ public sealed class GitRepositoryService
         if (current.Staged != " ")
         {
             output.AppendLine("STAGED CHANGES");
-            output.AppendLine(await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color", "--", LiteralPathspec(current.Path)], cancellationToken, maxCharacters));
+            output.AppendLine(await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--", LiteralPathspec(current.Path)], cancellationToken, maxCharacters));
         }
         if (current.WorkingTree == "?")
         {
             output.AppendLine("UNTRACKED FILE");
             var boundedOutput = maxCharacters == int.MaxValue ? int.MaxValue : maxCharacters + 1;
-            var diff = await RunGitAsync(["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", current.Path], cancellationToken, boundedOutput);
+            var diff = await RunGitAsync(["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", "/dev/null", current.Path], cancellationToken, boundedOutput);
             if (diff.ExitCode is not 0 and not 1) EnsureSuccess(diff, "Git could not read this untracked file.");
             output.AppendLine(diff.Output);
         }
         else if (current.WorkingTree != " ")
         {
             output.AppendLine("UNSTAGED CHANGES");
-            output.AppendLine(await ReadDiffAsync(["diff", "--no-ext-diff", "--no-color", "--", LiteralPathspec(current.Path)], cancellationToken, maxCharacters));
+            output.AppendLine(await ReadDiffAsync(["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--", LiteralPathspec(current.Path)], cancellationToken, maxCharacters));
         }
         var value = output.ToString().TrimEnd();
         return value.Length > maxCharacters ? value[..maxCharacters] + "\n[diff excerpt truncated]" : value;
@@ -191,7 +191,7 @@ public sealed class GitRepositoryService
         EnsureSuccess(filesResult, "Git could not list the files changed by this commit.");
         var allFiles = filesResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var files = allFiles.Take(maxFiles).ToArray();
-        var diffArguments = new List<string> { "show", "--format=", "--no-ext-diff", "--no-color", "--no-renames", "--unified=3", hash, "--" };
+        var diffArguments = new List<string> { "show", "--format=", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--unified=3", hash, "--" };
         diffArguments.AddRange(files.Select(path => ":(literal)" + path));
         var diffResult = await RunGitAsync(diffArguments, cancellationToken, maxCharacters + 1);
         EnsureSuccess(diffResult, "Git could not read this commit's diff.");
@@ -226,7 +226,7 @@ public sealed class GitRepositoryService
         EnsureSuccess(filesResult, "Git could not list changes from this branch.");
         var allFiles = filesResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var files = allFiles.Take(maxFiles).ToArray();
-        var diffArguments = new List<string> { "diff", "--no-ext-diff", "--no-color", "--no-renames", "--unified=3", range, "--" };
+        var diffArguments = new List<string> { "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--unified=3", range, "--" };
         diffArguments.AddRange(files.Select(path => ":(literal)" + path));
         var diffResult = await RunGitAsync(diffArguments, cancellationToken, maxCharacters + 1);
         EnsureSuccess(diffResult, "Git could not read changes from this branch.");
@@ -243,7 +243,7 @@ public sealed class GitRepositoryService
     }
 
     public async Task<string> GetStagedDiffAsync(CancellationToken cancellationToken = default) =>
-        await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color"], cancellationToken);
+        await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color"], cancellationToken);
 
     public async Task<GitStagedReview> GetStagedReviewAsync(CancellationToken cancellationToken = default)
     {
@@ -476,6 +476,8 @@ public sealed class GitRepositoryService
             }
         };
         process.StartInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("core.fsmonitor=false");
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         try
         {
