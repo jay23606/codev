@@ -181,8 +181,8 @@ public static class AgentProfileCatalog
                 var scope = relativePath.StartsWith(Path.Combine(".opencode", "agents"), StringComparison.Ordinal)
                     ? "project-opencode" : "project";
                 var loaded = scope == "project"
-                    ? await LoadScopeAsync(path, scope, warnings, cancellationToken, remaining).ConfigureAwait(false)
-                    : await LoadOpenCodeScopeAsync(path, scope, warnings, cancellationToken, remaining).ConfigureAwait(false);
+                    ? await LoadScopeAsync(path, scope, warnings, cancellationToken, remaining, projectRoot, relativePath).ConfigureAwait(false)
+                    : await LoadOpenCodeScopeAsync(path, scope, warnings, cancellationToken, remaining, projectRoot, relativePath).ConfigureAwait(false);
                 project.AddRange(loaded);
             }
         }
@@ -349,7 +349,8 @@ public static class AgentProfileCatalog
     }
 
     private static async Task<List<AgentProfile>> LoadScopeAsync(string directory, string scope, List<string> warnings,
-        CancellationToken cancellationToken, int maxProfiles = MaxProfilesPerScope)
+        CancellationToken cancellationToken, int maxProfiles = MaxProfilesPerScope,
+        string? trustedProjectRoot = null, string? relativeDirectory = null)
     {
         var result = new List<AgentProfile>();
         try
@@ -364,9 +365,9 @@ public static class AgentProfileCatalog
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    if (IsReparsePoint(path)) { warnings.Add($"Agent profile '{Path.GetFileName(path)}' is a symbolic link and was skipped."); continue; }
-                    if (new FileInfo(path).Length > MaxProfileFileBytes) { warnings.Add($"Agent profile '{Path.GetFileName(path)}' exceeds the size limit and was skipped."); continue; }
-                    var text = StrictUtf8.GetString(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+                    if (trustedProjectRoot is null && IsReparsePoint(path)) { warnings.Add($"Agent profile '{Path.GetFileName(path)}' is a symbolic link and was skipped."); continue; }
+                    var text = await ReadProfileTextAsync(path, cancellationToken, trustedProjectRoot,
+                        trustedProjectRoot is null ? null : Path.Combine(relativeDirectory!, Path.GetFileName(path))).ConfigureAwait(false);
                     if (TryParse(Path.GetFileName(path), text, scope, out var profile, out var error) && profile is not null)
                         result.Add(profile with { FilePath = path });
                     else warnings.Add($"Agent profile '{Path.GetFileName(path)}' was skipped: {error}");
@@ -382,7 +383,7 @@ public static class AgentProfileCatalog
     }
 
     private static async Task<List<AgentProfile>> LoadOpenCodeScopeAsync(string directory, string scope, List<string> warnings,
-        CancellationToken cancellationToken, int maxProfiles)
+        CancellationToken cancellationToken, int maxProfiles, string? trustedProjectRoot = null, string? relativeDirectory = null)
     {
         var result = new List<AgentProfile>();
         try
@@ -402,9 +403,9 @@ public static class AgentProfileCatalog
                 var fileName = Path.GetFileName(path);
                 try
                 {
-                    if (IsReparsePoint(path)) { warnings.Add($"OpenCode agent '{fileName}' is a symbolic link and was skipped."); continue; }
-                    if (new FileInfo(path).Length > MaxProfileFileBytes) { warnings.Add($"OpenCode agent '{fileName}' exceeds the size limit and was skipped."); continue; }
-                    var text = StrictUtf8.GetString(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+                    if (trustedProjectRoot is null && IsReparsePoint(path)) { warnings.Add($"OpenCode agent '{fileName}' is a symbolic link and was skipped."); continue; }
+                    var text = await ReadProfileTextAsync(path, cancellationToken, trustedProjectRoot,
+                        trustedProjectRoot is null ? null : Path.Combine(relativeDirectory!, fileName)).ConfigureAwait(false);
                     if (TryParseOpenCodeAgent(fileName, text, scope, out var profile, out var modelWarning, out var error) && profile is not null)
                     {
                         result.Add(profile with { FilePath = path });
@@ -420,6 +421,27 @@ public static class AgentProfileCatalog
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         { warnings.Add($"The {scope} agent profile directory could not be read."); }
         return result;
+    }
+
+    private static async Task<string> ReadProfileTextAsync(string path, CancellationToken cancellationToken,
+        string? trustedProjectRoot, string? relativePath)
+    {
+        await using var stream = trustedProjectRoot is not null && relativePath is not null
+            ? FileHardLinkInspector.OpenSingleLinkReadStream(path, relativePath, trustedProjectRoot)
+            : new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (stream.Length > MaxProfileFileBytes)
+            throw new IOException($"Agent profile '{Path.GetFileName(path)}' exceeds the size limit.");
+        var bytes = new byte[MaxProfileFileBytes + 1];
+        var length = 0;
+        while (length < bytes.Length)
+        {
+            var read = await stream.ReadAsync(bytes.AsMemory(length), cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+            length += read;
+        }
+        if (length > MaxProfileFileBytes)
+            throw new IOException($"Agent profile '{Path.GetFileName(path)}' exceeds the size limit.");
+        return StrictUtf8.GetString(bytes, 0, length);
     }
 
     private static bool TryParseOpenCodeAgent(string fileName, string contents, string scope,

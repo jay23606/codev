@@ -1,4 +1,5 @@
 using Codev;
+using System.Runtime.InteropServices;
 
 namespace Codev.Tests;
 
@@ -121,6 +122,23 @@ public sealed class AgentProfileCatalogTests : IDisposable
         Assert.Contains(userOnly.Profiles, profile => profile.Name == "Code" && profile.Scope == "built-in");
         Assert.Equal(new[] { "Code", "Ask", "Debug", "Orchestrator", "Plan" }, both.Profiles.Select(profile => profile.Name));
         Assert.Equal("project", both.Profiles[0].Scope);
+    }
+
+    [Fact]
+    public async Task Project_profile_is_not_loaded_when_hard_linked_to_a_file_outside_the_project()
+    {
+        if (!FileHardLinkInspector.IsSupportedPlatform) return;
+        var profileDirectory = Path.Combine(_project, ".codev", "agents");
+        var external = Path.Combine(_root, "outside-profile.md");
+        Directory.CreateDirectory(profileDirectory);
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(external, Profile("Outside"));
+        if (!TryCreateHardLink(external, Path.Combine(profileDirectory, "outside.md"))) return;
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "Outside");
+        Assert.Contains(loaded.Warnings, warning => warning.Contains("could not be read", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -346,6 +364,22 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     private static string Profile(string name) => $"---\nname: {name}\ndescription: Do a coding task.\n---\nFollow the user's instructions.";
+
+    private static bool TryCreateHardLink(string existingPath, string newPath)
+    {
+        if (OperatingSystem.IsWindows()) return CreateHardLinkWindows(newPath, existingPath, IntPtr.Zero);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return CreateHardLinkUnix(existingPath, newPath) == 0;
+        return false;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 
     public void Dispose()
     {

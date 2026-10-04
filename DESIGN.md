@@ -703,6 +703,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **A9 Unix index privacy follow-up (2026-10-04, pending CI).** Adversarial review found that the binary index contains project source excerpts but inherited the process umask, which commonly creates group/world-readable files and traversable directories on Linux/macOS. Atomic binary storage now creates/restricts its leaf directory to `0700` and the staged index file to `0600`, including existing index directories; a portable regression checks those modes after an index update. Local .NET 10 testing is unavailable on this host (SDK 9.0.305 only), so cross-platform CI must verify this change before merge.
 
+**Project-agent profile read-boundary follow-up (2026-10-04, pending CI).** The same adversarial review found that project agent files were checked for links and then read by path, leaving a check/use race and allowing a hard link to expose a file outside the project. Project-scoped Codev and OpenCode profile loads now use `FileHardLinkInspector` to open the file relative to the verified project root, reject links/hard links on the opened handle, and read bounded UTF-8 bytes from that handle. A regression verifies a project profile hard-linked to an outside file is skipped. Local .NET 10 testing is unavailable on this host (SDK 9.0.305 only); cross-platform CI must verify the change.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
