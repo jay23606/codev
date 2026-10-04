@@ -68,6 +68,40 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
     }
 
     [Fact]
+    public async Task Delete_removes_snapshot_containing_read_only_files_on_windows()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-readonly-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        var sourceFile = Path.Combine(project, "readonly.txt");
+        Directory.CreateDirectory(project);
+        BestOfNAttemptSnapshot? snapshot = null;
+        try
+        {
+            await File.WriteAllTextAsync(sourceFile, "preserve this attribute in the snapshot");
+            File.SetAttributes(sourceFile, File.GetAttributes(sourceFile) | FileAttributes.ReadOnly);
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+            snapshot = await manager.CaptureAsync(project);
+            var capturedFile = Path.Combine(snapshot.RootPath, "baseline", "readonly.txt");
+            Assert.True((File.GetAttributes(capturedFile) & FileAttributes.ReadOnly) != 0);
+
+            manager.Delete(snapshot);
+
+            Assert.False(Directory.Exists(snapshot.RootPath));
+        }
+        finally
+        {
+            if (File.Exists(sourceFile)) File.SetAttributes(sourceFile, FileAttributes.Normal);
+            if (snapshot is not null && Directory.Exists(snapshot.RootPath))
+            {
+                foreach (var file in Directory.EnumerateFiles(snapshot.RootPath, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+            }
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task Baseline_mutation_is_detected_before_any_attempt_is_created()
     {
         var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-tests", Guid.NewGuid().ToString("N"));

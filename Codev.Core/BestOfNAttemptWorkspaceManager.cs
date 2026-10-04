@@ -555,7 +555,32 @@ public sealed class BestOfNAttemptWorkspaceManager
         if (Path.IsPathRooted(relative) || relative is "." or ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, PathComparison) ||
             (File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("Refusing to delete a directory outside the managed attempt-workspaces root.");
+        ClearReadOnlyFileAttributes(full);
         Directory.Delete(full, recursive: true);
+    }
+
+    private static void ClearReadOnlyFileAttributes(string root)
+    {
+        // Captured baselines preserve source attributes. On Windows, a read-only file cannot be
+        // removed even when its parent is writable, so clear that bit inside our owned tree before
+        // recursive cleanup. Never descend through a link or alter a reparse point.
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(pending.Pop()))
+            {
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    pending.Push(entry);
+                    continue;
+                }
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                    File.SetAttributes(entry, attributes & ~FileAttributes.ReadOnly);
+            }
+        }
     }
 
     private static void EnsureOrdinaryDirectory(string path, string message)
