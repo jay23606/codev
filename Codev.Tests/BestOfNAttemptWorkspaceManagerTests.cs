@@ -68,6 +68,43 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
     }
 
     [Fact]
+    public async Task Snapshot_and_attempt_workspaces_exclude_files_that_Codev_classifies_as_sensitive()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-sensitive-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        BestOfNAttemptSnapshot? snapshot = null;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, "secrets"));
+            await File.WriteAllTextAsync(Path.Combine(project, ".env"), "API_KEY=must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, "api-credential.json"), "{\"token\":\"must-not-be-copied\"}");
+            await File.WriteAllTextAsync(Path.Combine(project, "id_ed25519"), "private-key-material");
+            await File.WriteAllTextAsync(Path.Combine(project, "secrets", "config.json"), "{\"token\":\"nested-secret\"}");
+            await File.WriteAllTextAsync(Path.Combine(project, "settings.json"), "{\"theme\":\"dark\"}");
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+
+            snapshot = await manager.CaptureAsync(project);
+            await File.WriteAllTextAsync(Path.Combine(project, ".env"), "API_KEY=rotated-after-capture");
+            var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+
+            foreach (var relativePath in new[] { ".env", "api-credential.json", "id_ed25519" })
+            {
+                Assert.False(File.Exists(Path.Combine(snapshot.RootPath, "baseline", relativePath)));
+                Assert.False(File.Exists(Path.Combine(workspace.WorkspacePath, relativePath)));
+            }
+            Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", "secrets")));
+            Assert.False(File.Exists(Path.Combine(workspace.WorkspacePath, "secrets", "config.json")));
+            Assert.Equal("{\"theme\":\"dark\"}", await File.ReadAllTextAsync(Path.Combine(workspace.WorkspacePath, "settings.json")));
+        }
+        finally
+        {
+            if (snapshot is not null) new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata")).Delete(snapshot);
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task Delete_removes_snapshot_containing_read_only_files_on_windows()
     {
         if (!OperatingSystem.IsWindows()) return;

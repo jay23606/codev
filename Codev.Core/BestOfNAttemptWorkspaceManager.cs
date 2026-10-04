@@ -240,6 +240,9 @@ public sealed class BestOfNAttemptWorkspaceManager
                     throw new InvalidOperationException($"Cannot capture a project containing a symbolic link or reparse point: {Path.GetRelativePath(source, entry)}");
                 // Git metadata belongs to the original repository and is replaced by private attempt metadata.
                 if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase)) continue;
+                // Keep paths that Codev itself treats as sensitive out of both the private
+                // snapshot and every model-visible attempt workspace.
+                if (WorkspaceFileService.IsSensitiveFileName(name)) continue;
                 var target = Path.GetFullPath(Path.Combine(current.Destination, name));
                 EnsureWithinRoot(destination, target);
                 if ((attributes & FileAttributes.Directory) != 0)
@@ -480,6 +483,7 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                     throw new InvalidOperationException("Snapshot contains a symbolic link or reparse point.");
                 var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                if (WorkspaceFileService.IsSensitiveFileName(name)) continue;
                 entries.Add((entry, isDirectory));
                 if (isDirectory) pending.Push(entry);
             }
