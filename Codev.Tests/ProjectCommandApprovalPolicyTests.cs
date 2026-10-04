@@ -211,6 +211,27 @@ public sealed class ProjectCommandApprovalPolicyTests : IDisposable
         Assert.Equal(0, callsToApprovalUi);
     }
 
+    [Fact]
+    public async Task Profile_one_call_approval_cannot_bypass_an_unavailable_permission_registry()
+    {
+        var registryPath = Path.Combine(_root, "corrupt-permissions.json");
+        await File.WriteAllTextAsync(registryPath, "null");
+        var unavailable = ProjectCommandPermissionRegistry.Load(registryPath);
+        var callsToApprovalUi = 0;
+
+        var result = await new ProjectCommandApprovalPolicy(unavailable).ApproveAsync(
+            new CodeTaskCommandProposal("cargo check", _project, "PowerShell", ProfileApprovalSatisfied: true),
+            requestApproval: _ =>
+            {
+                callsToApprovalUi++;
+                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+            },
+            modeWhenUnconfigured: ProjectCommandPermissionMode.Auto);
+
+        Assert.Equal(CommandApprovalOutcome.Rejected, result.Outcome);
+        Assert.Equal(1, callsToApprovalUi);
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_root, recursive: true); } catch { }

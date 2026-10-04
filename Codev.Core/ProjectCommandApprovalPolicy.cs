@@ -23,7 +23,7 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
             allowReadOnly: false, contextExclusions: contextExclusions,
             isVerification: proposal.IsVerification, modeWhenUnconfigured: modeWhenUnconfigured);
 
-        var readOnlyInspection = !proposal.IsVerification && !proposal.IsBackground &&
+        var readOnlyInspection = permissions.CanPersist && !proposal.IsVerification && !proposal.IsBackground &&
             (mode is ProjectCommandPermissionMode.Auto or ProjectCommandPermissionMode.ReadOnly) &&
             ReadOnlyCommandClassifier.IsReadOnly(proposal.Command, proposal.ProjectPath, proposal.ShellName, contextExclusions);
         if (decision == ProjectCommandPermissionDecision.Ask && readOnlyInspection)
@@ -35,7 +35,7 @@ public sealed class ProjectCommandApprovalPolicy(ProjectCommandPermissionRegistr
         if (proposal.IsBackground && mode == ProjectCommandPermissionMode.ReadOnly)
             return Result(CommandApprovalOutcome.Rejected, "Read-only command mode does not allow long-running shell processes.");
 
-        if (proposal.ProfileApprovalSatisfied && decision == ProjectCommandPermissionDecision.Ask)
+        if (permissions.CanPersist && proposal.ProfileApprovalSatisfied && decision == ProjectCommandPermissionDecision.Ask)
             return Result(CommandApprovalOutcome.Approved,
                 "The selected agent profile approved this command once; the project permission mode was left unchanged.");
 

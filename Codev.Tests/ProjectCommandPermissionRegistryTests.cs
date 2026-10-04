@@ -202,6 +202,21 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     }
 
     [Fact]
+    public async Task Null_permission_root_fails_closed_instead_of_becoming_an_empty_registry()
+    {
+        const string contents = "null";
+        await File.WriteAllTextAsync(_path, contents);
+
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+
+        Assert.False(registry.CanPersist);
+        Assert.NotNull(registry.LoadError);
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            registry.Evaluate(_project, "npm install", modeWhenUnconfigured: ProjectCommandPermissionMode.Auto));
+        Assert.Equal(contents, await File.ReadAllTextAsync(_path));
+    }
+
+    [Fact]
     public async Task Invalid_rule_in_auto_permissions_fails_closed_and_preserves_the_file()
     {
         var contents = JsonSerializer.Serialize(new[]

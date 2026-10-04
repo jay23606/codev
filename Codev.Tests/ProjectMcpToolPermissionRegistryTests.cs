@@ -52,6 +52,48 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
     }
 
     [Fact]
+    public void Malformed_rule_fails_closed_in_auto_and_preserves_the_registry_file()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new[]
+        {
+            new ProjectMcpToolPermissions(_project,
+            [
+                new ProjectMcpToolPermissionRule("github", "search", ProjectCommandPermissionDecision.Deny),
+                null!
+            ])
+        });
+        File.WriteAllText(_path, json);
+
+        var loaded = ProjectMcpToolPermissionRegistry.Load(_path);
+
+        Assert.False(loaded.CanPersist);
+        Assert.NotNull(loaded.LoadError);
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            loaded.Evaluate(_project, ProjectCommandPermissionMode.Auto, "github", "search"));
+        Assert.Equal(json, File.ReadAllText(_path));
+    }
+
+    [Fact]
+    public void Duplicate_normalized_project_entries_fail_closed_and_preserve_the_registry_file()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new[]
+        {
+            new ProjectMcpToolPermissions(_project,
+                [new ProjectMcpToolPermissionRule("github", "search", ProjectCommandPermissionDecision.Deny)]),
+            new ProjectMcpToolPermissions(Path.Combine(_project, "."), [])
+        });
+        File.WriteAllText(_path, json);
+
+        var loaded = ProjectMcpToolPermissionRegistry.Load(_path);
+
+        Assert.False(loaded.CanPersist);
+        Assert.NotNull(loaded.LoadError);
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            loaded.Evaluate(_project, ProjectCommandPermissionMode.Auto, "github", "search"));
+        Assert.Equal(json, File.ReadAllText(_path));
+    }
+
+    [Fact]
     public async Task Invalid_tool_identity_is_rejected()
     {
         var registry = ProjectMcpToolPermissionRegistry.Load(_path);

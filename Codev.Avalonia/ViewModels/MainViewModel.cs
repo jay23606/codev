@@ -1092,7 +1092,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName);
         if (decision == Codev.ProjectCommandPermissionDecision.Deny) return Codev.CommandApprovalOutcome.Denied;
         if (decision == Codev.ProjectCommandPermissionDecision.Allow) return Codev.CommandApprovalOutcome.Approved;
-        if (profileApprovalSatisfied) return Codev.CommandApprovalOutcome.Approved;
+        if (_projectMcpPermissions.CanPersist && profileApprovalSatisfied) return Codev.CommandApprovalOutcome.Approved;
 
         var choice = await (ApproveMcpToolAsync?.Invoke(tool, arguments) ?? Task.FromResult(Codev.ProjectCommandApprovalChoice.Cancel));
         try

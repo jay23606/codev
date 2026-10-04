@@ -45,19 +45,25 @@ public sealed class ProjectMcpToolPermissionRegistry
                 if (item is null || string.IsNullOrWhiteSpace(item.ProjectPath) || item.Rules is null || item.Rules.Count > MaxRulesPerProject)
                     throw new InvalidDataException("The MCP permission file contains an invalid project entry.");
                 var projectPath = NormalizePath(item.ProjectPath);
+                if (registry._projects.ContainsKey(projectPath))
+                    throw new InvalidDataException("The MCP permission file contains duplicate project entries.");
                 var rules = new List<ProjectMcpToolPermissionRule>();
                 foreach (var rule in item.Rules)
                 {
-                    if (rule is null || rule.Decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny)) continue;
+                    if (rule is null || rule.Decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny))
+                        throw new InvalidDataException("The MCP permission file contains an invalid tool rule.");
                     try
                     {
                         var normalized = NormalizeRule(rule.ServerId, rule.ToolName, rule.Decision);
                         rules.RemoveAll(existing => SameTool(existing, normalized) && existing.Decision == normalized.Decision);
-                        if (rules.Count < MaxRulesPerProject) rules.Add(normalized);
+                        rules.Add(normalized);
                     }
-                    catch (ArgumentException) { }
+                    catch (ArgumentException ex)
+                    {
+                        throw new InvalidDataException("The MCP permission file contains an invalid tool rule.", ex);
+                    }
                 }
-                registry._projects[projectPath] = new ProjectMcpToolPermissions(projectPath, rules);
+                registry._projects.TryAdd(projectPath, new ProjectMcpToolPermissions(projectPath, rules));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or ArgumentException or NotSupportedException)
@@ -72,6 +78,7 @@ public sealed class ProjectMcpToolPermissionRegistry
 
     public ProjectCommandPermissionDecision Evaluate(string projectPath, ProjectCommandPermissionMode mode, string serverId, string toolName)
     {
+        if (!CanPersist) return ProjectCommandPermissionDecision.Ask;
         var permission = GetProject(projectPath);
         var lookup = NormalizeRule(serverId, toolName, ProjectCommandPermissionDecision.Allow);
         var rules = permission?.Rules ?? [];

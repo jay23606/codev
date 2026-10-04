@@ -72,7 +72,8 @@ public sealed class ProjectCommandPermissionRegistry
         try
         {
             if (new FileInfo(path).Length > MaxFileBytes) throw new InvalidDataException("The permission file exceeds the size limit.");
-            var projects = JsonSerializer.Deserialize<List<ProjectCommandPermissions>>(File.ReadAllText(path), JsonOptions) ?? [];
+            var projects = JsonSerializer.Deserialize<List<ProjectCommandPermissions>>(File.ReadAllText(path), JsonOptions)
+                ?? throw new InvalidDataException("The permission file has no project list.");
             if (projects.Count > MaxProjects) throw new InvalidDataException("The permission file contains too many projects.");
             foreach (var project in projects)
             {
@@ -103,6 +104,7 @@ public sealed class ProjectCommandPermissionRegistry
         IReadOnlyList<string>? contextExclusions = null, bool isVerification = false,
         ProjectCommandPermissionMode? modeWhenUnconfigured = null)
     {
+        if (!CanPersist) return ProjectCommandPermissionDecision.Ask;
         var project = GetProject(projectPath);
         var mode = project?.Mode ?? modeWhenUnconfigured ?? ProjectCommandPermissionMode.AskEveryTime;
         var rules = project?.Rules ?? [];
