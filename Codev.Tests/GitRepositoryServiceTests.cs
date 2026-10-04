@@ -20,15 +20,15 @@ public sealed class GitRepositoryServiceTests
             var helperSource = "require('fs').writeFileSync('" + marker.Replace('\\', '/') + "', 'executed'); " +
                 "process.stdout.write(require('fs').readFileSync(process.argv[2]));";
             await File.WriteAllTextAsync(helper, helperSource);
-            var helperPath = helper.Replace('\\', '/');
-            await RunGitAsync(root, "config", "core.fsmonitor", $"node \"{helperPath}\"");
-            await RunGitAsync(root, "config", "diff.codev-audit.textconv", $"node \"{helperPath}\"");
             await File.WriteAllTextAsync(Path.Combine(root, ".gitattributes"), "fixture.txt diff=codev-audit\n");
             var fixture = Path.Combine(root, "fixture.txt");
             await File.WriteAllTextAsync(fixture, "baseline\n");
             await RunGitAsync(root, "add", "--", ".gitattributes", "fixture.txt");
             await RunGitAsync(root, "commit", "-m", "initial");
             await RunGitAsync(root, "branch", "review-base");
+            var helperPath = helper.Replace('\\', '/');
+            await RunGitAsync(root, "config", "core.fsmonitor", $"node \"{helperPath}\"");
+            await RunGitAsync(root, "config", "diff.codev-audit.textconv", $"node \"{helperPath}\"");
             await File.WriteAllTextAsync(fixture, "working change\n");
             var service = new GitRepositoryService(root);
 
