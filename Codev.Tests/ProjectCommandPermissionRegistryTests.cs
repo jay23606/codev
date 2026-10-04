@@ -5,6 +5,10 @@ namespace Codev.Tests;
 
 public sealed class ProjectCommandPermissionRegistryTests : IDisposable
 {
+    private static readonly JsonSerializerOptions PermissionJsonOptions = new()
+    {
+        Converters = { new ProjectCommandPermissionModeJsonConverter(settingsUseCurrentNumericValues: true) }
+    };
     private readonly string _root = Path.Combine(Path.GetTempPath(), "Codev-command-permissions", Guid.NewGuid().ToString("N"));
     private readonly string _project = Path.Combine(Path.GetTempPath(), "Codev-projects", Guid.NewGuid().ToString("N"));
     private readonly string _path;
@@ -139,6 +143,25 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_project, "command-permissions.json")));
     }
 
+    [Theory]
+    [InlineData(0, ProjectCommandPermissionMode.AskEveryTime)]
+    [InlineData(1, ProjectCommandPermissionMode.AskEveryTime)]
+    [InlineData(2, ProjectCommandPermissionMode.ReadOnly)]
+    [InlineData(3, ProjectCommandPermissionMode.ReadOnly)]
+    public async Task Ambiguous_numeric_registry_modes_migrate_conservatively(int storedMode,
+        ProjectCommandPermissionMode expectedMode)
+    {
+        await File.WriteAllTextAsync(_path,
+            $"[{{\"ProjectPath\":{JsonSerializer.Serialize(_project)},\"Mode\":{storedMode},\"Rules\":[{{\"Command\":\"npm install\",\"Decision\":1}}]}}]");
+
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+
+        Assert.Equal(expectedMode, registry.GetMode(_project));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, "npm install"));
+        await registry.SetModeAsync(_project, expectedMode);
+        Assert.Contains("\"Mode\": \"" + expectedMode + "\"", await File.ReadAllTextAsync(_path));
+    }
+
     [Fact]
     public async Task Copying_project_settings_persists_mode_and_rules_as_one_complete_snapshot()
     {
@@ -146,7 +169,7 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
         const string deniedCommand = "Remove-Item protected.txt";
         const string allowedCommand = "dotnet test";
         const string protectedAllowCommand = "git status --short";
-        await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(new[]
+        await File.WriteAllTextAsync(_path, SerializePermissions(new[]
         {
             new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Auto,
             [
@@ -219,7 +242,7 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     [Fact]
     public async Task Invalid_rule_in_auto_permissions_fails_closed_and_preserves_the_file()
     {
-        var contents = JsonSerializer.Serialize(new[]
+        var contents = SerializePermissions(new[]
         {
             new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Auto,
             [
@@ -241,7 +264,7 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     [Fact]
     public async Task Duplicate_project_entries_fail_closed_instead_of_dropping_an_earlier_deny()
     {
-        var contents = JsonSerializer.Serialize(new[]
+        var contents = SerializePermissions(new[]
         {
             new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Auto,
                 [new ProjectCommandPermissionRule("npm install", ProjectCommandPermissionDecision.Deny)]),
@@ -282,7 +305,7 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
         Assert.False(ProjectCommandPermissionRegistry.CanCreateAllowRule("type " + codevDataFile));
         Assert.True(ProjectCommandPermissionRegistry.CanCreateAllowRule("dotnet test"));
 
-        await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(new[]
+        await File.WriteAllTextAsync(_path, SerializePermissions(new[]
         {
             new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Allowlist,
                 [new ProjectCommandPermissionRule("git status --short", ProjectCommandPermissionDecision.Allow)])
@@ -344,4 +367,7 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
         try { Directory.Delete(_root, recursive: true); } catch { }
         try { Directory.Delete(_project, recursive: true); } catch { }
     }
+
+    private static string SerializePermissions(IEnumerable<ProjectCommandPermissions> permissions) =>
+        JsonSerializer.Serialize(permissions, PermissionJsonOptions);
 }

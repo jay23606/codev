@@ -9,7 +9,11 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, Lis
     bool RecentConversationsExpanded = true, string EmbeddingModel = "nomic-embed-text",
     ProjectCommandPermissionMode DefaultProjectCommandPermissionMode = ProjectCommandPermissionMode.Auto)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new ProjectCommandPermissionModeJsonConverter(settingsUseCurrentNumericValues: true) }
+    };
     public static AvaloniaUiSettings Default { get; } = new("dark", Codev.OllamaEndpoint.Default.ToString());
 
     public static AvaloniaUiSettings Deserialize(string json)
@@ -32,7 +36,7 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, Lis
             NormalizeDefaultProjectCommandPermissionMode(value.DefaultProjectCommandPermissionMode));
     }
 
-    public static string Serialize(AvaloniaUiSettings settings) => JsonSerializer.Serialize(settings);
+    public static string Serialize(AvaloniaUiSettings settings) => JsonSerializer.Serialize(settings, JsonOptions);
 
     private static string NormalizeTheme(string? value) =>
         string.Equals(value, "light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark";

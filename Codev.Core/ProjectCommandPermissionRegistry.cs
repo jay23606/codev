@@ -47,7 +47,12 @@ public sealed class ProjectCommandPermissionRegistry
     private const int MaxRulesPerProject = 300;
     private const int MaxCommandLength = 4000;
     private const int MaxFileBytes = 8 * 1024 * 1024;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+        Converters = { new ProjectCommandPermissionModeJsonConverter(settingsUseCurrentNumericValues: false) }
+    };
     private static readonly Regex GitCommand = new(@"\bgit(?:\.exe)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex GitMetadataPath = new(@"(?:^|[/\\\s])\.git(?:$|[/\\\s])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly string _path;

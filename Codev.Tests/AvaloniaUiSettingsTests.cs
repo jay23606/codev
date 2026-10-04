@@ -87,6 +87,21 @@ public sealed class AvaloniaUiSettingsTests
     }
 
     [Theory]
+    [InlineData(0, ProjectCommandPermissionMode.AskEveryTime)]
+    [InlineData(1, ProjectCommandPermissionMode.Auto)]
+    [InlineData(2, ProjectCommandPermissionMode.Allowlist)]
+    [InlineData(3, ProjectCommandPermissionMode.ReadOnly)]
+    public void Migrates_numeric_default_command_modes_and_serializes_them_by_name(int storedMode,
+        ProjectCommandPermissionMode expectedMode)
+    {
+        var settings = AvaloniaUiSettings.Deserialize($"{{\"DefaultProjectCommandPermissionMode\":{storedMode}}}");
+
+        Assert.Equal(expectedMode, settings.DefaultProjectCommandPermissionMode);
+        Assert.Contains("\"DefaultProjectCommandPermissionMode\":\"" + expectedMode + "\"",
+            AvaloniaUiSettings.Serialize(settings));
+    }
+
+    [Theory]
     [InlineData("Consolas", "Consolas")]
     [InlineData("aptos", "Aptos")]
     [InlineData("CALIBRI", "Calibri")]
