@@ -155,9 +155,13 @@ public sealed class McpBoundedStdioClientTransportTests
         {
             if (File.Exists(path))
             {
-                var processIds = (await File.ReadAllTextAsync(path)).Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(value => int.TryParse(value, out var processId) ? processId : 0).ToArray();
-                if (processIds.Length == 2 && processIds.All(processId => processId > 0)) return processIds;
+                try
+                {
+                    var processIds = (await File.ReadAllTextAsync(path)).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(value => int.TryParse(value, out var processId) ? processId : 0).ToArray();
+                    if (processIds.Length == 2 && processIds.All(processId => processId > 0)) return processIds;
+                }
+                catch (IOException) { /* PowerShell briefly holds the PID file without sharing on Windows. */ }
             }
             await Task.Delay(50);
         }
