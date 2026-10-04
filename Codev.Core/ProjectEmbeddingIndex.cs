@@ -192,8 +192,16 @@ public sealed class ProjectEmbeddingIndex
 
     private async Task<ProjectEmbeddingIndexData?> LoadAsync(CancellationToken cancellationToken)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            var directory = Path.GetDirectoryName(_indexPath)!;
+            if (Directory.Exists(directory))
+                File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
         var path = File.Exists(_indexPath) ? _indexPath : Path.ChangeExtension(_indexPath, ".json");
         if (!File.Exists(path)) return null;
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         var info = new FileInfo(path);
         if (info.Length > MaxIndexFileBytes) throw new InvalidDataException($"The semantic index is larger than the supported {MaxIndexFileBytes / (1024 * 1024)} MB limit.");
 

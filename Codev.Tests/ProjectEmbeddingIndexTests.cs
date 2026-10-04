@@ -50,9 +50,21 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
         await index.UpdateAsync();
 
         var path = ProjectEmbeddingIndex.GetIndexPath(_data, _root);
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-            File.GetUnixFileMode(Path.GetDirectoryName(path)!));
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        var directory = Path.GetDirectoryName(path)!;
+        var privateDirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        var privateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        Assert.Equal(privateDirectoryMode, File.GetUnixFileMode(directory));
+        Assert.Equal(privateFileMode, File.GetUnixFileMode(path));
+
+        // Existing indexes from earlier builds may have inherited a permissive umask.
+        File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute);
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead |
+            UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite);
+        Assert.Single(await index.SearchAsync("private source"));
+        Assert.Equal(privateDirectoryMode, File.GetUnixFileMode(directory));
+        Assert.Equal(privateFileMode, File.GetUnixFileMode(path));
     }
 
     [Fact]
