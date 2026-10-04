@@ -1,19 +1,22 @@
 using Avalonia.Headless.XUnit;
 using Codev;
 using Codev.Avalonia.ViewModels;
+using System.Diagnostics;
 using System.Reflection;
+using Xunit.Abstractions;
 using System.Text.Json;
 
 namespace Codev.Avalonia.Tests;
 
 public sealed class LiveLocalModelTests
 {
-    [AvaloniaFact]
+    private readonly ITestOutputHelper _output;
+
+    public LiveLocalModelTests(ITestOutputHelper output) => _output = output;
+
+    [LiveOllamaFact]
     public async Task Live_local_default_context_warning_follows_a_real_completed_turn()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
-
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-unknown-context", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         MainViewModel? viewModel = null;
@@ -73,12 +76,99 @@ public sealed class LiveLocalModelTests
         }
     }
 
-    [AvaloniaFact]
+    [LiveOllamaFact]
+    public async Task Live_local_large_project_performance_smoke_records_first_token_and_memory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-live-performance", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "app-data");
+        var project = Path.Combine(root, "large-project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        try
+        {
+            var fileBody = string.Join(" ", Enumerable.Range(0, 32)
+                .Select(index => $"// Fixture declaration {index:D2}: representative source for the large-project startup and context measurement."));
+            for (var index = 0; index < 48; index++)
+            {
+                var contents = $"// Project fixture {index:D2}\npublic static class ProjectFixture{index:D2}\n{{\n    public const string Description = \"{fileBody}\";\n}}\n";
+                await File.WriteAllTextAsync(Path.Combine(project, $"ProjectFixture{index:D2}.cs"), contents);
+            }
+
+            viewModel = new MainViewModel(appData);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            conversation.Model = Environment.GetEnvironmentVariable("CODEV_OLLAMA_MODEL") ?? "qwen3.6:35b-a3b";
+            conversation.Provider = "ollama";
+            conversation.IsCodeTask = false;
+            conversation.IsPlanMode = false;
+            conversation.NumCtx = 32768;
+            conversation.NumPredict = 64;
+            conversation.ThinkEnabled = false;
+            conversation.Temperature = 0;
+            var historicalText = string.Join(' ', Enumerable.Range(0, 45)
+                .Select(index => $"Earlier project discussion detail {index:D3} records a naming and compatibility decision."));
+            for (var index = 0; index < 6; index++)
+            {
+                var userMessage = new ChatMessage("user", $"Review the project architecture and preserve this constraint: {historicalText}");
+                var assistantMessage = new ChatMessage("assistant", $"Understood. I will preserve the documented constraint and keep the change scoped: {historicalText}");
+                conversation.Messages.Add(userMessage);
+                conversation.Messages.Add(assistantMessage);
+                viewModel.Messages.Add(userMessage);
+                viewModel.Messages.Add(assistantMessage);
+            }
+            viewModel.Draft = "Reply with exactly: large project performance smoke passed.";
+
+            using var process = Process.GetCurrentProcess();
+            process.Refresh();
+            var privateBytesBefore = process.PrivateMemorySize64;
+            var peakPrivateBytes = privateBytesBefore;
+            var start = Stopwatch.GetTimestamp();
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            await Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+
+            var sawGeneration = false;
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(6);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                sawGeneration |= viewModel.IsGenerating;
+                process.Refresh();
+                peakPrivateBytes = Math.Max(peakPrivateBytes, process.PrivateMemorySize64);
+                if (sawGeneration && !viewModel.IsGenerating) break;
+                await Task.Delay(100);
+            }
+
+            var responseExcerpt = conversation.Messages.LastOrDefault(message => message.IsAssistant)?.Content ?? "<no assistant response>";
+            if (responseExcerpt.Length > 1200) responseExcerpt = responseExcerpt[^1200..];
+            Assert.True(sawGeneration, "The local performance request did not start.");
+            Assert.False(viewModel.IsGenerating,
+                $"The local performance request did not finish within six minutes. Final response excerpt: {responseExcerpt}");
+            var reply = conversation.Messages.LastOrDefault(message => message.IsAssistant);
+            Assert.NotNull(reply);
+            Assert.Contains("large project performance smoke passed", reply!.Content, StringComparison.OrdinalIgnoreCase);
+            process.Refresh();
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            var stats = reply.GenerationStats;
+            _output.WriteLine($"Model={conversation.Model}; Context={conversation.NumCtx}; ProjectFiles=48; ProjectBytes={Directory.EnumerateFiles(project, "*.cs").Sum(path => new FileInfo(path).Length)}; PromptTokens={conversation.LastPromptTokens}; TTFTms={stats?.TimeToFirstToken?.TotalMilliseconds}; ModelLoadMs={stats?.ModelLoadTime?.TotalMilliseconds}; WallMs={elapsed.TotalMilliseconds:F0}; PrivateBytesBefore={privateBytesBefore}; PrivateBytesPeak={peakPrivateBytes}; PrivateBytesAfter={process.PrivateMemorySize64}.");
+        }
+        finally
+        {
+            if (viewModel is not null)
+            {
+                if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
+                var stopDeadline = DateTimeOffset.UtcNow.AddSeconds(15);
+                while (viewModel.IsGenerating && DateTimeOffset.UtcNow < stopDeadline) await Task.Delay(100);
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                await viewModel.SavePendingDraftAsync();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [LiveOllamaFact]
     public async Task Live_local_plan_mode_uses_structured_output_or_its_plain_text_fallback()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
-
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-plan", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         MainViewModel? viewModel = null;
@@ -130,12 +220,9 @@ public sealed class LiveLocalModelTests
         }
     }
 
-    [AvaloniaFact]
+    [LiveOllamaFact]
     public async Task Live_best_of_n_runs_independent_local_code_attempts_and_applies_a_verified_winner()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
-
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-best-of-n", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "app-data");
         var project = Path.Combine(root, "project");
@@ -276,12 +363,9 @@ public sealed class LiveLocalModelTests
         }
     }
 
-    [AvaloniaFact]
+    [LiveOllamaFact]
     public async Task Live_local_code_task_applies_a_file_edit_in_auto_without_showing_review()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
-
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-auto-file", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "app-data");
         var project = Path.Combine(root, "project");
@@ -358,12 +442,9 @@ public sealed class LiveLocalModelTests
         }
     }
 
-    [AvaloniaFact]
+    [LiveOllamaFact]
     public async Task Live_local_chat_in_a_fresh_conversation_runs_while_a_restored_turn_stays_paused()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
-
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-queue-isolation", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "Codev");
         Directory.CreateDirectory(appData);
@@ -429,12 +510,9 @@ public sealed class LiveLocalModelTests
         }
     }
 
-    [AvaloniaFact]
+    [LiveOllamaFact]
     public async Task Live_local_chat_resumes_a_saved_turn_streams_a_reply_and_clears_queue_state()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
-
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-queue", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "Codev");
         Directory.CreateDirectory(appData);
