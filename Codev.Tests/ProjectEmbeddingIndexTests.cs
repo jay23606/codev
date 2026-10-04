@@ -83,6 +83,32 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task Incremental_update_preserves_case_distinct_files_on_case_sensitive_file_systems()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var upperPath = Path.Combine(_root, "A.cs");
+        var lowerPath = Path.Combine(_root, "a.cs");
+        await File.WriteAllTextAsync(upperPath, "first");
+        await File.WriteAllTextAsync(lowerPath, "second");
+        if (await File.ReadAllTextAsync(upperPath) == await File.ReadAllTextAsync(lowerPath)) return;
+
+        const string content = "class SharedSource { }";
+        await File.WriteAllTextAsync(upperPath, content);
+        await File.WriteAllTextAsync(lowerPath, content);
+        var handler = new EmbeddingHandler();
+        using var http = new HttpClient(handler);
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
+        await index.UpdateAsync();
+
+        await index.UpdateAsync();
+        var results = await index.SearchAsync("find the shared source");
+
+        Assert.Equal(new[] { "A.cs", "a.cs" }, results.Select(result => result.RelativePath).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
     public async Task Search_never_returns_chunks_that_are_stale_for_the_current_project_file()
     {
         const string original = "class OriginalImplementation { }";

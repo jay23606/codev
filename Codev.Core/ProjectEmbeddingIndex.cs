@@ -78,8 +78,9 @@ public sealed class ProjectEmbeddingIndex
     {
         EnsureCanContinue(canContinue, cancellationToken);
         var previous = await LoadAsync(cancellationToken).ConfigureAwait(false);
-        var oldByKey = previous?.Chunks.GroupBy(Key, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, ProjectEmbeddingChunk>(StringComparer.OrdinalIgnoreCase);
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var oldByKey = previous?.Chunks.GroupBy(Key, pathComparer).ToDictionary(group => group.Key, group => group.First(), pathComparer)
+            ?? new Dictionary<string, ProjectEmbeddingChunk>(pathComparer);
         var oldByContent = previous?.Model == model
             ? previous.Chunks.GroupBy(ContentKey, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal)
