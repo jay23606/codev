@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Automation;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
@@ -168,6 +169,29 @@ public sealed class MainWindowTests
         {
             window?.Close();
             if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Icon_only_composer_action_exposes_a_descriptive_accessibility_name()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        MainWindow? window = null;
+        try
+        {
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var sendButton = Assert.IsType<Button>(window.FindControl<Button>("ComposerSendButton"));
+            Assert.Equal("Send or queue prompt; stop when the composer is empty", AutomationProperties.GetName(sendButton));
+        }
+        finally
+        {
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
             await DeleteAutoModeTestDirectoryAsync(root);
         }
     }

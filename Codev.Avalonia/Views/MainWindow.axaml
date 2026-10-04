@@ -295,9 +295,9 @@
                                                 <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2">
                                                     <Button Content="{Binding DisplayStatus}" Classes="soft" Tag="{Binding}" Click="TaskChecklistStatus_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Cycle between to do, in progress, and done" />
                                                     <TextBox Grid.Column="1" Text="{Binding Text}" MaxLength="240" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" Tag="{Binding}" LostFocus="TaskChecklistText_LostFocus" VerticalContentAlignment="Center" />
-                                                    <Button Grid.Column="2" Content="↑" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveUp_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step up" />
-                                                    <Button Grid.Column="3" Content="↓" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveDown_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step down" />
-                                                    <Button Grid.Column="4" Content="×" Classes="soft" Tag="{Binding}" Click="TaskChecklistRemove_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Remove this step" />
+                                                    <Button Grid.Column="2" Content="↑" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveUp_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step up" AutomationProperties.Name="Move this checklist step up" />
+                                                    <Button Grid.Column="3" Content="↓" Classes="soft" Tag="{Binding}" Click="TaskChecklistMoveDown_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Move this step down" AutomationProperties.Name="Move this checklist step down" />
+                                                    <Button Grid.Column="4" Content="×" Classes="soft" Tag="{Binding}" Click="TaskChecklistRemove_Click" IsEnabled="{Binding $parent[Window].DataContext.CanEditTaskChecklist}" ToolTip.Tip="Remove this step" AutomationProperties.Name="Remove this checklist step" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -324,8 +324,8 @@
                                 </Border>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
                                     <Button Content="Steer" Classes="soft" Padding="7,3" FontSize="10" IsVisible="{Binding IsQueued}" Tag="{Binding}" Click="PrioritizeQueuedMessage_Click" ToolTip.Tip="Run this queued prompt next after the current response" />
-                                    <Button Content="×" Classes="soft" Padding="7,3" FontSize="10" IsVisible="{Binding IsQueued}" Tag="{Binding}" Click="CancelQueuedMessage_Click" ToolTip.Tip="Remove this queued prompt" />
-                                    <Button Content="⋯" Classes="soft" Padding="7,3" FontSize="10" ToolTip.Tip="Prompt actions">
+                                    <Button Content="×" Classes="soft" Padding="7,3" FontSize="10" IsVisible="{Binding IsQueued}" Tag="{Binding}" Click="CancelQueuedMessage_Click" ToolTip.Tip="Remove this queued prompt" AutomationProperties.Name="Remove this queued prompt" />
+                                    <Button Content="⋯" Classes="soft" Padding="7,3" FontSize="10" ToolTip.Tip="Prompt actions" AutomationProperties.Name="Prompt actions">
                                         <Button.Flyout>
                                             <MenuFlyout>
                                                 <MenuItem Header="Edit message" Tag="{Binding}" Click="EditPromptMenu_Click" />
@@ -402,7 +402,7 @@
                         </Expander>
                         <Grid ColumnDefinitions="*,Auto">
                         <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="64" MaxHeight="180" TextWrapping="Wrap" FontFamily="{Binding UiFontFamily}" FontSize="{Binding UiFontSize}" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
-                            <Button Grid.Column="1" Classes="composer-send" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" FontSize="21" Width="36" Height="34" VerticalAlignment="Bottom" Margin="-49,0,8,9" Command="{Binding SendCommand}" />
+                            <Button x:Name="ComposerSendButton" Grid.Column="1" Classes="composer-send" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" AutomationProperties.Name="Send or queue prompt; stop when the composer is empty" FontSize="21" Width="36" Height="34" VerticalAlignment="Bottom" Margin="-49,0,8,9" Command="{Binding SendCommand}" />
                             <Popup x:Name="FileMentionPopup" PlacementTarget="{Binding #ComposerTextBox}" Placement="Top" IsLightDismissEnabled="True">
                                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4" Width="480">
                                     <ListBox x:Name="FileMentionListBox" MaxHeight="220">
@@ -442,7 +442,7 @@
                                         <TextBlock Text="{Binding RelativePath}" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
                                         <TextBlock Text="·" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
                                         <TextBlock Text="{Binding Comment}" FontSize="10" MaxWidth="420" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                        <Button Content="×" Padding="3,0" Background="Transparent" BorderThickness="0" Command="{Binding $parent[Window].DataContext.RemoveDiffCommentCommand}" CommandParameter="{Binding}" ToolTip.Tip="Remove this unsent diff comment" />
+                                        <Button Content="×" Padding="3,0" Background="Transparent" BorderThickness="0" Command="{Binding $parent[Window].DataContext.RemoveDiffCommentCommand}" CommandParameter="{Binding}" ToolTip.Tip="Remove this unsent diff comment" AutomationProperties.Name="Remove this unsent diff comment" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate></ItemsControl.ItemTemplate>
@@ -485,7 +485,7 @@
                                     <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="6,2" Margin="0,0,5,4">
                                         <StackPanel Orientation="Horizontal" Spacing="4">
                                             <TextBlock Text="{Binding}" FontSize="10" VerticalAlignment="Center" />
-                                            <Button Content="×" Padding="2,0" Background="Transparent" BorderThickness="0" Command="{Binding $parent[Window].DataContext.RemoveContextFileCommand}" CommandParameter="{Binding}" ToolTip.Tip="Remove this file from chat context" />
+                                            <Button Content="×" Padding="2,0" Background="Transparent" BorderThickness="0" Command="{Binding $parent[Window].DataContext.RemoveContextFileCommand}" CommandParameter="{Binding}" ToolTip.Tip="Remove this file from chat context" AutomationProperties.Name="Remove this file from chat context" />
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate></ItemsControl.ItemTemplate>
