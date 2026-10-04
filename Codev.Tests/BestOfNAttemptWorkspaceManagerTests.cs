@@ -141,6 +141,40 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
     }
 
     [Fact]
+    public async Task Workspace_reads_writes_and_winner_review_use_the_same_canonical_local_app_data_boundary()
+    {
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Codev.Tests", "best-of-n-redirected-root", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+        BestOfNAttemptSnapshot? snapshot = null;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(project, "sum.js"), "function add(a, b) { return a - b; }\n");
+            snapshot = await manager.CaptureAsync(project);
+            var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+            await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "sum.js"),
+                "function add(a, b) { return a + b; }\n");
+
+            var files = new WorkspaceFileService(project);
+            var review = await manager.ReviewChangesAsync(snapshot, workspace, files);
+
+            Assert.True(review.CanApply, string.Join(Environment.NewLine, review.BlockingReasons));
+            Assert.Contains(review.Proposals, proposal => proposal.RelativePath == "sum.js" &&
+                proposal.After.Contains("return a + b", StringComparison.Ordinal));
+            Assert.Contains(files.ListFiles(), path => path.EndsWith("sum.js", StringComparison.OrdinalIgnoreCase));
+            await files.WriteFileAtomicAsync("sum.js", "function add(a, b) { return a + b; }\n");
+            Assert.Contains("return a + b", (await files.ReadFileSnapshotAsync("sum.js")).Content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (snapshot is not null) manager.Delete(snapshot);
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task Winner_review_fails_closed_for_deletions_and_unsupported_files()
     {
         var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-tests", Guid.NewGuid().ToString("N"));

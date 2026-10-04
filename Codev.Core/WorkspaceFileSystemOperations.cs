@@ -39,26 +39,28 @@ internal static class WorkspaceFileSystemOperations
     private const uint DefaultMacFileMode = 0x180; // 0600: keep newly-created source private and writable by its owner.
 
     internal static async Task WriteAtomicallyAsync(string root, string destinationPath, byte[] content, bool overwrite, CancellationToken cancellationToken,
-        Func<CancellationToken, Task<bool>>? validateBeforeCommit = null)
+        Func<CancellationToken, Task<bool>>? validateBeforeCommit = null, string? boundaryRoot = null)
     {
         var (directory, fileName) = GetDestination(root, destinationPath);
-        using var parent = FileHardLinkInspector.OpenDirectoryBeneathRoot(root, directory, forMutation: true);
+        var effectiveRoot = boundaryRoot ?? root;
+        using var parent = FileHardLinkInspector.OpenDirectoryBeneathRoot(root, directory, forMutation: true, boundaryRoot: effectiveRoot);
         var temporaryName = $".codev-{Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant()}.tmp";
         if (OperatingSystem.IsWindows())
-            await WriteWindowsAsync(root, parent, temporaryName, fileName, content, overwrite, cancellationToken, validateBeforeCommit);
+            await WriteWindowsAsync(effectiveRoot, parent, temporaryName, fileName, content, overwrite, cancellationToken, validateBeforeCommit);
         else
             await WriteUnixAsync(parent, temporaryName, fileName, content, overwrite, cancellationToken, validateBeforeCommit);
     }
 
-    internal static void DeleteFile(string root, string destinationPath)
+    internal static void DeleteFile(string root, string destinationPath, string? boundaryRoot = null)
     {
         var (directory, fileName) = GetDestination(root, destinationPath);
-        using var parent = FileHardLinkInspector.OpenDirectoryBeneathRoot(root, directory, forMutation: true);
+        var effectiveRoot = boundaryRoot ?? root;
+        using var parent = FileHardLinkInspector.OpenDirectoryBeneathRoot(root, directory, forMutation: true, boundaryRoot: effectiveRoot);
         if (OperatingSystem.IsWindows())
         {
             using var handle = OpenWindowsRelativeFile(parent, fileName, DeleteAccess | ReadAttributes | Synchronize,
                 FileOpen, FileNonDirectoryFile | FileSynchronousIoNonAlert | FileOpenReparsePoint);
-            EnsureHandleIsChildOfParent(handle, parent, fileName, root);
+            EnsureHandleIsChildOfParent(handle, parent, fileName, effectiveRoot);
             SetDisposition(handle);
             return;
         }
@@ -67,10 +69,12 @@ internal static class WorkspaceFileSystemOperations
             throw new IOException("The project file could not be removed relative to its verified folder.", new Win32Exception(Marshal.GetLastPInvokeError()));
     }
 
-    internal static IReadOnlyList<WorkspaceDirectoryEntry> EnumerateDirectory(string root, string relativeDirectory, int maxEntries = 10_000)
+    internal static IReadOnlyList<WorkspaceDirectoryEntry> EnumerateDirectory(string root, string relativeDirectory,
+        int maxEntries = 10_000, string? boundaryRoot = null)
     {
         var maximum = Math.Max(1, maxEntries);
-        using var directory = FileHardLinkInspector.OpenDirectoryBeneathRoot(root, relativeDirectory, forEnumeration: true);
+        using var directory = FileHardLinkInspector.OpenDirectoryBeneathRoot(root, relativeDirectory,
+            forEnumeration: true, boundaryRoot: boundaryRoot ?? root);
         if (OperatingSystem.IsWindows()) return EnumerateWindows(directory, maximum);
         if (OperatingSystem.IsMacOS()) return EnumerateMacOs(directory, maximum);
 

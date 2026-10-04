@@ -180,7 +180,9 @@ public sealed class LiveLocalModelTests
             Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
             Assert.Contains("Best-of-N verification", transcript, StringComparison.Ordinal);
             Assert.Contains("verification passed", transcript, StringComparison.OrdinalIgnoreCase);
-            var source = await File.ReadAllTextAsync(Path.Combine(project, "sum.js"));
+            var resultPath = Path.Combine(project, "sum.js");
+            Assert.True(File.Exists(resultPath), $"The verified Best-of-N winner was not applied to the project. Transcript: {transcript}");
+            var source = await File.ReadAllTextAsync(resultPath);
             Assert.Contains("function add", source, StringComparison.Ordinal);
             Assert.Contains("bad sum", source, StringComparison.Ordinal);
             var change = Assert.Single(conversation.FileChanges);

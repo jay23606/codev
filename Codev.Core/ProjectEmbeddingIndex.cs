@@ -85,7 +85,7 @@ public sealed class ProjectEmbeddingIndex
             try
             {
                 var full = files.ResolvePath(relative);
-                await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative, files.Root);
+                await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative, files.BoundaryRoot);
                 if (stream.Length > 500_000) continue;
                 fileLength = stream.Length;
                 using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);

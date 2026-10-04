@@ -42,7 +42,8 @@ public static partial class ProjectFormatterCatalog
             if (!Directory.Exists(codevDirectory) || !File.Exists(path)) return new([], null);
             if (IsLink(codevDirectory) || IsLink(path))
                 return new([], "Project formatter configuration was ignored because .codev or formatters.json is a symbolic link.");
-            await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, RelativeConfigPath, projectRoot);
+            var boundaryRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(projectRoot);
+            await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, RelativeConfigPath, boundaryRoot);
             if (stream.Length > MaxConfigBytes) return new([], $"Project formatter configuration exceeds the {MaxConfigBytes / 1024} KB limit.");
             using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -109,7 +110,8 @@ public static partial class ProjectFormatterCatalog
         var path = Path.Combine(codevDirectory, "formatters.json");
         if (!Directory.Exists(codevDirectory) || !File.Exists(path)) return EmptyConfiguration;
         if (IsLink(codevDirectory) || IsLink(path)) throw new UnauthorizedAccessException("Project formatter configuration cannot follow symbolic links.");
-        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, RelativeConfigPath, projectRoot);
+        var boundaryRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(projectRoot);
+        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, RelativeConfigPath, boundaryRoot);
         if (stream.Length > MaxConfigBytes) throw new InvalidDataException($"Formatter configuration exceeds {MaxConfigBytes / 1024} KB.");
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);

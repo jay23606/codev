@@ -110,14 +110,14 @@ public static class ProjectPathInstructionRuleParser
     public static string? ReadDefinition(WorkspaceFileService service, string relativePath)
     {
         var safePath = service.ResolvePath(relativePath);
-        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(safePath, relativePath, service.Root);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(safePath, relativePath, service.BoundaryRoot);
         return DecodeBounded(stream);
     }
 
     public static async Task<string?> ReadDefinitionAsync(WorkspaceFileService service, string relativePath, CancellationToken cancellationToken = default)
     {
         var safePath = service.ResolvePath(relativePath);
-        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(safePath, relativePath, service.Root);
+        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(safePath, relativePath, service.BoundaryRoot);
         if (stream.Length > MaxDefinitionBytes) return null;
         var bytes = new byte[MaxDefinitionBytes + 1];
         var total = 0;

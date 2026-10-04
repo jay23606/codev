@@ -25,6 +25,7 @@ public sealed class WorkspaceFileService
     };
 
     private readonly string _root;
+    private readonly string _boundaryRoot;
     private readonly string[] _contextExclusions;
 
     public static bool IsSensitiveFileName(string name)
@@ -46,10 +47,12 @@ public sealed class WorkspaceFileService
             ? full
             : full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         EnsureRootIsNotLink();
+        _boundaryRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(_root);
         _contextExclusions = (contextExclusions ?? []).Select(NormalizeExclusion).Where(value => value is not null).Select(value => value!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public string Root => _root;
+    internal string BoundaryRoot => _boundaryRoot;
     public IReadOnlyList<string> ContextExclusions => _contextExclusions;
 
     public bool IsSupportedContextFile(string relativePath) =>
@@ -129,7 +132,7 @@ public sealed class WorkspaceFileService
         if (relativeDirectoryPath == ".") relativeDirectoryPath = "";
         var results = new List<string>();
         var maximum = Math.Clamp(maxEntries, 1, 200);
-        foreach (var entry in WorkspaceFileSystemOperations.EnumerateDirectory(_root, relativeDirectoryPath, 10_000))
+        foreach (var entry in WorkspaceFileSystemOperations.EnumerateDirectory(_root, relativeDirectoryPath, 10_000, _boundaryRoot))
         {
             if (results.Count >= maximum) break;
             var attributes = entry.Attributes;
@@ -161,7 +164,7 @@ public sealed class WorkspaceFileService
         while (pending.Count > 0 && results.Count < maxEntries && scannedEntries < maxScannedEntries)
         {
             var current = pending.Pop();
-            foreach (var entry in WorkspaceFileSystemOperations.EnumerateDirectory(_root, current, maxScannedEntries - scannedEntries)
+            foreach (var entry in WorkspaceFileSystemOperations.EnumerateDirectory(_root, current, maxScannedEntries - scannedEntries, _boundaryRoot)
                          .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
             {
                 if (results.Count >= maxEntries || scannedEntries >= maxScannedEntries) break;
@@ -258,7 +261,7 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!SourceExtensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Only common source, text, and configuration files are opened by the agent.");
-        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath, _root);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath, _boundaryRoot);
         if (stream.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB are not opened by the agent.");
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken);
@@ -291,7 +294,7 @@ public sealed class WorkspaceFileService
             try
             {
                 var full = ResolvePath(relative);
-                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative, _root);
+                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative, _boundaryRoot);
                 if (stream.Length > 500_000) continue;
                 using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                 var fileLines = new List<string>();
@@ -380,7 +383,7 @@ public sealed class WorkspaceFileService
     {
         var full = ResolvePath(relativePath);
         if (!File.Exists(full)) return null;
-        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath, _root);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relativePath, _boundaryRoot);
         if (stream.Length > 500_000) throw new InvalidOperationException("Files larger than 500 KB cannot be checkpointed or restored.");
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken);
@@ -408,7 +411,7 @@ public sealed class WorkspaceFileService
         if (expectedOriginalHash is not null && !await CurrentFileMatchesAsync(full, expectedOriginalHash, cancellationToken))
             throw new IOException("The file changed while its proposed edit was being reviewed. Nothing was overwritten; please inspect it again.");
         await WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, full, Encoding.UTF8.GetBytes(content), overwrite: true, cancellationToken,
-            expectedOriginalHash is null ? null : token => CurrentFileMatchesAsync(full, expectedOriginalHash, token));
+            expectedOriginalHash is null ? null : token => CurrentFileMatchesAsync(full, expectedOriginalHash, token), _boundaryRoot);
     }
 
     public async Task CreateFileAtomicAsync(string relativePath, string content, CancellationToken cancellationToken = default)
@@ -419,7 +422,8 @@ public sealed class WorkspaceFileService
         if (File.Exists(full)) throw new IOException("A file already exists at this path. Review it as an edit instead.");
         var parent = Path.GetDirectoryName(full)!;
         if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The parent folder must already exist; Codev will not create new directory trees yet.");
-        await WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, full, Encoding.UTF8.GetBytes(content), overwrite: false, cancellationToken);
+        await WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, full, Encoding.UTF8.GetBytes(content), overwrite: false,
+            cancellationToken, boundaryRoot: _boundaryRoot);
     }
 
     public async Task<string> ReadCheckpointAsync(string relativePath, Guid conversationId, string checkpointPath, CancellationToken cancellationToken = default)
@@ -480,7 +484,7 @@ public sealed class WorkspaceFileService
             if (!currentExists) return null;
             if (!await CurrentFileMatchesAsync(full, expectedCurrentHash!, cancellationToken))
                 throw new IOException("The file changed while it was being removed. Nothing was deleted; review its current contents first.");
-            WorkspaceFileSystemOperations.DeleteFile(_root, full);
+            WorkspaceFileSystemOperations.DeleteFile(_root, full, _boundaryRoot);
         }
         return rollback;
     }
@@ -500,7 +504,7 @@ public sealed class WorkspaceFileService
         if (expectedCurrentHash is null && File.Exists(full))
             throw new IOException("A file appeared while its checkpoint was being restored. Nothing was overwritten; review it again.");
         await WorkspaceFileSystemOperations.WriteAtomicallyAsync(_root, full, content, overwrite: expectedCurrentHash is not null, cancellationToken,
-            expectedCurrentHash is null ? null : token => CurrentFileMatchesAsync(full, expectedCurrentHash, token));
+            expectedCurrentHash is null ? null : token => CurrentFileMatchesAsync(full, expectedCurrentHash, token), _boundaryRoot);
     }
 
     private static string ValidateCheckpointPath(Guid conversationId, string checkpointPath)
@@ -516,7 +520,7 @@ public sealed class WorkspaceFileService
         if (!File.Exists(path)) return false;
         // Hash the same regular-file handle that passed the hard-link check before using it to approve a replacement.
         var relativePath = Path.GetRelativePath(_root, path);
-        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, relativePath, _root);
+        using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, relativePath, _boundaryRoot);
         if (stream.Length > 500_000) return false;
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken);

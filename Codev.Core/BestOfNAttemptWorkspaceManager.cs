@@ -218,6 +218,7 @@ public sealed class BestOfNAttemptWorkspaceManager
     private async Task CopyTreeAsync(string source, string destination, bool makeWritable, CancellationToken cancellationToken)
     {
         EnsureOrdinaryDirectory(source, "Snapshot source folders cannot be links.");
+        var trustedSourceRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(source);
         Directory.CreateDirectory(destination);
         RestrictDirectoryToCurrentUser(destination);
         EnsureOrdinaryDirectory(destination, "Snapshot destination cannot be a link.");
@@ -254,7 +255,7 @@ public sealed class BestOfNAttemptWorkspaceManager
                 totalBytes = checked(totalBytes + length);
                 if (totalBytes > MaximumBytes)
                     throw new InvalidOperationException($"Project snapshot exceeds the {MaximumBytes / (1024 * 1024 * 1024)} GiB limit.");
-                await CopyFileAsync(entry, target, source, makeWritable, cancellationToken).ConfigureAwait(false);
+                await CopyFileAsync(entry, target, trustedSourceRoot, makeWritable, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -413,7 +414,8 @@ public sealed class BestOfNAttemptWorkspaceManager
 
     private static async Task<string> ReadBoundedTextFileAsync(string path, string trustedRoot, CancellationToken cancellationToken)
     {
-        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetFileName(path), trustedRoot);
+        var canonicalRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(trustedRoot);
+        await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, Path.GetFileName(path), canonicalRoot);
         if (stream.Length > 200_000) throw new InvalidOperationException("The file exceeds Codev's 200 KB reviewed-write limit.");
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -425,8 +427,10 @@ public sealed class BestOfNAttemptWorkspaceManager
     private static async Task<bool> FileContentsMatchAsync(string firstPath, string secondPath, string firstRoot,
         string secondRoot, CancellationToken cancellationToken)
     {
-        await using var first = FileHardLinkInspector.OpenSingleLinkReadStream(firstPath, Path.GetFileName(firstPath), firstRoot);
-        await using var second = FileHardLinkInspector.OpenSingleLinkReadStream(secondPath, Path.GetFileName(secondPath), secondRoot);
+        var canonicalFirstRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(firstRoot);
+        var canonicalSecondRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(secondRoot);
+        await using var first = FileHardLinkInspector.OpenSingleLinkReadStream(firstPath, Path.GetFileName(firstPath), canonicalFirstRoot);
+        await using var second = FileHardLinkInspector.OpenSingleLinkReadStream(secondPath, Path.GetFileName(secondPath), canonicalSecondRoot);
         if (first.Length != second.Length) return false;
         var firstHash = await SHA256.HashDataAsync(first, cancellationToken).ConfigureAwait(false);
         var secondHash = await SHA256.HashDataAsync(second, cancellationToken).ConfigureAwait(false);
@@ -461,6 +465,7 @@ public sealed class BestOfNAttemptWorkspaceManager
     private async Task<string> ComputeTreeIdAsync(string root, CancellationToken cancellationToken)
     {
         EnsureOrdinaryDirectory(root, "Snapshot folders cannot be links.");
+        var canonicalRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(root);
         var entries = new List<(string Path, bool IsDirectory)>();
         var pending = new Stack<string>();
         pending.Push(root);
@@ -502,7 +507,7 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if (++fileCount > MaximumFiles)
                     throw new InvalidOperationException($"Project snapshot exceeds the {MaximumFiles:N0}-file limit.");
                 hash.AppendData([0x46]);
-                await using var input = FileHardLinkInspector.OpenSingleLinkReadStream(entry.Path, relative, root);
+                await using var input = FileHardLinkInspector.OpenSingleLinkReadStream(entry.Path, relative, canonicalRoot);
                 var length = input.Length;
                 hash.AppendData(Encoding.UTF8.GetBytes(length.ToString(CultureInfo.InvariantCulture)));
                 hash.AppendData([0]);

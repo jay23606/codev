@@ -98,6 +98,19 @@ public static class FileHardLinkInspector
             throw new UnauthorizedAccessException($"'{displayPath}' resolved outside the trusted project folder, so it was not read.");
     }
 
+    /// <summary>Returns the canonical path of an ordinary directory, including OS path redirections.</summary>
+    public static string GetCanonicalDirectoryPath(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        using var handle = OpenDirectoryHandle(path);
+        if (!OperatingSystem.IsWindows()) return Path.GetFullPath(path);
+        var canonical = NormalizeHandlePath(GetFinalPath(handle));
+        var pathRoot = Path.GetPathRoot(canonical);
+        return pathRoot is not null && PathsEqual(canonical, NormalizeHandlePath(pathRoot))
+            ? pathRoot
+            : canonical;
+    }
+
     internal static SafeFileHandle OpenDirectoryHandle(string path)
     {
         if (OperatingSystem.IsWindows())
@@ -155,9 +168,10 @@ public static class FileHardLinkInspector
     internal static bool PathsEqual(string left, string right) => string.Equals(left, right,
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
-    internal static SafeFileHandle OpenDirectoryBeneathRoot(string trustedRoot, string relativeDirectory, bool forMutation = false, bool forEnumeration = false)
+    internal static SafeFileHandle OpenDirectoryBeneathRoot(string trustedRoot, string relativeDirectory,
+        bool forMutation = false, bool forEnumeration = false, string? boundaryRoot = null)
     {
-        var fullRoot = Path.GetFullPath(trustedRoot);
+        var fullRoot = Path.GetFullPath(boundaryRoot ?? trustedRoot);
         var relative = string.IsNullOrWhiteSpace(relativeDirectory) ? "" : relativeDirectory
             .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
         var components = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
