@@ -1,4 +1,5 @@
 using Codev;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using ModelContextProtocol.Client;
@@ -101,6 +102,80 @@ public sealed class McpBoundedStdioClientTransportTests
         var received = await session.MessageReader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.NotNull(received);
+    }
+
+    [Fact]
+    public async Task Disposing_process_transport_terminates_its_server_process_tree()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-mcp-stdio-lifecycle", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var processIdPath = Path.Combine(root, "server.pid");
+        var safeProcessIdPath = processIdPath.Replace("'", "''", StringComparison.Ordinal);
+        var options = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? new StdioClientTransportOptions
+            {
+                Command = "powershell.exe",
+                Arguments = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                    $"Set-Content -LiteralPath '{safeProcessIdPath}' -Value $PID; Start-Sleep -Seconds 30"],
+                Name = "process-tree-lifecycle-test"
+            }
+            : new StdioClientTransportOptions
+            {
+                Command = "/bin/sh",
+                Arguments = ["-c", $"echo $$ > '{safeProcessIdPath}'; sleep 30"],
+                Name = "process-tree-lifecycle-test"
+            };
+
+        try
+        {
+            var clientTransport = new McpBoundedStdioClientTransport(options);
+            var session = await clientTransport.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await using var lifetime = (IAsyncDisposable)session;
+            var processId = await WaitForProcessIdAsync(processIdPath, TimeSpan.FromSeconds(10));
+            Assert.True(IsProcessRunning(processId), "The fixture server should still be running before transport disposal.");
+
+            await lifetime.DisposeAsync();
+
+            await WaitForProcessExitAsync(processId, TimeSpan.FromSeconds(10));
+            Assert.False(IsProcessRunning(processId), "Disposing the stdio transport should terminate its server process tree.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static async Task<int> WaitForProcessIdAsync(string path, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (File.Exists(path) && int.TryParse(await File.ReadAllTextAsync(path), out var processId)) return processId;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("The MCP fixture server did not write its process ID.");
+    }
+
+    private static async Task WaitForProcessExitAsync(int processId, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (!IsProcessRunning(processId)) return;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("The MCP stdio server process remained alive after its transport was disposed.");
+    }
+
+    private static bool IsProcessRunning(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
     }
 
     private sealed class BlockingAtEndStream(byte[] data) : Stream
