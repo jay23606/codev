@@ -44,7 +44,9 @@ public sealed class GitRepositoryServiceTests
 
             await service.StageFileAsync("fixture.txt");
             Assert.Contains("working change", await service.GetStagedDiffAsync(), StringComparison.Ordinal);
+            Assert.False(File.Exists(marker));
             await RunGitAsync(root, "commit", "-m", "review change");
+            if (File.Exists(marker)) File.Delete(marker);
             Assert.Contains("working change", (await service.GetCommitReviewAsync((await RunGitAsync(root, "rev-parse", "HEAD")).Trim())).Diff, StringComparison.Ordinal);
             Assert.Contains("working change", (await service.GetBranchReviewAsync("review-base")).Diff, StringComparison.Ordinal);
             Assert.False(File.Exists(marker));
