@@ -22,15 +22,16 @@ public static class AtomicBinaryFile
         var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            await using (var stream = new FileStream(temporaryPath, new FileStreamOptions
+            var options = new FileStreamOptions
             {
                 Mode = FileMode.CreateNew,
                 Access = FileAccess.Write,
                 Share = FileShare.None,
                 BufferSize = 64 * 1024,
-                Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
-                UnixCreateMode = OperatingSystem.IsWindows() ? null : privateFileMode
-            }))
+                Options = FileOptions.Asynchronous | FileOptions.WriteThrough
+            };
+            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = privateFileMode;
+            await using (var stream = new FileStream(temporaryPath, options))
             {
                 await writeContents(stream, cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
