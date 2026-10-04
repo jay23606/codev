@@ -9,6 +9,36 @@ namespace Codev.Tests;
 public sealed class McpBoundedStdioClientTransportTests
 {
     [Fact]
+    public async Task Windows_executable_arguments_preserve_literal_percent_sequences()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var scriptPath = Path.Combine(Path.GetTempPath(), $"Codev-mcp-args-{Guid.NewGuid():N}.ps1");
+        await File.WriteAllTextAsync(scriptPath, "param([string]$argument) [Console]::Write($argument)");
+        try
+        {
+            var options = new StdioClientTransportOptions
+            {
+                Command = "powershell.exe",
+                Arguments = ["-NoProfile", "-NonInteractive", "-File", scriptPath, "%PATH%"]
+            };
+            var startInfo = McpBoundedStdioClientTransport.CreateStartInfo(options);
+            startInfo.RedirectStandardOutput = true;
+            startInfo.RedirectStandardError = true;
+            using var process = Process.Start(startInfo)!;
+            var output = await process.StandardOutput.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(0, process.ExitCode);
+            Assert.Equal("%PATH%", output);
+        }
+        finally
+        {
+            try { File.Delete(scriptPath); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task Bounded_stream_accepts_a_frame_at_the_limit_and_resets_for_the_next_frame()
     {
         await using var source = new MemoryStream(Encoding.UTF8.GetBytes("1234\nnext\noversize\n"));

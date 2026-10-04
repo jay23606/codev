@@ -66,15 +66,16 @@ internal sealed class McpBoundedStdioClientTransport : IClientTransport
         }
     }
 
-    private static ProcessStartInfo CreateStartInfo(StdioClientTransportOptions options)
+    internal static ProcessStartInfo CreateStartInfo(StdioClientTransportOptions options)
     {
         var command = options.Command;
         IList<string> arguments = options.Arguments ?? [];
+        var useWindowsCommandProcessor = false;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) &&
             !string.Equals(Path.GetFileName(command), "cmd.exe", StringComparison.OrdinalIgnoreCase))
         {
-            arguments = ["/c", command, .. arguments];
-            command = "cmd.exe";
+            (command, useWindowsCommandProcessor) = ResolveWindowsCommand(command, options);
+            if (useWindowsCommandProcessor) arguments = ["/d", "/c", command, .. arguments];
         }
 
         var startInfo = new ProcessStartInfo
@@ -92,7 +93,7 @@ internal sealed class McpBoundedStdioClientTransport : IClientTransport
         };
         foreach (var argument in arguments)
         {
-            var escaped = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Whitespace.IsMatch(argument)
+            var escaped = useWindowsCommandProcessor && !Whitespace.IsMatch(argument)
                 ? WindowsShellCharacters.Replace(argument, static match => "^" + match.Value)
                 : argument;
             startInfo.ArgumentList.Add(escaped);
@@ -103,6 +104,42 @@ internal sealed class McpBoundedStdioClientTransport : IClientTransport
             foreach (var (key, value) in options.EnvironmentVariables) startInfo.Environment[key] = value;
         return startInfo;
     }
+
+    private static (string Command, bool UseCommandProcessor) ResolveWindowsCommand(string command, StdioClientTransportOptions options)
+    {
+        var extension = Path.GetExtension(command);
+        if (extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase))
+            return (command, true);
+        if (extension.Length > 0) return (command, false);
+
+        var path = GetConfiguredEnvironmentVariable(options, "PATH") ?? Environment.GetEnvironmentVariable("PATH");
+        var pathExtensions = GetConfiguredEnvironmentVariable(options, "PATHEXT") ?? Environment.GetEnvironmentVariable("PATHEXT");
+        var extensions = (pathExtensions ?? ".COM;.EXE;.BAT;.CMD")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (extensions.Length == 0) extensions = [".COM", ".EXE", ".BAT", ".CMD"];
+
+        IEnumerable<string> directories = (path ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (!Path.IsPathRooted(command) && (command.Contains(Path.DirectorySeparatorChar) || command.Contains(Path.AltDirectorySeparatorChar)))
+            directories = [options.WorkingDirectory ?? Environment.CurrentDirectory];
+        else
+            directories = [options.WorkingDirectory ?? Environment.CurrentDirectory, .. directories];
+
+        foreach (var directory in directories)
+        foreach (var candidateExtension in extensions)
+        {
+            var candidate = Path.Combine(directory, command + candidateExtension);
+            if (!File.Exists(candidate)) continue;
+            var candidateIsBatch = candidateExtension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) ||
+                candidateExtension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
+            return (candidate, candidateIsBatch);
+        }
+
+        // Leave unresolved names to CreateProcess so its standard diagnostics are preserved.
+        return (command, false);
+    }
+
+    private static string? GetConfiguredEnvironmentVariable(StdioClientTransportOptions options, string name) =>
+        options.EnvironmentVariables?.FirstOrDefault(pair => pair.Key.Equals(name, StringComparison.OrdinalIgnoreCase)).Value;
 
     private static async Task StopProcessAsync(Process? process)
     {
