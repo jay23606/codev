@@ -1179,6 +1179,68 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Older_agent_profile_refresh_cannot_replace_profiles_after_project_switch()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-profile-refresh-race", Guid.NewGuid().ToString("N"));
+        var projectA = Path.Combine(root, "project-a");
+        var projectB = Path.Combine(root, "project-b");
+        Directory.CreateDirectory(projectA);
+        Directory.CreateDirectory(projectB);
+        var oldLoadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseOldLoad = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        MainViewModel? viewModel = null;
+        Task? oldRefresh = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var oldProfile = CreateProfile("Project A Reviewer", projectA);
+            var newProfile = CreateProfile("Project B Reviewer", projectB);
+            async Task<AgentProfileLoadResult> LoadProfilesAsync(string profilesDirectory, string? projectPath, bool includeProjectProfiles,
+                CancellationToken cancellationToken, IReadOnlyList<string>? additionalDirectories)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.Equals(projectPath, projectA, StringComparison.Ordinal))
+                {
+                    oldLoadStarted.TrySetResult();
+                    await releaseOldLoad.Task;
+                    return new AgentProfileLoadResult([oldProfile], []);
+                }
+                return new AgentProfileLoadResult([newProfile], []);
+            }
+
+            typeof(MainViewModel).GetField("_loadAgentProfilesAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(viewModel, (Func<string, string?, bool, CancellationToken, IReadOnlyList<string>?, Task<AgentProfileLoadResult>>)LoadProfilesAsync);
+
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            conversation.ProjectPath = projectA;
+            oldRefresh = viewModel.RefreshAgentProfilesAsync();
+            await oldLoadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            conversation.ProjectPath = projectB;
+            await viewModel.RefreshAgentProfilesAsync();
+            Assert.Contains(viewModel.AgentProfiles, profile => profile.Name == newProfile.Name);
+
+            releaseOldLoad.TrySetResult();
+            await oldRefresh.WaitAsync(TimeSpan.FromSeconds(5));
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            Assert.Contains(viewModel.AgentProfiles, profile => profile.Name == newProfile.Name);
+            Assert.DoesNotContain(viewModel.AgentProfiles, profile => profile.Name == oldProfile.Name);
+        }
+        finally
+        {
+            releaseOldLoad.TrySetResult();
+            if (oldRefresh is not null) await oldRefresh.WaitAsync(TimeSpan.FromSeconds(5));
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+
+        static AgentProfile CreateProfile(string name, string projectPath) => new(name, "Test profile", null, null, null,
+            AgentToolPermission.Allow, new Dictionary<string, AgentToolPermission>(), "Test instructions", "project",
+            Path.Combine(projectPath, ".codev", "agents", "reviewer.md"), Mode: "primary");
+    }
+
+    [AvaloniaFact]
     public void File_review_is_readable_collapsed_by_default_and_keeps_decisions_visible()
     {
         var window = new MainWindow();

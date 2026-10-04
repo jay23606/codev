@@ -31,6 +31,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private readonly string UserSkillsPath;
     private readonly string UserAgentProfilesPath;
     private Guid? _agentProfilesLoadedForConversationId;
+    private long _agentProfileRefreshRevision;
+    private Func<string, string?, bool, CancellationToken, IReadOnlyList<string>?, Task<Codev.AgentProfileLoadResult>> _loadAgentProfilesAsync = Codev.AgentProfileCatalog.LoadAsync;
     private readonly string SemanticIndexDirectory;
     private static readonly JsonSerializerOptions BackupJsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly ObservableCollection<Codev.Conversation> _conversations = [];
@@ -2019,14 +2021,18 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     public async Task RefreshAgentProfilesAsync(CancellationToken cancellationToken = default)
     {
+        var refreshRevision = Interlocked.Increment(ref _agentProfileRefreshRevision);
         var conversation = ActiveConversation;
+        var projectPath = conversation?.ProjectPath;
+        var includeProjectProfiles = false;
         try
         {
+            includeProjectProfiles = projectPath is { Length: > 0 } project && _projectFolderTrust.IsTrusted(project);
             Directory.CreateDirectory(UserAgentProfilesPath);
-            var loaded = await Codev.AgentProfileCatalog.LoadAsync(UserAgentProfilesPath, conversation?.ProjectPath,
-                conversation?.ProjectPath is { Length: > 0 } project && _projectFolderTrust.IsTrusted(project), cancellationToken,
+            var loaded = await _loadAgentProfilesAsync(UserAgentProfilesPath, projectPath,
+                includeProjectProfiles, cancellationToken,
                 Codev.AgentProfileCatalog.GetCompatibleUserAgentProfileDirectories());
-            if (!ReferenceEquals(ActiveConversation, conversation)) return;
+            if (!IsCurrentAgentProfileRefresh(refreshRevision, conversation, projectPath, includeProjectProfiles)) return;
             if (loaded.Warnings.Count > 0 && !loaded.Warnings[0].Equals(_lastAgentProfileWarning, StringComparison.Ordinal))
             {
                 _lastAgentProfileWarning = loaded.Warnings[0];
@@ -2038,12 +2044,13 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             {
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (!ReferenceEquals(ActiveConversation, conversation) ||
+                    if (!IsCurrentAgentProfileRefresh(refreshRevision, conversation, projectPath, includeProjectProfiles) ||
                         !string.Equals(conversation.AgentProfileName, currentProfileName, StringComparison.Ordinal)) return;
                     conversation.AgentProfileName = migratedProfileName;
                     Persist();
                 });
             }
+            if (!IsCurrentAgentProfileRefresh(refreshRevision, conversation, projectPath, includeProjectProfiles)) return;
             var choices = new List<AgentProfileChoice> { new("", "Build", "Use the default coding agent with the selected project permissions. Ctrl+Shift+A switches between Build and Plan.") };
             choices.AddRange(loaded.Profiles.Where(profile => profile.Mode is "all" or "primary").Select(profile => new AgentProfileChoice(profile.Name,
                 profile.Model is { Length: > 0 } model ? $"{profile.Name} · {model}" : profile.Name, profile.Description)));
@@ -2052,7 +2059,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 choices.Add(new AgentProfileChoice(selected, selected + " · unavailable", "This profile could not be loaded for the current project scope."));
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (!ReferenceEquals(ActiveConversation, conversation)) return;
+                if (!IsCurrentAgentProfileRefresh(refreshRevision, conversation, projectPath, includeProjectProfiles)) return;
                 _agentProfilesLoadedForConversationId = null;
                 Reset(AgentProfiles, choices);
                 OnPropertyChanged(nameof(SelectedAgentProfileName));
@@ -2063,8 +2070,19 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            _ = SetConnectionStatusAsync($"Agent profiles could not be loaded ({ex.GetType().Name}).");
+            if (IsCurrentAgentProfileRefresh(refreshRevision, conversation, projectPath, includeProjectProfiles))
+                _ = SetConnectionStatusAsync($"Agent profiles could not be loaded ({ex.GetType().Name}).");
         }
+    }
+
+    private bool IsCurrentAgentProfileRefresh(long revision, Codev.Conversation? conversation, string? projectPath,
+        bool includeProjectProfiles)
+    {
+        if (Volatile.Read(ref _agentProfileRefreshRevision) != revision || !ReferenceEquals(ActiveConversation, conversation)) return false;
+        var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!string.Equals(conversation?.ProjectPath, projectPath, pathComparison)) return false;
+        var currentlyIncludesProjectProfiles = projectPath is { Length: > 0 } project && _projectFolderTrust.IsTrusted(project);
+        return currentlyIncludesProjectProfiles == includeProjectProfiles;
     }
 
     public Task<IReadOnlyList<Codev.AgentProfileDocument>> GetUserAgentProfileDocumentsAsync(CancellationToken cancellationToken = default) =>
