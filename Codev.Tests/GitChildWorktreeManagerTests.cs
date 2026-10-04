@@ -293,14 +293,17 @@ public sealed class GitChildWorktreeManagerTests
             await RunGitAsync(repo, "commit", "-m", "configure merge driver");
             var manager = new GitChildWorktreeManager(Path.Combine(temp, "appdata"));
             var child = await manager.CreateAsync(repo, Guid.NewGuid(), Guid.NewGuid());
-            await File.WriteAllTextAsync(Path.Combine(child.WorktreePath, "child.txt"), "child change\n");
-            await RunGitAsync(child.WorktreePath, "add", "--", "child.txt");
+            await File.WriteAllTextAsync(Path.Combine(child.WorktreePath, "tracked.txt"), "child change\n");
+            await RunGitAsync(child.WorktreePath, "add", "--", "tracked.txt");
             await RunGitAsync(child.WorktreePath, "commit", "-m", "child change");
+            await File.WriteAllTextAsync(Path.Combine(repo, "tracked.txt"), "parent change\n");
+            await RunGitAsync(repo, "add", "--", "tracked.txt");
+            await RunGitAsync(repo, "commit", "-m", "parent change");
             var review = await manager.GetReviewAsync(repo, child.Branch, child.StartCommit);
 
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => manager.MergeAsync(repo, review));
 
-            Assert.Contains("external merge drivers", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("external merge driver", error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.False(File.Exists(marker));
             Assert.False((await new GitRepositoryService(repo).GetStatusAsync()).HasChanges);
         }
