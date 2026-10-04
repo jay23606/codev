@@ -168,12 +168,21 @@ public sealed class ProjectEmbeddingIndex
         var index = await LoadAsync(cancellationToken).ConfigureAwait(false);
         if (index is null || index.Chunks.Count == 0) return [];
         if (!string.Equals(index.Model, model, StringComparison.Ordinal)) throw new InvalidOperationException("The index uses a different embedding model. Rebuild it in Settings before searching.");
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var searchableChunks = new List<ProjectEmbeddingChunk>();
+        foreach (var pathGroup in index.Chunks.GroupBy(chunk => chunk.RelativePath, comparer))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = await ReadCurrentChunksAsync(pathGroup.Key, cancellationToken).ConfigureAwait(false);
+            if (current is null) continue;
+            searchableChunks.AddRange(pathGroup.Where(chunk => current.Contains((chunk.Hash, chunk.Content))));
+        }
+        if (searchableChunks.Count == 0) return [];
         var queryVector = (await client.EmbedAsync([query], cancellationToken).ConfigureAwait(false))[0];
-        var indexedDimensions = index.Chunks[0].Embedding.Length;
+        var indexedDimensions = searchableChunks[0].Embedding.Length;
         if (queryVector.Length != indexedDimensions)
             throw new InvalidOperationException("The embedding model returned a different vector size than the saved index. Rebuild the index in Settings before searching.");
-        return index.Chunks.Where(chunk => IsStillReadable(chunk.RelativePath))
-            .Select(chunk => new SemanticSearchResult(chunk.RelativePath, chunk.Chunk, Cosine(queryVector, chunk.Embedding), chunk.Content))
+        return searchableChunks.Select(chunk => new SemanticSearchResult(chunk.RelativePath, chunk.Chunk, Cosine(queryVector, chunk.Embedding), chunk.Content))
             .Where(result => double.IsFinite(result.Score)).OrderByDescending(result => result.Score).ThenBy(result => result.RelativePath, StringComparer.OrdinalIgnoreCase)
             .Take(Math.Clamp(limit, 1, MaxSearchResults)).ToArray();
     }
@@ -312,6 +321,22 @@ public sealed class ProjectEmbeddingIndex
     {
         try { return !files.IsContextExcluded(relativePath) && files.IsSupportedContextFile(relativePath) && File.Exists(files.ResolvePath(relativePath)); }
         catch { return false; }
+    }
+
+    private async Task<HashSet<(string Hash, string Content)>?> ReadCurrentChunksAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!IsStillReadable(relativePath)) return null;
+            await using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(files.ResolvePath(relativePath), relativePath, files.BoundaryRoot);
+            if (stream.Length > 500_000) return null;
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var content = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            if (content.Contains('\0')) return null;
+            return Chunk(content).Select(chunk => (Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(chunk))), chunk)).ToHashSet();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
     }
 
     private static bool IsExcluded(string path, IReadOnlyList<string>? exclusions)

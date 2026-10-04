@@ -54,6 +54,30 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_never_returns_chunks_that_are_stale_for_the_current_project_file()
+    {
+        const string original = "class OriginalImplementation { }";
+        const string changed = "class UpdatedImplementation { }";
+        await File.WriteAllTextAsync(Path.Combine(_root, "implementation.cs"), original);
+        var handler = new EmbeddingHandler();
+        using var http = new HttpClient(handler);
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
+        await index.UpdateAsync();
+        await File.WriteAllTextAsync(Path.Combine(_root, "implementation.cs"), changed);
+
+        var staleResults = await index.SearchAsync("find implementation");
+
+        Assert.Empty(staleResults);
+        Assert.DoesNotContain(handler.Inputs, input => input == "find implementation");
+        await index.UpdateAsync();
+        var refreshedResults = await index.SearchAsync("find implementation");
+        Assert.Single(refreshedResults);
+        Assert.Equal(changed, refreshedResults[0].Content);
+        Assert.Contains(handler.Inputs, input => input == "find implementation");
+    }
+
+    [Fact]
     public async Task Reembeds_a_moved_chunk_so_its_vector_matches_the_new_path()
     {
         const string content = "class MovedImplementation { void FindMe() { } }";
