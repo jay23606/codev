@@ -1,0 +1,75 @@
+{
+  "date": "2026-10-04",
+  "applicationCodeHead": "26e3c58ac80de07aa17215caf147a0bc281b1922",
+  "model": "qwen3.6:35b-a3b",
+  "ollamaVersion": "0.34.4",
+  "os": "Windows 11 Home 26200",
+  "cpu": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+  "ramGiB": 61.6,
+  "modelProcessor": "100% CPU",
+  "contextTokens": 32768,
+  "promptTokens": 8908,
+  "syntheticProject": {
+    "files": 48,
+    "bytes": 164736,
+    "priorExchanges": 6
+  },
+  "runs": [
+    {
+      "timeToFirstTokenMs": 292.8755,
+      "modelLoadMs": 5.1487,
+      "turnWallMs": 760,
+      "testHostPrivateBytesBefore": 35725312,
+      "testHostPrivateBytesPeak": 41959424,
+      "testHostPrivateBytesAfter": 41959424
+    },
+    {
+      "timeToFirstTokenMs": 242.7028,
+      "modelLoadMs": 4.4439,
+      "turnWallMs": 760,
+      "testHostPrivateBytesBefore": 35840000,
+      "testHostPrivateBytesPeak": 42143744,
+      "testHostPrivateBytesAfter": 42143744
+    },
+    {
+      "timeToFirstTokenMs": 274.6103,
+      "modelLoadMs": 3.6528,
+      "turnWallMs": 764,
+      "testHostPrivateBytesBefore": 35708928,
+      "testHostPrivateBytesPeak": 41775104,
+      "testHostPrivateBytesAfter": 41775104
+    },
+    {
+      "timeToFirstTokenMs": 245.6558,
+      "modelLoadMs": 3.1835,
+      "turnWallMs": 781,
+      "testHostPrivateBytesBefore": 35389440,
+      "testHostPrivateBytesPeak": 41738240,
+      "testHostPrivateBytesAfter": 41742336
+    },
+    {
+      "timeToFirstTokenMs": 226.8471,
+      "modelLoadMs": 4.2295,
+      "turnWallMs": 640,
+      "testHostPrivateBytesBefore": 35590144,
+      "testHostPrivateBytesPeak": 41529344,
+      "testHostPrivateBytesAfter": 41529344
+    }
+  ],
+  "summary": {
+    "timeToFirstTokenMedianMs": 245.6558,
+    "timeToFirstTokenRangeMs": [226.8471, 292.8755],
+    "turnWallMedianMs": 760,
+    "turnWallRangeMs": [640, 781],
+    "modelLoadRangeMs": [3.1835, 5.1487],
+    "testHostPeakPrivateMemoryMiBRange": [39.605, 40.191]
+  },
+  "limitations": [
+    "Synthetic project/history rather than the real repository",
+    "Test-host memory excludes Ollama and model memory",
+    "Not packaged-app memory or visible-window readiness",
+    "Single Windows machine and one model",
+    "No cold-run per-turn telemetry or macOS/Linux measurement",
+    "Observations do not establish performance budgets"
+  ]
+}
