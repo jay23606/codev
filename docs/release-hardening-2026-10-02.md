@@ -56,7 +56,7 @@ This report records pre-release Q3 checks for PR #1, branch `avalonia-opencode-p
 
 ## Release decision
 
-Q3 is **not complete** under Q4: multiple rows are incomplete, and none have been waived. PR #1's exact head `5f48606` passed Windows/Linux/macOS portable and Avalonia UI checks, and all four app/CLI preview package-and-launch jobs passed ([Windows CI #37175488266](https://github.com/jay23606/codev/actions/runs/37175488266), [desktop preview #37175488277](https://github.com/jay23606/codev/actions/runs/37175488277)); public release publishing was skipped as expected on a PR. A public release should wait until the remaining Q3 checks are run or explicitly waived with written reasons.
+Q3 is **not complete** under Q4: multiple rows are incomplete, and none have been waived. PR #1's exact head `015be9d` passed portable core and Avalonia headless UI checks on Windows/Linux/macOS, Windows UI and native credential-vault checks, and app/CLI preview package-and-launch checks for win-x64, linux-x64, osx-arm64, and osx-x64 ([Windows CI #37176485117](https://github.com/jay23606/codev/actions/runs/37176485117), [desktop preview #37176485007](https://github.com/jay23606/codev/actions/runs/37176485007)); public release publishing was skipped as expected on a PR. A public release should wait until the remaining Q3 checks are run or explicitly waived with written reasons.
 
 ## Adversarial review follow-up
 
