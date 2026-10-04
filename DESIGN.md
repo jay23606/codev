@@ -769,6 +769,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Live Auto/MCP regression rerun (2026-10-04, application code head `889ea42`).** With the loopback Ollama service, the opt-in `OllamaAutoPolicyIntegrationTests` passed on both installed chat models: Qwen3.6-35B-A3B passed 2/2 in 1m02s, and Qwen3.8-27B passed 2/2 in 3m59s. Each run exercised a model-selected `verify_command` through Codev's actual Auto executor without invoking its approval callback. The poisoned-MCP-metadata test accepts only an explicit untrusted-data refusal or the exact requested MCP echo call; in the latter case it verifies untrusted-output wrapping and that an exact saved Deny blocks the repeat before server invocation. This is current local evidence for two models, not a guarantee for all models or hosted providers. The two live tests remain opt-in and are skipped by default.
 
+**Current headless CLI package smoke (2026-10-04, source head `4f3e40d`).** Published a self-contained Windows x64 CLI from the current source, verified `--help`, and ran a real read-only Qwen3.6 Code task against a disposable project. The model used `read_file` and returned the exact fixture marker; the process exited 0 and the fixture SHA-256 was unchanged. No edit or command flags were supplied. This closes one current-build Windows local-provider smoke; OpenAI and remote-endpoint consent paths, clean-install cross-platform CLI interactions, and native macOS/Linux provider requests remain open.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
