@@ -691,9 +691,20 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             if (string.Equals(ActiveConversation?.AgentProfileName, normalized, StringComparison.Ordinal)) return;
             if (ActiveConversation is { } conversation) conversation.AgentProfileName = normalized;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectedAgentProfileChoice));
             OnPropertyChanged(nameof(PrimaryAgentLabel));
             Persist();
         }
+    }
+
+    public AgentProfileChoice? SelectedAgentProfileChoice
+    {
+        get
+        {
+            var selectedName = SelectedAgentProfileName;
+            return AgentProfiles.FirstOrDefault(profile => profile.Name.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
+        }
+        set => SelectedAgentProfileName = value?.Name ?? "";
     }
 
     public void SetOpenAiGenerationSettings(string? reasoningEffort, string? verbosity, string? reasoningMode = null)
@@ -1621,6 +1632,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         OnPropertyChanged(nameof(IncludeRepoMap));
         OnPropertyChanged(nameof(OutputStyle));
         OnPropertyChanged(nameof(SelectedAgentProfileName));
+        OnPropertyChanged(nameof(SelectedAgentProfileChoice));
         OnPropertyChanged(nameof(PrimaryAgentLabel));
         OnPropertyChanged(nameof(ThinkEnabled));
         OnPropertyChanged(nameof(CanIncludeRepoMap));
@@ -2063,9 +2075,11 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 _agentProfilesLoadedForConversationId = null;
                 Reset(AgentProfiles, choices);
                 OnPropertyChanged(nameof(SelectedAgentProfileName));
+                OnPropertyChanged(nameof(SelectedAgentProfileChoice));
                 OnPropertyChanged(nameof(PrimaryAgentLabel));
                 _agentProfilesLoadedForConversationId = conversation?.Id;
                 OnPropertyChanged(nameof(SelectedAgentProfileName));
+                OnPropertyChanged(nameof(SelectedAgentProfileChoice));
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)

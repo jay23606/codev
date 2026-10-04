@@ -1078,19 +1078,19 @@ public sealed class MainWindowTests
             await File.WriteAllTextAsync(Path.Combine(opencodeDirectory, "subtask.md"), "---\ndescription: Handle delegated work.\nmode: subagent\n---\nWork only on the bounded delegated task.");
             await viewModel.RefreshAgentProfilesAsync();
             Assert.DoesNotContain(viewModel.AgentProfiles, profile => profile.Name == "subtask");
-            picker.SelectedValue = "Reviewer";
+            picker.SelectedItem = viewModel.AgentProfiles.First(profile => profile.Name == "Reviewer");
             await Dispatcher.UIThread.InvokeAsync(() => { });
 
             Assert.Equal("Reviewer", viewModel.SelectedAgentProfileName);
             Assert.Equal("Reviewer", conversation.AgentProfileName);
             Assert.Equal("Reviewer agent", viewModel.PrimaryAgentLabel);
 
-            picker.SelectedValue = "Plan";
+            picker.SelectedItem = viewModel.AgentProfiles.First(profile => profile.Name == "Plan");
             await Dispatcher.UIThread.InvokeAsync(() => { });
             Assert.Equal("Plan", conversation.AgentProfileName);
             Assert.Equal("Plan agent", viewModel.PrimaryAgentLabel);
 
-            picker.SelectedValue = "";
+            picker.SelectedItem = viewModel.AgentProfiles.First(profile => profile.Name.Length == 0);
             await Dispatcher.UIThread.InvokeAsync(() => { });
             Assert.Null(conversation.AgentProfileName);
             Assert.Equal("Build agent", viewModel.PrimaryAgentLabel);
@@ -1143,7 +1143,7 @@ public sealed class MainWindowTests
             window.UpdateLayout();
             Assert.True(picker.IsDropDownOpen);
             picker.IsDropDownOpen = false;
-            picker.SelectedValue = "Smoke QA";
+            picker.SelectedItem = viewModel.AgentProfiles.First(profile => profile.Name == "Smoke QA");
             await Dispatcher.UIThread.InvokeAsync(() => { });
             Assert.Equal("Smoke QA", viewModel.ActiveConversation!.AgentProfileName);
 
@@ -1165,7 +1165,7 @@ public sealed class MainWindowTests
 
             var restoredPicker = Assert.IsType<ComboBox>(restoredWindow.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.Equal("Smoke QA", restoredViewModel.SelectedAgentProfileName);
-            Assert.Equal("Smoke QA", restoredPicker.SelectedValue);
+            Assert.Equal("Smoke QA", Assert.IsType<AgentProfileChoice>(restoredPicker.SelectedItem).Name);
             Assert.Equal("Smoke QA agent", restoredViewModel.PrimaryAgentLabel);
         }
         finally
@@ -1174,6 +1174,53 @@ public sealed class MainWindowTests
             restoredWindow?.Close();
             if (viewModel is not null) await StopAndFlushAsync(viewModel);
             if (restoredViewModel is not null) await StopAndFlushAsync(restoredViewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Agent_profile_picker_reselects_the_saved_choice_after_catalog_items_are_replaced()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-agent-profile-rebind-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        MainWindow? window = null;
+        try
+        {
+            await viewModel.RefreshAgentProfilesAsync();
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            conversation.IsCodeTask = true;
+            conversation.AgentProfileName = "Smoke QA";
+            var loadingChoice = new AgentProfileChoice("Smoke QA", "Smoke QA · loading", "Restoring saved profile.");
+            viewModel.AgentProfiles.Add(loadingChoice);
+            var notify = typeof(MainViewModel).GetMethod("OnPropertyChanged", BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, types: [typeof(string)], modifiers: null)!;
+            notify.Invoke(viewModel, [nameof(MainViewModel.SelectedAgentProfileChoice)]);
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+            var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
+            Assert.Same(loadingChoice, picker.SelectedItem);
+
+            var loadedChoice = new AgentProfileChoice("Smoke QA", "Smoke QA", "Review source changes.");
+            typeof(MainViewModel).GetField("_agentProfilesLoadedForConversationId", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(viewModel, null);
+            viewModel.AgentProfiles.Clear();
+            viewModel.AgentProfiles.Add(new AgentProfileChoice("", "Build", "Default profile."));
+            viewModel.AgentProfiles.Add(loadedChoice);
+            typeof(MainViewModel).GetField("_agentProfilesLoadedForConversationId", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(viewModel, conversation.Id);
+            notify.Invoke(viewModel, [nameof(MainViewModel.SelectedAgentProfileChoice)]);
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            Assert.Same(loadedChoice, picker.SelectedItem);
+            Assert.Equal("Smoke QA", viewModel.SelectedAgentProfileName);
+            Assert.Equal("Smoke QA", conversation.AgentProfileName);
+        }
+        finally
+        {
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
             await DeleteAutoModeTestDirectoryAsync(root);
         }
     }
