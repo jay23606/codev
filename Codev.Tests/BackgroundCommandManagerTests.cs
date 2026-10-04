@@ -101,7 +101,7 @@ public sealed class BackgroundCommandManagerTests
         await using var manager = new BackgroundCommandManager(process =>
         {
             if (Interlocked.Increment(ref killAttempts) > 1) process.Kill(entireProcessTree: true);
-        }, TimeSpan.FromSeconds(2));
+        }, TimeSpan.FromSeconds(5));
         var owner = Guid.NewGuid();
         var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
         var started = await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
