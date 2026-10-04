@@ -51,8 +51,7 @@ public sealed class GitChildWorktreeManager
         RejectLink(_codevRoot, "The Codev data folder cannot be a link for child worktrees.");
         Directory.CreateDirectory(_worktreeRoot);
         RejectLink(_worktreeRoot, "The Codev child-worktrees folder cannot be a link.");
-        Directory.CreateDirectory(_hooksDisabledPath);
-        RejectLink(_hooksDisabledPath, "The Codev child-worktree hook override folder cannot be a link.");
+        EnsureHooksDisabledDirectory();
 
         var id = childConversationId.ToString("N");
         var branch = $"codev/child-{id}";
@@ -89,8 +88,7 @@ public sealed class GitChildWorktreeManager
         RejectLink(_codevRoot, "The Codev data folder cannot be a link for child worktrees.");
         Directory.CreateDirectory(_worktreeRoot);
         RejectLink(_worktreeRoot, "The Codev child-worktrees folder cannot be a link.");
-        Directory.CreateDirectory(_hooksDisabledPath);
-        RejectLink(_hooksDisabledPath, "The Codev child-worktree hook override folder cannot be a link.");
+        EnsureHooksDisabledDirectory();
         var baseResult = await RunGitAsync(repositoryRoot, ["rev-parse", "--verify", "--end-of-options", startCommit + "^{commit}"], cancellationToken);
         EnsureSuccess(baseResult, "The child's recorded starting commit is unavailable.");
         var branchResult = await RunGitAsync(repositoryRoot, ["rev-parse", "--verify", "--end-of-options", $"refs/heads/{branch}^{{commit}}"], cancellationToken);
@@ -226,12 +224,74 @@ public sealed class GitChildWorktreeManager
         if (!string.Equals(currentBase.Output.Trim(), targetAgain.Output.Trim(), StringComparison.Ordinal) ||
             !string.Equals(childHead.Output.Trim(), childHeadAgain.Output.Trim(), StringComparison.Ordinal))
             throw new InvalidOperationException("The parent or child branch changed during review. Refresh and review the child diff again.");
-        var merge = await RunGitAsync(repository, ["merge", "--no-ff", "--no-edit", branch], cancellationToken);
+        await EnsureNoConfiguredMergeDriversAsync(repository, cancellationToken);
+        await EnsureNoConfiguredCheckoutFiltersAsync(repository, cancellationToken);
+        EnsureHooksDisabledDirectory();
+        var merge = await RunGitAsync(repository,
+            ["-c", $"core.hooksPath={ToGitConfigPath(_hooksDisabledPath)}", "merge", "--no-ff", "--no-edit", branch], cancellationToken);
         if (merge.ExitCode != 0)
         {
-            _ = await RunGitAsync(repository, ["merge", "--abort"], cancellationToken);
+            _ = await RunGitAsync(repository,
+                ["-c", $"core.hooksPath={ToGitConfigPath(_hooksDisabledPath)}", "merge", "--abort"], cancellationToken);
             EnsureSuccess(merge, "Git could not merge the child branch; any partial merge was aborted.");
         }
+    }
+
+    private void EnsureHooksDisabledDirectory()
+    {
+        Directory.CreateDirectory(_codevRoot);
+        RejectLink(_codevRoot, "The Codev data folder cannot be a link for child worktrees.");
+        Directory.CreateDirectory(_hooksDisabledPath);
+        RejectLink(_hooksDisabledPath, "The Codev child-worktree hook override folder cannot be a link.");
+    }
+
+    private static async Task EnsureNoConfiguredMergeDriversAsync(string repository, CancellationToken cancellationToken)
+    {
+        const int maximumDriverConfigCharacters = 8192;
+        const int maximumDrivers = 64;
+        var configured = await RunGitAsync(repository,
+            ["config", "--name-only", "--get-regexp", "^merge\\..*\\.driver$"], cancellationToken,
+            maximumDriverConfigCharacters + 1).ConfigureAwait(false);
+        if (configured.ExitCode is not (0 or 1) || configured.Output.Length > maximumDriverConfigCharacters)
+            throw new InvalidOperationException("Git merge-driver configuration could not be inspected safely; Codev refused to merge the child worktree.");
+
+        var keys = configured.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        if (keys.Length > maximumDrivers || keys.Any(key => !key.StartsWith("merge.", StringComparison.OrdinalIgnoreCase) ||
+                                                            !key.EndsWith(".driver", StringComparison.OrdinalIgnoreCase) ||
+                                                            key.Any(char.IsControl)))
+            throw new InvalidOperationException("Git merge-driver configuration is invalid or too large to inspect safely; Codev refused to merge the child worktree.");
+        if (keys.Length > 0)
+            throw new InvalidOperationException("Git has external merge drivers configured. Codev will not run them while applying a child worktree; disable them or merge the child branch manually.");
+    }
+
+    private static async Task EnsureNoConfiguredCheckoutFiltersAsync(string repository, CancellationToken cancellationToken)
+    {
+        const int maximumFilterConfigCharacters = 8192;
+        const int maximumFilters = 64;
+        var drivers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var suffix in new[] { "smudge", "process" })
+        {
+            var configured = await RunGitAsync(repository,
+                ["config", "--name-only", "--get-regexp", $"^filter\\..*\\.{suffix}$"], cancellationToken,
+                maximumFilterConfigCharacters + 1).ConfigureAwait(false);
+            if (configured.ExitCode is not (0 or 1) || configured.Output.Length > maximumFilterConfigCharacters)
+                throw new InvalidOperationException("Git checkout-filter configuration could not be inspected safely; Codev refused to merge the child worktree.");
+
+            var ending = "." + suffix;
+            foreach (var key in configured.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!key.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) ||
+                    !key.EndsWith(ending, StringComparison.OrdinalIgnoreCase) || key.Length <= 6 + ending.Length ||
+                    key.Any(char.IsControl))
+                    throw new InvalidOperationException("Git checkout-filter configuration is invalid; Codev refused to merge the child worktree.");
+                drivers.Add(key[7..^ending.Length]);
+                if (drivers.Count > maximumFilters)
+                    throw new InvalidOperationException("Too many Git checkout filters are configured for a safe child merge.");
+            }
+        }
+
+        if (drivers.Count > 0)
+            throw new InvalidOperationException("Git has checkout filters configured. Codev will not run them while applying a child worktree; disable them or merge the child branch manually.");
     }
 
     private async Task<string> GetRepositoryRootAsync(string path, CancellationToken cancellationToken)

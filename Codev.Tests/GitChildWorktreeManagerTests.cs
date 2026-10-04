@@ -108,8 +108,9 @@ public sealed class GitChildWorktreeManagerTests
             await RunGitAsync(repo, "config", "filter.codevtest.smudge", "printf 'filter ran\\n' > smudge-filter-ran; cat");
             await RunGitAsync(repo, "add", "--", ".gitattributes", "tracked.txt");
             await RunGitAsync(repo, "commit", "-m", "initial");
-            var hooks = Path.Combine(repo, ".git", "hooks");
+            var hooks = Path.Combine(temp, "project-configured-hooks");
             Directory.CreateDirectory(hooks);
+            await RunGitAsync(repo, "config", "core.hooksPath", hooks.Replace('\\', '/'));
             await File.WriteAllTextAsync(Path.Combine(hooks, "post-checkout"), "#!/bin/sh\nprintf 'hook ran\\n' > post-checkout-hook-ran\n");
             if (!OperatingSystem.IsWindows())
                 File.SetUnixFileMode(Path.Combine(hooks, "post-checkout"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -228,6 +229,117 @@ public sealed class GitChildWorktreeManagerTests
             Assert.Equal("child change\nchanged after review\n", Normalize(await File.ReadAllTextAsync(Path.Combine(repo, "child.txt"))));
             Assert.Equal("main", (await RunGitAsync(repo, "branch", "--show-current")).Trim());
             Assert.Equal("child change\nchanged after review\n", Normalize(await File.ReadAllTextAsync(Path.Combine(child.WorktreePath, "child.txt"))));
+            Assert.False((await new GitRepositoryService(repo).GetStatusAsync()).HasChanges);
+        }
+        finally { try { Directory.Delete(temp, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Merge_skips_repository_pre_merge_and_post_merge_hooks()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "codev-child-worktree-tests", Guid.NewGuid().ToString("N"));
+        var repo = Path.Combine(temp, "repo");
+        var appData = Path.Combine(temp, "appdata");
+        Directory.CreateDirectory(repo);
+        try
+        {
+            await InitializeRepositoryAsync(repo);
+            var hooks = Path.Combine(repo, ".git", "hooks");
+            Directory.CreateDirectory(hooks);
+            var preMergeMarker = Path.Combine(repo, "pre-merge-hook-ran");
+            var postMergeMarker = Path.Combine(repo, "post-merge-hook-ran");
+            var preMergeHook = Path.Combine(hooks, "pre-merge-commit");
+            var postMergeHook = Path.Combine(hooks, "post-merge");
+            await File.WriteAllTextAsync(preMergeHook, "#!/bin/sh\nprintf 'ran' > pre-merge-hook-ran\nexit 1\n");
+            await File.WriteAllTextAsync(postMergeHook, "#!/bin/sh\nprintf 'ran' > post-merge-hook-ran\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(preMergeHook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                File.SetUnixFileMode(postMergeHook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            var manager = new GitChildWorktreeManager(appData);
+            var child = await manager.CreateAsync(repo, Guid.NewGuid(), Guid.NewGuid());
+            await File.WriteAllTextAsync(Path.Combine(child.WorktreePath, "child.txt"), "child change\n");
+            await RunGitAsync(child.WorktreePath, "add", "--", "child.txt");
+            await RunGitAsync(child.WorktreePath, "commit", "-m", "child change");
+            var review = await manager.GetReviewAsync(repo, child.Branch, child.StartCommit);
+
+            await manager.MergeAsync(repo, review);
+
+            Assert.False(File.Exists(preMergeMarker));
+            Assert.False(File.Exists(postMergeMarker));
+            Assert.Equal("child change\n", Normalize(await File.ReadAllTextAsync(Path.Combine(repo, "child.txt"))));
+        }
+        finally { try { Directory.Delete(temp, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Merge_refuses_configured_external_merge_drivers_without_running_them()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "codev-child-worktree-tests", Guid.NewGuid().ToString("N"));
+        var repo = Path.Combine(temp, "repo");
+        Directory.CreateDirectory(repo);
+        try
+        {
+            await InitializeRepositoryAsync(repo);
+            var marker = Path.Combine(temp, "merge-driver-ran");
+            var helper = Path.Combine(temp, "merge-driver.cjs");
+            await File.WriteAllTextAsync(helper, "require('fs').writeFileSync('" + marker.Replace('\\', '/') + "', 'ran');");
+            await RunGitAsync(repo, "config", "merge.codevtest.name", "Codev test driver");
+            await RunGitAsync(repo, "config", "merge.codevtest.driver", $"node \"{helper.Replace('\\', '/')}\" %O %A %B %L");
+            await File.WriteAllTextAsync(Path.Combine(repo, ".gitattributes"), "tracked.txt merge=codevtest\n");
+            await RunGitAsync(repo, "add", "--", ".gitattributes");
+            await RunGitAsync(repo, "commit", "-m", "configure merge driver");
+            var manager = new GitChildWorktreeManager(Path.Combine(temp, "appdata"));
+            var child = await manager.CreateAsync(repo, Guid.NewGuid(), Guid.NewGuid());
+            await File.WriteAllTextAsync(Path.Combine(child.WorktreePath, "child.txt"), "child change\n");
+            await RunGitAsync(child.WorktreePath, "add", "--", "child.txt");
+            await RunGitAsync(child.WorktreePath, "commit", "-m", "child change");
+            var review = await manager.GetReviewAsync(repo, child.Branch, child.StartCommit);
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => manager.MergeAsync(repo, review));
+
+            Assert.Contains("external merge drivers", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(marker));
+            Assert.False((await new GitRepositoryService(repo).GetStatusAsync()).HasChanges);
+        }
+        finally { try { Directory.Delete(temp, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Merge_refuses_configured_checkout_filters_without_running_them()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "codev-child-worktree-tests", Guid.NewGuid().ToString("N"));
+        var repo = Path.Combine(temp, "repo");
+        Directory.CreateDirectory(repo);
+        try
+        {
+            await RunGitAsync(repo, "init", "-b", "main");
+            await RunGitAsync(repo, "config", "user.name", "Codev Tests");
+            await RunGitAsync(repo, "config", "user.email", "codev-tests@example.invalid");
+            var marker = Path.Combine(temp, "checkout-filter-ran");
+            var helper = Path.Combine(temp, "checkout-filter.cjs");
+            await File.WriteAllTextAsync(helper, "require('fs').writeFileSync('" + marker.Replace('\\', '/') + "', 'ran'); process.stdin.pipe(process.stdout);");
+            await RunGitAsync(repo, "config", "filter.codevtest.smudge", $"node \"{helper.Replace('\\', '/')}\"");
+            await RunGitAsync(repo, "config", "filter.codevtest.clean", "cat");
+            await File.WriteAllTextAsync(Path.Combine(repo, ".gitattributes"), "tracked.txt filter=codevtest\n");
+            await File.WriteAllTextAsync(Path.Combine(repo, "tracked.txt"), "committed\n");
+            await RunGitAsync(repo, "add", "--", ".gitattributes", "tracked.txt");
+            await RunGitAsync(repo, "commit", "-m", "initial");
+
+            var manager = new GitChildWorktreeManager(Path.Combine(temp, "appdata"));
+            var child = await manager.CreateAsync(repo, Guid.NewGuid(), Guid.NewGuid());
+            await File.WriteAllTextAsync(Path.Combine(child.WorktreePath, "tracked.txt"), "child change\n");
+            await RunGitAsync(child.WorktreePath, "add", "--", "tracked.txt");
+            await RunGitAsync(child.WorktreePath, "commit", "-m", "child change");
+            File.Delete(marker);
+            var review = await manager.GetReviewAsync(repo, child.Branch, child.StartCommit);
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => manager.MergeAsync(repo, review));
+
+            Assert.Contains("checkout filters", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(marker));
             Assert.False((await new GitRepositoryService(repo).GetStatusAsync()).HasChanges);
         }
         finally { try { Directory.Delete(temp, recursive: true); } catch { } }
