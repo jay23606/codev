@@ -1181,7 +1181,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public async Task Agent_profile_picker_reselects_the_saved_choice_after_catalog_items_are_replaced()
     {
-        var root = Path.Combine(Path.GetTempPath(), "Codev-agent-profile-rebind-ui", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", "agent-profile-rebind", Guid.NewGuid().ToString("N"));
         var viewModel = new MainViewModel(root);
         MainWindow? window = null;
         try
