@@ -17,30 +17,37 @@ public sealed class ProjectEmbeddingIndex
     public const long MaxIndexedBytes = 80L * 1024 * 1024;
     public const int MaxSearchResults = 8;
     public const int MaxStoredChunks = 40_000;
+    private const long MaxIndexFileBytes = 256L * 1024 * 1024;
+    private const int IndexFormatVersion = 1;
+    private static readonly byte[] IndexMagic = Encoding.ASCII.GetBytes("CODEVIDX");
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly WorkspaceFileService files;
     private readonly OllamaEmbeddingClient client;
     private readonly string model;
     private readonly string _indexPath;
     private readonly long _maxIndexedBytes;
+    private readonly long _maxIndexFileBytes;
 
     public ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileService files, OllamaEmbeddingClient client, string model)
-        : this(dataDirectory, files, client, model, MaxIndexedBytes)
+        : this(dataDirectory, files, client, model, MaxIndexedBytes, MaxIndexFileBytes)
     {
     }
 
     internal ProjectEmbeddingIndex(string dataDirectory, WorkspaceFileService files, OllamaEmbeddingClient client, string model,
-        long maxIndexedBytes)
+        long maxIndexedBytes, long maxIndexFileBytes = MaxIndexFileBytes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
         if (maxIndexedBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxIndexedBytes));
+        if (maxIndexFileBytes <= 0 || maxIndexFileBytes > MaxIndexFileBytes) throw new ArgumentOutOfRangeException(nameof(maxIndexFileBytes));
         this.files = files;
         this.client = client;
         this.model = model;
         _maxIndexedBytes = maxIndexedBytes;
+        _maxIndexFileBytes = maxIndexFileBytes;
         _indexPath = GetIndexPath(dataDirectory, files.Root);
     }
 
@@ -49,15 +56,21 @@ public sealed class ProjectEmbeddingIndex
         var root = Path.GetFullPath(projectPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var identity = OperatingSystem.IsWindows() ? root.ToUpperInvariant() : root;
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
-        return Path.Combine(dataDirectory, "Codev", "embeddings", key + ".json");
+        return Path.Combine(dataDirectory, "Codev", "embeddings", key + ".idx");
     }
 
-    public static bool HasIndex(string dataDirectory, string projectPath) => File.Exists(GetIndexPath(dataDirectory, projectPath));
+    public static bool HasIndex(string dataDirectory, string projectPath)
+    {
+        var path = GetIndexPath(dataDirectory, projectPath);
+        return File.Exists(path) || File.Exists(Path.ChangeExtension(path, ".json"));
+    }
 
     public static void Delete(string dataDirectory, string projectPath)
     {
         var path = GetIndexPath(dataDirectory, projectPath);
         if (File.Exists(path)) File.Delete(path);
+        var legacyPath = Path.ChangeExtension(path, ".json");
+        if (File.Exists(legacyPath)) File.Delete(legacyPath);
     }
 
     public async Task<int> UpdateAsync(IProgress<(int Done, int Total)>? progress = null, CancellationToken cancellationToken = default,
@@ -129,8 +142,16 @@ public sealed class ProjectEmbeddingIndex
 
         EnsureCanContinue(canContinue, cancellationToken);
         updated = updated.OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase).ThenBy(item => item.Chunk).ToList();
-        Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
-        await AtomicTextFile.WriteAsync(_indexPath, JsonSerializer.Serialize(new ProjectEmbeddingIndexData(model, updated)), cancellationToken).ConfigureAwait(false);
+        var indexData = new ProjectEmbeddingIndexData(model, updated);
+        ValidateIndex(indexData);
+        var serializedBytes = GetSerializedSize(indexData);
+        if (serializedBytes > _maxIndexFileBytes)
+            throw new InvalidOperationException($"This semantic index would exceed the {_maxIndexFileBytes / (1024 * 1024)} MB storage limit. Narrow context exclusions and retry; the existing index was left unchanged.");
+        await AtomicBinaryFile.WriteAsync(_indexPath, (stream, token) => WriteIndexAsync(stream, indexData, token), cancellationToken).ConfigureAwait(false);
+        var legacyPath = Path.ChangeExtension(_indexPath, ".json");
+        try { if (File.Exists(legacyPath)) File.Delete(legacyPath); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
         return updated.Count;
     }
 
@@ -148,6 +169,9 @@ public sealed class ProjectEmbeddingIndex
         if (index is null || index.Chunks.Count == 0) return [];
         if (!string.Equals(index.Model, model, StringComparison.Ordinal)) throw new InvalidOperationException("The index uses a different embedding model. Rebuild it in Settings before searching.");
         var queryVector = (await client.EmbedAsync([query], cancellationToken).ConfigureAwait(false))[0];
+        var indexedDimensions = index.Chunks[0].Embedding.Length;
+        if (queryVector.Length != indexedDimensions)
+            throw new InvalidOperationException("The embedding model returned a different vector size than the saved index. Rebuild the index in Settings before searching.");
         return index.Chunks.Where(chunk => IsStillReadable(chunk.RelativePath))
             .Select(chunk => new SemanticSearchResult(chunk.RelativePath, chunk.Chunk, Cosine(queryVector, chunk.Embedding), chunk.Content))
             .Where(result => double.IsFinite(result.Score)).OrderByDescending(result => result.Score).ThenBy(result => result.RelativePath, StringComparer.OrdinalIgnoreCase)
@@ -159,15 +183,129 @@ public sealed class ProjectEmbeddingIndex
 
     private async Task<ProjectEmbeddingIndexData?> LoadAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(_indexPath)) return null;
-        var info = new FileInfo(_indexPath);
-        if (info.Length > 256L * 1024 * 1024) throw new InvalidDataException("The semantic index is larger than the supported 256 MB limit.");
-        var json = await File.ReadAllTextAsync(_indexPath, cancellationToken).ConfigureAwait(false);
-        var index = JsonSerializer.Deserialize<ProjectEmbeddingIndexData>(json, JsonOptions)
-            ?? throw new InvalidDataException("The semantic index is empty or invalid. Rebuild it in Settings.");
-        if (index.Chunks.Count > MaxStoredChunks || index.Chunks.Any(chunk => chunk.Embedding.Length is 0 or > 16_384 || chunk.Content.Length > ChunkCharacters || chunk.RelativePath.Length > 240))
-            throw new InvalidDataException("The semantic index contains invalid or oversized entries. Delete and rebuild it in Settings.");
+        var path = File.Exists(_indexPath) ? _indexPath : Path.ChangeExtension(_indexPath, ".json");
+        if (!File.Exists(path)) return null;
+        var info = new FileInfo(path);
+        if (info.Length > MaxIndexFileBytes) throw new InvalidDataException($"The semantic index is larger than the supported {MaxIndexFileBytes / (1024 * 1024)} MB limit.");
+
+        ProjectEmbeddingIndexData index;
+        if (string.Equals(Path.GetExtension(path), ".json", StringComparison.OrdinalIgnoreCase))
+        {
+            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            index = JsonSerializer.Deserialize<ProjectEmbeddingIndexData>(json, JsonOptions)
+                ?? throw new InvalidDataException("The legacy semantic index is empty or invalid. Delete and rebuild it in Settings.");
+        }
+        else
+        {
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            index = await ReadIndexAsync(stream, cancellationToken).ConfigureAwait(false);
+        }
+        ValidateIndex(index);
         return index;
+    }
+
+    private static long GetSerializedSize(ProjectEmbeddingIndexData index)
+    {
+        long size = IndexMagic.Length + sizeof(int) + sizeof(int) + Encoding.UTF8.GetByteCount(index.Model) + sizeof(int);
+        checked
+        {
+            foreach (var chunk in index.Chunks)
+            {
+                size += sizeof(int) + Encoding.UTF8.GetByteCount(chunk.RelativePath);
+                size += sizeof(int); // chunk ordinal
+                size += sizeof(int) + Encoding.UTF8.GetByteCount(chunk.Hash);
+                size += sizeof(int) + Encoding.UTF8.GetByteCount(chunk.Content);
+                size += sizeof(int) + (long)chunk.Embedding.Length * sizeof(float);
+            }
+        }
+        return size;
+    }
+
+    private static async Task WriteIndexAsync(Stream stream, ProjectEmbeddingIndexData index, CancellationToken cancellationToken)
+    {
+        await Task.Run(() =>
+        {
+            using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+            writer.Write(IndexMagic);
+            writer.Write(IndexFormatVersion);
+            WriteString(writer, index.Model);
+            writer.Write(index.Chunks.Count);
+            foreach (var chunk in index.Chunks)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                WriteString(writer, chunk.RelativePath);
+                writer.Write(chunk.Chunk);
+                WriteString(writer, chunk.Hash);
+                WriteString(writer, chunk.Content);
+                writer.Write(chunk.Embedding.Length);
+                foreach (var value in chunk.Embedding) writer.Write(value);
+            }
+            writer.Flush();
+        }, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Task<ProjectEmbeddingIndexData> ReadIndexAsync(Stream stream, CancellationToken cancellationToken) =>
+        Task.Run(() => ReadIndex(stream, cancellationToken), cancellationToken);
+
+    private static ProjectEmbeddingIndexData ReadIndex(Stream stream, CancellationToken cancellationToken)
+    {
+        using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
+        if (!reader.ReadBytes(IndexMagic.Length).AsSpan().SequenceEqual(IndexMagic))
+            throw new InvalidDataException("The semantic index has an unknown file signature. Delete and rebuild it in Settings.");
+        if (reader.ReadInt32() != IndexFormatVersion)
+            throw new InvalidDataException("The semantic index format version is not supported. Delete and rebuild it in Settings.");
+        var model = ReadString(reader, maxBytes: 512);
+        var count = reader.ReadInt32();
+        if (count is < 0 or > MaxStoredChunks) throw new InvalidDataException("The semantic index contains an invalid chunk count.");
+        var chunks = new List<ProjectEmbeddingChunk>(count);
+        for (var i = 0; i < count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = ReadString(reader, maxBytes: 960);
+            var ordinal = reader.ReadInt32();
+            var hash = ReadString(reader, maxBytes: 64);
+            var content = ReadString(reader, maxBytes: ChunkCharacters * 4);
+            var vectorLength = reader.ReadInt32();
+            if (ordinal < 0 || vectorLength is < 1 or > 16_384 ||
+                (long)vectorLength * sizeof(float) > reader.BaseStream.Length - reader.BaseStream.Position)
+                throw new InvalidDataException("The semantic index contains an invalid embedding vector.");
+            var vector = new float[vectorLength];
+            for (var dimension = 0; dimension < vector.Length; dimension++) vector[dimension] = reader.ReadSingle();
+            chunks.Add(new ProjectEmbeddingChunk(path, ordinal, content, hash, vector));
+        }
+        if (reader.BaseStream.Position != reader.BaseStream.Length)
+            throw new InvalidDataException("The semantic index contains unexpected trailing data.");
+        return new ProjectEmbeddingIndexData(model, chunks);
+    }
+
+    private static void WriteString(BinaryWriter writer, string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        writer.Write(bytes.Length);
+        writer.Write(bytes);
+    }
+
+    private static string ReadString(BinaryReader reader, int maxBytes)
+    {
+        var byteCount = reader.ReadInt32();
+        if (byteCount < 0 || byteCount > maxBytes || byteCount > reader.BaseStream.Length - reader.BaseStream.Position)
+            throw new InvalidDataException("The semantic index contains an invalid text field length.");
+        var bytes = reader.ReadBytes(byteCount);
+        if (bytes.Length != byteCount) throw new EndOfStreamException("The semantic index ended unexpectedly.");
+        return StrictUtf8.GetString(bytes);
+    }
+
+    private static void ValidateIndex(ProjectEmbeddingIndexData index)
+    {
+        if (index.Chunks is null || string.IsNullOrWhiteSpace(index.Model) || index.Model.Length > 512 || Encoding.UTF8.GetByteCount(index.Model) > 512 || index.Chunks.Count > MaxStoredChunks ||
+            index.Chunks.Any(chunk => chunk is null || string.IsNullOrWhiteSpace(chunk.RelativePath) || chunk.RelativePath.Length > 240 ||
+                Encoding.UTF8.GetByteCount(chunk.RelativePath) > 960 ||
+                chunk.Chunk < 0 || chunk.Hash is null || chunk.Hash.Length != 64 || chunk.Content is null || chunk.Content.Length > ChunkCharacters ||
+                chunk.Embedding is null || chunk.Embedding.Length is 0 or > 16_384 || chunk.Embedding.Any(value => !float.IsFinite(value))) ||
+            (index.Chunks.Count > 1 && index.Chunks.Any(chunk => chunk.Embedding.Length != index.Chunks[0].Embedding.Length)))
+            throw new InvalidDataException("The semantic index contains invalid or oversized entries. Delete and rebuild it in Settings.");
     }
 
     private bool IsStillReadable(string relativePath)

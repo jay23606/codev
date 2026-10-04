@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Codev.Tests;
@@ -86,7 +88,7 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
         var originalIndex = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root), client, "test-embed");
         await originalIndex.UpdateAsync();
         var indexPath = ProjectEmbeddingIndex.GetIndexPath(_data, _root);
-        var originalContents = await File.ReadAllTextAsync(indexPath);
+        var originalContents = await File.ReadAllBytesAsync(indexPath);
         await File.WriteAllTextAsync(Path.Combine(_root, "b.cs"), "class B {}");
 
         var constrainedIndex = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
@@ -96,7 +98,7 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
 
         Assert.Contains("byte limit", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("existing index was left unchanged", error.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(originalContents, await File.ReadAllTextAsync(indexPath));
+        Assert.Equal(originalContents, await File.ReadAllBytesAsync(indexPath));
         Assert.Equal(1, handler.InputCount);
     }
 
@@ -186,7 +188,90 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
         await File.WriteAllTextAsync(path, "not json");
         using var http = new HttpClient(new EmbeddingHandler());
         var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root), new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
-        await Assert.ThrowsAsync<JsonException>(() => index.CountAsync());
+        await Assert.ThrowsAsync<InvalidDataException>(() => index.CountAsync());
+    }
+
+    [Fact]
+    public async Task Large_embedding_vectors_use_compact_versioned_binary_storage()
+    {
+        for (var i = 0; i < 128; i++)
+            await File.WriteAllTextAsync(Path.Combine(_root, $"file-{i:D3}.cs"), $"class File{i} {{ // {new string('x', 1600)} }}");
+        var handler = new EmbeddingHandler(vectorSize: 768);
+        using var http = new HttpClient(handler);
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "nomic-embed-text"), "nomic-embed-text");
+
+        Assert.Equal(128, await index.UpdateAsync());
+
+        var path = ProjectEmbeddingIndex.GetIndexPath(_data, _root);
+        var bytes = await File.ReadAllBytesAsync(path);
+        Assert.Equal("CODEVIDX", Encoding.ASCII.GetString(bytes, 0, 8));
+        Assert.True(bytes.Length < 800_000, $"Expected compact storage for 128 768-dimensional vectors, got {bytes.Length:N0} bytes.");
+        Assert.Equal(128, await index.CountAsync());
+        Assert.Equal(8, (await index.SearchAsync("find a source file")).Count);
+    }
+
+    [Fact]
+    public async Task Migrates_a_legacy_json_index_to_binary_after_a_successful_update()
+    {
+        const string content = "class Existing { }";
+        await File.WriteAllTextAsync(Path.Combine(_root, "existing.cs"), content);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+        var legacyIndexPath = Path.ChangeExtension(ProjectEmbeddingIndex.GetIndexPath(_data, _root), ".json");
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyIndexPath)!);
+        await File.WriteAllTextAsync(legacyIndexPath, JsonSerializer.Serialize(new ProjectEmbeddingIndexData("test-embed",
+            [new ProjectEmbeddingChunk("existing.cs", 0, content, hash, [1, 0, 0])])));
+        var handler = new EmbeddingHandler();
+        using var http = new HttpClient(handler);
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
+
+        Assert.Equal(1, await index.CountAsync());
+        Assert.Equal(1, await index.UpdateAsync());
+
+        Assert.True(File.Exists(ProjectEmbeddingIndex.GetIndexPath(_data, _root)));
+        Assert.False(File.Exists(legacyIndexPath));
+        Assert.Equal(0, handler.InputCount);
+    }
+
+    [Fact]
+    public async Task Oversized_binary_index_update_preserves_the_previous_index()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), "class A {} ");
+        var handler = new EmbeddingHandler(vectorSize: 768);
+        using var http = new HttpClient(handler);
+        var client = new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed");
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root), client, "test-embed",
+            ProjectEmbeddingIndex.MaxIndexedBytes, maxIndexFileBytes: 50_000);
+        await index.UpdateAsync();
+        var path = ProjectEmbeddingIndex.GetIndexPath(_data, _root);
+        var original = await File.ReadAllBytesAsync(path);
+        await File.WriteAllTextAsync(Path.Combine(_root, "a.cs"), new string('x', 50_000));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => index.UpdateAsync());
+
+        Assert.Contains("storage limit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("existing index was left unchanged", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(original, await File.ReadAllBytesAsync(path));
+    }
+
+    [Fact]
+    public async Task Refuses_to_save_an_index_when_embedding_dimensions_change_between_batches()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "seed.cs"), "class Seed {} ");
+        var handler = new EmbeddingHandler(vectorSizeForInput: input => input.Contains("file-032.cs", StringComparison.Ordinal) ? 4 : 3);
+        using var http = new HttpClient(handler);
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
+        await index.UpdateAsync();
+        var path = ProjectEmbeddingIndex.GetIndexPath(_data, _root);
+        var original = await File.ReadAllBytesAsync(path);
+        for (var i = 0; i < 33; i++) await File.WriteAllTextAsync(Path.Combine(_root, $"file-{i:D3}.cs"), $"class File{i} {{ }}");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => index.UpdateAsync());
+
+        Assert.Contains("invalid or oversized entries", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(original, await File.ReadAllBytesAsync(path));
     }
 
     [Fact]
@@ -227,7 +312,7 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
             ? function.GetProperty("name").GetString()! : tool.GetProperty("name").GetString()!).ToArray();
     }
 
-    private sealed class EmbeddingHandler : HttpMessageHandler
+    private sealed class EmbeddingHandler(int vectorSize = 3, Func<string, int>? vectorSizeForInput = null) : HttpMessageHandler
     {
         public int InputCount { get; private set; }
         public int LastBatchSize { get; private set; }
@@ -243,7 +328,11 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
             if (input.ValueKind == JsonValueKind.Array)
                 Inputs.AddRange(input.EnumerateArray().Select(value => value.GetString() ?? ""));
             else Inputs.Add(input.GetString() ?? "");
-            var embeddings = Enumerable.Range(0, LastBatchSize).Select(_ => new[] { 1.0, 0.0, 0.5 });
+            var inputValues = input.ValueKind == JsonValueKind.Array
+                ? input.EnumerateArray().Select(value => value.GetString() ?? "").ToArray()
+                : [input.GetString() ?? ""];
+            var embeddings = Enumerable.Range(0, LastBatchSize).Select(index => Enumerable.Range(0, vectorSizeForInput?.Invoke(inputValues[index]) ?? vectorSize)
+                .Select(dimension => dimension == 0 ? 1.0 : Math.Sin(dimension) * 0.1).ToArray());
             var response = JsonSerializer.Serialize(new { embeddings });
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(response) };
         }

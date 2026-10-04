@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Authentication;
 using ModelContextProtocol.Client;
@@ -93,6 +94,8 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     private readonly List<McpClient> _clients = [];
     private readonly List<McpOAuthCallbackListener> _oauthListeners = [];
     private readonly List<IClientTransport> _transports = [];
+    private readonly List<CleanupTrackingTransport> _connectedTransports = [];
+    private readonly ConcurrentQueue<Exception> _transportCleanupFailures = new();
     private readonly Dictionary<string, McpCodeTaskTool> _tools = new(StringComparer.Ordinal);
     private readonly Dictionary<string, McpCodeTaskPrompt> _prompts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, McpCodeTaskResource> _resources = new(StringComparer.Ordinal);
@@ -172,7 +175,8 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 var phase = "startup";
                 try
                 {
-                    var transport = transportFactory(server, session);
+                    var transport = new CleanupTrackingClientTransport(transportFactory(server, session), session._transportCleanupFailures,
+                        connected => session._connectedTransports.Add(connected));
                     session._transports.Add(transport);
                     var startupPhaseTimeout = server.OAuthEnabled == true
                         ? Math.Max(server.StartupTimeoutMs ?? McpServerConfigurationStore.DefaultStartupTimeoutMs, (int)OAuthStartupTimeout.TotalMilliseconds)
@@ -421,11 +425,14 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     {
         var failures = new ConcurrentQueue<Exception>();
         var disposal = Task.WhenAll(_clients.Select(client => CaptureCleanupFailureAsync(() => DisposeClientAsync(client), failures))
+            .Concat(_connectedTransports.Select(transport => CaptureCleanupFailureAsync(() => transport.DisposeAsync().AsTask(), failures)))
             .Concat(_transports.Select(transport => CaptureCleanupFailureAsync(() => DisposeTransportAsync(transport), failures)))
             .Concat(_oauthListeners.Select(listener => CaptureCleanupFailureAsync(() => listener.DisposeAsync().AsTask(), failures))));
         try
         {
             await disposal.WaitAsync(TotalShutdownTimeout).ConfigureAwait(false);
+            while (_transportCleanupFailures.TryDequeue(out var transportFailure))
+                if (!failures.Contains(transportFailure)) failures.Enqueue(transportFailure);
             if (!failures.IsEmpty)
                 throw new IOException("One or more MCP connections failed to shut down cleanly.", new AggregateException(failures));
         }
@@ -437,6 +444,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
         finally
         {
             _clients.Clear();
+            _connectedTransports.Clear();
             _transports.Clear();
             _oauthListeners.Clear();
             _tools.Clear();
@@ -467,6 +475,43 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
             await asyncDisposable.DisposeAsync().ConfigureAwait(false);
         else if (transport is IDisposable disposable)
             disposable.Dispose();
+    }
+
+    private sealed class CleanupTrackingClientTransport(IClientTransport inner, ConcurrentQueue<Exception> failures,
+        Action<CleanupTrackingTransport> onConnected) : IClientTransport
+    {
+        public string Name => inner.Name;
+
+        public async Task<ITransport> ConnectAsync(CancellationToken cancellationToken = default)
+        {
+            var connected = new CleanupTrackingTransport(await inner.ConnectAsync(cancellationToken).ConfigureAwait(false), failures);
+            onConnected(connected);
+            return connected;
+        }
+    }
+
+    private sealed class CleanupTrackingTransport(ITransport inner, ConcurrentQueue<Exception> failures) : ITransport, IAsyncDisposable
+    {
+        private int _disposed;
+        public string SessionId => inner.SessionId ?? string.Empty;
+        public ChannelReader<JsonRpcMessage> MessageReader => inner.MessageReader;
+        public Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default) =>
+            inner.SendMessageAsync(message, cancellationToken);
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            try
+            {
+                if (inner is IAsyncDisposable asyncDisposable) await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                else if (inner is IDisposable disposable) disposable.Dispose();
+            }
+            catch (Exception ex)
+            {
+                failures.Enqueue(ex);
+                throw;
+            }
+        }
     }
 
     private static async Task CaptureCleanupFailureAsync(Func<Task> cleanup, ConcurrentQueue<Exception> failures)
