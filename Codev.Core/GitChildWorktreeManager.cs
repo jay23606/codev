@@ -224,8 +224,8 @@ public sealed class GitChildWorktreeManager
         if (!string.Equals(currentBase.Output.Trim(), targetAgain.Output.Trim(), StringComparison.Ordinal) ||
             !string.Equals(childHead.Output.Trim(), childHeadAgain.Output.Trim(), StringComparison.Ordinal))
             throw new InvalidOperationException("The parent or child branch changed during review. Refresh and review the child diff again.");
-        await EnsureNoConfiguredMergeDriversAsync(repository, cancellationToken);
-        await EnsureNoConfiguredCheckoutFiltersAsync(repository, cancellationToken);
+        await EnsureNoConfiguredMergeDriversAsync(repository, review.Files, cancellationToken);
+        await EnsureNoConfiguredCheckoutFiltersAsync(repository, review.Files, cancellationToken);
         EnsureHooksDisabledDirectory();
         var merge = await RunGitAsync(repository,
             ["-c", $"core.hooksPath={ToGitConfigPath(_hooksDisabledPath)}", "merge", "--no-ff", "--no-edit", branch], cancellationToken);
@@ -245,7 +245,8 @@ public sealed class GitChildWorktreeManager
         RejectLink(_hooksDisabledPath, "The Codev child-worktree hook override folder cannot be a link.");
     }
 
-    private static async Task EnsureNoConfiguredMergeDriversAsync(string repository, CancellationToken cancellationToken)
+    private static async Task EnsureNoConfiguredMergeDriversAsync(string repository, IReadOnlyList<string> files,
+        CancellationToken cancellationToken)
     {
         const int maximumDriverConfigCharacters = 8192;
         const int maximumDrivers = 64;
@@ -255,16 +256,23 @@ public sealed class GitChildWorktreeManager
         if (configured.ExitCode is not (0 or 1) || configured.Output.Length > maximumDriverConfigCharacters)
             throw new InvalidOperationException("Git merge-driver configuration could not be inspected safely; Codev refused to merge the child worktree.");
 
+        var driverNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var keys = configured.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         if (keys.Length > maximumDrivers || keys.Any(key => !key.StartsWith("merge.", StringComparison.OrdinalIgnoreCase) ||
                                                             !key.EndsWith(".driver", StringComparison.OrdinalIgnoreCase) ||
-                                                            key.Any(char.IsControl)))
+                                                            key.Length <= 12 || key.Any(char.IsControl)))
             throw new InvalidOperationException("Git merge-driver configuration is invalid or too large to inspect safely; Codev refused to merge the child worktree.");
-        if (keys.Length > 0)
+        foreach (var key in keys) driverNames.Add(key[6..^7]);
+        if (driverNames.Count == 0) return;
+        if (files.Any(IsGitAttributesPath))
             throw new InvalidOperationException("Git has external merge drivers configured. Codev will not run them while applying a child worktree; disable them or merge the child branch manually.");
+        var attributes = await GetChangedFileAttributesAsync(repository, files, "merge", cancellationToken).ConfigureAwait(false);
+        if (attributes.Any(driverNames.Contains))
+            throw new InvalidOperationException("Git has an external merge driver for a changed file. Codev will not run it while applying a child worktree; disable it or merge the child branch manually.");
     }
 
-    private static async Task EnsureNoConfiguredCheckoutFiltersAsync(string repository, CancellationToken cancellationToken)
+    private static async Task EnsureNoConfiguredCheckoutFiltersAsync(string repository, IReadOnlyList<string> files,
+        CancellationToken cancellationToken)
     {
         const int maximumFilterConfigCharacters = 8192;
         const int maximumFilters = 64;
@@ -290,8 +298,35 @@ public sealed class GitChildWorktreeManager
             }
         }
 
-        if (drivers.Count > 0)
-            throw new InvalidOperationException("Git has checkout filters configured. Codev will not run them while applying a child worktree; disable them or merge the child branch manually.");
+        if (drivers.Count == 0) return;
+        if (files.Any(IsGitAttributesPath))
+            throw new InvalidOperationException("Git has checkout filters configured and the child changes .gitattributes. Codev will not run them while applying the child worktree; disable them or merge the child branch manually.");
+        var attributes = await GetChangedFileAttributesAsync(repository, files, "filter", cancellationToken).ConfigureAwait(false);
+        if (attributes.Any(drivers.Contains))
+            throw new InvalidOperationException("Git has a checkout filter for a changed file. Codev will not run it while applying a child worktree; disable it or merge the child branch manually.");
+    }
+
+    private static bool IsGitAttributesPath(string path) =>
+        string.Equals(Path.GetFileName(path), ".gitattributes", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<HashSet<string>> GetChangedFileAttributesAsync(string repository,
+        IReadOnlyList<string> files, string attribute, CancellationToken cancellationToken)
+    {
+        var arguments = new List<string>(files.Count + 5) { "check-attr", "--cached", "-z", attribute, "--" };
+        arguments.AddRange(files);
+        var result = await RunGitAsync(repository, arguments, cancellationToken, 250_000).ConfigureAwait(false);
+        EnsureSuccess(result, "Git could not inspect attributes for the reviewed child changes.");
+        var fields = result.Output.Split('\0');
+        if (fields.Length == 0 || fields[^1].Length != 0 || (fields.Length - 1) % 3 != 0)
+            throw new InvalidOperationException("Git returned malformed file attributes; Codev refused to merge the child worktree.");
+        var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 2; i < fields.Length - 1; i += 3)
+        {
+            if (fields[i].Any(char.IsControl))
+                throw new InvalidOperationException("Git returned invalid file attributes; Codev refused to merge the child worktree.");
+            if (!string.Equals(fields[i], "unspecified", StringComparison.Ordinal)) values.Add(fields[i]);
+        }
+        return values;
     }
 
     private async Task<string> GetRepositoryRootAsync(string path, CancellationToken cancellationToken)

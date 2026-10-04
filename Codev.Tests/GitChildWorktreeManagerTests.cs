@@ -338,7 +338,7 @@ public sealed class GitChildWorktreeManagerTests
 
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => manager.MergeAsync(repo, review));
 
-            Assert.Contains("checkout filters", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("checkout filter", error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.False(File.Exists(marker));
             Assert.False((await new GitRepositoryService(repo).GetStatusAsync()).HasChanges);
         }
