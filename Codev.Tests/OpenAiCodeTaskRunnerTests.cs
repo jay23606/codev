@@ -77,7 +77,10 @@ public sealed class OpenAiCodeTaskRunnerTests
             1 => OpenAiSse(JsonSerializer.Serialize(new
             {
                 status = "completed",
-                output = new[] { new { type = "message", content = new[] { new { type = "output_text", text = fakeOutput } } }
+                output = new[]
+                {
+                    new { type = "message", content = new[] { new { type = "output_text", text = fakeOutput } } }
+                }
             }), fakeOutput),
             2 => OpenAiSse("""{"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"write_file","arguments":"{\"relative_path\":\"a.txt\",\"content\":\"updated\"}"}]}"""),
             _ => OpenAiSse("""{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"The requested edit is complete."}]}]}""", "The requested edit is complete.")

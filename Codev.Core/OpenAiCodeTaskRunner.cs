@@ -66,7 +66,10 @@ public sealed class OpenAiCodeTaskRunner(CloudModelApiClient client)
                     if (onTranscript is null || Stopwatch.GetElapsedTime(lastPublished) < TimeSpan.FromMilliseconds(100))
                         return Task.CompletedTask;
                     if (ToolOutputTranscriptParser.Parse(streamedText.ToString()).Outputs.Count > 0)
-                        return Task.CompletedTask;
+                    {
+                        lastPublished = Stopwatch.GetTimestamp();
+                        return PublishTranscriptAsync(transcript.ToString());
+                    }
                     lastPublished = Stopwatch.GetTimestamp();
                     return PublishTranscriptAsync(transcript.ToString() + streamedText);
                 }, cancellationToken, onRequestPayload, reasoningEffort, verbosity, reasoningMode);
