@@ -291,12 +291,9 @@ public sealed class LiveLocalModelTests
         }
     }
 
-    [AvaloniaFact]
+    [LiveOllamaFact]
     public async Task Live_auto_code_task_runs_verification_without_showing_command_approval()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
-
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-auto-verify", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "app-data");
         var project = Path.Combine(root, "project");
