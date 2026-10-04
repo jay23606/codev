@@ -3127,7 +3127,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(progressConversation ?? conversation, skill, arguments, token),
             backgroundCommands: isolatedAttempt ? null : _backgroundCommands,
             afterFileWrite: isolatedAttempt ? null : (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
-            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchAsync(query, cancellationToken: token),
+            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchFilesAsync(query, cancellationToken: token),
             permissionProjectPath: turn.ProjectPath);
         var initialTranscript = mcpSession.ToConnectionTranscript();
         var initialMessageCount = history.Count;
@@ -3423,7 +3423,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),
             backgroundCommands: _backgroundCommands,
             afterFileWrite: (relativePath, token) => RunProjectFormatterAfterWriteAsync(conversation, files, relativePath, token),
-            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchAsync(query, cancellationToken: token));
+            semanticSearch: semanticIndex is null ? null : (query, token) => semanticIndex.SearchFilesAsync(query, cancellationToken: token));
         var input = normalizedHistory.Select(message => (object)new { role = message.Role, content = message.Content }).ToList();
         var client = new Codev.CloudModelApiClient(_http);
         var runner = new Codev.OpenAiCodeTaskRunner(client);

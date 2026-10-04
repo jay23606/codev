@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -41,7 +42,6 @@ public sealed class CodeTaskToolExecutor(
             ["list_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_directory"] = 240 },
             ["read_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240 },
             ["search_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["query"] = 1_000 },
-            ["semantic_search"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["query"] = 1_000 },
             ["create_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
             ["write_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
             ["apply_patch"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["patch"] = 500_000 },
@@ -94,7 +94,6 @@ public sealed class CodeTaskToolExecutor(
                 "list_files" => ListFiles(Arg("relative_directory")),
                 "read_file" => await ReadFileAsync(Arg("relative_path"), cancellationToken),
                 "search_files" => await SearchFilesAsync(Arg("query"), cancellationToken),
-                "semantic_search" => await SemanticSearchAsync(Arg("query"), cancellationToken),
                 "create_file" => await CreateFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "write_file" => await WriteFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "apply_patch" => await ApplyPatchAsync(Arg("relative_path"), Arg("patch"), cancellationToken),
@@ -268,23 +267,60 @@ public sealed class CodeTaskToolExecutor(
 
     private async Task<string> SearchFilesAsync(string query, CancellationToken cancellationToken)
     {
-        var results = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken));
-        AddContextSource("Search results for: " + query);
-        results = Truncate(results);
-        TrackUntrustedContent("Search results for: " + query, results);
-        return UntrustedToolOutput.Format("project search results", results, activity: "search_files");
-    }
+        var source = semanticSearch is null
+            ? "Search results for: " + query
+            : "Hybrid literal and semantic search results for: " + query;
+        string body;
+        if (semanticSearch is null)
+        {
+            body = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken).ConfigureAwait(false));
+        }
+        else
+        {
+            var literal = await files.SearchFileMatchesAsync(query, cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<SemanticSearchResult> semantic = [];
+            string? semanticFailure = null;
+            try
+            {
+                semantic = await semanticSearch(query, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                semanticFailure = Truncate(ex.Message, 600);
+            }
 
-    private async Task<string> SemanticSearchAsync(string query, CancellationToken cancellationToken)
-    {
-        if (semanticSearch is null) return "Semantic search is unavailable because this conversation has not enabled it or no index is available. Enable and build the local index in Settings.";
-        var results = await semanticSearch(query, cancellationToken).ConfigureAwait(false);
-        var body = string.Join("\n\n", results.Select(result => $"{result.RelativePath} (match {result.Score:P0})\n{result.Content}"));
-        if (body.Length == 0) body = "No semantic matches found. Update the index from Settings if project files have changed.";
-        AddContextSource("Semantic search results for: " + query);
-        body = Truncate(body, 8_000);
-        TrackUntrustedContent("Semantic search results for: " + query, body);
-        return UntrustedToolOutput.Format("semantic project search results", body, activity: "semantic_search");
+            var fused = HybridProjectSearch.Fuse(literal, semantic);
+            body = string.Join("\n\n", fused.Select(FormatHybridResult));
+            if (fused.Count == 0)
+                body = "No literal or semantic matches found. Update the local index in Settings if project files have changed.";
+            if (semanticFailure is not null)
+            {
+                var literalFallback = string.Join("\n", literal.Select(match => match.ToString()));
+                body = $"Semantic ranking is unavailable; showing literal matches only. {semanticFailure}" +
+                    (literalFallback.Length == 0 ? "\nNo literal matches found." : "\n\n" + literalFallback);
+            }
+            body = Truncate(body, 8_000);
+        }
+
+        AddContextSource(source);
+        body = Truncate(body);
+        TrackUntrustedContent(source, body);
+        return UntrustedToolOutput.Format(semanticSearch is null ? "project search results" : "hybrid project search results",
+            body, activity: "search_files");
+
+        static string FormatHybridResult(HybridProjectSearchResult result)
+        {
+            var sources = new List<string>(2);
+            if (result.LiteralMatch is not null) sources.Add("literal");
+            if (result.SemanticMatch is not null) sources.Add("semantic");
+            var text = new StringBuilder($"{result.RelativePath} ({string.Join(" + ", sources)} match)");
+            if (result.LiteralMatch is { } literalMatch)
+                text.Append($"\nLiteral line {literalMatch.LineNumber}: {literalMatch.LineText}");
+            if (result.SemanticMatch is { } semanticMatch)
+                text.Append($"\nSemantic chunk {semanticMatch.Chunk} (match {semanticMatch.Score:P0}):\n{semanticMatch.Content}");
+            return text.ToString();
+        }
     }
 
     private void AddContextSource(string source)

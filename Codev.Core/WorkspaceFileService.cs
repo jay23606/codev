@@ -272,17 +272,24 @@ public sealed class WorkspaceFileService
     public async Task<IReadOnlyList<string>> SearchFilesAsync(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
-        var matches = await SearchFilesCoreAsync(query, ListFiles(maxEntries: 500), cancellationToken);
+        var matches = await SearchFilesCoreAsync(query, ListFiles(maxEntries: 500), 50, null, cancellationToken);
         return matches.Select(match => match.ToString()).ToArray();
+    }
+
+    public Task<IReadOnlyList<FileSearchMatch>> SearchFileMatchesAsync(string query, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
+        return SearchFilesCoreAsync(query, ListFiles(maxEntries: 500), 50, maxMatchesPerFile: 3, cancellationToken: cancellationToken);
     }
 
     public Task<IReadOnlyList<FileSearchMatch>> SearchContextFilesAsync(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
-        return SearchFilesCoreAsync(query, ListContextFiles(maxEntries: 500), cancellationToken);
+        return SearchFilesCoreAsync(query, ListContextFiles(maxEntries: 500), 50, null, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<FileSearchMatch>> SearchFilesCoreAsync(string query, IReadOnlyList<string> files, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<FileSearchMatch>> SearchFilesCoreAsync(string query, IReadOnlyList<string> files, int maxResults,
+        int? maxMatchesPerFile, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
         var matches = new List<FileSearchMatch>();
@@ -303,13 +310,16 @@ public sealed class WorkspaceFileService
             }
             catch (OperationCanceledException) { throw; }
             catch { continue; }
+            var fileMatches = 0;
             for (var i = 0; i < lines.Length; i++)
             {
                 if (!lines[i].Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
                 var line = lines[i].Trim();
                 if (line.Length > 320) line = line[..320] + "…";
                 matches.Add(new FileSearchMatch(relative, i + 1, line));
-                if (matches.Count >= 50) return matches;
+                fileMatches++;
+                if (matches.Count >= maxResults) return matches;
+                if (maxMatchesPerFile is { } perFileLimit && fileMatches >= perFileLimit) break;
             }
         }
         return matches;

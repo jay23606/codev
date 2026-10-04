@@ -165,6 +165,24 @@ public sealed class ProjectEmbeddingIndex
 
     public async Task<IReadOnlyList<SemanticSearchResult>> SearchAsync(string query, int limit = MaxSearchResults, CancellationToken cancellationToken = default)
     {
+        var results = await SearchCandidatesAsync(query, cancellationToken).ConfigureAwait(false);
+        return results.Take(Math.Clamp(limit, 1, MaxSearchResults)).ToArray();
+    }
+
+    /// <summary>Returns the best current semantic chunk from each file, ranked for file-level search.</summary>
+    public async Task<IReadOnlyList<SemanticSearchResult>> SearchFilesAsync(string query, int limit = MaxSearchResults,
+        CancellationToken cancellationToken = default)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var results = await SearchCandidatesAsync(query, cancellationToken).ConfigureAwait(false);
+        return results.GroupBy(result => result.RelativePath, comparer)
+            .Select(group => group.First())
+            .Take(Math.Clamp(limit, 1, MaxSearchResults))
+            .ToArray();
+    }
+
+    private async Task<List<SemanticSearchResult>> SearchCandidatesAsync(string query, CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(query) || query.Length > 1000) throw new ArgumentException("Search query must contain 1–1,000 characters.", nameof(query));
         var index = await LoadAsync(cancellationToken).ConfigureAwait(false);
         if (index is null || index.Chunks.Count == 0) return [];
@@ -185,7 +203,7 @@ public sealed class ProjectEmbeddingIndex
             throw new InvalidOperationException("The embedding model returned a different vector size than the saved index. Rebuild the index in Settings before searching.");
         return searchableChunks.Select(chunk => new SemanticSearchResult(chunk.RelativePath, chunk.Chunk, Cosine(queryVector, chunk.Embedding), chunk.Content))
             .Where(result => double.IsFinite(result.Score)).OrderByDescending(result => result.Score).ThenBy(result => result.RelativePath, StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Clamp(limit, 1, MaxSearchResults)).ToArray();
+            .ThenBy(result => result.Chunk).ToList();
     }
 
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) => (await LoadAsync(cancellationToken).ConfigureAwait(false))?.Chunks.Count ?? 0;

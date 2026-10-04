@@ -291,6 +291,21 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task File_search_returns_distinct_files_when_one_file_has_many_high_ranked_chunks()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "a-large.cs"), new string('x', ProjectEmbeddingIndex.ChunkCharacters * 10));
+        await File.WriteAllTextAsync(Path.Combine(_root, "b-small.cs"), "class Small { }");
+        using var http = new HttpClient(new EmbeddingHandler());
+        var index = new ProjectEmbeddingIndex(_data, new WorkspaceFileService(_root),
+            new OllamaEmbeddingClient(http, new Uri("http://127.0.0.1:11434"), "test-embed"), "test-embed");
+        await index.UpdateAsync();
+
+        var results = await index.SearchFilesAsync("find a source file");
+
+        Assert.Equal(new[] { "a-large.cs", "b-small.cs" }, results.Select(result => result.RelativePath).ToArray());
+    }
+
+    [Fact]
     public async Task Migrates_a_legacy_json_index_to_binary_after_a_successful_update()
     {
         const string content = "class Existing { }";
@@ -354,12 +369,15 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
     }
 
     [Fact]
-    public void Semantic_tool_is_absent_by_default_and_opt_in_for_both_providers()
+    public void Hybrid_search_is_described_as_opt_in_for_both_providers()
     {
         var shell = ShellCommandResolver.ResolveCurrent();
         Assert.DoesNotContain("semantic_search", Names(CodeTaskToolSchemaFactory.CreateOllamaTools(shell)));
-        Assert.Contains("semantic_search", Names(CodeTaskToolSchemaFactory.CreateOllamaTools(shell, allowSemanticSearch: true)));
-        Assert.Contains("semantic_search", Names(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, allowSemanticSearch: true)));
+        Assert.DoesNotContain("semantic_search", Names(CodeTaskToolSchemaFactory.CreateOllamaTools(shell, allowSemanticSearch: true)));
+        Assert.DoesNotContain("semantic_search", Names(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, allowSemanticSearch: true)));
+        Assert.Contains("literal string", FindToolDescription(CodeTaskToolSchemaFactory.CreateOllamaTools(shell), "search_files"));
+        Assert.Contains("conceptually related", FindToolDescription(CodeTaskToolSchemaFactory.CreateOllamaTools(shell, allowSemanticSearch: true), "search_files"));
+        Assert.Contains("conceptually related", FindToolDescription(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, allowSemanticSearch: true), "search_files"));
     }
 
     [Fact]
@@ -389,6 +407,15 @@ public sealed class ProjectEmbeddingIndexTests : IDisposable
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(tools, JsonSerializerOptions.Web));
         return document.RootElement.EnumerateArray().Select(tool => tool.TryGetProperty("function", out var function)
             ? function.GetProperty("name").GetString()! : tool.GetProperty("name").GetString()!).ToArray();
+    }
+
+    private static string FindToolDescription(object[] tools, string name)
+    {
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(tools, JsonSerializerOptions.Web));
+        return document.RootElement.EnumerateArray()
+            .Select(tool => tool.TryGetProperty("function", out var function) ? function : tool)
+            .Single(tool => tool.GetProperty("name").GetString() == name)
+            .GetProperty("description").GetString()!;
     }
 
     private sealed class EmbeddingHandler(int vectorSize = 3, Func<string, int>? vectorSizeForInput = null) : HttpMessageHandler
