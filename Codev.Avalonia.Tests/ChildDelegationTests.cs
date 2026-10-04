@@ -71,11 +71,9 @@ public sealed class ChildDelegationTests
         }
     }
 
-    [AvaloniaFact]
+    [LiveOllamaFact]
     public async Task Live_orchestrator_starts_two_read_only_children_in_parallel_worktrees()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CODEV_OLLAMA_LIVE_TESTS"), "1", StringComparison.Ordinal))
-            return;
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-delegation-tests", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "app-data");
         var repository = Path.Combine(root, "repository");
