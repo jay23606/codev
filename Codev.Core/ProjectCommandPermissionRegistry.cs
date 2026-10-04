@@ -81,7 +81,8 @@ public sealed class ProjectCommandPermissionRegistry
                 var normalizedPath = NormalizeProjectPath(project.ProjectPath);
                 var mode = Enum.IsDefined(project.Mode) ? project.Mode : ProjectCommandPermissionMode.AskEveryTime;
                 var rules = NormalizeRules(project.Rules);
-                registry._projects[normalizedPath] = new ProjectCommandPermissions(normalizedPath, mode, rules);
+                if (!registry._projects.TryAdd(normalizedPath, new ProjectCommandPermissions(normalizedPath, mode, rules)))
+                    throw new InvalidDataException("The permission file contains duplicate project entries.");
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or ArgumentException or NotSupportedException)
@@ -251,9 +252,11 @@ public sealed class ProjectCommandPermissionRegistry
         var normalized = new List<ProjectCommandPermissionRule>();
         foreach (var rule in rules)
         {
-            if (rule is null || rule.Decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny)) continue;
+            if (rule is null || rule.Decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny))
+                throw new InvalidDataException("The permission file contains an invalid command rule.");
             var command = NormalizeCommand(rule.Command);
-            if (command.Length is 0 or > MaxCommandLength) continue;
+            if (command.Length is 0 or > MaxCommandLength)
+                throw new InvalidDataException("The permission file contains an invalid command rule.");
             normalized.RemoveAll(item => string.Equals(item.Command, command, StringComparison.Ordinal) && item.Decision == rule.Decision);
             if (normalized.Count < MaxRulesPerProject) normalized.Add(rule with { Command = command });
         }

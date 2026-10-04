@@ -202,6 +202,48 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
     }
 
     [Fact]
+    public async Task Invalid_rule_in_auto_permissions_fails_closed_and_preserves_the_file()
+    {
+        var contents = JsonSerializer.Serialize(new[]
+        {
+            new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Auto,
+            [
+                new ProjectCommandPermissionRule("Remove-Item protected.txt", ProjectCommandPermissionDecision.Deny),
+                new ProjectCommandPermissionRule(null!, ProjectCommandPermissionDecision.Deny)
+            ])
+        });
+        await File.WriteAllTextAsync(_path, contents);
+
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+
+        Assert.False(registry.CanPersist);
+        Assert.NotNull(registry.LoadError);
+        Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, registry.GetMode(_project));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, "npm install"));
+        Assert.Equal(contents, await File.ReadAllTextAsync(_path));
+    }
+
+    [Fact]
+    public async Task Duplicate_project_entries_fail_closed_instead_of_dropping_an_earlier_deny()
+    {
+        var contents = JsonSerializer.Serialize(new[]
+        {
+            new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Auto,
+                [new ProjectCommandPermissionRule("npm install", ProjectCommandPermissionDecision.Deny)]),
+            new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Auto, [])
+        });
+        await File.WriteAllTextAsync(_path, contents);
+
+        var registry = ProjectCommandPermissionRegistry.Load(_path);
+
+        Assert.False(registry.CanPersist);
+        Assert.NotNull(registry.LoadError);
+        Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, registry.GetMode(_project));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, "npm install"));
+        Assert.Equal(contents, await File.ReadAllTextAsync(_path));
+    }
+
+    [Fact]
     public async Task Failed_persistence_does_not_leave_an_in_memory_allow_rule()
     {
         var blocker = Path.Combine(_root, "not-a-directory");
