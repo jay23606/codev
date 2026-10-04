@@ -8,10 +8,11 @@ public sealed class GitRepositoryServiceTests
     [Fact]
     public async Task Status_and_review_diffs_do_not_run_repository_fsmonitor_or_textconv_helpers()
     {
-        var root = Path.Combine(Path.GetTempPath(), "codev-git-tests", Guid.NewGuid().ToString("N"));
+        var temp = Path.Combine(Path.GetTempPath(), "codev-git-tests", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(temp, "repo");
         Directory.CreateDirectory(root);
-        var marker = Path.Combine(root, "review-helper-ran.txt");
-        var helper = Path.Combine(root, "review-helper.cjs");
+        var marker = Path.Combine(temp, "review-helper-ran.txt");
+        var helper = Path.Combine(temp, "review-helper.cjs");
         try
         {
             await RunGitAsync(root, "init", "-b", "main");
@@ -30,10 +31,11 @@ public sealed class GitRepositoryServiceTests
             await RunGitAsync(root, "config", "core.fsmonitor", $"node \"{helperPath}\"");
             await RunGitAsync(root, "config", "diff.codev-audit.textconv", $"node \"{helperPath}\"");
             await File.WriteAllTextAsync(fixture, "working change\n");
+            if (File.Exists(marker)) File.Delete(marker);
             var service = new GitRepositoryService(root);
 
             var status = await service.GetStatusAsync();
-            var file = Assert.Single(status.Files);
+            var file = Assert.Single(status.Files, candidate => candidate.Path == "fixture.txt");
             var workingDiff = await service.GetFileDiffAsync(file);
             var workingReview = await service.GetWorkingTreeReviewAsync();
             Assert.Contains("working change", workingDiff, StringComparison.Ordinal);
@@ -47,7 +49,7 @@ public sealed class GitRepositoryServiceTests
             Assert.Contains("working change", (await service.GetBranchReviewAsync("review-base")).Diff, StringComparison.Ordinal);
             Assert.False(File.Exists(marker));
         }
-        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+        finally { try { Directory.Delete(temp, recursive: true); } catch { } }
     }
 
     [Fact]
