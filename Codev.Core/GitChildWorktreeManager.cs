@@ -185,6 +185,7 @@ public sealed class GitChildWorktreeManager
         var startCommit = expectedReview.StartCommit;
         ValidateBranch(branch);
         ValidateCommit(startCommit);
+        ValidateCommit(expectedReview.ChildHead);
         if (expectedReview.Truncated) throw new InvalidOperationException("The displayed child diff was truncated. Reduce the changes before merging so they can be reviewed in full.");
         if (expectedReview.HasUncommittedChanges) throw new InvalidOperationException("Commit or discard the child's uncommitted changes before merging.");
         var currentBranch = await RunGitAsync(repository, ["branch", "--show-current"], cancellationToken);
@@ -227,8 +228,10 @@ public sealed class GitChildWorktreeManager
         await EnsureNoConfiguredMergeDriversAsync(repository, review.Files, cancellationToken);
         await EnsureNoConfiguredCheckoutFiltersAsync(repository, review.Files, cancellationToken);
         EnsureHooksDisabledDirectory();
+        // Merge the immutable object ID captured by the review. Resolving the branch name
+        // again here would leave a race between the final ref check above and Git's lookup.
         var merge = await RunGitAsync(repository,
-            ["-c", $"core.hooksPath={ToGitConfigPath(_hooksDisabledPath)}", "merge", "--no-ff", "--no-edit", branch], cancellationToken);
+            ["-c", $"core.hooksPath={ToGitConfigPath(_hooksDisabledPath)}", "merge", "--no-ff", "--no-edit", expectedReview.ChildHead], cancellationToken);
         if (merge.ExitCode != 0)
         {
             _ = await RunGitAsync(repository,
