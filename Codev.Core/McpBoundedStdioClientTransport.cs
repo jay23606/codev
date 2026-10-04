@@ -109,15 +109,19 @@ internal sealed class McpBoundedStdioClientTransport : IClientTransport
         if (process is null) return;
         try
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!process.HasExited)
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) when (process.HasExited) { }
+                catch (System.ComponentModel.Win32Exception) when (process.HasExited) { }
+            }
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
-        catch (InvalidOperationException) { }
-        catch (System.ComponentModel.Win32Exception) { }
-        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
-        catch (InvalidOperationException) { }
-        catch (System.ComponentModel.Win32Exception) { }
-        catch (TimeoutException) { }
-        process.Dispose();
+        catch (TimeoutException ex)
+        {
+            throw new IOException("The MCP stdio server process did not exit after process-tree termination was requested.", ex);
+        }
+        finally { process.Dispose(); }
     }
 
     private sealed class ProcessOwnedTransport(ITransport inner, Process process, BoundedLineReadStream output,
