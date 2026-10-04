@@ -79,6 +79,8 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             Directory.CreateDirectory(Path.Combine(project, "secrets"));
             Directory.CreateDirectory(Path.Combine(project, ".docker"));
             Directory.CreateDirectory(Path.Combine(project, ".aws"));
+            Directory.CreateDirectory(Path.Combine(project, ".config", "gh"));
+            Directory.CreateDirectory(Path.Combine(project, ".terraform"));
             await File.WriteAllTextAsync(Path.Combine(project, ".env"), "API_KEY=must-not-be-copied");
             await File.WriteAllTextAsync(Path.Combine(project, ".npmrc"), "//registry.npmjs.org/:_authToken=must-not-be-copied");
             await File.WriteAllTextAsync(Path.Combine(project, ".pypirc"), "password=must-not-be-copied");
@@ -88,6 +90,13 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             await File.WriteAllTextAsync(Path.Combine(project, ".docker", "config.json"), "{\"auths\":{\"registry\":{\"auth\":\"must-not-be-copied\"}}}");
             await File.WriteAllTextAsync(Path.Combine(project, ".aws", "credentials"), "aws_secret_access_key=must-not-be-copied");
             await File.WriteAllTextAsync(Path.Combine(project, "prod.tfvars"), "api_token = \"must-not-be-copied\"");
+            await File.WriteAllTextAsync(Path.Combine(project, ".terraform", "terraform.tfstate"), "{\"password\":\"must-not-be-copied\"}");
+            await File.WriteAllTextAsync(Path.Combine(project, "terraform.tfstate.backup"), "{\"password\":\"must-not-be-copied\"}");
+            await File.WriteAllTextAsync(Path.Combine(project, ".config", "gh", "hosts.yml"), "oauth_token: must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, ".envrc"), "export API_TOKEN=must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, ".envrc.local"), "export API_TOKEN=must-not-be-copied");
+            await File.WriteAllTextAsync(Path.Combine(project, "local.settings.json"), "{\"Values\":{\"API_KEY\":\"must-not-be-copied\"}}");
+            await File.WriteAllTextAsync(Path.Combine(project, "id_ecdsa"), "private-key-material");
             await File.WriteAllTextAsync(Path.Combine(project, "api-credential.json"), "{\"token\":\"must-not-be-copied\"}");
             await File.WriteAllTextAsync(Path.Combine(project, "id_ed25519"), "private-key-material");
             await File.WriteAllTextAsync(Path.Combine(project, "secrets", "config.json"), "{\"token\":\"nested-secret\"}");
@@ -98,7 +107,7 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             await File.WriteAllTextAsync(Path.Combine(project, ".env"), "API_KEY=rotated-after-capture");
             var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
 
-            foreach (var relativePath in new[] { ".env", ".npmrc", ".pypirc", ".netrc", "NuGet.Config", "appsettings.Production.json", "prod.tfvars", "api-credential.json", "id_ed25519" })
+            foreach (var relativePath in new[] { ".env", ".npmrc", ".pypirc", ".netrc", "NuGet.Config", "appsettings.Production.json", "prod.tfvars", ".terraform/terraform.tfstate", "terraform.tfstate.backup", ".config/gh/hosts.yml", ".envrc", ".envrc.local", "local.settings.json", "id_ecdsa", "api-credential.json", "id_ed25519" })
             {
                 Assert.False(File.Exists(Path.Combine(snapshot.RootPath, "baseline", relativePath)));
                 Assert.False(File.Exists(Path.Combine(workspace.WorkspacePath, relativePath)));
@@ -109,6 +118,10 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".docker")));
             Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", ".aws")));
             Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".aws")));
+            Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", ".config", "gh")));
+            Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".config", "gh")));
+            Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", ".terraform")));
+            Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".terraform")));
             Assert.Equal("{\"theme\":\"dark\"}", await File.ReadAllTextAsync(Path.Combine(workspace.WorkspacePath, "settings.json")));
         }
         finally

@@ -142,7 +142,7 @@ public sealed class BestOfNAttemptWorkspaceManager
             if (hadOriginal && hasResult && await FileContentsMatchAsync(beforePath!, afterPath!, baselineRoot, expectedWorkspace, cancellationToken).ConfigureAwait(false))
                 continue;
             if (!targetFiles.IsSupportedContextFile(relativePath) || targetFiles.IsContextExcluded(relativePath) ||
-                WorkspaceFileService.IsSensitiveFileName(Path.GetFileName(relativePath)))
+                WorkspaceFileService.IsSensitiveRelativePath(relativePath))
             {
                 blockers.Add($"Changed path is excluded from reviewed source-file writes: {relativePath}");
                 continue;
@@ -242,7 +242,7 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase)) continue;
                 // Keep paths that Codev itself treats as sensitive out of both the private
                 // snapshot and every model-visible attempt workspace.
-                if (WorkspaceFileService.IsSensitiveFileName(name)) continue;
+                if (WorkspaceFileService.IsSensitiveRelativePath(Path.GetRelativePath(source, entry))) continue;
                 var target = Path.GetFullPath(Path.Combine(current.Destination, name));
                 EnsureWithinRoot(destination, target);
                 if ((attributes & FileAttributes.Directory) != 0)
@@ -483,7 +483,7 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                     throw new InvalidOperationException("Snapshot contains a symbolic link or reparse point.");
                 var isDirectory = (attributes & FileAttributes.Directory) != 0;
-                if (WorkspaceFileService.IsSensitiveFileName(name)) continue;
+                if (WorkspaceFileService.IsSensitiveRelativePath(Path.GetRelativePath(root, entry))) continue;
                 entries.Add((entry, isDirectory));
                 if (isDirectory) pending.Push(entry);
             }

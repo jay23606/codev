@@ -33,17 +33,30 @@ public sealed class WorkspaceFileService
         var fileName = Path.GetFileName(name).ToLowerInvariant();
         var knownCredentialFile = fileName is ".npmrc" or ".yarnrc" or ".yarnrc.yml" or ".pypirc" or ".netrc" or "_netrc" or
             "pip.conf" or "nuget.config" or "credentials" or "kubeconfig";
-        var credentialDirectory = fileName is ".aws" or ".azure" or ".docker" or ".gcloud" or ".kube" or ".ssh";
+        var credentialDirectory = fileName is ".aws" or ".azure" or ".docker" or ".gcloud" or ".kube" or ".ssh" or ".terraform";
         var appSettings = fileName.StartsWith("appsettings", StringComparison.Ordinal) && fileName.EndsWith(".json", StringComparison.Ordinal);
-        return fileName == ".env" || fileName.StartsWith(".env.", StringComparison.Ordinal) ||
+        return fileName == ".env" || fileName == ".envrc" || fileName.StartsWith(".env.", StringComparison.Ordinal) ||
+               fileName.StartsWith(".envrc.", StringComparison.Ordinal) ||
                fileName.Contains("secret") || fileName.Contains("credential") ||
                knownCredentialFile || credentialDirectory ||
                fileName.StartsWith(".npmrc.", StringComparison.Ordinal) ||
                appSettings ||
                fileName.EndsWith(".tfvars", StringComparison.Ordinal) || fileName.EndsWith(".tfvars.json", StringComparison.Ordinal) ||
+               fileName.EndsWith(".tfstate", StringComparison.Ordinal) || fileName.EndsWith(".tfstate.backup", StringComparison.Ordinal) ||
+               fileName is "local.settings.json" or "id_ecdsa" or "id_dsa" or "id_ed25519_sk" ||
                fileName.EndsWith(".pem", StringComparison.Ordinal) || fileName.EndsWith(".pfx", StringComparison.Ordinal) ||
                fileName.EndsWith(".p12", StringComparison.Ordinal) || fileName.EndsWith(".p8", StringComparison.Ordinal) ||
                fileName.EndsWith(".key", StringComparison.Ordinal) || fileName is "id_rsa" or "id_ed25519";
+    }
+
+    public static bool IsSensitiveRelativePath(string relativePath)
+    {
+        var segments = relativePath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length >= 2 && string.Equals(segments[0], ".config", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(segments[1], "gh", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(segments[1], "gcloud", StringComparison.OrdinalIgnoreCase)))
+            return true;
+        return segments.Any(IsSensitiveFileName);
     }
 
     public static bool IsIgnoredDirectory(string name) => IgnoredDirectories.Contains(name);
@@ -562,8 +575,7 @@ public sealed class WorkspaceFileService
     private bool IsSensitivePath(string path)
     {
         var relative = Path.GetRelativePath(_root, path);
-        return relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries)
-            .Any(IsSensitiveFileName);
+        return IsSensitiveRelativePath(relative);
     }
 }
 
