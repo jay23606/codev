@@ -39,6 +39,45 @@ public sealed class McpBoundedStdioClientTransportTests
     }
 
     [Fact]
+    public async Task Windows_batch_argument_quoting_preserves_shell_metacharacters_and_percent_sequences()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        string[] expected = ["plain", "has spaces", "quote\"inside", "amp&ersand", "%PATH%", "percent %PATH% plus", "caret^and|pipe", "trailing\\", "x\" & echo INJECTED & \"y"];
+        var scriptPath = Path.Combine(Path.GetTempPath(), $"Codev-mcp-args-{Guid.NewGuid():N}.cmd");
+        await File.WriteAllTextAsync(scriptPath,
+            "@echo off\r\nnode.exe -e \"process.stdout.write(JSON.stringify(process.argv.slice(1)))\" %*\r\n");
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = McpBoundedStdioClientTransport.BuildWindowsCommandProcessorArguments(scriptPath, expected),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using var process = Process.Start(startInfo)!;
+            var output = await process.StandardOutput.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(0, process.ExitCode);
+            Assert.Equal(expected, System.Text.Json.JsonSerializer.Deserialize<string[]>(output));
+        }
+        finally
+        {
+            try { File.Delete(scriptPath); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void Windows_batch_arguments_reject_line_breaks()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            McpBoundedStdioClientTransport.BuildWindowsCommandProcessorArguments("server.cmd", ["safe\r\nunsafe"]));
+    }
+
+    [Fact]
     public async Task Bounded_stream_accepts_a_frame_at_the_limit_and_resets_for_the_next_frame()
     {
         await using var source = new MemoryStream(Encoding.UTF8.GetBytes("1234\nnext\noversize\n"));

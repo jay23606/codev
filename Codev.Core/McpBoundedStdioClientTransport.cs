@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
@@ -17,8 +16,6 @@ namespace Codev;
 internal sealed class McpBoundedStdioClientTransport : IClientTransport
 {
     public const int MaxMessageLineBytes = 8 * 1024 * 1024;
-    private static readonly Regex WindowsShellCharacters = new("[&^><|]", RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex Whitespace = new("\\s", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly StdioClientTransportOptions _options;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly int _maxMessageLineBytes;
@@ -69,18 +66,17 @@ internal sealed class McpBoundedStdioClientTransport : IClientTransport
     internal static ProcessStartInfo CreateStartInfo(StdioClientTransportOptions options)
     {
         var command = options.Command;
-        IList<string> arguments = options.Arguments ?? [];
+        var arguments = options.Arguments?.ToArray() ?? [];
         var useWindowsCommandProcessor = false;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) &&
             !string.Equals(Path.GetFileName(command), "cmd.exe", StringComparison.OrdinalIgnoreCase))
         {
             (command, useWindowsCommandProcessor) = ResolveWindowsCommand(command, options);
-            if (useWindowsCommandProcessor) arguments = ["/d", "/c", command, .. arguments];
         }
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = command,
+            FileName = useWindowsCommandProcessor ? "cmd.exe" : command,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -91,18 +87,63 @@ internal sealed class McpBoundedStdioClientTransport : IClientTransport
             StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             StandardErrorEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
         };
-        foreach (var argument in arguments)
+        if (useWindowsCommandProcessor)
         {
-            var escaped = useWindowsCommandProcessor && !Whitespace.IsMatch(argument)
-                ? WindowsShellCharacters.Replace(argument, static match => "^" + match.Value)
-                : argument;
-            startInfo.ArgumentList.Add(escaped);
+            startInfo.Arguments = BuildWindowsCommandProcessorArguments(command, arguments);
         }
+        else foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
 
         if (!options.InheritEnvironmentVariables) startInfo.Environment.Clear();
         if (options.EnvironmentVariables is not null)
             foreach (var (key, value) in options.EnvironmentVariables) startInfo.Environment[key] = value;
         return startInfo;
+    }
+
+    internal static string BuildWindowsCommandProcessorArguments(string command, IReadOnlyList<string> arguments)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command);
+        ArgumentNullException.ThrowIfNull(arguments);
+        if (arguments.Any(argument => argument.Contains('\r') || argument.Contains('\n')))
+            throw new ArgumentException("Windows batch MCP arguments cannot contain line breaks.", nameof(arguments));
+
+        var commandLine = string.Join(" ", new[] { command }.Concat(arguments).Select(QuoteWindowsCommandArgument));
+        return $"/d /s /c \"{commandLine}\"";
+    }
+
+    private static string QuoteWindowsCommandArgument(string value)
+    {
+        var output = new StringBuilder(value.Length + 2);
+        output.Append('"');
+        var backslashes = 0;
+        foreach (var character in value)
+        {
+            if (character == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            if (character == '%')
+            {
+                output.Append('\\', checked(backslashes * 2));
+                output.Append("\"^%\"");
+            }
+            else if (character == '"')
+            {
+                output.Append('\\', checked(backslashes * 2));
+                output.Append("\"\"");
+            }
+            else
+            {
+                output.Append('\\', backslashes);
+                output.Append(character);
+            }
+            backslashes = 0;
+        }
+
+        output.Append('\\', checked(backslashes * 2));
+        output.Append('"');
+        return output.ToString();
     }
 
     private static (string Command, bool UseCommandProcessor) ResolveWindowsCommand(string command, StdioClientTransportOptions options)
