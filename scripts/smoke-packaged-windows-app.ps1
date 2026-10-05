@@ -964,14 +964,37 @@ public static class CodevCommonDialog
             'Message Codev'))
     $composer = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $composerCondition)
     if ($null -eq $composer) { throw 'The named message composer is missing from the keyboard focus order.' }
+    # SetForegroundWindow can report failure when Windows' foreground lock
+    # prevents an automation host from activating a newly launched process.
+    # Verify the actual focused element below instead of treating that return
+    # value as proof that focus failed.
+    [void][CodevCommonDialog]::ActivateWindow($windowHandle)
     $composer.SetFocus()
+    $focusDeadline = [DateTime]::UtcNow.AddSeconds(2)
+    $focused = $null
+    do {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -ne $focused -and $focused.Current.ProcessId -eq $app.Id) { break }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $focusDeadline)
+    if ($null -eq $focused -or $focused.Current.ProcessId -ne $app.Id) {
+        $focusName = if ($null -eq $focused) { '<none>' } else { $focused.Current.Name }
+        $focusProcessId = if ($null -eq $focused) { 0 } else { $focused.Current.ProcessId }
+        throw "The composer did not take keyboard focus in the packaged Codev process (focused='$focusName', process=$focusProcessId)."
+    }
     $visitedTabNames = @{}
     for ($tab = 0; $tab -lt 40; $tab++) {
         [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
-        Start-Sleep -Milliseconds 40
-        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $focusDeadline = [DateTime]::UtcNow.AddMilliseconds(500)
+        do {
+            Start-Sleep -Milliseconds 25
+            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+            if ($null -ne $focused -and $focused.Current.ProcessId -eq $app.Id) { break }
+        } while ([DateTime]::UtcNow -lt $focusDeadline)
         if ($null -eq $focused -or $focused.Current.ProcessId -ne $app.Id) {
-            throw 'Tab traversal left the packaged Codev process.'
+            $focusName = if ($null -eq $focused) { '<none>' } else { $focused.Current.Name }
+            $focusProcessId = if ($null -eq $focused) { 0 } else { $focused.Current.ProcessId }
+            throw "Tab traversal left the packaged Codev process (focused='$focusName', process=$focusProcessId, tab=$($tab + 1))."
         }
         if (-not [string]::IsNullOrWhiteSpace($focused.Current.Name)) {
             $visitedTabNames[$focused.Current.Name] = $true

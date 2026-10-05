@@ -1,0 +1,73 @@
+{
+  "sourceHead": "1b1806d86cf50d42a2d52bf14228ddc5125a9e09",
+  "artifactRun": "https://github.com/jay23606/codev/actions/runs/37375343932",
+  "runtime": "win-x64 self-contained Avalonia package",
+  "machine": {
+    "os": "Microsoft Windows 11 Home",
+    "build": "26200",
+    "cpu": "AMD Ryzen AI 9 HX 370 with Radeon 890M",
+    "physicalMemoryGiB": 61.6
+  },
+  "profile": "One fresh isolated CODEV_DATA_ROOT reused for five sequential launches.",
+  "method": {
+    "startup": "Elapsed time from Start-Process invocation until the process exposes a nonzero MainWindowHandle.",
+    "idleSampling": "16 private-byte and working-set samples at 500 ms intervals after the window handle appears.",
+    "workload": "No project opened and no model request sent."
+  },
+  "startupMedianMs": 947.1,
+  "maxObservedIdlePrivateMiB": 158.9,
+  "runs": [
+    {
+      "run": 1,
+      "windowHandleMs": 947.1,
+      "idlePrivateMeanMiB": 146.0,
+      "idlePrivateMinMiB": 95.4,
+      "idlePrivateMaxMiB": 152.2,
+      "idleWorkingSetMeanMiB": 185.9,
+      "idleSampleCount": 16
+    },
+    {
+      "run": 2,
+      "windowHandleMs": 1236.3,
+      "idlePrivateMeanMiB": 145.4,
+      "idlePrivateMinMiB": 135.6,
+      "idlePrivateMaxMiB": 149.5,
+      "idleWorkingSetMeanMiB": 189.5,
+      "idleSampleCount": 16
+    },
+    {
+      "run": 3,
+      "windowHandleMs": 992.7,
+      "idlePrivateMeanMiB": 153.7,
+      "idlePrivateMinMiB": 145.2,
+      "idlePrivateMaxMiB": 158.9,
+      "idleWorkingSetMeanMiB": 190.3,
+      "idleSampleCount": 16
+    },
+    {
+      "run": 4,
+      "windowHandleMs": 897.8,
+      "idlePrivateMeanMiB": 148.5,
+      "idlePrivateMinMiB": 78.5,
+      "idlePrivateMaxMiB": 157.8,
+      "idleWorkingSetMeanMiB": 187.8,
+      "idleSampleCount": 16
+    },
+    {
+      "run": 5,
+      "windowHandleMs": 891.9,
+      "idlePrivateMeanMiB": 140.5,
+      "idlePrivateMinMiB": 77.9,
+      "idlePrivateMaxMiB": 148.1,
+      "idleWorkingSetMeanMiB": 184.2,
+      "idleSampleCount": 16
+    }
+  ],
+  "limitations": [
+    "Warm-filesystem samples from one Windows machine; this does not measure cold-machine startup.",
+    "Main-window handle is a startup proxy, not proof of first rendered frame or user-visible readiness.",
+    "Idle-only sampling does not establish memory with a long conversation or large project open.",
+    "No time-to-first-token measurement was made, and Ollama/model process memory is excluded.",
+    "These observations inform a future performance budget but do not set one."
+  ]
+}
