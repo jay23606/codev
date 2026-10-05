@@ -72,6 +72,9 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
         Write-Host "Native picker '$($Dialog.Current.Name)' filename: id='$($fileName.Current.AutomationId)' class='$($fileName.Current.ClassName)' type='$($fileName.Current.ControlType.ProgrammaticName)' bounds=$([int]$bounds.Left),$([int]$bounds.Top),$([int]$bounds.Width),$([int]$bounds.Height)"
     }
     $dialogHandle = [CodevCommonDialog]::FindWindowByTitle($null, $Dialog.Current.Name)
+    if ($dialogHandle -eq [IntPtr]::Zero) {
+        $dialogHandle = [CodevCommonDialog]::FindWindowByTitle('#32770', $null)
+    }
     $automationWindowHandle = [IntPtr]$Dialog.Current.NativeWindowHandle
     if ($dialogHandle -eq [IntPtr]::Zero) { $dialogHandle = $automationWindowHandle }
     if ($dialogHandle -eq [IntPtr]::Zero) { throw 'The native file picker window handle is missing.' }
