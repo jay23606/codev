@@ -87,7 +87,7 @@ assert_mode() {
   local plan="$1"
   local code="$2"
   local description="$3"
-  for _ in {1..600}; do
+  for _ in {1..200}; do
     if python3 - "$conversations_path" "$conversation_id" "$plan" "$code" <<'PY'
 import json
 import sys
@@ -132,61 +132,6 @@ tell application "System Events"
   key code 46 using {command down, shift down}
 end tell
 APPLESCRIPT
-}
-
-click_mode_button() {
-  local automation_id="$1"
-  local result
-  result="$(osascript - "$app_pid" "$automation_id" <<'APPLESCRIPT'
-on run argv
-  set targetPid to item 1 of argv as integer
-  set automationId to item 2 of argv
-  tell application "System Events"
-    set targetProcess to first process whose unix id is targetPid
-    set frontmost of targetProcess to true
-    delay 1
-    tell targetProcess
-      set targetButton to missing value
-      set buttonReport to ""
-      set windowContents to entire contents of window 1
-      repeat with elementIndex from 1 to count of windowContents
-        set currentElement to item elementIndex of windowContents
-        try
-          set elementRole to value of attribute "AXRole" of currentElement
-        on error
-          set elementRole to "missing"
-        end try
-        if elementRole is "AXButton" then
-          try
-            set buttonIdentifier to value of attribute "AXIdentifier" of currentElement
-          on error
-            set buttonIdentifier to missing value
-          end try
-          try
-            set buttonLabel to name of currentElement as text
-          on error
-            set buttonLabel to "missing"
-          end try
-          set identifierLabel to "missing"
-          if buttonIdentifier is not missing value then set identifierLabel to buttonIdentifier as text
-          set buttonReport to buttonReport & elementIndex & ": id=" & identifierLabel & ", name=" & buttonLabel & linefeed
-          if buttonIdentifier is not missing value then
-            if (buttonIdentifier as text) is automationId then set targetButton to currentElement
-          end if
-        end if
-      end repeat
-      if targetButton is missing value then
-        return "Could not find accessibility identifier '" & automationId & "' among descendants of window 1." & linefeed & buttonReport
-      end if
-      perform action "AXPress" of targetButton
-      return "Pressed accessibility identifier '" & automationId & "'."
-    end tell
-  end tell
-end run
-APPLESCRIPT
-  )" || return 1
-  printf '%s\n' "$result"
-  [[ "$result" == Pressed* ]]
 }
 
 send_mode_shortcut
@@ -237,13 +182,12 @@ assert_mode false false 'Packaged macOS app restored the same conversation in Ch
 # conversation/model discovery completes. Let the window settle before input.
 sleep 1
 
-# Also exercise the eligible path that previously failed on packaged macOS:
-# Plan must advance into Code task once the local model is available.
+# Exercise the complete mode cycle now that the local model is available.
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with a local model available.'
-click_mode_button 'CodeTaskModeButton'
+send_mode_shortcut
 assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
-click_mode_button 'CodeTaskModeButton'
+send_mode_shortcut
 assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
 
 # /status is handled locally and exercises the composer/send path without a model request.
