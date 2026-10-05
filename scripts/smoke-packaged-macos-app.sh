@@ -128,7 +128,7 @@ send_mode_shortcut() {
 tell application "System Events"
   set targetProcess to first process whose unix id is ${app_pid}
   set frontmost of targetProcess to true
-  delay 0.25
+  delay 1
   key code 46 using {command down, shift down}
 end tell
 APPLESCRIPT
@@ -181,6 +181,15 @@ assert_mode false false 'Packaged macOS app restored the same conversation in Ch
 # A fresh Intel-Mac process may still be compiling Skia shaders just after
 # conversation/model discovery completes. Let the window settle before input.
 sleep 1
+
+# Also exercise the eligible path that previously failed on packaged macOS:
+# Plan must advance into Code task once the local model is available.
+send_mode_shortcut
+assert_mode true false 'Packaged macOS app switched Chat → Plan with a local model available.'
+send_mode_shortcut
+assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
+send_mode_shortcut
+assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
 
 # /status is handled locally and exercises the composer/send path without a model request.
 before_message_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
