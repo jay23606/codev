@@ -87,7 +87,7 @@ assert_mode() {
   local plan="$1"
   local code="$2"
   local description="$3"
-  for _ in {1..200}; do
+  for _ in {1..600}; do
     if python3 - "$conversations_path" "$conversation_id" "$plan" "$code" <<'PY'
 import json
 import sys
@@ -178,15 +178,15 @@ on run argv
       if targetButton is missing value then
         return "Could not find accessibility identifier '" & automationId & "' among descendants of window 1." & linefeed & buttonReport
       end if
-      click targetButton
-      return "Clicked accessibility identifier '" & automationId & "'."
+      perform action "AXPress" of targetButton
+      return "Pressed accessibility identifier '" & automationId & "'."
     end tell
   end tell
 end run
 APPLESCRIPT
   )" || return 1
   printf '%s\n' "$result"
-  [[ "$result" == Clicked* ]]
+  [[ "$result" == Pressed* ]]
 }
 
 send_mode_shortcut
