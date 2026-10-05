@@ -866,6 +866,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Intel Mac preview retry (2026-10-05, exact PR head `408acab`, run [#37313500438](https://github.com/jay23606/codev/actions/runs/37313500438)).** The first osx-x64 attempt was cancelled after 25 minutes with no logs, but rerunning that terminal job passed the portable tests, app/CLI packaging, and launch checks in 2m26s. Windows, Linux, Apple Silicon, and Intel Mac preview jobs all passed on this head; public release publishing was skipped as expected for a PR. This closes the unexplained Intel cancellation for the current candidate, while the Q3 manual interaction and release-readiness checks remain open.
 
+**Platform primary-modifier shortcut validation (2026-10-05, PR head `fedb5a0`).** Avalonia now uses Command/Meta as the primary modifier on macOS and Ctrl on Windows/Linux, and its shortcut reference, mode tooltip, and agent-picker tooltip use the matching label. Headless tests exercise mode and agent shortcuts with the platform modifier and assert the displayed help labels. Exact-head [Windows/Linux/macOS CI #37318963334](https://github.com/jay23606/codev/actions/runs/37318963334) and [four-RID app/CLI preview #37318963288](https://github.com/jay23606/codev/actions/runs/37318963288) passed. The Windows packaged smoke also confirmed the updated Ctrl labels. This validates the Avalonia key-event path on macOS CI, not native Command-key delivery or a macOS desktop interaction; those Q3 checks remain open.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
