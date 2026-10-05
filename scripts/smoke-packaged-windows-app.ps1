@@ -61,13 +61,9 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
 }
 
 function Invoke-BackupDialogButton($Dialog, [string]$Name) {
-    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        $Name)
-    $button = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
-    if ($null -eq $button) { throw "The native file picker '$Name' button is missing." }
-    # The common dialog's default action is the named Save/Open button; its shell
-    # accessibility wrapper is visible in UIA but does not accept SetFocus.
+    # Common-dialog button names differ across Windows runner UIA trees. Once the
+    # dialog and filename field are verified, Enter invokes Save/Open as the user.
+    if ($Name -notin @('Save', 'Open')) { throw "Unsupported native file picker action '$Name'." }
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 }
 
