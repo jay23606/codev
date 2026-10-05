@@ -74,27 +74,12 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     Start-Sleep -Milliseconds 100
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($Path)
-    if ($env:CODEV_UI_SMOKE_DIAGNOSTICS -eq '1') {
-        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        Write-Host "Filename after typing: '$($fileName.Current.Name)' bounds=$($bounds.Left),$($bounds.Top),$($bounds.Width),$($bounds.Height); focused='$($focused.Current.Name)' id='$($focused.Current.AutomationId)' class='$($focused.Current.ClassName)'"
-    }
+    if ($fileName.Current.Name -ne $Path) { throw 'The native file picker filename does not match the requested path.' }
 }
 
 function Invoke-BackupDialogButton($Dialog, [string]$Name) {
     if ($Name -notin @('Save', 'Open')) { throw "Unsupported native file picker action '$Name'." }
-    $buttonCondition = [System.Windows.Automation.AndCondition]::new(
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-            '1'),
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            'Button'))
-    $button = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
-    if ($null -eq $button) { throw "The native file picker '$Name' button is missing." }
-    $bounds = $button.Current.BoundingRectangle
-    if ($bounds.IsEmpty) { throw "The native file picker '$Name' button is not visible." }
-    if ($env:CODEV_UI_SMOKE_DIAGNOSTICS -eq '1') { Write-Host "Picker $Name button name='$($button.Current.Name)' id='$($button.Current.AutomationId)' class='$($button.Current.ClassName)' bounds=$($bounds.Left),$($bounds.Top),$($bounds.Width),$($bounds.Height)" }
-    [CodevCommonDialog]::ClickAt([int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 }
 
 try {
