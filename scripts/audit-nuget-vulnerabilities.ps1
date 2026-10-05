@@ -13,8 +13,7 @@ $projects = @(
     'Codev.Cli/Codev.Cli.csproj',
     'Codev.Core/Codev.Core.csproj',
     'Codev.Tests/Codev.Tests.csproj',
-    'Codev.Windows.Tests/Codev.Windows.Tests.csproj',
-    'Codev.csproj'
+    'Codev.Windows.Tests/Codev.Windows.Tests.csproj'
 )
 
 Push-Location (Join-Path $PSScriptRoot '..')

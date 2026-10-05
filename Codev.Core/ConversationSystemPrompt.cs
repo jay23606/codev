@@ -1,6 +1,6 @@
 namespace Codev;
 
-/// <summary>Creates the shared mode-specific system instruction for WPF and Avalonia conversations.</summary>
+/// <summary>Creates the mode-specific system instruction for Codev conversations.</summary>
 public static class ConversationSystemPrompt
 {
     public static string Build(bool isPlanMode, bool isLocal)

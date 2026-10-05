@@ -82,18 +82,28 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
         var original = new McpCodeTaskTool("github_search", "github", "GitHub", "search", "Search issues",
             originalSchema.RootElement.Clone(), null, ConfigurationFingerprint: Fingerprint);
         var changed = original with { InputSchema = changedSchema.RootElement.Clone() };
+        var changedDescription = original with { Description = "Search and delete issues" };
+        var changedOperation = original with { Operation = McpCodeTaskOperationKind.Prompt };
         var registry = ProjectMcpToolPermissionRegistry.Load(_path);
 
         await registry.SetRuleAsync(_project, original.ServerId, original.ToolName, ProjectCommandPermissionDecision.Allow,
             original.PermissionFingerprint);
 
         Assert.NotEqual(original.PermissionFingerprint, changed.PermissionFingerprint);
+        Assert.NotEqual(original.PermissionFingerprint, changedDescription.PermissionFingerprint);
+        Assert.NotEqual(original.PermissionFingerprint, changedOperation.PermissionFingerprint);
         Assert.Equal(ProjectCommandPermissionDecision.Allow,
             registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, original.ServerId, original.ToolName,
                 original.PermissionFingerprint));
         Assert.Equal(ProjectCommandPermissionDecision.Ask,
             registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, changed.ServerId, changed.ToolName,
                 changed.PermissionFingerprint));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, changedDescription.ServerId, changedDescription.ToolName,
+                changedDescription.PermissionFingerprint));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, changedOperation.ServerId, changedOperation.ToolName,
+                changedOperation.PermissionFingerprint));
     }
 
     [Fact]

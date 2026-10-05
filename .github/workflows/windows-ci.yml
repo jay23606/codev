@@ -125,7 +125,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Restore test project and application
+      - name: Restore Windows-specific test project
         run: dotnet restore Codev.Windows.Tests\Codev.Windows.Tests.csproj
 
       - name: Restore portable test project
@@ -134,12 +134,6 @@ jobs:
       - name: Audit NuGet dependencies
         shell: pwsh
         run: ./scripts/audit-nuget-vulnerabilities.ps1
-
-      - name: Build application
-        run: dotnet build Codev.csproj --configuration Release --no-restore
-
-      - name: Publish self-contained Windows app
-        run: dotnet publish Codev.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\ci-publish
 
       - name: Run portable tests
         run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-portable-tests.trx"

@@ -1,4 +1,4 @@
-name: Legacy WPF and Avalonia build archives
+name: Avalonia build archives
 
 on:
   workflow_dispatch:
@@ -7,34 +7,6 @@ permissions:
   contents: read
 
 jobs:
-  windows-wpf:
-    name: Build Windows WPF app
-    runs-on: windows-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Restore
-        run: dotnet restore Codev.csproj
-
-      - name: Publish self-contained Windows app
-        run: dotnet publish Codev.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output artifacts\win-x64
-
-      - name: Zip the published app
-        shell: pwsh
-        run: Compress-Archive -Path artifacts\win-x64\* -DestinationPath Codev-win-x64.zip
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-wpf-win-x64
-          path: Codev-win-x64.zip
-
   avalonia-windows:
     name: Build Avalonia preview (win-x64)
     runs-on: windows-latest
