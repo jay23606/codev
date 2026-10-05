@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-05",
+  "sourceHead": "f99563fa04b7505f81cdbbfba5f80f4dd335a22f",
+  "model": "qwen3.6:35b-a3b",
+  "ollamaVersion": "0.34.4",
+  "os": "Windows 11 Home 26200",
+  "cpu": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+  "ramGiB": 61.6,
+  "contextTokens": 32768,
+  "promptTokens": 8908,
+  "syntheticProject": {
+    "files": 48,
+    "bytes": 164736,
+    "priorExchanges": 6
+  },
+  "runs": [
+    {
+      "condition": "model unloaded before request",
+      "timeToFirstTokenMs": 121779.482,
+      "modelLoadMs": 42581.9464,
+      "turnWallMs": 122286,
+      "testHostPrivateBytesBefore": 35905536,
+      "testHostPrivateBytesPeak": 42782720,
+      "testHostPrivateBytesAfter": 33923072
+    },
+    {
+      "condition": "warm repeat 1",
+      "timeToFirstTokenMs": 245.5187,
+      "modelLoadMs": 4.3257,
+      "turnWallMs": 651,
+      "testHostPrivateBytesBefore": 35229696,
+      "testHostPrivateBytesPeak": 41230336,
+      "testHostPrivateBytesAfter": 41234432
+    },
+    {
+      "condition": "warm repeat 2",
+      "timeToFirstTokenMs": 249.5644,
+      "modelLoadMs": 7.6499,
+      "turnWallMs": 758,
+      "testHostPrivateBytesBefore": 35954688,
+      "testHostPrivateBytesPeak": 42110976,
+      "testHostPrivateBytesAfter": 42110976
+    },
+    {
+      "condition": "warm repeat 3",
+      "timeToFirstTokenMs": 245.2613,
+      "modelLoadMs": 6.3788,
+      "turnWallMs": 741,
+      "testHostPrivateBytesBefore": 35475456,
+      "testHostPrivateBytesPeak": 41287680,
+      "testHostPrivateBytesAfter": 41287680
+    }
+  ],
+  "warmSummary": {
+    "timeToFirstTokenMedianMs": 245.5187,
+    "timeToFirstTokenRangeMs": [245.2613, 249.5644],
+    "turnWallMedianMs": 741,
+    "turnWallRangeMs": [651, 758],
+    "modelLoadRangeMs": [4.3257, 7.6499],
+    "testHostPeakPrivateMemoryMiBRange": [39.32, 40.16]
+  },
+  "limitations": [
+    "Synthetic project and seeded conversation rather than the real repository",
+    "Test-host memory excludes Ollama and model memory",
+    "Not packaged-app memory or visible-window readiness",
+    "One Windows machine and one local model",
+    "One unloaded-model run and three immediate warm repeats; not a cold-run distribution",
+    "Does not set or validate performance budgets"
+  ]
+}
