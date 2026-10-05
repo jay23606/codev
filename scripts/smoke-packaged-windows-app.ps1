@@ -52,21 +52,49 @@ function Wait-ForBackupDialog([string]$Title) {
 }
 
 function Set-BackupDialogPath($Dialog, [string]$Path) {
-    $fileName = Find-ByAutomationId $Dialog '1001'
+    if ($Dialog.Current.Name -eq 'Import Codev conversation backup') {
+        $fileNameCondition = [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+                '1148'),
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+                'Edit'))
+        $fileName = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $fileNameCondition)
+    }
+    else {
+        $fileName = Find-ByAutomationId $Dialog '1001'
+    }
     if ($null -eq $fileName) { throw 'The native file picker filename control is missing.' }
-    # The common dialog's initial focus varies across Windows builds. Alt+N selects
-    # its File name field; UIA does not expose a writable ValuePattern for that box.
-    [System.Windows.Forms.SendKeys]::SendWait('%n')
+    $bounds = $fileName.Current.BoundingRectangle
+    if ($bounds.IsEmpty) { throw 'The native file picker filename control is not visible.' }
+    $dialogHandle = [IntPtr]$Dialog.Current.NativeWindowHandle
+    [void][CodevCommonDialog]::SetForegroundWindow($dialogHandle)
+    [CodevCommonDialog]::ClickAt([int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
     Start-Sleep -Milliseconds 100
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($Path)
+    if ($env:CODEV_UI_SMOKE_DIAGNOSTICS -eq '1') {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        Write-Host "Filename after typing: '$($fileName.Current.Name)' bounds=$($bounds.Left),$($bounds.Top),$($bounds.Width),$($bounds.Height); focused='$($focused.Current.Name)' id='$($focused.Current.AutomationId)' class='$($focused.Current.ClassName)'"
+    }
 }
 
 function Invoke-BackupDialogButton($Dialog, [string]$Name) {
-    # Common-dialog button names differ across Windows runner UIA trees. Once the
-    # dialog and filename field are verified, Enter invokes Save/Open as the user.
     if ($Name -notin @('Save', 'Open')) { throw "Unsupported native file picker action '$Name'." }
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $buttonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+            '1'),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            'Button'))
+    $button = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+    if ($null -eq $button) { throw "The native file picker '$Name' button is missing." }
+    $bounds = $button.Current.BoundingRectangle
+    if ($bounds.IsEmpty) { throw "The native file picker '$Name' button is not visible." }
+    if ($env:CODEV_UI_SMOKE_DIAGNOSTICS -eq '1') { Write-Host "Picker $Name button name='$($button.Current.Name)' id='$($button.Current.AutomationId)' class='$($button.Current.ClassName)' bounds=$($bounds.Left),$($bounds.Top),$($bounds.Width),$($bounds.Height)" }
+    [CodevCommonDialog]::ClickAt([int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
 }
 
 try {
@@ -95,6 +123,29 @@ try {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
     Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class CodevCommonDialog
+{
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+
+    public static void ClickAt(int x, int y)
+    {
+        if (!SetCursorPos(x, y)) throw new InvalidOperationException("Could not focus the native filename field.");
+        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+    }
+}
+'@
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
     if ($null -eq $window) { throw 'Windows UI Automation could not read the packaged main window.' }
     if ($window.Current.Name -ne 'Codev') {

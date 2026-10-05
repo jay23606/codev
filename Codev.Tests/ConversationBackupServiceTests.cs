@@ -181,6 +181,23 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Backup_import_discards_untrusted_checkpoint_file_paths()
+    {
+        var backup = JsonSerializer.Serialize(new[]
+        {
+            new Conversation
+            {
+                FileChanges = [new FileChangeRecord("src/app.cs", @"C:\Users\other\AppData\Codev\checkpoint.txt", DateTimeOffset.Now, "Modified")]
+            }
+        }, Options);
+
+        var imported = Assert.Single(ConversationBackupService.Import(backup, Options));
+
+        Assert.Equal("src/app.cs", imported.FileChanges[0].RelativePath);
+        Assert.Null(imported.FileChanges[0].CheckpointPath);
+    }
+
+    [Fact]
     public void Backup_import_normalizes_null_drafts_and_caps_oversized_drafts()
     {
         var nullDraft = Assert.Single(ConversationBackupService.Import("[{\"Draft\":null,\"Messages\":[]}]", Options));
