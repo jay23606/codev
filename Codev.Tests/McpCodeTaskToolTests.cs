@@ -278,7 +278,8 @@ public sealed class McpCodeTaskToolTests
                 },
                 mcpPermissionApproval: (mcpTool, _, _) =>
                 {
-                    var decision = permissions.Evaluate(workspace, commandPermissions.GetMode(workspace), mcpTool.ServerId, mcpTool.ToolName);
+                    var decision = permissions.Evaluate(workspace, commandPermissions.GetMode(workspace), mcpTool.ServerId,
+                        mcpTool.ToolName, mcpTool.ConfigurationFingerprint);
                     if (decision == ProjectCommandPermissionDecision.Ask) promptCount++;
                     return Task.FromResult(decision switch
                     {
@@ -313,15 +314,18 @@ public sealed class McpCodeTaskToolTests
             Assert.Contains("read MCP resource templates", ToolOutputSummary.Build(parsedTemplate.Outputs), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(2, Volatile.Read(ref resourceTemplateReads));
 
-            await permissions.SetRuleAsync(workspace, tool.ServerId, tool.ToolName, ProjectCommandPermissionDecision.Deny);
+            await permissions.SetRuleAsync(workspace, tool.ServerId, tool.ToolName, ProjectCommandPermissionDecision.Deny,
+                tool.ConfigurationFingerprint);
             var denied = await executor.ExecuteAsync(tool.FunctionName, arguments.RootElement);
             Assert.Contains("Denied by a saved project MCP tool permission rule", denied, StringComparison.Ordinal);
             Assert.Equal(1, Volatile.Read(ref toolCalls));
-            await permissions.SetRuleAsync(workspace, resource.ServerId, "resource " + resource.Name, ProjectCommandPermissionDecision.Deny);
+            await permissions.SetRuleAsync(workspace, resource.ServerId, "resource " + resource.Name, ProjectCommandPermissionDecision.Deny,
+                resourceTool.ConfigurationFingerprint);
             var deniedResource = await executor.ExecuteAsync(resource.FunctionName, emptyArguments.RootElement);
             Assert.Contains("Denied by a saved project MCP tool permission rule", deniedResource, StringComparison.Ordinal);
             Assert.Equal(3, Volatile.Read(ref resourceReads));
-            await permissions.SetRuleAsync(workspace, resourceTemplate.ServerId, "resource template " + resourceTemplate.Name, ProjectCommandPermissionDecision.Deny);
+            await permissions.SetRuleAsync(workspace, resourceTemplate.ServerId, "resource template " + resourceTemplate.Name,
+                ProjectCommandPermissionDecision.Deny, session.Tools[resourceTemplate.FunctionName].ConfigurationFingerprint);
             var deniedTemplate = await executor.ExecuteAsync(resourceTemplate.FunctionName, templateArguments.RootElement);
             Assert.Contains("Denied by a saved project MCP tool permission rule", deniedTemplate, StringComparison.Ordinal);
             Assert.Equal(2, Volatile.Read(ref resourceTemplateReads));

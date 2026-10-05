@@ -3335,7 +3335,8 @@ public partial class MainWindow : Window
             return "Rejected: MCP tool arguments must be a JSON object no larger than 500,000 characters.";
         if (!IsProjectTrusted(projectPath)) return $"Rejected: project trust was revoked; the MCP {tool.Operation.DisplayName()} was not called.";
         var mode = _projectCommandPermissions.GetMode(projectPath);
-        var decision = _projectMcpPermissions.Evaluate(projectPath, mode, tool.ServerId, tool.ToolName);
+        var decision = _projectMcpPermissions.Evaluate(projectPath, mode, tool.ServerId, tool.ToolName,
+            tool.ConfigurationFingerprint);
         if (decision == ProjectCommandPermissionDecision.Deny)
             return "Denied by a saved project MCP operation permission rule; the server was not called.";
         if (decision == ProjectCommandPermissionDecision.Ask && !profileApprovalSatisfied)
@@ -3348,12 +3349,12 @@ public partial class MainWindow : Window
                 if (choice == ProjectCommandApprovalChoice.DenyExactCommand)
                 {
                     await _projectMcpPermissions.SetRuleAsync(projectPath, tool.ServerId, tool.ToolName,
-                        ProjectCommandPermissionDecision.Deny, cancellationToken);
+                        ProjectCommandPermissionDecision.Deny, tool.ConfigurationFingerprint, cancellationToken);
                     return "Denied by a saved project MCP operation permission rule; the server was not called.";
                 }
                 if (choice == ProjectCommandApprovalChoice.AllowExactCommand)
                     await _projectMcpPermissions.SetRuleAsync(projectPath, tool.ServerId, tool.ToolName,
-                        ProjectCommandPermissionDecision.Allow, cancellationToken);
+                        ProjectCommandPermissionDecision.Allow, tool.ConfigurationFingerprint, cancellationToken);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
@@ -3540,7 +3541,8 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(conversation.ProjectPath) || !IsProjectTrusted(conversation.ProjectPath))
             return CommandApprovalOutcome.Rejected;
         var mode = _projectCommandPermissions.GetMode(conversation.ProjectPath);
-        var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName);
+        var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName,
+            tool.ConfigurationFingerprint);
         if (decision == ProjectCommandPermissionDecision.Deny) return CommandApprovalOutcome.Denied;
         if (decision == ProjectCommandPermissionDecision.Allow || profileApprovalSatisfied && decision == ProjectCommandPermissionDecision.Ask)
             return CommandApprovalOutcome.Approved;
@@ -3552,7 +3554,7 @@ public partial class MainWindow : Window
         {
             await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName,
                 choice == ProjectCommandApprovalChoice.AllowExactCommand ? ProjectCommandPermissionDecision.Allow : ProjectCommandPermissionDecision.Deny,
-                cancellationToken);
+                tool.ConfigurationFingerprint, cancellationToken);
             return choice == ProjectCommandApprovalChoice.AllowExactCommand ? CommandApprovalOutcome.Approved : CommandApprovalOutcome.Denied;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)

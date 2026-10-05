@@ -410,6 +410,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public bool CanPersistProjectCommandPermissions => _projectCommandPermissions.CanPersist;
     public string ProjectCommandPermissionStoreNotice => _projectCommandPermissions.LoadError ??
         "Command permissions are stored in Codev's local app data, outside the project folder.";
+    public bool CanPersistMcpToolPermissions => _projectMcpPermissions.CanPersist;
+    public string? McpToolPermissionLoadError => _projectMcpPermissions.LoadError;
     public bool CanManageProjectTrust => HasProject && _projectFolderTrust.CanWrite && !IsFileSystemRoot(ActiveConversation!.ProjectPath!) && !IsProjectTrustInherited;
     public string ProjectTrustLabel => !HasProject ? "No folder" : !_projectFolderTrust.CanWrite ? "Trust settings unavailable" : IsFileSystemRoot(ActiveConversation!.ProjectPath!) ? "Choose project folder" :
         IsProjectTrustInherited ? "Trusted via parent" : IsProjectTrusted ? "Trusted · revoke" : "Untrusted · trust folder";
@@ -1106,7 +1108,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         if (string.IsNullOrWhiteSpace(conversation.ProjectPath)) return Codev.CommandApprovalOutcome.Rejected;
         var mode = GetProjectCommandPermissionMode(conversation.ProjectPath);
-        var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName);
+        var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName,
+            tool.ConfigurationFingerprint);
         if (decision == Codev.ProjectCommandPermissionDecision.Deny) return Codev.CommandApprovalOutcome.Denied;
         if (decision == Codev.ProjectCommandPermissionDecision.Allow) return Codev.CommandApprovalOutcome.Approved;
         if (_projectMcpPermissions.CanPersist && profileApprovalSatisfied) return Codev.CommandApprovalOutcome.Approved;
@@ -1117,12 +1120,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             if (choice == Codev.ProjectCommandApprovalChoice.RunOnce) return Codev.CommandApprovalOutcome.Approved;
             if (choice == Codev.ProjectCommandApprovalChoice.AllowExactCommand)
             {
-                await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName, Codev.ProjectCommandPermissionDecision.Allow);
+                await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName,
+                    Codev.ProjectCommandPermissionDecision.Allow, tool.ConfigurationFingerprint);
                 return Codev.CommandApprovalOutcome.Approved;
             }
             if (choice == Codev.ProjectCommandApprovalChoice.DenyExactCommand)
             {
-                await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName, Codev.ProjectCommandPermissionDecision.Deny);
+                await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName,
+                    Codev.ProjectCommandPermissionDecision.Deny, tool.ConfigurationFingerprint);
                 return Codev.CommandApprovalOutcome.Denied;
             }
         }

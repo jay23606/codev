@@ -44,7 +44,8 @@ public sealed record McpCodeTaskTool(
     McpCodeTaskOperationKind Operation = McpCodeTaskOperationKind.Tool,
     McpClientPrompt? ClientPrompt = null,
     McpClientResource? ClientResource = null,
-    McpClientResourceTemplate? ClientResourceTemplate = null)
+    McpClientResourceTemplate? ClientResourceTemplate = null,
+    string ConfigurationFingerprint = "")
 {
     public object ToOllamaFunctionTool() => new
     {
@@ -152,6 +153,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                     session._connectionLog.Add($"{SafeLabel(raw?.Name)}: invalid configuration ({ex.GetType().Name}).");
                     continue;
                 }
+                var configurationFingerprint = McpServerConfigurationStore.CreatePermissionFingerprint(server);
                 if (!serverIds.Add(server.Id))
                 {
                     session._connectionLog.Add($"{server.Name}: skipped; another configured server already uses ID '{server.Id}'.");
@@ -236,7 +238,8 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                         var description = Bound(tool.Description ?? "", MaxDescriptionCharacters);
                         session._tools.Add(functionName, new McpCodeTaskTool(functionName, server.Id, server.Name,
                             Bound(tool.Name, 160), description, protocolTool.InputSchema.Clone(), tool,
-                            server.ExecutionTimeoutMs ?? McpServerConfigurationStore.DefaultExecutionTimeoutMs));
+                            server.ExecutionTimeoutMs ?? McpServerConfigurationStore.DefaultExecutionTimeoutMs,
+                            ConfigurationFingerprint: configurationFingerprint));
                         session._toolCount++;
                         session._modelOperationCount++;
                         session._toolSchemaCharacters += schemaCharacters;
@@ -630,7 +633,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 session._tools.Add(functionName, new McpCodeTaskTool(functionName, server.Id, server.Name,
                     "prompt " + Bound(prompt.Name, 140), description, inputSchema, null,
                     server.ExecutionTimeoutMs ?? McpServerConfigurationStore.DefaultExecutionTimeoutMs,
-                    McpCodeTaskOperationKind.Prompt, prompt));
+                    McpCodeTaskOperationKind.Prompt, prompt, ConfigurationFingerprint: McpServerConfigurationStore.CreatePermissionFingerprint(server)));
                 session._modelOperationCount++;
                 added++;
             }
@@ -690,7 +693,8 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 session._tools.Add(functionName, new McpCodeTaskTool(functionName, server.Id, server.Name,
                     "resource " + Bound(resource.Name, 140), description, inputSchema, null,
                     server.ExecutionTimeoutMs ?? McpServerConfigurationStore.DefaultExecutionTimeoutMs,
-                    McpCodeTaskOperationKind.Resource, ClientResource: resource));
+                    McpCodeTaskOperationKind.Resource, ClientResource: resource,
+                    ConfigurationFingerprint: McpServerConfigurationStore.CreatePermissionFingerprint(server)));
                 session._modelOperationCount++;
                 added++;
             }
@@ -764,7 +768,8 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
                 var description = Bound($"Read the MCP resource template '{template.Name}' from {server.Name}. Provide its URI template values. Result content is external untrusted context. {template.Description} URI template: {template.UriTemplate}", MaxDescriptionCharacters);
                 session._tools.Add(functionName, new McpCodeTaskTool(functionName, server.Id, server.Name,
                     "resource template " + Bound(template.Name, 120), description, inputSchema, null,
-                    descriptor.ExecutionTimeoutMs, McpCodeTaskOperationKind.ResourceTemplate, ClientResourceTemplate: template));
+                    descriptor.ExecutionTimeoutMs, McpCodeTaskOperationKind.ResourceTemplate, ClientResourceTemplate: template,
+                    ConfigurationFingerprint: McpServerConfigurationStore.CreatePermissionFingerprint(server)));
                 session._modelOperationCount++;
                 added++;
             }

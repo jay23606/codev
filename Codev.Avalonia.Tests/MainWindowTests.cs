@@ -1467,6 +1467,60 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Auto_mcp_approval_explains_unreadable_permissions_and_keeps_run_once_available()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(appData);
+        Directory.CreateDirectory(project);
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-mcp-permissions.json"), "null");
+
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            viewModel.SetProjectFolder(project);
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            Assert.Equal(ProjectCommandPermissionMode.Auto, viewModel.ProjectCommandPermissionMode);
+            Assert.False(viewModel.CanPersistMcpToolPermissions);
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            using var schema = JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}""");
+            using var arguments = JsonDocument.Parse("""{"query":"codev"}""");
+            var tool = new McpCodeTaskTool("mcp_github_search_0123456789abcdef", "github", "GitHub", "search",
+                "Search repositories.", schema.RootElement.Clone(), null!);
+            var approve = typeof(MainViewModel).GetMethod("ApproveMcpToolWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var pending = Assert.IsAssignableFrom<Task<CommandApprovalOutcome>>(approve.Invoke(viewModel,
+                [viewModel.ActiveConversation!, tool, arguments.RootElement.Clone(), false]));
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains(viewModel.McpToolPermissionLoadError!, StringComparison.Ordinal) == true);
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains("needs approval", StringComparison.OrdinalIgnoreCase) == true);
+            var allowAndRun = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Allow + run");
+            Assert.False(allowAndRun.IsEnabled);
+            var runOnce = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Run once");
+            Assert.True(runOnce.IsEnabled);
+
+            await Dispatcher.UIThread.InvokeAsync(() => runOnce.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+
+            Assert.Equal(CommandApprovalOutcome.Approved, await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.False(window.FindControl<Border>("InlineApprovalPanel")!.IsVisible);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Mcp_executor_uses_inline_approval_and_run_once_does_not_save_a_rule()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

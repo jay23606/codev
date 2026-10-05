@@ -4,7 +4,8 @@ using System.Text.RegularExpressions;
 
 namespace Codev;
 
-public sealed record ProjectMcpToolPermissionRule(string ServerId, string ToolName, ProjectCommandPermissionDecision Decision);
+public sealed record ProjectMcpToolPermissionRule(string ServerId, string ToolName, ProjectCommandPermissionDecision Decision,
+    string? ConfigurationFingerprint = null);
 public sealed record ProjectMcpToolPermissions(string ProjectPath, List<ProjectMcpToolPermissionRule> Rules);
 
 /// <summary>Stores per-project, exact MCP server/tool allow and deny decisions outside project folders.</summary>
@@ -54,7 +55,7 @@ public sealed class ProjectMcpToolPermissionRegistry
                         throw new InvalidDataException("The MCP permission file contains an invalid tool rule.");
                     try
                     {
-                        var normalized = NormalizeRule(rule.ServerId, rule.ToolName, rule.Decision);
+                        var normalized = NormalizeRule(rule.ServerId, rule.ToolName, rule.Decision, rule.ConfigurationFingerprint);
                         rules.RemoveAll(existing => SameTool(existing, normalized) && existing.Decision == normalized.Decision);
                         rules.Add(normalized);
                     }
@@ -76,26 +77,31 @@ public sealed class ProjectMcpToolPermissionRegistry
 
     public IReadOnlyList<ProjectMcpToolPermissionRule> GetRules(string projectPath) => GetProject(projectPath)?.Rules.ToArray() ?? [];
 
-    public ProjectCommandPermissionDecision Evaluate(string projectPath, ProjectCommandPermissionMode mode, string serverId, string toolName)
+    public ProjectCommandPermissionDecision Evaluate(string projectPath, ProjectCommandPermissionMode mode, string serverId, string toolName,
+        string? configurationFingerprint = null)
     {
         if (!CanPersist) return ProjectCommandPermissionDecision.Ask;
         var permission = GetProject(projectPath);
-        var lookup = NormalizeRule(serverId, toolName, ProjectCommandPermissionDecision.Allow);
+        var lookup = NormalizeRule(serverId, toolName, ProjectCommandPermissionDecision.Allow, configurationFingerprint);
         var rules = permission?.Rules ?? [];
         if (rules.Any(rule => SameTool(rule, lookup) && rule.Decision == ProjectCommandPermissionDecision.Deny))
             return ProjectCommandPermissionDecision.Deny;
         if (mode == ProjectCommandPermissionMode.Auto) return ProjectCommandPermissionDecision.Allow;
-        if (mode == ProjectCommandPermissionMode.Allowlist && rules.Any(rule => SameTool(rule, lookup) && rule.Decision == ProjectCommandPermissionDecision.Allow))
+        if (mode == ProjectCommandPermissionMode.Allowlist && lookup.ConfigurationFingerprint is not null &&
+            rules.Any(rule => SameTool(rule, lookup) && rule.Decision == ProjectCommandPermissionDecision.Allow &&
+                string.Equals(rule.ConfigurationFingerprint, lookup.ConfigurationFingerprint, StringComparison.Ordinal)))
             return ProjectCommandPermissionDecision.Allow;
         return ProjectCommandPermissionDecision.Ask;
     }
 
     public Task SetRuleAsync(string projectPath, string serverId, string toolName, ProjectCommandPermissionDecision decision,
-        CancellationToken cancellationToken = default)
+        string? configurationFingerprint = null, CancellationToken cancellationToken = default)
     {
         if (decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny))
             throw new ArgumentOutOfRangeException(nameof(decision), "A saved MCP tool rule must allow or deny.");
-        var rule = NormalizeRule(serverId, toolName, decision);
+        var rule = NormalizeRule(serverId, toolName, decision, configurationFingerprint);
+        if (decision == ProjectCommandPermissionDecision.Allow && rule.ConfigurationFingerprint is null)
+            throw new ArgumentException("An MCP Allow rule must be bound to a server configuration fingerprint.", nameof(configurationFingerprint));
         return UpdateAsync(projectPath, project =>
         {
             var rules = project.Rules.Where(item => !SameTool(item, rule) || item.Decision != decision).ToList();
@@ -145,13 +151,17 @@ public sealed class ProjectMcpToolPermissionRegistry
         finally { _gate.Release(); }
     }
 
-    private static ProjectMcpToolPermissionRule NormalizeRule(string serverId, string toolName, ProjectCommandPermissionDecision decision)
+    private static ProjectMcpToolPermissionRule NormalizeRule(string serverId, string toolName, ProjectCommandPermissionDecision decision,
+        string? configurationFingerprint = null)
     {
         var server = (serverId ?? string.Empty).Trim();
         var tool = (toolName ?? string.Empty).Trim();
         if (!SafeId.IsMatch(server)) throw new ArgumentException("MCP server IDs must contain 1–256 safe characters.", nameof(serverId));
         if (tool.Length is 0 or > 256 || tool.Any(char.IsControl)) throw new ArgumentException("MCP tool names must contain 1–256 printable characters.", nameof(toolName));
-        return new ProjectMcpToolPermissionRule(server, tool, decision);
+        var fingerprint = string.IsNullOrWhiteSpace(configurationFingerprint) ? null : configurationFingerprint.Trim().ToLowerInvariant();
+        if (fingerprint is not null && !Regex.IsMatch(fingerprint, "^[0-9a-f]{64}$", RegexOptions.CultureInvariant))
+            throw new ArgumentException("MCP configuration fingerprints must be 64-character hexadecimal digests.", nameof(configurationFingerprint));
+        return new ProjectMcpToolPermissionRule(server, tool, decision, fingerprint);
     }
 
     private static bool SameTool(ProjectMcpToolPermissionRule first, ProjectMcpToolPermissionRule second) =>

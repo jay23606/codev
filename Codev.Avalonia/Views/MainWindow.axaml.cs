@@ -437,6 +437,14 @@ public partial class MainWindow : Window
             var panel = new StackPanel { Spacing = 8 };
             panel.Children.Add(new TextBlock { Text = $"Review MCP {tool.Operation.DisplayName()} call: {tool.ServerName} · {tool.ToolName}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
             panel.Children.Add(new TextBlock { Text = tool.Description, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
+            var viewModel = DataContext as ViewModels.MainViewModel;
+            if (viewModel is { CanPersistMcpToolPermissions: false } && !string.IsNullOrWhiteSpace(viewModel.McpToolPermissionLoadError))
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "Saved MCP permissions are unavailable. This call needs approval, and Allow + run cannot save a persistent rule. " + viewModel.McpToolPermissionLoadError,
+                    TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                    FontWeight = global::Avalonia.Media.FontWeight.SemiBold
+                });
             var args = new TextBox
             {
                 Text = arguments.GetRawText(), IsReadOnly = true, AcceptsReturn = true,
@@ -450,7 +458,14 @@ public partial class MainWindow : Window
             var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
             void Add(string label, Codev.ProjectCommandApprovalChoice choice)
             {
-                var button = new Button { Content = label, Classes = { "soft" } };
+                var button = new Button
+                {
+                    Content = label,
+                    Classes = { "soft" },
+                    IsEnabled = label != "Allow + run" || viewModel?.CanPersistMcpToolPermissions != false
+                };
+                if (label == "Allow + run" && viewModel?.CanPersistMcpToolPermissions == false)
+                    ToolTip.SetTip(button, "Saved MCP permissions are unavailable; this rule cannot be stored. Run once remains available.");
                 button.Click += (_, _) => CompleteMcpApproval(choice);
                 buttons.Children.Add(button);
             }

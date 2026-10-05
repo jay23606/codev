@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 
 namespace Codev;
 
@@ -175,6 +176,41 @@ public sealed class McpServerConfigurationStore(string path)
             OAuthClientSecretEnvironmentVariable = oauthSecretEnvironmentVariable,
             OAuthScopes = oauthScopes
         };
+    }
+
+    /// <summary>
+    /// Returns a stable, non-secret fingerprint for the configured MCP server target. Saved
+    /// project Allow rules use this so changing the endpoint or process configuration requires
+    /// a fresh approval. Secret values are deliberately excluded; only their environment
+    /// variable references are included.
+    /// </summary>
+    public static string CreatePermissionFingerprint(McpServerConfiguration server)
+    {
+        var normalized = NormalizeAndValidate(server);
+        var identity = new
+        {
+            normalized.Transport,
+            Url = normalized.Transport == McpServerTransportKind.Http
+                ? new Uri(normalized.Url, UriKind.Absolute).AbsoluteUri : "",
+            normalized.Command,
+            Arguments = normalized.Arguments ?? [],
+            normalized.WorkingDirectory,
+            EnvironmentVariables = NormalizeMappings(normalized.EnvironmentVariables, caseInsensitiveKeys: false),
+            HeaderEnvironmentVariables = NormalizeMappings(normalized.HeaderEnvironmentVariables, caseInsensitiveKeys: true),
+            normalized.OAuthEnabled,
+            normalized.OAuthClientId,
+            normalized.OAuthClientSecretEnvironmentVariable,
+            OAuthScopes = (normalized.OAuthScopes ?? []).OrderBy(value => value, StringComparer.Ordinal).ToArray()
+        };
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(identity, JsonOptions);
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+        static KeyValuePair<string, string>[] NormalizeMappings(IReadOnlyDictionary<string, string>? mappings, bool caseInsensitiveKeys) =>
+            (mappings ?? new Dictionary<string, string>())
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => new KeyValuePair<string, string>(caseInsensitiveKeys ? pair.Key.ToLowerInvariant() : pair.Key, pair.Value))
+                .ToArray();
     }
 
     private static void ValidateTimeout(int? timeoutMs, int maximum, string phase)

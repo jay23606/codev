@@ -7,6 +7,7 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "Codev-mcp-permissions", Guid.NewGuid().ToString("N"));
     private readonly string _project = Path.Combine(Path.GetTempPath(), "Codev-mcp-project", Guid.NewGuid().ToString("N"));
     private readonly string _path;
+    private const string Fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     public ProjectMcpToolPermissionRegistryTests()
     {
@@ -35,8 +36,8 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
         Assert.Equal(ProjectCommandPermissionDecision.Deny, registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search"));
 
         await registry.RemoveRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Deny);
-        await registry.SetRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Allow);
-        Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search"));
+        await registry.SetRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Allow, Fingerprint);
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search", Fingerprint));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "create_issue"));
     }
 
@@ -44,11 +45,53 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
     public async Task Rules_persist_and_apply_only_to_the_same_project()
     {
         var registry = ProjectMcpToolPermissionRegistry.Load(_path);
-        await registry.SetRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Allow);
+        await registry.SetRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Allow, Fingerprint);
         var reloaded = ProjectMcpToolPermissionRegistry.Load(_path);
 
-        Assert.Equal(ProjectCommandPermissionDecision.Allow, reloaded.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search"));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, reloaded.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search", Fingerprint));
         Assert.Equal(ProjectCommandPermissionDecision.Ask, reloaded.Evaluate(_project + "-other", ProjectCommandPermissionMode.Allowlist, "github", "search"));
+    }
+
+    [Fact]
+    public async Task Changing_http_endpoint_with_same_server_id_and_tool_requires_a_new_allow()
+    {
+        var original = new McpServerConfiguration("github", "GitHub", McpServerTransportKind.Http, true,
+            Url: "https://api.example.test/mcp", OAuthEnabled: false);
+        var replacement = original with { Url = "https://attacker.example.test/mcp" };
+        var originalFingerprint = McpServerConfigurationStore.CreatePermissionFingerprint(original);
+        var replacementFingerprint = McpServerConfigurationStore.CreatePermissionFingerprint(replacement);
+        var registry = ProjectMcpToolPermissionRegistry.Load(_path);
+
+        await registry.SetRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Allow, originalFingerprint);
+
+        Assert.Equal(ProjectCommandPermissionDecision.Allow,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search", originalFingerprint));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search", replacementFingerprint));
+
+        await registry.SetRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Deny);
+        Assert.Equal(ProjectCommandPermissionDecision.Deny,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Auto, "github", "search", replacementFingerprint));
+    }
+
+    [Fact]
+    public void Legacy_allow_rule_without_fingerprint_fails_closed_but_legacy_deny_still_applies()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new[]
+        {
+            new ProjectMcpToolPermissions(_project,
+            [
+                new ProjectMcpToolPermissionRule("github", "search", ProjectCommandPermissionDecision.Allow),
+                new ProjectMcpToolPermissionRule("github", "delete", ProjectCommandPermissionDecision.Deny)
+            ])
+        });
+        File.WriteAllText(_path, json);
+        var registry = ProjectMcpToolPermissionRegistry.Load(_path);
+
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, "github", "search", Fingerprint));
+        Assert.Equal(ProjectCommandPermissionDecision.Deny,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Auto, "github", "delete", Fingerprint));
     }
 
     [Fact]
@@ -123,7 +166,8 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
             start.Set();
             for (var index = 0; index < projects.Length; index++)
                 await registry.SetRuleAsync(projects[index], "github", "search",
-                    index % 2 == 0 ? ProjectCommandPermissionDecision.Deny : ProjectCommandPermissionDecision.Allow);
+                    index % 2 == 0 ? ProjectCommandPermissionDecision.Deny : ProjectCommandPermissionDecision.Allow,
+                    Fingerprint);
         });
 
         await Task.WhenAll(readers.Append(writer));
