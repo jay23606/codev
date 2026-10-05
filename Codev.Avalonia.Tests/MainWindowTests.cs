@@ -378,6 +378,73 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Conversation_mode_shortcut_explains_hosted_remote_and_untrusted_ineligibility()
+    {
+        var scenarios = new[]
+        {
+            (Name: "anthropic", Provider: "anthropic", Endpoint: Codev.OllamaEndpoint.Default.ToString(), Project: false,
+                Reason: "Hosted Code task currently supports OpenAI only"),
+            (Name: "openai-no-key", Provider: "openai", Endpoint: Codev.OllamaEndpoint.Default.ToString(), Project: false,
+                Reason: "Connect OpenAI and approve hosted requests"),
+            (Name: "remote-ollama", Provider: "ollama", Endpoint: "http://192.0.2.1:11434", Project: false,
+                Reason: "Code task requires Ollama at a local loopback address"),
+            (Name: "untrusted-project", Provider: "ollama", Endpoint: Codev.OllamaEndpoint.Default.ToString(), Project: true,
+                Reason: "Trust the attached project folder")
+        };
+
+        foreach (var scenario in scenarios)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+            var codevDirectory = Path.Combine(root, "Codev");
+            Directory.CreateDirectory(codevDirectory);
+            File.WriteAllText(Path.Combine(codevDirectory, "avalonia-settings.json"),
+                JsonSerializer.Serialize(new AvaloniaUiSettings("dark", scenario.Endpoint)));
+            var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+            MainViewModel? viewModel = null;
+            MainWindow? window = null;
+            try
+            {
+                viewModel = new MainViewModel(root, handler);
+                var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+                conversation.Messages.Add(new("user", "Keep this conversation in Chat mode."));
+                if (scenario.Project)
+                {
+                    var untrustedProject = Path.Combine(root, "untrusted-project");
+                    Directory.CreateDirectory(untrustedProject);
+                    conversation.ProjectPath = untrustedProject;
+                }
+                viewModel.SelectedModel = new ModelChoice("test-model", "Test model", scenario.Provider);
+
+                window = new MainWindow { DataContext = viewModel };
+                window.Show();
+                window.UpdateLayout();
+
+                void PressModeShortcut() => window.RaiseEvent(new KeyEventArgs
+                {
+                    RoutedEvent = InputElement.KeyDownEvent,
+                    Key = Key.M,
+                    KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift
+                });
+
+                PressModeShortcut();
+                Assert.True(viewModel.IsPlanMode);
+                Assert.False(viewModel.IsCodeTask);
+                PressModeShortcut();
+                Assert.False(viewModel.IsPlanMode);
+                Assert.False(viewModel.IsCodeTask);
+                Assert.Contains(scenario.Reason, viewModel.ContextActionStatus, StringComparison.Ordinal);
+            }
+            finally
+            {
+                window?.Close();
+                if (viewModel is not null) await StopAndFlushAsync(viewModel);
+                await DeleteAutoModeTestDirectoryAsync(root);
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Icon_only_composer_action_exposes_a_descriptive_accessibility_name()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
