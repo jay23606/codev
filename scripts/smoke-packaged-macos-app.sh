@@ -134,6 +134,25 @@ end tell
 APPLESCRIPT
 }
 
+click_mode_button() {
+  local button_name="$1"
+  osascript - "$app_pid" "$button_name" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set buttonName to item 2 of argv
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 1
+    tell targetProcess
+      log (name of every button of window 1)
+      click (first button of window 1 whose name is buttonName)
+    end tell
+  end tell
+end run
+APPLESCRIPT
+}
+
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with Command+Shift+M.'
 send_mode_shortcut
@@ -186,9 +205,9 @@ sleep 1
 # Plan must advance into Code task once the local model is available.
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with a local model available.'
-send_mode_shortcut
+click_mode_button 'Enable Code task'
 assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
-send_mode_shortcut
+click_mode_button 'Code task on'
 assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
 
 # /status is handled locally and exercises the composer/send path without a model request.
