@@ -178,6 +178,9 @@ if conversation is None or conversation.get("Model") != "codev-smoke:latest":
     raise SystemExit("macOS packaged app did not select the mock Ollama model before chat interaction.")
 PY
 assert_mode false false 'Packaged macOS app restored the same conversation in Chat mode after relaunch.'
+# A fresh Intel-Mac process may still be compiling Skia shaders just after
+# conversation/model discovery completes. Let the window settle before input.
+sleep 1
 
 # /status is handled locally and exercises the composer/send path without a model request.
 before_message_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
@@ -199,7 +202,7 @@ on run argv
   tell application "System Events"
     set targetProcess to first process whose unix id is targetPid
     set frontmost of targetProcess to true
-    delay 0.25
+    delay 1
     key code 37 using {command down}
     keystroke "/status"
     key code 36
@@ -246,8 +249,10 @@ with open(sys.argv[1], encoding="utf-8") as source:
 conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
 messages = conversation.get("Messages", []) if conversation else []
 if len(messages) < 2 or messages[-2].get("Content") != "/status" or messages[-1].get("Role") != "assistant":
+    print(f"Last persisted messages: {messages[-4:]!r}", file=sys.stderr)
     raise SystemExit("Packaged macOS app did not persist the expected local /status response.")
 if "Model: Ollama (local)" not in messages[-1].get("Content", "") or "Project command permissions:" not in messages[-1].get("Content", ""):
+    print(f"Persisted /status response: {messages[-1]!r}", file=sys.stderr)
     raise SystemExit("Packaged macOS app persisted an incomplete /status report.")
 PY
 
