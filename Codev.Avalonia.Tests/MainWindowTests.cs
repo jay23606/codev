@@ -24,7 +24,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public async Task Model_picker_shows_loading_empty_and_unavailable_states_without_blank_options()
     {
-        var root = Path.Combine(Path.GetTempPath(), "Codev-model-picker-ui", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "app-data");
         var settingsDirectory = Path.Combine(appData, "Codev");
         Directory.CreateDirectory(settingsDirectory);
