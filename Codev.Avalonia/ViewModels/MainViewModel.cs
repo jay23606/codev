@@ -65,7 +65,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private readonly SemaphoreSlim _activeConversationPersistGate = new(1, 1);
     private long _persistenceRevision;
     private long _activeConversationRevision;
-    private readonly HttpClient _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly HttpClient _http;
     private readonly Codev.CloudApiKeyVault _cloudApiKeyVault = new();
     private Task _savedCloudApiKeysRestoreTask = Task.CompletedTask;
     private Task _managedWorkspacePermissionDefaultsTask = Task.CompletedTask;
@@ -180,8 +180,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     [
     ];
 
-    public MainViewModel(string? localDataRoot = null)
+    public MainViewModel(string? localDataRoot = null, HttpMessageHandler? httpMessageHandler = null)
     {
+        _http = new HttpClient(httpMessageHandler ?? new SocketsHttpHandler { AllowAutoRedirect = false })
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
         var dataRoot = Path.GetFullPath(localDataRoot ?? Codev.CodevDataPaths.LocalDataRoot);
         var appData = Path.Combine(dataRoot, "Codev");
         StorePath = Path.Combine(appData, "avalonia-conversations.json");

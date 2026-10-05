@@ -12,7 +12,6 @@ using Codev;
 using Codev.Avalonia.ViewModels;
 using Codev.Avalonia.Views;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 using System.Reflection;
 using System.Text.Json;
@@ -29,35 +28,30 @@ public sealed class MainWindowTests
         var settingsDirectory = Path.Combine(appData, "Codev");
         Directory.CreateDirectory(settingsDirectory);
 
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var endpoint = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
+        var endpoint = "http://127.0.0.1:11434";
         File.WriteAllText(Path.Combine(settingsDirectory, "avalonia-settings.json"),
             JsonSerializer.Serialize(new AvaloniaUiSettings("dark", endpoint)));
 
-        using var serverTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var requestAccepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var returnEmptyModels = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var serverTask = Task.Run(async () =>
+        var firstRequestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseEmptyModelsResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestCount = 0;
+        var httpHandler = new TestHttpMessageHandler((request, cancellationToken) =>
         {
-            using var client = await listener.AcceptTcpClientAsync(serverTimeout.Token);
-            requestAccepted.TrySetResult();
-            await returnEmptyModels.Task.WaitAsync(serverTimeout.Token);
+            Assert.EndsWith("/api/tags", request.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+            if (Interlocked.Increment(ref requestCount) == 1)
+            {
+                firstRequestStarted.TrySetResult();
+                return releaseEmptyModelsResponse.Task.WaitAsync(cancellationToken);
+            }
 
-            var body = Encoding.UTF8.GetBytes("{\"models\":[]}");
-            var header = Encoding.ASCII.GetBytes(
-                $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
-            await using var stream = client.GetStream();
-            await stream.WriteAsync(header, serverTimeout.Token);
-            await stream.WriteAsync(body, serverTimeout.Token);
-            await stream.FlushAsync(serverTimeout.Token);
-        }, serverTimeout.Token);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        });
 
         MainViewModel? viewModel = null;
         MainWindow? window = null;
         try
         {
-            viewModel = new MainViewModel(appData);
+            viewModel = new MainViewModel(appData, httpHandler);
             var initialLoad = (Task)typeof(MainViewModel)
                 .GetField("_modelLoadTask", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(viewModel)!;
@@ -65,7 +59,7 @@ public sealed class MainWindowTests
             window.Show();
             window.UpdateLayout();
 
-            await requestAccepted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             await Dispatcher.UIThread.InvokeAsync(() => window.UpdateLayout());
             var modelPicker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ModelPicker"));
             var placeholder = Assert.Single(window.GetVisualDescendants().OfType<TextBlock>(),
@@ -73,9 +67,11 @@ public sealed class MainWindowTests
             Assert.False(modelPicker.IsVisible);
             Assert.True(placeholder.IsVisible);
 
-            returnEmptyModels.TrySetResult();
+            releaseEmptyModelsResponse.TrySetResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"models\":[]}", Encoding.UTF8, "application/json")
+            });
             await initialLoad.WaitAsync(TimeSpan.FromSeconds(5));
-            await serverTask;
             await Dispatcher.UIThread.InvokeAsync(() => window.UpdateLayout());
 
             Assert.Empty(viewModel.Models);
@@ -85,11 +81,7 @@ public sealed class MainWindowTests
             Assert.Equal("No local chat models installed", placeholder.Text);
             Assert.Contains("Ollama connected · no chat-capable models installed", viewModel.ConnectionStatus, StringComparison.Ordinal);
 
-            using var closedPortReservation = new TcpListener(IPAddress.Loopback, 0);
-            closedPortReservation.Start();
-            var unavailableEndpoint = $"http://127.0.0.1:{((IPEndPoint)closedPortReservation.LocalEndpoint).Port}";
-            closedPortReservation.Stop();
-            Assert.True(await viewModel.SetOllamaEndpointAsync(unavailableEndpoint));
+            Assert.True(await viewModel.SetOllamaEndpointAsync("http://127.0.0.1:11435"));
             await Dispatcher.UIThread.InvokeAsync(() => window.UpdateLayout());
 
             Assert.False(viewModel.HasModels);
@@ -100,12 +92,12 @@ public sealed class MainWindowTests
         }
         finally
         {
-            returnEmptyModels.TrySetResult();
+            releaseEmptyModelsResponse.TrySetResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"models\":[]}", Encoding.UTF8, "application/json")
+            });
             window?.Close();
             if (viewModel is not null) await StopAndFlushAsync(viewModel);
-            listener.Stop();
-            try { await serverTask; }
-            catch (Exception ex) when (ex is OperationCanceledException or SocketException or ObjectDisposedException) { }
             await DeleteAutoModeTestDirectoryAsync(root);
         }
     }
@@ -1534,6 +1526,13 @@ public sealed class MainWindowTests
         public event EventHandler? CanExecuteChanged { add { } remove { } }
         public bool CanExecute(object? parameter) => true;
         public void Execute(object? parameter) { }
+    }
+
+    private sealed class TestHttpMessageHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sendAsync) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            sendAsync(request, cancellationToken);
     }
 
     private sealed class TestAgentProfileEditorService(UserAgentProfileStore store) : Codev.Avalonia.ViewModels.IUserAgentProfileEditorService
