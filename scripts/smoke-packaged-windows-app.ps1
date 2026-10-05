@@ -298,6 +298,34 @@ public static class CodevCommonDialog
         }
     }
 
+    $composerCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Message Codev'))
+    $composer = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $composerCondition)
+    if ($null -eq $composer) { throw 'The named message composer is missing from the keyboard focus order.' }
+    $composer.SetFocus()
+    $visitedTabNames = @{}
+    for ($tab = 0; $tab -lt 40; $tab++) {
+        [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+        Start-Sleep -Milliseconds 40
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -eq $focused -or $focused.Current.ProcessId -ne $app.Id) {
+            throw 'Tab traversal left the packaged Codev process.'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($focused.Current.Name)) {
+            $visitedTabNames[$focused.Current.Name] = $true
+        }
+    }
+    foreach ($requiredTabName in @('Search conversations', 'Message Codev', 'Response style')) {
+        if (-not $visitedTabNames.ContainsKey($requiredTabName)) {
+            throw "Tab traversal did not reach the accessible control '$requiredTabName'."
+        }
+    }
+
     $sendName = 'Send or queue prompt; stop when the composer is empty'
     $buttonCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
@@ -393,7 +421,7 @@ public static class CodevCommonDialog
 
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal to the search, composer, and response-style controls, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -460,7 +488,7 @@ public static class CodevCommonDialog
     }
 
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, and the Auto footer selector. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, and successful Tab traversal to the search, composer, and response-style controls. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
