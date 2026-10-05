@@ -499,6 +499,67 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Composer_suggestion_search_survives_a_new_edit_after_its_debounce()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        MainWindow? window = null;
+        var dispatcherExceptions = new List<Exception>();
+        DispatcherUnhandledExceptionEventHandler onDispatcherException = (_, args) =>
+        {
+            if (args.Exception is ObjectDisposedException &&
+                args.Exception.StackTrace?.Contains("MainWindow.Composer_TextChanged", StringComparison.Ordinal) == true)
+            {
+                dispatcherExceptions.Add(args.Exception);
+                args.Handled = true;
+            }
+        };
+        Dispatcher.UIThread.UnhandledException += onDispatcherException;
+        try
+        {
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var composer = Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox"));
+            var textChanged = typeof(MainWindow).GetMethod("Composer_TextChanged", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(textChanged);
+
+            void SetComposerText(string text)
+            {
+                composer.Text = text;
+                composer.CaretIndex = text.Length;
+                textChanged!.Invoke(window, [composer, null]);
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                SetComposerText("/sta");
+                Thread.Sleep(150);
+                SetComposerText("/status");
+            });
+            await Task.Delay(250);
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                SetComposerText("@src/");
+                Thread.Sleep(170);
+                SetComposerText("@readme");
+            });
+            await Task.Delay(250);
+
+            Assert.Empty(dispatcherExceptions);
+        }
+        finally
+        {
+            Dispatcher.UIThread.UnhandledException -= onDispatcherException;
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Context_size_picker_tracks_each_conversation_and_applies_model_cap()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

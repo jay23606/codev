@@ -1718,12 +1718,13 @@ public partial class MainWindow : Window
             FileMentionPopup.IsOpen = false;
             _activeFileMention = null;
             var slashSearch = _slashCommandSearch = new CancellationTokenSource();
+            var slashSearchToken = slashSearch.Token;
             var slashCaretIndex = ComposerTextBox.CaretIndex;
             try
             {
-                await Task.Delay(100, slashSearch.Token);
-                var commands = await viewModel.GetSlashCommandSuggestionsAsync(text, slashCaretIndex, slashSearch.Token);
-                if (slashSearch.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) ||
+                await Task.Delay(100, slashSearchToken);
+                var commands = await viewModel.GetSlashCommandSuggestionsAsync(text, slashCaretIndex, slashSearchToken);
+                if (slashSearchToken.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) ||
                     ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != slashCaretIndex) return;
                 SlashCommandListBox.ItemsSource = commands;
                 SlashCommandListBox.SelectedIndex = -1;
@@ -1743,12 +1744,13 @@ public partial class MainWindow : Window
         }
 
         var search = _fileMentionSearch = new CancellationTokenSource();
+        var searchToken = search.Token;
         var caretIndex = ComposerTextBox.CaretIndex;
         try
         {
-            await Task.Delay(120, search.Token);
-            var suggestions = await Task.Run(() => viewModel.GetProjectFileSuggestions(mention.Prefix), search.Token);
-            if (search.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) || ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != caretIndex) return;
+            await Task.Delay(120, searchToken);
+            var suggestions = await Task.Run(() => viewModel.GetProjectFileSuggestions(mention.Prefix), searchToken);
+            if (searchToken.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) || ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != caretIndex) return;
             FileMentionListBox.ItemsSource = suggestions;
             FileMentionListBox.SelectedIndex = -1;
             _activeFileMention = suggestions.Count > 0 ? mention : null;
