@@ -68,12 +68,27 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     if ($null -eq $fileName) { throw 'The native file picker filename control is missing.' }
     $bounds = $fileName.Current.BoundingRectangle
     if ($bounds.IsEmpty) { throw 'The native file picker filename control is not visible.' }
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        Write-Host "Native picker '$($Dialog.Current.Name)' filename: id='$($fileName.Current.AutomationId)' class='$($fileName.Current.ClassName)' type='$($fileName.Current.ControlType.ProgrammaticName)' bounds=$([int]$bounds.Left),$([int]$bounds.Top),$([int]$bounds.Width),$([int]$bounds.Height)"
+    }
     $dialogHandle = [IntPtr]$Dialog.Current.NativeWindowHandle
     [void][CodevCommonDialog]::SetForegroundWindow($dialogHandle)
     [CodevCommonDialog]::ClickAt([int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
     Start-Sleep -Milliseconds 100
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($Path)
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        Write-Host "Native picker filename after input: expected=$($fileName.Current.Name -eq $Path), focused-id='$($focused.Current.AutomationId)', focused-class='$($focused.Current.ClassName)'"
+        $controls = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($control in $controls) {
+            if ($control.Current.ClassName -notin @('Edit', 'Button', 'ComboBox', 'ComboBoxEx32')) { continue }
+            $controlBounds = $control.Current.BoundingRectangle
+            if ($controlBounds.IsEmpty) { continue }
+            $safeName = if ($control.Current.Name -in @('Save', 'Open', 'Cancel', 'File name:')) { $control.Current.Name } else { '' }
+            Write-Host "Native picker control: name='$safeName' id='$($control.Current.AutomationId)' class='$($control.Current.ClassName)' type='$($control.Current.ControlType.ProgrammaticName)' bounds=$([int]$controlBounds.Left),$([int]$controlBounds.Top),$([int]$controlBounds.Width),$([int]$controlBounds.Height)"
+        }
+    }
 }
 
 function Invoke-BackupDialogButton($Dialog, [string]$Name) {
