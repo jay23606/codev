@@ -28,6 +28,7 @@ Add-Type -AssemblyName UIAutomationTypes
 $smokeRoot = Join-Path $env:RUNNER_TEMP ("Codev-upgrade-smoke-" + [guid]::NewGuid().ToString('N'))
 $previousArchive = Join-Path $smokeRoot 'previous-release.zip'
 $previousDirectory = Join-Path $smokeRoot 'previous-release'
+$currentInstallDirectory = Join-Path $smokeRoot 'current-install'
 $stdoutPath = Join-Path $smokeRoot 'codev.stdout.log'
 $stderrPath = Join-Path $smokeRoot 'codev.stderr.log'
 $previousReleaseUri = 'https://github.com/jay23606/codev/releases/latest/download/Codev-Avalonia-preview-win-x64.zip'
@@ -136,7 +137,15 @@ try {
 
     Stop-CodevPackage
 
-    $currentWindow = Start-CodevPackage $CurrentAppPath
+    $currentPackageSource = Split-Path -Parent (Resolve-Path -LiteralPath $CurrentAppPath).Path
+    New-Item -ItemType Directory -Path $currentInstallDirectory | Out-Null
+    Get-ChildItem -LiteralPath $currentPackageSource -Force | Copy-Item -Destination $currentInstallDirectory -Recurse -Force
+    $currentInstallAppPath = Join-Path $currentInstallDirectory 'Codev.Avalonia.exe'
+    if (-not (Test-Path -LiteralPath $currentInstallAppPath -PathType Leaf)) {
+        throw 'The isolated current-package copy did not contain Codev.Avalonia.exe.'
+    }
+
+    $currentWindow = Start-CodevPackage $currentInstallAppPath
     $currentComposer = Find-Composer $currentWindow
     $currentValuePattern = $null
     if (-not $currentComposer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$currentValuePattern)) {
@@ -153,7 +162,37 @@ try {
     }
 
     Stop-CodevPackage
-    Write-Host 'Upgrade smoke passed: a draft saved by the latest public Windows release survived an update to the current package. No prompt was sent.'
+
+    $persistedAfterUpgrade = @(Get-Content -LiteralPath $conversationsPath -Raw | ConvertFrom-Json -AsHashtable |
+        Where-Object { $_.Draft -ceq $draft })
+    if ($persistedAfterUpgrade.Count -ne 1) {
+        throw 'The upgraded profile did not retain the sentinel draft before package removal.'
+    }
+
+    $resolvedSmokeRoot = [System.IO.Path]::GetFullPath($smokeRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $resolvedInstallDirectory = [System.IO.Path]::GetFullPath($currentInstallDirectory)
+    if (-not $resolvedInstallDirectory.StartsWith($resolvedSmokeRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing to remove a package directory outside the isolated upgrade-smoke folder.'
+    }
+    $installEntry = Get-Item -LiteralPath $resolvedInstallDirectory -Force
+    if (-not $installEntry.PSIsContainer -or ($installEntry.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'Refusing to remove an unexpected or linked current-package directory.'
+    }
+
+    Remove-Item -LiteralPath $resolvedInstallDirectory -Recurse -Force
+    if (Test-Path -LiteralPath $resolvedInstallDirectory) {
+        throw 'The isolated current-package directory remained after simulated portable-package uninstall.'
+    }
+    if (-not (Test-Path -LiteralPath $conversationsPath -PathType Leaf)) {
+        throw 'Removing the portable package also removed the user conversation store.'
+    }
+    $persistedAfterRemoval = @(Get-Content -LiteralPath $conversationsPath -Raw | ConvertFrom-Json -AsHashtable |
+        Where-Object { $_.Draft -ceq $draft })
+    if ($persistedAfterRemoval.Count -ne 1) {
+        throw 'User conversation data did not remain readable after simulated portable-package uninstall.'
+    }
+
+    Write-Host 'Upgrade and portable-package removal smoke passed: the latest public Windows release draft survived upgrade, and removing the isolated app directory left the user profile readable with that draft. No prompt was sent.'
 }
 finally {
     try { Stop-CodevPackage } catch { Write-Warning $_ }
