@@ -72,7 +72,8 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
         Write-Host "Native picker '$($Dialog.Current.Name)' filename: id='$($fileName.Current.AutomationId)' class='$($fileName.Current.ClassName)' type='$($fileName.Current.ControlType.ProgrammaticName)' bounds=$([int]$bounds.Left),$([int]$bounds.Top),$([int]$bounds.Width),$([int]$bounds.Height)"
     }
     $dialogHandle = [CodevCommonDialog]::FindWindowByTitle($null, $Dialog.Current.Name)
-    if ($dialogHandle -eq [IntPtr]::Zero) { $dialogHandle = [IntPtr]$Dialog.Current.NativeWindowHandle }
+    $automationWindowHandle = [IntPtr]$Dialog.Current.NativeWindowHandle
+    if ($dialogHandle -eq [IntPtr]::Zero) { $dialogHandle = $automationWindowHandle }
     if ($dialogHandle -eq [IntPtr]::Zero) { throw 'The native file picker window handle is missing.' }
     $activated = [CodevCommonDialog]::ActivateWindow($dialogHandle)
     Start-Sleep -Milliseconds 150
@@ -83,14 +84,14 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     if ($env:GITHUB_ACTIONS -eq 'true') {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         $foregroundHandle = [CodevCommonDialog]::GetForegroundWindow()
-        Write-Host "Native picker activation: success=$activated dialog=$([CodevCommonDialog]::GetWindowTextValue($dialogHandle))/$([CodevCommonDialog]::GetClassNameValue($dialogHandle)) foreground=$([CodevCommonDialog]::GetWindowTextValue($foregroundHandle))/$([CodevCommonDialog]::GetClassNameValue($foregroundHandle)); filename focused=$($focused.Current.AutomationId -eq $fileName.Current.AutomationId)"
+        Write-Host "Native picker activation: success=$activated target-hwnd=$($dialogHandle.ToInt64()) ui-hwnd=$($automationWindowHandle.ToInt64()) dialog=$([CodevCommonDialog]::GetWindowTextValue($dialogHandle))/$([CodevCommonDialog]::GetClassNameValue($dialogHandle)) foreground-hwnd=$($foregroundHandle.ToInt64()) foreground=$([CodevCommonDialog]::GetWindowTextValue($foregroundHandle))/$([CodevCommonDialog]::GetClassNameValue($foregroundHandle)); filename-hwnd=$($fileName.Current.NativeWindowHandle) focused=$($focused.Current.AutomationId -eq $fileName.Current.AutomationId)"
         $controls = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($control in $controls) {
             if ($control.Current.ClassName -notin @('Edit', 'Button', 'ComboBox', 'ComboBoxEx32')) { continue }
             $controlBounds = $control.Current.BoundingRectangle
             if ($controlBounds.IsEmpty) { continue }
             $safeName = if ($control.Current.Name -in @('Save', 'Open', 'Cancel', 'File name:')) { $control.Current.Name } else { '' }
-            Write-Host "Native picker control: name='$safeName' id='$($control.Current.AutomationId)' class='$($control.Current.ClassName)' type='$($control.Current.ControlType.ProgrammaticName)' bounds=$([int]$controlBounds.Left),$([int]$controlBounds.Top),$([int]$controlBounds.Width),$([int]$controlBounds.Height)"
+            Write-Host "Native picker control: name='$safeName' id='$($control.Current.AutomationId)' class='$($control.Current.ClassName)' type='$($control.Current.ControlType.ProgrammaticName)' hwnd=$($control.Current.NativeWindowHandle) bounds=$([int]$controlBounds.Left),$([int]$controlBounds.Top),$([int]$controlBounds.Width),$([int]$controlBounds.Height)"
         }
     }
     $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
