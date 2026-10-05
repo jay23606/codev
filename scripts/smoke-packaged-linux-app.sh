@@ -34,12 +34,12 @@ mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
 python3 ./scripts/mock-ollama-server.py --port-file "$mock_port_path" --request-log "$mock_request_log" >"$smoke_root/mock-ollama.log" 2>&1 &
 mock_pid=$!
-for _ in {1..50}; do
+for _ in {1..200}; do
   if [[ -s "$mock_port_path" ]]; then break; fi
   if ! kill -0 "$mock_pid" 2>/dev/null; then cat "$smoke_root/mock-ollama.log" >&2; exit 1; fi
   sleep 0.1
 done
-if [[ ! -s "$mock_port_path" ]]; then echo 'Mock Ollama did not report its loopback port.' >&2; exit 1; fi
+if [[ ! -s "$mock_port_path" ]]; then cat "$smoke_root/mock-ollama.log" >&2; echo 'Mock Ollama did not report its loopback port within 20 seconds.' >&2; exit 1; fi
 mock_port="$(cat "$mock_port_path")"
 mkdir -p "$CODEV_DATA_ROOT/Codev"
 printf '{"Theme":"dark","OllamaEndpoint":"http://127.0.0.1:%s/"}\n' "$mock_port" >"$CODEV_DATA_ROOT/Codev/avalonia-settings.json"
@@ -77,6 +77,19 @@ fi
 conversation_id="$(jq -r '.' "$active_path")"
 if [[ -z "$conversation_id" || "$conversation_id" == null ]]; then
   echo 'The Linux app persisted an invalid active conversation ID.' >&2
+  exit 1
+fi
+
+for _ in {1..100}; do
+  if jq -e --arg id "$conversation_id" '.[] | select(.Id == $id) | .Model == "codev-smoke:latest"' \
+    "$conversations_path" >/dev/null 2>&1; then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited while discovering the Linux mock model.' >&2; exit 1; fi
+  sleep 0.1
+done
+if ! jq -e --arg id "$conversation_id" '.[] | select(.Id == $id) | .Model == "codev-smoke:latest"' \
+  "$conversations_path" >/dev/null 2>&1; then
+  cat "$log_path" >&2
+  echo 'Linux packaged app did not select the mock Ollama model before mode interaction.' >&2
   exit 1
 fi
 
