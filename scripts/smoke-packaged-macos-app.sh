@@ -136,7 +136,8 @@ APPLESCRIPT
 
 click_mode_button() {
   local button_name="$1"
-  osascript - "$app_pid" "$button_name" <<'APPLESCRIPT'
+  local result
+  result="$(osascript - "$app_pid" "$button_name" <<'APPLESCRIPT'
 on run argv
   set targetPid to item 1 of argv as integer
   set buttonName to item 2 of argv
@@ -147,13 +148,27 @@ on run argv
     tell targetProcess
       set availableNames to name of every button of window 1
       if buttonName is not in availableNames then
-        error "Could not find button '" & buttonName & "'. Accessible button names: " & (availableNames as text)
+        set buttonReport to ""
+        repeat with buttonIndex from 1 to count of buttons of window 1
+          set targetButton to button buttonIndex of window 1
+          try
+            set buttonLabel to name of targetButton as text
+          on error
+            set buttonLabel to "missing"
+          end try
+          set buttonReport to buttonReport & buttonIndex & ": name=" & buttonLabel & ", position=" & (position of targetButton as text) & ", size=" & (size of targetButton as text) & linefeed
+        end repeat
+        return "Could not find button '" & buttonName & "'. Window position=" & (position of window 1 as text) & ", size=" & (size of window 1 as text) & linefeed & buttonReport
       end if
       click (first button of window 1 whose name is buttonName)
+      return "Clicked '" & buttonName & "'."
     end tell
   end tell
 end run
 APPLESCRIPT
+  )" || return 1
+  printf '%s\n' "$result"
+  [[ "$result" == Clicked* ]]
 }
 
 send_mode_shortcut
