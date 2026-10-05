@@ -314,7 +314,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public async Task Conversation_mode_shortcut_respects_generation_fallback_and_persists_per_conversation()
     {
-        var root = Path.Combine(Path.GetTempPath(), "Codev-mode-cycle-ui", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
         var unavailableHandler = new TestHttpMessageHandler((_, _) => Task.FromResult(
             new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
         MainViewModel? viewModel = null;
