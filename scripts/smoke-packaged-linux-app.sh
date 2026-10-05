@@ -8,7 +8,7 @@ if [[ ! -x "$app_path" ]]; then
 fi
 command -v xdotool >/dev/null || { echo 'xdotool is required for the packaged Linux interaction smoke.' >&2; exit 1; }
 command -v jq >/dev/null || { echo 'jq is required for the packaged Linux interaction smoke.' >&2; exit 1; }
-command -v python3 >/dev/null || { echo 'python3 is required for the packaged Linux chat smoke.' >&2; exit 1; }
+command -v node >/dev/null || { echo 'node is required for the packaged Linux chat smoke.' >&2; exit 1; }
 
 smoke_root="$(mktemp -d)"
 export CODEV_DATA_ROOT="$smoke_root/data"
@@ -32,7 +32,7 @@ trap cleanup EXIT
 
 mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
-python3 ./scripts/mock-ollama-server.py --port-file "$mock_port_path" --request-log "$mock_request_log" >"$smoke_root/mock-ollama.log" 2>&1 &
+node ./scripts/mock-ollama-server.js --port-file "$mock_port_path" --request-log "$mock_request_log" >"$smoke_root/mock-ollama.log" 2>&1 &
 mock_pid=$!
 for _ in {1..200}; do
   if [[ -s "$mock_port_path" ]]; then break; fi

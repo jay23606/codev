@@ -118,11 +118,11 @@ jobs:
           print("Avalonia remained running for the macOS launch smoke.")
           PY
 
-      - name: Set up Python for the packaged macOS mock server
-        if: runner.os == 'macOS'
-        uses: actions/setup-python@v7
+      - name: Set up Node for packaged desktop mock server
+        if: runner.os != 'Windows'
+        uses: actions/setup-node@v7
         with:
-          python-version: '3.12'
+          node-version: '22'
 
       - name: Smoke-test packaged macOS mode shortcut and local chat under the window server
         if: runner.os == 'macOS'
