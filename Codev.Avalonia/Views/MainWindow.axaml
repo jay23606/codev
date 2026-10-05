@@ -76,7 +76,7 @@
                     </StackPanel>
                 </Grid>
                 <Button Grid.Row="1" Classes="nav" Content="＋   New conversation" Command="{Binding NewConversationCommand}" Background="#D97757" Foreground="White" Margin="0,0,0,4" />
-                <TextBox x:Name="SearchTextBox" Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" />
+                <TextBox x:Name="SearchTextBox" Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" AutomationProperties.Name="Search conversations" />
                 <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="2">
                         <Button Classes="nav" Content="{Binding PinnedConversationsSectionLabel}" Click="TogglePinnedConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" />
@@ -208,14 +208,14 @@
                     </ComboBox>
                     <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" />
                     <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" />
-                    <ComboBox x:Name="AgentProfileSelectionComboBox" Grid.Column="5" Width="124" ItemsSource="{Binding AgentProfiles}" SelectedItem="{Binding SelectedAgentProfileChoice, Mode=TwoWay}" IsEnabled="{Binding IsCodeTask}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose the Build or Plan primary agent, or a reusable profile. Ctrl+Shift+A toggles Build and Plan. Plan can inspect files but cannot edit, run commands, call MCP, or delegate.">
+                    <ComboBox x:Name="AgentProfileSelectionComboBox" Grid.Column="5" Width="124" ItemsSource="{Binding AgentProfiles}" SelectedItem="{Binding SelectedAgentProfileChoice, Mode=TwoWay}" IsEnabled="{Binding IsCodeTask}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose the Build or Plan primary agent, or a reusable profile. Ctrl+Shift+A toggles Build and Plan. Plan can inspect files but cannot edit, run commands, call MCP, or delegate." AutomationProperties.Name="Primary agent profile">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:AgentProfileChoice">
                                 <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <ComboBox Grid.Column="6" Width="105" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions.">
+                    <ComboBox Grid.Column="6" Width="105" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions." AutomationProperties.Name="Response style">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:OutputStyleChoice">
                                 <TextBlock Text="{Binding DisplayName}" />
@@ -401,7 +401,7 @@
                             </ItemsControl>
                         </Expander>
                         <Grid ColumnDefinitions="*,Auto">
-                        <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="64" MaxHeight="180" TextWrapping="Wrap" FontFamily="{Binding UiFontFamily}" FontSize="{Binding UiFontSize}" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" />
+                        <TextBox x:Name="ComposerTextBox" Classes="composer" AcceptsReturn="True" MinHeight="64" MaxHeight="180" TextWrapping="Wrap" FontFamily="{Binding UiFontFamily}" FontSize="{Binding UiFontSize}" Watermark="Message Codev… · drop project files to attach" VerticalContentAlignment="Top" Text="{Binding Draft, Mode=TwoWay}" TextChanged="Composer_TextChanged" AutomationProperties.Name="Message Codev" />
                             <Button x:Name="ComposerSendButton" Grid.Column="1" Classes="composer-send" Content="{Binding SendButtonLabel}" ToolTip.Tip="Send prompt or queue follow-up; with an empty composer, stop generation" AutomationProperties.Name="Send or queue prompt; stop when the composer is empty" FontSize="21" Width="36" Height="34" VerticalAlignment="Bottom" Margin="-49,0,8,9" Command="{Binding SendCommand}" />
                             <Popup x:Name="FileMentionPopup" PlacementTarget="{Binding #ComposerTextBox}" Placement="Top" IsLightDismissEnabled="True">
                                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4" Width="480">
