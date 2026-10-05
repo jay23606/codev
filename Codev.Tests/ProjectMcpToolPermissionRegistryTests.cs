@@ -75,6 +75,28 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
     }
 
     [Fact]
+    public async Task Changing_advertised_tool_schema_with_same_server_and_name_requires_a_new_allow()
+    {
+        using var originalSchema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}}}""");
+        using var changedSchema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"},"delete_all":{"type":"boolean"}}}""");
+        var original = new McpCodeTaskTool("github_search", "github", "GitHub", "search", "Search issues",
+            originalSchema.RootElement.Clone(), null, ConfigurationFingerprint: Fingerprint);
+        var changed = original with { InputSchema = changedSchema.RootElement.Clone() };
+        var registry = ProjectMcpToolPermissionRegistry.Load(_path);
+
+        await registry.SetRuleAsync(_project, original.ServerId, original.ToolName, ProjectCommandPermissionDecision.Allow,
+            original.PermissionFingerprint);
+
+        Assert.NotEqual(original.PermissionFingerprint, changed.PermissionFingerprint);
+        Assert.Equal(ProjectCommandPermissionDecision.Allow,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, original.ServerId, original.ToolName,
+                original.PermissionFingerprint));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            registry.Evaluate(_project, ProjectCommandPermissionMode.Allowlist, changed.ServerId, changed.ToolName,
+                changed.PermissionFingerprint));
+    }
+
+    [Fact]
     public void Legacy_allow_rule_without_fingerprint_fails_closed_but_legacy_deny_still_applies()
     {
         var json = System.Text.Json.JsonSerializer.Serialize(new[]

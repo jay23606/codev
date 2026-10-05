@@ -1109,7 +1109,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         if (string.IsNullOrWhiteSpace(conversation.ProjectPath)) return Codev.CommandApprovalOutcome.Rejected;
         var mode = GetProjectCommandPermissionMode(conversation.ProjectPath);
         var decision = _projectMcpPermissions.Evaluate(conversation.ProjectPath, mode, tool.ServerId, tool.ToolName,
-            tool.ConfigurationFingerprint);
+            tool.PermissionFingerprint);
         if (decision == Codev.ProjectCommandPermissionDecision.Deny) return Codev.CommandApprovalOutcome.Denied;
         if (decision == Codev.ProjectCommandPermissionDecision.Allow) return Codev.CommandApprovalOutcome.Approved;
         if (_projectMcpPermissions.CanPersist && profileApprovalSatisfied) return Codev.CommandApprovalOutcome.Approved;
@@ -1121,13 +1121,13 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             if (choice == Codev.ProjectCommandApprovalChoice.AllowExactCommand)
             {
                 await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName,
-                    Codev.ProjectCommandPermissionDecision.Allow, tool.ConfigurationFingerprint);
+                    Codev.ProjectCommandPermissionDecision.Allow, tool.PermissionFingerprint);
                 return Codev.CommandApprovalOutcome.Approved;
             }
             if (choice == Codev.ProjectCommandApprovalChoice.DenyExactCommand)
             {
                 await _projectMcpPermissions.SetRuleAsync(conversation.ProjectPath, tool.ServerId, tool.ToolName,
-                    Codev.ProjectCommandPermissionDecision.Deny, tool.ConfigurationFingerprint);
+                    Codev.ProjectCommandPermissionDecision.Deny, tool.PermissionFingerprint);
                 return Codev.CommandApprovalOutcome.Denied;
             }
         }

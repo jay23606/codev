@@ -107,7 +107,7 @@ public sealed class OllamaAutoPolicyIntegrationTests
                 mcpPermissionApproval: (tool, _, _) =>
                 {
                     var decision = mcpPermissions.Evaluate(root, commandPermissions.GetMode(root), tool.ServerId,
-                        tool.ToolName, tool.ConfigurationFingerprint);
+                        tool.ToolName, tool.PermissionFingerprint);
                     if (decision == ProjectCommandPermissionDecision.Ask) approvalPromptShown = true;
                     return Task.FromResult(decision switch
                     {
@@ -125,7 +125,7 @@ public sealed class OllamaAutoPolicyIntegrationTests
             output.WriteLine($"Model {model} selected the user-requested MCP tool; Auto ran it without approval.");
 
             await mcpPermissions.SetRuleAsync(root, mcpTool.ServerId, mcpTool.ToolName, ProjectCommandPermissionDecision.Deny,
-                mcpTool.ConfigurationFingerprint);
+                mcpTool.PermissionFingerprint);
             var denied = await executor.ExecuteAsync(mcpTool.FunctionName, arguments);
             Assert.Contains("Denied by a saved project MCP tool permission rule", denied, StringComparison.Ordinal);
             Assert.Equal(1, Volatile.Read(ref toolCalls));

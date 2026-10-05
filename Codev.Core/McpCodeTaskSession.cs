@@ -47,6 +47,16 @@ public sealed record McpCodeTaskTool(
     McpClientResourceTemplate? ClientResourceTemplate = null,
     string ConfigurationFingerprint = "")
 {
+    /// <summary>Permission identity for the current server target and advertised operation contract.</summary>
+    public string PermissionFingerprint
+    {
+        get
+        {
+            var definition = string.Join("\n", ConfigurationFingerprint, Operation, ToolName, Description, InputSchema.GetRawText());
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(definition))).ToLowerInvariant();
+        }
+    }
+
     public object ToOllamaFunctionTool() => new
     {
         type = "function",
