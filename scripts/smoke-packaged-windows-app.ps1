@@ -295,6 +295,20 @@ public static class CodevCommonDialog
     $sendButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
     if ($null -eq $sendButton) { throw "The composer send button is missing its accessible name '$sendName'." }
 
+    $allButtonCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button)
+    $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $allButtonCondition)
+    for ($index = 0; $index -lt $buttons.Count; $index++) {
+        $button = $buttons.Item($index)
+        if ([string]::IsNullOrWhiteSpace($button.Current.Name)) {
+            throw "A packaged-app button has no accessible name (automation id '$($button.Current.AutomationId)')."
+        }
+        if (-not $button.Current.IsKeyboardFocusable) {
+            throw "A packaged-app button is not keyboard-focusable ('$($button.Current.Name)')."
+        }
+    }
+
     $modeCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
         'ProjectCommandModeButton')
@@ -365,7 +379,7 @@ public static class CodevCommonDialog
 
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         $smokeSucceeded = $true
-        Write-Host 'Packaged app and Auto mode-change/restart persistence smoke passed. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11.'
+        Write-Host "Packaged app smoke passed with $($buttons.Count) named, keyboard-focusable buttons and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -432,7 +446,7 @@ public static class CodevCommonDialog
     }
 
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened with $($edits.Count) editable text control(s), an accessible send button, and the Auto footer selector. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened with $($edits.Count) editable text control(s), $($buttons.Count) named keyboard-focusable buttons, and the Auto footer selector. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
