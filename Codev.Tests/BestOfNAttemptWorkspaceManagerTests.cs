@@ -98,6 +98,7 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             await File.WriteAllTextAsync(Path.Combine(project, "local.settings.json"), "{\"Values\":{\"API_KEY\":\"must-not-be-copied\"}}");
             await File.WriteAllTextAsync(Path.Combine(project, "id_ecdsa"), "private-key-material");
             await File.WriteAllTextAsync(Path.Combine(project, "api-credential.json"), "{\"token\":\"must-not-be-copied\"}");
+            await File.WriteAllTextAsync(Path.Combine(project, "runtime-9281.json"), "{\"type\":\"service_account\",\"private_key\":\"fixture-only\",\"client_email\":\"fixture@example.invalid\"}");
             await File.WriteAllTextAsync(Path.Combine(project, "id_ed25519"), "private-key-material");
             await File.WriteAllTextAsync(Path.Combine(project, "secrets", "config.json"), "{\"token\":\"nested-secret\"}");
             await File.WriteAllTextAsync(Path.Combine(project, "settings.json"), "{\"theme\":\"dark\"}");
@@ -107,7 +108,7 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             await File.WriteAllTextAsync(Path.Combine(project, ".env"), "API_KEY=rotated-after-capture");
             var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
 
-            foreach (var relativePath in new[] { ".env", ".npmrc", ".pypirc", ".netrc", "NuGet.Config", "appsettings.Production.json", "prod.tfvars", ".terraform/terraform.tfstate", "terraform.tfstate.backup", ".config/gh/hosts.yml", ".envrc", ".envrc.local", "local.settings.json", "id_ecdsa", "api-credential.json", "id_ed25519" })
+            foreach (var relativePath in new[] { ".env", ".npmrc", ".pypirc", ".netrc", "NuGet.Config", "appsettings.Production.json", "prod.tfvars", ".terraform/terraform.tfstate", "terraform.tfstate.backup", ".config/gh/hosts.yml", ".envrc", ".envrc.local", "local.settings.json", "id_ecdsa", "api-credential.json", "runtime-9281.json", "id_ed25519" })
             {
                 Assert.False(File.Exists(Path.Combine(snapshot.RootPath, "baseline", relativePath)));
                 Assert.False(File.Exists(Path.Combine(workspace.WorkspacePath, relativePath)));
@@ -123,6 +124,33 @@ public sealed class BestOfNAttemptWorkspaceManagerTests
             Assert.False(Directory.Exists(Path.Combine(snapshot.RootPath, "baseline", ".terraform")));
             Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".terraform")));
             Assert.Equal("{\"theme\":\"dark\"}", await File.ReadAllTextAsync(Path.Combine(workspace.WorkspacePath, "settings.json")));
+        }
+        finally
+        {
+            if (snapshot is not null) new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata")).Delete(snapshot);
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Winner_review_excludes_new_service_account_json_credentials_with_arbitrary_filenames()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codev-best-of-n-service-account-review-tests", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        BestOfNAttemptSnapshot? snapshot = null;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(project, "main.cs"), "class Main {}");
+            var manager = new BestOfNAttemptWorkspaceManager(Path.Combine(root, "appdata"));
+            snapshot = await manager.CaptureAsync(project);
+            var workspace = await manager.CreateAttemptWorkspaceAsync(snapshot, 1);
+            await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "runtime-9281.json"),
+                "{\"type\":\"service_account\",\"private_key\":\"fixture-only\",\"client_email\":\"fixture@example.invalid\"}");
+
+            var review = await manager.ReviewChangesAsync(snapshot, workspace, new WorkspaceFileService(project));
+
+            Assert.DoesNotContain(review.Proposals, proposal => proposal.RelativePath == "runtime-9281.json");
         }
         finally
         {

@@ -88,6 +88,19 @@ public sealed class WorkspaceFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Project_file_access_rejects_service_account_private_key_json_with_an_unrecognized_filename()
+    {
+        const string relativePath = "deploy/runtime-9281.json";
+        Directory.CreateDirectory(Path.Combine(_root, "deploy"));
+        File.WriteAllText(Path.Combine(_root, relativePath),
+            "{\"type\":\"service_account\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\\nfixture-only\\n-----END PRIVATE KEY-----\\n\",\"client_email\":\"fixture@example.invalid\"}");
+
+        Assert.Throws<UnauthorizedAccessException>(() => Service.ResolvePath(relativePath));
+        Assert.Equal(0, Service.EstimateContextTokens([relativePath]));
+        Assert.DoesNotContain(relativePath, Service.ListContextFiles());
+    }
+
+    [Fact]
     public void Project_context_exclusions_filter_context_without_limiting_agent_file_access()
     {
         Directory.CreateDirectory(Path.Combine(_root, "src", "generated"));

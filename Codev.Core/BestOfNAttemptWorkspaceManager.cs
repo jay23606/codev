@@ -242,7 +242,9 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase)) continue;
                 // Keep paths that Codev itself treats as sensitive out of both the private
                 // snapshot and every model-visible attempt workspace.
-                if (WorkspaceFileService.IsSensitiveRelativePath(Path.GetRelativePath(source, entry))) continue;
+                var relativePath = Path.GetRelativePath(source, entry);
+                if (WorkspaceFileService.IsSensitiveRelativePath(relativePath) ||
+                    WorkspaceFileService.IsSensitiveCredentialJson(entry, relativePath, trustedSourceRoot)) continue;
                 var target = Path.GetFullPath(Path.Combine(current.Destination, name));
                 EnsureWithinRoot(destination, target);
                 if ((attributes & FileAttributes.Directory) != 0)
@@ -390,6 +392,7 @@ public sealed class BestOfNAttemptWorkspaceManager
     private static Task<Dictionary<string, string>> EnumerateSnapshotFilesAsync(string root, CancellationToken cancellationToken)
     {
         EnsureOrdinaryDirectory(root, "Attempt review folders cannot be links.");
+        var trustedRoot = FileHardLinkInspector.GetCanonicalDirectoryPath(root);
         var files = new Dictionary<string, string>(OperatingSystem.IsWindows()
             ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         var pending = new Stack<string>();
@@ -407,8 +410,11 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if ((attributes & FileAttributes.Directory) != 0) pending.Push(entry);
                 else
                 {
+                    var relative = Path.GetRelativePath(root, entry).Replace(Path.DirectorySeparatorChar, '/');
+                    if (WorkspaceFileService.IsSensitiveRelativePath(relative) ||
+                        WorkspaceFileService.IsSensitiveCredentialJson(entry, relative, trustedRoot)) continue;
                     if (files.Count >= MaximumFiles) throw new InvalidOperationException("Attempt review exceeded its file-count limit.");
-                    files.Add(Path.GetRelativePath(root, entry).Replace(Path.DirectorySeparatorChar, '/'), entry);
+                    files.Add(relative, entry);
                 }
             }
         }
@@ -483,7 +489,9 @@ public sealed class BestOfNAttemptWorkspaceManager
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                     throw new InvalidOperationException("Snapshot contains a symbolic link or reparse point.");
                 var isDirectory = (attributes & FileAttributes.Directory) != 0;
-                if (WorkspaceFileService.IsSensitiveRelativePath(Path.GetRelativePath(root, entry))) continue;
+                var relativePath = Path.GetRelativePath(root, entry);
+                if (WorkspaceFileService.IsSensitiveRelativePath(relativePath) ||
+                    WorkspaceFileService.IsSensitiveCredentialJson(entry, relativePath, canonicalRoot)) continue;
                 entries.Add((entry, isDirectory));
                 if (isDirectory) pending.Push(entry);
             }

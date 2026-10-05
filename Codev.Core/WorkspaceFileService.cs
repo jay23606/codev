@@ -2,6 +2,7 @@ using System.IO;
 using System.IO.Enumeration;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Codev;
 
@@ -11,6 +12,7 @@ public sealed class WorkspaceFileService
     public const int MaxContextFiles = 24;
     public const int MaxContextCharacters = 32_000;
     public const int MaxContextFileCharacters = 2_400;
+    private const int MaxCredentialJsonBytes = 64 * 1024;
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "dist", "build", "coverage" };
     private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -57,6 +59,28 @@ public sealed class WorkspaceFileService
              string.Equals(segments[1], "gcloud", StringComparison.OrdinalIgnoreCase)))
             return true;
         return segments.Any(IsSensitiveFileName);
+    }
+
+    /// <summary>Recognizes Google service-account private-key JSON even when its filename is arbitrary.</summary>
+    internal static bool IsSensitiveCredentialJson(string path, string displayPath, string trustedRoot)
+    {
+        if (!string.Equals(Path.GetExtension(path), ".json", StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(path, displayPath, trustedRoot);
+            if (stream.Length is <= 0 or > MaxCredentialJsonBytes) return false;
+            using var document = JsonDocument.Parse(stream);
+            var root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object &&
+                   root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String &&
+                   string.Equals(type.GetString(), "service_account", StringComparison.Ordinal) &&
+                   root.TryGetProperty("private_key", out var privateKey) && privateKey.ValueKind == JsonValueKind.String &&
+                   !string.IsNullOrWhiteSpace(privateKey.GetString());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     public static bool IsIgnoredDirectory(string name) => IgnoredDirectories.Contains(name);
@@ -575,7 +599,7 @@ public sealed class WorkspaceFileService
     private bool IsSensitivePath(string path)
     {
         var relative = Path.GetRelativePath(_root, path);
-        return IsSensitiveRelativePath(relative);
+        return IsSensitiveRelativePath(relative) || IsSensitiveCredentialJson(path, relative, _boundaryRoot);
     }
 }
 
