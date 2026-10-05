@@ -312,6 +312,72 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Conversation_mode_shortcut_respects_generation_fallback_and_persists_per_conversation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-mode-cycle-ui", Guid.NewGuid().ToString("N"));
+        var unavailableHandler = new TestHttpMessageHandler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        MainViewModel? viewModel = null;
+        MainViewModel? restoredViewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root, unavailableHandler);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            void PressModeShortcut() => window.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Key = Key.M,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift
+            });
+
+            PressModeShortcut();
+            Assert.True(viewModel.IsPlanMode);
+            Assert.False(viewModel.IsCodeTask);
+            Assert.Contains(window.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Plan mode");
+
+            typeof(MainViewModel).GetProperty(nameof(MainViewModel.IsGenerating))!
+                .GetSetMethod(nonPublic: true)!.Invoke(viewModel, [true]);
+            PressModeShortcut();
+            Assert.True(viewModel.IsPlanMode);
+            Assert.False(viewModel.IsCodeTask);
+            Assert.Contains("Wait for the current response to finish", viewModel.ContextActionStatus, StringComparison.Ordinal);
+            typeof(MainViewModel).GetProperty(nameof(MainViewModel.IsGenerating))!
+                .GetSetMethod(nonPublic: true)!.Invoke(viewModel, [false]);
+
+            PressModeShortcut();
+            Assert.False(viewModel.IsPlanMode);
+            Assert.False(viewModel.IsCodeTask);
+            Assert.Contains("Code task is unavailable", viewModel.ContextActionStatus, StringComparison.Ordinal);
+
+            PressModeShortcut();
+            Assert.True(viewModel.IsPlanMode);
+            var conversationId = Assert.IsType<Conversation>(viewModel.ActiveConversation).Id;
+            window.Close();
+            window = null;
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            restoredViewModel = new MainViewModel(root,
+                new TestHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))));
+            var restored = Assert.IsType<Conversation>(restoredViewModel.ActiveConversation);
+            Assert.Equal(conversationId, restored.Id);
+            Assert.True(restoredViewModel.IsPlanMode);
+            Assert.False(restoredViewModel.IsCodeTask);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            if (restoredViewModel is not null) await StopAndFlushAsync(restoredViewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Icon_only_composer_action_exposes_a_descriptive_accessibility_name()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
