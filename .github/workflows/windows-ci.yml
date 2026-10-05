@@ -131,6 +131,10 @@ jobs:
       - name: Restore portable test project
         run: dotnet restore Codev.Tests\Codev.Tests.csproj
 
+      - name: Audit NuGet dependencies
+        shell: pwsh
+        run: ./scripts/audit-nuget-vulnerabilities.ps1
+
       - name: Build application
         run: dotnet build Codev.csproj --configuration Release --no-restore
 
