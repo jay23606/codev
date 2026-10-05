@@ -50,7 +50,30 @@ public partial class MainWindow : Window
         DataContextChanged += (_, _) => ConfigureAgentInteractions();
         ObserveMessages();
         ConfigureAgentInteractions();
-        Opened += (_, _) => ScheduleScrollToLatest();
+        Opened += (_, _) =>
+        {
+            FitInsideCurrentScreenWorkArea();
+            ScheduleScrollToLatest();
+        };
+    }
+
+    private void FitInsideCurrentScreenWorkArea()
+    {
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null || screen.WorkingArea.Width <= 0 || screen.WorkingArea.Height <= 0) return;
+
+        var scale = screen.Scaling > 0 ? screen.Scaling : 1;
+        var workArea = screen.WorkingArea;
+        var maximumWidth = workArea.Width / scale - 48;
+        var maximumHeight = workArea.Height / scale - 48;
+        if (maximumWidth >= MinWidth) Width = Math.Min(Width, maximumWidth);
+        if (maximumHeight >= MinHeight) Height = Math.Min(Height, maximumHeight);
+
+        var outerWidth = (int)Math.Ceiling(Width * scale) + 16;
+        var outerHeight = (int)Math.Ceiling(Height * scale) + 40;
+        Position = new PixelPoint(
+            workArea.X + Math.Max(0, (workArea.Width - outerWidth) / 2),
+            workArea.Y + Math.Max(0, (workArea.Height - outerHeight) / 2));
     }
 
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)

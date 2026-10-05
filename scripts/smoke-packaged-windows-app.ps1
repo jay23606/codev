@@ -278,7 +278,13 @@ public static class CodevCommonDialog
         throw "Expected the Codev main window; UI Automation reported '$($window.Current.Name)'."
     }
     $workingArea = [System.Windows.Forms.Screen]::FromHandle($windowHandle).WorkingArea
-    $windowBounds = $window.Current.BoundingRectangle
+    $layoutDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $windowBounds = $window.Current.BoundingRectangle
+        if ($windowBounds.Left -ge $workingArea.Left -and $windowBounds.Top -ge $workingArea.Top -and
+            $windowBounds.Right -le $workingArea.Right -and $windowBounds.Bottom -le $workingArea.Bottom) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $layoutDeadline)
     if ($windowBounds.Left -lt $workingArea.Left -or $windowBounds.Top -lt $workingArea.Top -or
         $windowBounds.Right -gt $workingArea.Right -or $windowBounds.Bottom -gt $workingArea.Bottom) {
         throw "The packaged main window extends outside the monitor work area (window=$([int]$windowBounds.Left),$([int]$windowBounds.Top),$([int]$windowBounds.Width),$([int]$windowBounds.Height); workArea=$($workingArea.X),$($workingArea.Y),$($workingArea.Width),$($workingArea.Height))."
