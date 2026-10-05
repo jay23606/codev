@@ -802,6 +802,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Packaged Windows conversation-group and model-picker interaction (2026-10-04, source head `50f45a3`).** Built and launched the current-source self-contained win-x64 app with an isolated data root; the native window responded. UI Automation expanded the model picker and observed the installed Qwen3.6 and Qwen3.8 tags with no blank entries, then collapsed and expanded the Recents group and confirmed its conversation row disappeared and returned. The app closed normally. The no-model popup state, persistence after relaunch, and macOS/Linux native interaction remain unverified; see the bounded pass in [`docs/avalonia-smoke-checklist.md`](docs/avalonia-smoke-checklist.md).
 
+**Footer Auto/Ask native-input limitation (2026-10-04, source head `50f45a3`).** The packaged app's permission flyout and menu item labels were visible to UI Automation, but the window could not be activated from this session: `SetForegroundWindow` returned false and Windows reported foreground process ID 0. Synthetic pointer and keyboard input did not change the mode, so this is not a product-failure reproduction and no native selection/persistence claim is made. The existing Avalonia headless regression still verifies Auto selection, saved default, restored state, and no inline approval. The native interaction remains open in [`docs/avalonia-smoke-checklist.md`](docs/avalonia-smoke-checklist.md).
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
