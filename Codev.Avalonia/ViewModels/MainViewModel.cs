@@ -8,6 +8,7 @@ using System.Windows.Input;
 using Avalonia.Threading;
 using Avalonia;
 using Avalonia.Styling;
+using Codev.Avalonia;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -507,11 +508,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public string CodeTaskLabel => IsCodeTask ? "Code task on" : CanEnterCodeTaskMode ? "Enable Code task" : "Code task unavailable";
     public string PrimaryAgentLabel => SelectedAgentProfileName.Equals("Plan", StringComparison.OrdinalIgnoreCase) ? "Plan agent" :
         SelectedAgentProfileName.Length == 0 ? "Build agent" : $"{SelectedAgentProfileName} agent";
+    public string PrimaryAgentTooltip => $"Choose the Build or Plan primary agent, or a reusable profile. {PlatformKeyboardShortcuts.PrimaryModifierLabel}+Shift+A toggles Build and Plan. Plan can inspect files but cannot edit, run commands, call MCP, or delegate.";
     public string ConversationModeCycleTooltip => IsCodeTask
-        ? "Ctrl+Shift+M switches Code task back to Chat."
+        ? $"{PlatformKeyboardShortcuts.PrimaryModifierLabel}+Shift+M switches Code task back to Chat."
         : IsPlanMode
-            ? CanEnterCodeTaskMode ? "Ctrl+Shift+M switches Plan to Code task." : $"Ctrl+Shift+M switches Plan to Chat. {GetCodeTaskUnavailableReason()}"
-            : $"Ctrl+Shift+M switches Chat to Plan. {GetCodeTaskUnavailableReason() ?? "Code task can also be selected."}";
+            ? CanEnterCodeTaskMode ? $"{PlatformKeyboardShortcuts.PrimaryModifierLabel}+Shift+M switches Plan to Code task." : $"{PlatformKeyboardShortcuts.PrimaryModifierLabel}+Shift+M switches Plan to Chat. {GetCodeTaskUnavailableReason()}"
+            : $"{PlatformKeyboardShortcuts.PrimaryModifierLabel}+Shift+M switches Chat to Plan. {GetCodeTaskUnavailableReason() ?? "Code task can also be selected."}";
     public bool CanEnterCodeTaskMode => GetCodeTaskUnavailableReason() is null;
     public bool CanToggleCodeTaskMode => ActiveConversation is not null && !IsGenerating;
     public bool ShowCodeTaskUnavailableReason => !IsCodeTask && GetCodeTaskUnavailableReason() is { } reason &&
@@ -2067,7 +2069,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 });
             }
             if (!IsCurrentAgentProfileRefresh(refreshRevision, conversation, projectPath, includeProjectProfiles)) return;
-            var choices = new List<AgentProfileChoice> { new("", "Build", "Use the default coding agent with the selected project permissions. Ctrl+Shift+A switches between Build and Plan.") };
+            var choices = new List<AgentProfileChoice> { new("", "Build", $"Use the default coding agent with the selected project permissions. {PlatformKeyboardShortcuts.PrimaryModifierLabel}+Shift+A switches between Build and Plan.") };
             choices.AddRange(loaded.Profiles.Where(profile => profile.Mode is "all" or "primary").Select(profile => new AgentProfileChoice(profile.Name,
                 profile.Model is { Length: > 0 } model ? $"{profile.Name} · {model}" : profile.Name, profile.Description)));
             var selected = conversation?.AgentProfileName;

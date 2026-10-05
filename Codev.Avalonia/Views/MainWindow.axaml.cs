@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Codev.Avalonia;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Globalization;
@@ -4030,7 +4031,7 @@ public partial class MainWindow : Window
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
-        var primaryModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+        var primaryModifier = PlatformKeyboardShortcuts.HasPrimaryModifier(e.KeyModifiers);
         if (e.Key == Key.F1)
             ShowKeyboardShortcuts();
         else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.M)
@@ -4074,13 +4075,14 @@ public partial class MainWindow : Window
         };
 
         var shortcuts = new StackPanel { Spacing = 8 };
+        var modifier = PlatformKeyboardShortcuts.PrimaryModifierLabel;
         foreach (var shortcut in new[]
         {
-            "Ctrl/⌘+N  New conversation",
-            "Ctrl/⌘+F  Search conversations",
-            "Ctrl/⌘+L  Focus the composer",
-            "Ctrl/⌘+Shift+M  Cycle Chat, Plan, and Code task",
-            "Ctrl/⌘+Shift+A  Cycle the primary agent",
+            $"{modifier}+N  New conversation",
+            $"{modifier}+F  Search conversations",
+            $"{modifier}+L  Focus the composer",
+            $"{modifier}+Shift+M  Cycle Chat, Plan, and Code task",
+            $"{modifier}+Shift+A  Cycle the primary agent",
             "Esc  Stop the active response",
             "F1  Show these shortcuts",
             "/status  Show local conversation and project status"

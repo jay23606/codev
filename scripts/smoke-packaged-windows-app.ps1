@@ -998,7 +998,7 @@ public static class CodevCommonDialog
     for ($index = 0; $index -lt $shortcutText.Count; $index++) {
         $shortcutNames += $shortcutText.Item($index).Current.Name
     }
-    foreach ($requiredShortcut in @('Ctrl/⌘+N', 'Ctrl/⌘+F', 'Ctrl/⌘+L', '/status')) {
+    foreach ($requiredShortcut in @('Ctrl+N', 'Ctrl+F', 'Ctrl+L', 'Ctrl+Shift+M', '/status')) {
         if (-not ($shortcutNames -contains $requiredShortcut) -and
             -not (($shortcutNames -join "`n").Contains($requiredShortcut, [StringComparison]::Ordinal))) {
             throw "The keyboard shortcuts reference does not list '$requiredShortcut'."

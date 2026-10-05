@@ -298,7 +298,10 @@ public sealed class MainWindowTests
                 .GetValue(window));
             Assert.True(dialog.IsVisible);
             var lines = dialog.GetVisualDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
-            Assert.Contains(lines, line => line?.Contains("Ctrl/⌘+Shift+M", StringComparison.Ordinal) == true);
+            var modifier = OperatingSystem.IsMacOS() ? "⌘" : "Ctrl";
+            Assert.Contains(lines, line => line?.Contains($"{modifier}+Shift+M", StringComparison.Ordinal) == true);
+            Assert.Contains($"{modifier}+Shift+M", viewModel.ConversationModeCycleTooltip, StringComparison.Ordinal);
+            Assert.Contains($"{modifier}+Shift+A", viewModel.PrimaryAgentTooltip, StringComparison.Ordinal);
             Assert.Contains(lines, line => line?.Contains("/status", StringComparison.Ordinal) == true);
             Assert.Contains(lines, line => line?.Contains("F1  Show these shortcuts", StringComparison.Ordinal) == true);
             dialog.Close();
@@ -331,7 +334,7 @@ public sealed class MainWindowTests
             {
                 RoutedEvent = InputElement.KeyDownEvent,
                 Key = Key.M,
-                KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift
+                KeyModifiers = (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control) | KeyModifiers.Shift
             });
 
             PressModeShortcut();
@@ -424,7 +427,7 @@ public sealed class MainWindowTests
                 {
                     RoutedEvent = InputElement.KeyDownEvent,
                     Key = Key.M,
-                    KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift
+                    KeyModifiers = (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control) | KeyModifiers.Shift
                 });
 
                 PressModeShortcut();
@@ -1592,11 +1595,11 @@ public sealed class MainWindowTests
             Assert.Null(conversation.AgentProfileName);
             Assert.Equal("Build agent", viewModel.PrimaryAgentLabel);
 
-            window.KeyPress(Key.A, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.A, "A");
+            window.KeyPress(Key.A, (OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control) | RawInputModifiers.Shift, PhysicalKey.A, "A");
             Assert.Equal("Plan", conversation.AgentProfileName);
             Assert.Equal("Plan agent", viewModel.PrimaryAgentLabel);
 
-            window.KeyPress(Key.A, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.A, "A");
+            window.KeyPress(Key.A, (OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control) | RawInputModifiers.Shift, PhysicalKey.A, "A");
             Assert.Null(conversation.AgentProfileName);
             Assert.Equal("Build agent", viewModel.PrimaryAgentLabel);
         }
