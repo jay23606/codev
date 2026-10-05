@@ -271,7 +271,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | B4 | Step limit and loop detection | S | none | Core · implemented in WPF, Avalonia, and OpenAI Code task; manual QA remains |
 | B5 | Test and lint loop | M | B1 | Done |
 | B6 | Show model reasoning | S | none | Done |
-| B7 | Sandbox research | L | X3, per OS | Speculative |
+| B7 | Sandbox research | L | X3, per OS | Speculative · 2026-10-04 upstream review found that OpenCode explicitly does not sandbox agents: its permission system is a UX control, not an isolation boundary, and its security guidance recommends running in a container or VM when true isolation is needed ([security model](https://github.com/anomalyco/opencode/blob/dev/SECURITY.md), [permissions](https://github.com/anomalyco/opencode/blob/dev/packages/web/src/content/docs/permissions.mdx)). Do not build a platform sandbox solely for OpenCode parity. Codev's per-child worktrees isolate Codev-managed file and Git operations; shell commands retain user-account authority, as disclosed in D5. Keep platform sandboxing as a separate optional hardening question, with platform-specific research required before implementation. |
 | B8 | Loaded-model awareness | S | none | Done |
 | B9 | Folder trust | M | none; must land before D2, D3, D4 and D6 read project files | Core · implemented in WPF and Avalonia; manual QA pending |
 | B10 | Untrusted content handling | S–M | B1 | Core · shared Code task prompt/output and review defenses implemented in WPF and Avalonia; future tool surfaces and manual red-team remain |
