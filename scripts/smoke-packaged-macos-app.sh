@@ -145,7 +145,10 @@ on run argv
     set frontmost of targetProcess to true
     delay 1
     tell targetProcess
-      log (name of every button of window 1)
+      set availableNames to name of every button of window 1
+      if buttonName is not in availableNames then
+        error "Could not find button '" & buttonName & "'. Accessible button names: " & (availableNames as text)
+      end if
       click (first button of window 1 whose name is buttonName)
     end tell
   end tell
