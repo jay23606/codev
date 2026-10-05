@@ -74,27 +74,10 @@ jobs:
       - name: Publish self-contained headless CLI
         run: dotnet publish Codev.Cli/Codev.Cli.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish-cli/${{ matrix.rid }}
 
-      - name: Launch Avalonia on Windows
+      - name: Smoke-test packaged Windows UI with UI Automation
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $appPath = Join-Path $PWD 'artifacts/publish/win-x64/Codev.Avalonia.exe'
-          $stdoutPath = Join-Path $env:TEMP 'codev-avalonia-windows-smoke.out.log'
-          $stderrPath = Join-Path $env:TEMP 'codev-avalonia-windows-smoke.err.log'
-          $app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-          try {
-            if ($app.WaitForExit(15000)) {
-              Get-Content $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
-              throw "Avalonia exited before the Windows launch smoke completed (exit $($app.ExitCode))."
-            }
-            Write-Host 'Avalonia remained running for the 15-second Windows launch smoke.'
-          }
-          finally {
-            if (-not $app.HasExited) {
-              $app.Kill($true)
-              $app.WaitForExit(5000)
-            }
-          }
+        run: ./scripts/smoke-packaged-windows-app.ps1
 
       - name: Smoke-test headless CLI on Windows
         if: runner.os == 'Windows'
