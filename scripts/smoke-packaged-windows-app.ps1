@@ -921,6 +921,24 @@ public static class CodevCommonDialog
     $sendButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
     if ($null -eq $sendButton) { throw "The composer send button is missing its accessible name '$sendName'." }
 
+    $composerValue = $null
+    if (-not $composer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$composerValue)) {
+        throw 'The composer does not expose its editable value to UI Automation.'
+    }
+    $composer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('codev-shift-enter-first')
+    [System.Windows.Forms.SendKeys]::SendWait('+{ENTER}')
+    [System.Windows.Forms.SendKeys]::SendWait('codev-shift-enter-second')
+    $newlineDraft = ([string]$composerValue.Current.Value).Replace("`r`n", "`n")
+    if (-not $newlineDraft.Contains("codev-shift-enter-first`ncodev-shift-enter-second", [StringComparison]::Ordinal)) {
+        throw 'Shift+Enter did not preserve both draft lines in the composer.'
+    }
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}')
+    if (-not [string]::IsNullOrEmpty([string]$composerValue.Current.Value)) {
+        throw 'The disposable keyboard-smoke draft did not clear before the slash command check.'
+    }
+
     # /status is an in-app command and must not depend on a reachable model.
     # Exercise it through the real composer and verify its saved transcript.
     $conversationPath = Join-Path $dataRoot 'Codev\avalonia-conversations.json'
@@ -932,11 +950,7 @@ public static class CodevCommonDialog
     $statusBeforeCount = @($statusConversation[0].Messages).Count
     $composer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('/status')
-    $sendInvoke = $null
-    if (-not $sendButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$sendInvoke)) {
-        throw 'The composer send button cannot invoke /status through UI Automation.'
-    }
-    $sendInvoke.Invoke()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     $statusDeadline = [DateTime]::UtcNow.AddSeconds(10)
     $statusReport = $null
     do {
@@ -1058,7 +1072,7 @@ public static class CodevCommonDialog
         Test-PinnedConversationSearchArchiveRestore $window $dataRoot
         Test-PermanentConversationDelete $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -1147,7 +1161,7 @@ public static class CodevCommonDialog
     $renamedRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)
     if ($null -eq $renamedRow) { throw 'The renamed conversation was not visible in the sidebar after restart.' }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
