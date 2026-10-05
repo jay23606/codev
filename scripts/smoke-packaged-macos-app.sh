@@ -135,33 +135,43 @@ APPLESCRIPT
 }
 
 click_mode_button() {
-  local button_name="$1"
+  local automation_id="$1"
   local result
-  result="$(osascript - "$app_pid" "$button_name" <<'APPLESCRIPT'
+  result="$(osascript - "$app_pid" "$automation_id" <<'APPLESCRIPT'
 on run argv
   set targetPid to item 1 of argv as integer
-  set buttonName to item 2 of argv
+  set automationId to item 2 of argv
   tell application "System Events"
     set targetProcess to first process whose unix id is targetPid
     set frontmost of targetProcess to true
     delay 1
     tell targetProcess
-      set availableNames to name of every button of window 1
-      if buttonName is not in availableNames then
-        set buttonReport to ""
-        repeat with buttonIndex from 1 to count of buttons of window 1
-          set targetButton to button buttonIndex of window 1
-          try
-            set buttonLabel to name of targetButton as text
-          on error
-            set buttonLabel to "missing"
-          end try
-          set buttonReport to buttonReport & buttonIndex & ": name=" & buttonLabel & ", position=" & (position of targetButton as text) & ", size=" & (size of targetButton as text) & linefeed
-        end repeat
-        return "Could not find button '" & buttonName & "'. Window position=" & (position of window 1 as text) & ", size=" & (size of window 1 as text) & linefeed & buttonReport
+      set targetButton to missing value
+      set buttonReport to ""
+      repeat with buttonIndex from 1 to count of buttons of window 1
+        set currentButton to button buttonIndex of window 1
+        try
+          set buttonIdentifier to value of attribute "AXIdentifier" of currentButton
+        on error
+          set buttonIdentifier to missing value
+        end try
+        try
+          set buttonLabel to name of currentButton as text
+        on error
+          set buttonLabel to "missing"
+        end try
+        set identifierLabel to "missing"
+        if buttonIdentifier is not missing value then set identifierLabel to buttonIdentifier as text
+        set buttonReport to buttonReport & buttonIndex & ": id=" & identifierLabel & ", name=" & buttonLabel & ", position=" & (position of currentButton as text) & ", size=" & (size of currentButton as text) & linefeed
+        if buttonIdentifier is not missing value then
+          if (buttonIdentifier as text) is automationId then set targetButton to currentButton
+        end if
+      end repeat
+      if targetButton is missing value then
+        return "Could not find accessibility identifier '" & automationId & "'. Window position=" & (position of window 1 as text) & ", size=" & (size of window 1 as text) & linefeed & buttonReport
       end if
-      click (first button of window 1 whose name is buttonName)
-      return "Clicked '" & buttonName & "'."
+      click targetButton
+      return "Clicked accessibility identifier '" & automationId & "'."
     end tell
   end tell
 end run
@@ -223,9 +233,9 @@ sleep 1
 # Plan must advance into Code task once the local model is available.
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with a local model available.'
-click_mode_button 'Enable Code task'
+click_mode_button 'CodeTaskModeButton'
 assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
-click_mode_button 'Code task on'
+click_mode_button 'CodeTaskModeButton'
 assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
 
 # /status is handled locally and exercises the composer/send path without a model request.
