@@ -74,7 +74,7 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     $dialogHandle = [CodevCommonDialog]::FindWindowByTitle($null, $Dialog.Current.Name)
     if ($dialogHandle -eq [IntPtr]::Zero) { $dialogHandle = [IntPtr]$Dialog.Current.NativeWindowHandle }
     if ($dialogHandle -eq [IntPtr]::Zero) { throw 'The native file picker window handle is missing.' }
-    [void][CodevCommonDialog]::ActivateWindow($dialogHandle)
+    $activated = [CodevCommonDialog]::ActivateWindow($dialogHandle)
     Start-Sleep -Milliseconds 150
     [CodevCommonDialog]::ClickAt([int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
     Start-Sleep -Milliseconds 100
@@ -82,7 +82,8 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     [System.Windows.Forms.SendKeys]::SendWait($Path)
     if ($env:GITHUB_ACTIONS -eq 'true') {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        Write-Host "Native picker handles: dialog=$($dialogHandle.ToInt64()) foreground=$([CodevCommonDialog]::GetForegroundWindow().ToInt64()); filename focused=$($focused.Current.AutomationId -eq $fileName.Current.AutomationId)"
+        $foregroundHandle = [CodevCommonDialog]::GetForegroundWindow()
+        Write-Host "Native picker activation: success=$activated dialog=$([CodevCommonDialog]::GetWindowTextValue($dialogHandle))/$([CodevCommonDialog]::GetClassNameValue($dialogHandle)) foreground=$([CodevCommonDialog]::GetWindowTextValue($foregroundHandle))/$([CodevCommonDialog]::GetClassNameValue($foregroundHandle)); filename focused=$($focused.Current.AutomationId -eq $fileName.Current.AutomationId)"
         $controls = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($control in $controls) {
             if ($control.Current.ClassName -notin @('Edit', 'Button', 'ComboBox', 'ComboBoxEx32')) { continue }
@@ -132,6 +133,7 @@ try {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public static class CodevCommonDialog
 {
@@ -152,6 +154,12 @@ public static class CodevCommonDialog
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int maxCount);
 
     [DllImport("user32.dll")]
     private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
@@ -183,7 +191,11 @@ public static class CodevCommonDialog
         var currentThread = GetCurrentThreadId();
         var targetThread = GetWindowThreadProcessId(hWnd, IntPtr.Zero);
         if (targetThread == 0) return false;
-        if (!AttachThreadInput(currentThread, targetThread, true)) return false;
+        var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+        if (foregroundThread != 0 && foregroundThread != currentThread)
+            AttachThreadInput(currentThread, foregroundThread, true);
+        var attachedTarget = targetThread != currentThread && targetThread != foregroundThread &&
+            AttachThreadInput(currentThread, targetThread, true);
         try
         {
             ShowWindow(hWnd, 9);
@@ -193,7 +205,26 @@ public static class CodevCommonDialog
             SetFocus(hWnd);
             return GetForegroundWindow() == hWnd;
         }
-        finally { AttachThreadInput(currentThread, targetThread, false); }
+        finally
+        {
+            if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+            if (foregroundThread != 0 && foregroundThread != currentThread)
+                AttachThreadInput(currentThread, foregroundThread, false);
+        }
+    }
+
+    public static string GetWindowTextValue(IntPtr hWnd)
+    {
+        var text = new StringBuilder(512);
+        GetWindowText(hWnd, text, text.Capacity);
+        return text.ToString();
+    }
+
+    public static string GetClassNameValue(IntPtr hWnd)
+    {
+        var text = new StringBuilder(256);
+        GetClassName(hWnd, text, text.Capacity);
+        return text.ToString();
     }
 }
 '@
