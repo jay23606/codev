@@ -31,7 +31,9 @@ trap cleanup EXIT
 
 mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
-node ./scripts/mock-ollama-server.js --port-file "$mock_port_path" --request-log "$mock_request_log" >"$smoke_root/mock-ollama.log" 2>&1 &
+model_enabled_path="$smoke_root/mock-ollama-model.enabled"
+printf '0' >"$model_enabled_path"
+node ./scripts/mock-ollama-server.js --port-file "$mock_port_path" --request-log "$mock_request_log" --model-enabled-file "$model_enabled_path" >"$smoke_root/mock-ollama.log" 2>&1 &
 mock_pid=$!
 for _ in {1..200}; do
   if [[ -s "$mock_port_path" ]]; then break; fi
@@ -80,31 +82,6 @@ if not isinstance(conversation_id, str) or not conversation_id:
 print(conversation_id)
 PY
 )"
-
-for _ in {1..100}; do
-  if python3 - "$conversations_path" "$conversation_id" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    conversations = json.load(source)
-conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
-raise SystemExit(0 if conversation and conversation.get("Model") == "codev-smoke:latest" else 1)
-PY
-  then break; fi
-  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited while discovering the macOS mock model.' >&2; exit 1; fi
-  sleep 0.1
-done
-python3 - "$conversations_path" "$conversation_id" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    conversations = json.load(source)
-conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
-if conversation is None or conversation.get("Model") != "codev-smoke:latest":
-    raise SystemExit("macOS packaged app did not select the mock Ollama model before mode interaction.")
-PY
 
 assert_mode() {
   local plan="$1"
@@ -159,13 +136,48 @@ APPLESCRIPT
 
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with Command+Shift+M.'
+send_mode_shortcut
+assert_mode false false 'Packaged macOS app switched Plan → Chat when Code task was unavailable.'
 
-# The mock server supplies one local model, so exercise the eligible Code task
-# branch before restoring Chat for the plain streaming-chat round-trip.
-send_mode_shortcut
-assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
-send_mode_shortcut
-assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
+# Keep the mode-cycle check independent from model startup, then relaunch with
+# the model enabled for the local chat round-trip.
+kill "$app_pid" 2>/dev/null || true
+wait "$app_pid" 2>/dev/null || true
+app_pid=''
+printf '1' >"$model_enabled_path"
+"$app_path" >"$log_path" 2>&1 &
+app_pid=$!
+for _ in {1..120}; do
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during its model-enabled macOS relaunch.' >&2; exit 1; fi
+  if [[ -s "$active_path" && -s "$conversations_path" ]]; then break; fi
+  sleep 0.25
+done
+
+for _ in {1..100}; do
+  if python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+raise SystemExit(0 if conversation and conversation.get("Model") == "codev-smoke:latest" else 1)
+PY
+  then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited while discovering the macOS mock model.' >&2; exit 1; fi
+  sleep 0.1
+done
+python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+if conversation is None or conversation.get("Model") != "codev-smoke:latest":
+    raise SystemExit("macOS packaged app did not select the mock Ollama model before chat interaction.")
+PY
+assert_mode false false 'Packaged macOS app restored the same conversation in Chat mode after relaunch.'
 
 # /status is handled locally and exercises the composer/send path without a model request.
 before_message_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'

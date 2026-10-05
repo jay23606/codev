@@ -2022,7 +2022,7 @@ public partial class MainWindow : Window
         });
         content.Children.Add(new TextBlock
         {
-            Text = "Saved prompt templates from the WPF app also appear as /template-… commands (SAVED) and insert into the composer for review. Manage those templates in the WPF app or migrate them to Markdown files here.",
+            Text = "Prompt templates imported from older Codev versions also appear as /template-… commands (SAVED) and insert into the composer for review. Manage templates in Settings or migrate them to Markdown command files.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
         });

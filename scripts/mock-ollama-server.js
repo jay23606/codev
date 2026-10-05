@@ -14,17 +14,20 @@ function option(name) {
 }
 const portFile = option("--port-file");
 const requestLog = option("--request-log");
+const enabledFile = args.includes("--model-enabled-file") ? option("--model-enabled-file") : null;
+const modelEnabled = () => enabledFile === null || fs.readFileSync(enabledFile, "utf8").trim() === "1";
 
 const server = http.createServer((request, response) => {
   if (request.method === "GET" && request.url === "/api/tags") {
-    const body = JSON.stringify({ models: [{ name: MODEL, model: MODEL, size: 1,
-      details: { family: "smoke", parameter_size: "0", quantization_level: "Q4_0" } }] });
+    const models = modelEnabled() ? [{ name: MODEL, model: MODEL, size: 1,
+      details: { family: "smoke", parameter_size: "0", quantization_level: "Q4_0" } }] : [];
+    const body = JSON.stringify({ models });
     response.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
     response.end(body);
     return;
   }
   if (request.method === "GET" && request.url === "/api/ps") {
-    const body = JSON.stringify({ models: [{ name: MODEL, model: MODEL, size_vram: 1 }] });
+    const body = JSON.stringify({ models: modelEnabled() ? [{ name: MODEL, model: MODEL, size_vram: 1 }] : [] });
     response.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
     response.end(body);
     return;
@@ -48,7 +51,7 @@ const server = http.createServer((request, response) => {
     catch { response.writeHead(400); response.end("invalid JSON"); return; }
     const entry = { path: request.url, model: payload.model, stream: payload.stream, keep_alive: payload.keep_alive };
     fs.appendFileSync(requestLog, `${JSON.stringify(entry)}\n`, "utf8");
-    if (entry.model !== MODEL || entry.stream !== true) {
+    if (!modelEnabled() || entry.model !== MODEL || entry.stream !== true) {
       response.writeHead(400);
       response.end("unexpected chat request");
       return;
