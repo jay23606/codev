@@ -148,27 +148,35 @@ on run argv
     tell targetProcess
       set targetButton to missing value
       set buttonReport to ""
-      repeat with buttonIndex from 1 to count of buttons of window 1
-        set currentButton to button buttonIndex of window 1
+      set windowContents to entire contents of window 1
+      repeat with elementIndex from 1 to count of windowContents
+        set currentElement to item elementIndex of windowContents
         try
-          set buttonIdentifier to value of attribute "AXIdentifier" of currentButton
+          set elementRole to value of attribute "AXRole" of currentElement
         on error
-          set buttonIdentifier to missing value
+          set elementRole to "missing"
         end try
-        try
-          set buttonLabel to name of currentButton as text
-        on error
-          set buttonLabel to "missing"
-        end try
-        set identifierLabel to "missing"
-        if buttonIdentifier is not missing value then set identifierLabel to buttonIdentifier as text
-        set buttonReport to buttonReport & buttonIndex & ": id=" & identifierLabel & ", name=" & buttonLabel & ", position=" & (position of currentButton as text) & ", size=" & (size of currentButton as text) & linefeed
-        if buttonIdentifier is not missing value then
-          if (buttonIdentifier as text) is automationId then set targetButton to currentButton
+        if elementRole is "AXButton" then
+          try
+            set buttonIdentifier to value of attribute "AXIdentifier" of currentElement
+          on error
+            set buttonIdentifier to missing value
+          end try
+          try
+            set buttonLabel to name of currentElement as text
+          on error
+            set buttonLabel to "missing"
+          end try
+          set identifierLabel to "missing"
+          if buttonIdentifier is not missing value then set identifierLabel to buttonIdentifier as text
+          set buttonReport to buttonReport & elementIndex & ": id=" & identifierLabel & ", name=" & buttonLabel & linefeed
+          if buttonIdentifier is not missing value then
+            if (buttonIdentifier as text) is automationId then set targetButton to currentElement
+          end if
         end if
       end repeat
       if targetButton is missing value then
-        return "Could not find accessibility identifier '" & automationId & "'. Window position=" & (position of window 1 as text) & ", size=" & (size of window 1 as text) & linefeed & buttonReport
+        return "Could not find accessibility identifier '" & automationId & "' among descendants of window 1." & linefeed & buttonReport
       end if
       click targetButton
       return "Clicked accessibility identifier '" & automationId & "'."
