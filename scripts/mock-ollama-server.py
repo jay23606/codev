@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import sys
+
+print(f"Mock Ollama fixture starting under {sys.version.split()[0]}.", flush=True)
+
 import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -76,11 +80,14 @@ def main() -> None:
     parser.add_argument("--port-file", required=True)
     parser.add_argument("--request-log", required=True)
     args = parser.parse_args()
+    print("Binding loopback Ollama fixture.", flush=True)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     server.request_log = args.request_log  # type: ignore[attr-defined]
     server.log_lock = Lock()  # type: ignore[attr-defined]
+    print("Writing loopback Ollama fixture port.", flush=True)
     Path(args.port_file).write_text(str(server.server_address[1]), encoding="ascii")
+    print("Loopback Ollama fixture is ready.", flush=True)
     server.serve_forever(poll_interval=0.1)
 
 

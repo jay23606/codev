@@ -35,7 +35,14 @@ python3 ./scripts/mock-ollama-server.py --port-file "$mock_port_path" --request-
 mock_pid=$!
 for _ in {1..200}; do
   if [[ -s "$mock_port_path" ]]; then break; fi
-  if ! kill -0 "$mock_pid" 2>/dev/null; then cat "$smoke_root/mock-ollama.log" >&2; exit 1; fi
+  mock_state="$(ps -p "$mock_pid" -o stat= 2>/dev/null || true)"
+  if [[ -z "$mock_state" || "$mock_state" == Z* ]]; then
+    if wait "$mock_pid"; then mock_status=0; else mock_status=$?; fi
+    mock_pid=''
+    cat "$smoke_root/mock-ollama.log" >&2
+    echo "Mock Ollama exited before startup completed (exit $mock_status)." >&2
+    exit 1
+  fi
   sleep 0.1
 done
 if [[ ! -s "$mock_port_path" ]]; then cat "$smoke_root/mock-ollama.log" >&2; echo 'Mock Ollama did not report its loopback port within 20 seconds.' >&2; exit 1; fi
