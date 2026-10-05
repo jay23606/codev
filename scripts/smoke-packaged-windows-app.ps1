@@ -405,6 +405,14 @@ function Test-PinnedConversationSearchArchiveRestore($Window, [string]$DataRoot)
         throw 'Show archived cannot be opened through UI Automation.'
     }
     $archiveViewInvoke.Invoke()
+    $archivedRowDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    $archivedRow = $null
+    do {
+        $archivedRow = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+        if ($null -ne $archivedRow) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $archivedRowDeadline)
+    if ($null -eq $archivedRow) { throw 'The pinned conversation did not appear in the archived view before its restore check.' }
     $archiveItem = Find-ConversationMenuItem $Window $title 'Archive / restore'
     Invoke-AccessibleMenuItem $archiveItem
 
@@ -913,6 +921,45 @@ public static class CodevCommonDialog
     $sendButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
     if ($null -eq $sendButton) { throw "The composer send button is missing its accessible name '$sendName'." }
 
+    # /status is an in-app command and must not depend on a reachable model.
+    # Exercise it through the real composer and verify its saved transcript.
+    $conversationPath = Join-Path $dataRoot 'Codev\avalonia-conversations.json'
+    $activePath = Join-Path $dataRoot 'Codev\avalonia-active-conversation.json'
+    $statusActiveId = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+    $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+    $statusConversation = @($savedConversations | Where-Object { [string]$_.Id -eq $statusActiveId })
+    if ($statusConversation.Count -ne 1) { throw 'The active conversation is missing before the /status smoke.' }
+    $statusBeforeCount = @($statusConversation[0].Messages).Count
+    $composer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('/status')
+    $sendInvoke = $null
+    if (-not $sendButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$sendInvoke)) {
+        throw 'The composer send button cannot invoke /status through UI Automation.'
+    }
+    $sendInvoke.Invoke()
+    $statusDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    $statusReport = $null
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $statusConversation = @($savedConversations | Where-Object { [string]$_.Id -eq $statusActiveId })
+            $statusMessages = @($statusConversation[0].Messages)
+            if ($statusMessages.Count -ge $statusBeforeCount + 2 -and
+                [string]$statusMessages[-2].Content -eq '/status' -and
+                [string]$statusMessages[-1].Role -eq 'assistant') {
+                $statusReport = [string]$statusMessages[-1].Content
+                break
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $statusDeadline)
+    if ([string]::IsNullOrWhiteSpace($statusReport) -or
+        -not $statusReport.Contains('Model: Ollama (local)', [StringComparison]::Ordinal) -or
+        -not $statusReport.Contains('Project command permissions:', [StringComparison]::Ordinal)) {
+        throw 'Sending /status through the packaged composer did not save the expected local status report.'
+    }
+
     $allButtonCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Button)
@@ -1011,7 +1058,7 @@ public static class CodevCommonDialog
         Test-PinnedConversationSearchArchiveRestore $window $dataRoot
         Test-PermanentConversationDelete $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -1100,7 +1147,7 @@ public static class CodevCommonDialog
     $renamedRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)
     if ($null -eq $renamedRow) { throw 'The renamed conversation was not visible in the sidebar after restart.' }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {

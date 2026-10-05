@@ -67,6 +67,7 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [ ] Queue a follow-up and cancel it before it starts; verify it is labeled canceled and does not run.
 - [ ] Stop a response with Escape and with the stop button; verify partial output is retained.
 - [ ] Verify Enter sends, Shift+Enter inserts a newline, Ctrl/Cmd+N creates a conversation, Ctrl/Cmd+F focuses search, and Ctrl/Cmd+L focuses the composer.
+- [x] Windows 11 packaged smoke: send `/status` through the composer and verify its local report is saved without requiring a model response. Native macOS/Linux interaction remains unchecked.
 - [ ] Scroll upward during streaming and verify auto-follow pauses; return to the bottom and verify it resumes.
 - [x] Windows 11 packaged smoke: pin a conversation, find it through search, archive it, and restore it. Native macOS/Linux interaction remains unchecked.
 - [x] Windows 11 packaged smoke: open a conversation's sidebar context menu, rename the initial chat, restart Codev, and verify the new title appears in the sidebar.
