@@ -141,9 +141,32 @@ on run argv
   tell application "System Events"
     set targetProcess to first process whose unix id is targetPid
     tell targetProcess
-      repeat with currentElement in entire contents of window 1
+      set windowContents to entire contents of window 1
+      set buttonReport to ""
+      repeat with elementIndex from 1 to count of windowContents
+        set currentElement to item elementIndex of windowContents
         try
-          if (value of attribute "AXIdentifier" of currentElement as text) is "CodeTaskModeButton" then
+          set buttonIdentifier to value of attribute "AXIdentifier" of currentElement
+        on error
+          set buttonIdentifier to missing value
+        end try
+        try
+          set buttonRole to value of attribute "AXRole" of currentElement
+        on error
+          set buttonRole to "missing"
+        end try
+        if buttonRole is "AXButton" then
+          try
+            set buttonName to name of currentElement as text
+          on error
+            set buttonName to "missing"
+          end try
+          set identifierLabel to "missing"
+          if buttonIdentifier is not missing value then set identifierLabel to buttonIdentifier as text
+          set buttonReport to buttonReport & elementIndex & ": id=" & identifierLabel & ", name=" & buttonName & linefeed
+        end if
+        if buttonIdentifier is not missing value then
+          if (buttonIdentifier as text) is "CodeTaskModeButton" then
             try
               set buttonName to name of currentElement as text
             on error
@@ -156,9 +179,9 @@ on run argv
             end try
             return "Code task mode button: name=" & buttonName & ", help=" & buttonHelp & ", enabled=" & (enabled of currentElement as text)
           end if
-        end try
+        end if
       end repeat
-      return "CodeTaskModeButton was not found in the macOS accessibility tree."
+      return "CodeTaskModeButton was not found in the macOS accessibility tree." & linefeed & buttonReport
     end tell
   end tell
 end run
