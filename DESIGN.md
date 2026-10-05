@@ -268,7 +268,7 @@ X-items are from section 7. Items in phase 1 to 3 do not depend on the Avalonia 
 | B2 | Structured tool calls | M | none | Core · Ollama compaction and Avalonia local Plan use validated JSON Schema with bounded text fallbacks; five focused tests and an opt-in live Qwen3.6 Plan workflow pass; cross-model and native UI QA remain |
 | B15 | Keep a conversation's model warm between turns | S | none | Core · Avalonia Ollama requests set a 30-minute keep-alive; current V5 selected-file chat stayed resident after six minutes and follow-up load was 1.97 ms; manual desktop smoke remains |
 | B16 | Best-of-N attempts, picked by the verification loop | M | B5, B1 | Later · Implemented in Avalonia; current-build V5 again found no completed task at N=1 or N=3, while N=3 cost 12 minutes; keep N=1 by default |
-| B17 | Fix the flaky OpenAI stream-interruption test | S | none | Core · repeated partial transcript snapshots are deduplicated; deterministic delayed-stream regression test and current-head cross-platform CI pass |
+| B17 | Fix the flaky OpenAI stream-interruption test | S | none | Core · repeated partial transcript snapshots are deduplicated; deterministic delayed-stream regression test and current-head cross-platform CI pass. On 2026-10-05, `Codev.Tests` passed 1,009 tests with 2 opt-in live tests skipped, and `Keeps_partial_openai_text_visible_when_the_code_task_stream_is_interrupted` passed 25 consecutive .NET 10.0.401 runs |
 | B3 | Diff edits alongside whole-file edits | M | none | Done |
 | B4 | Step limit and loop detection | S | none | Core · implemented in WPF, Avalonia, and OpenAI Code task; manual QA remains |
 | B5 | Test and lint loop | M | B1 | Done |
