@@ -68,6 +68,198 @@ function Test-NewConversationShortcut($Window, [string]$DataRoot) {
     throw 'Ctrl+N did not create and activate a new conversation.'
 }
 
+function Test-ConversationRename($Window, [string]$DataRoot) {
+    $activeConversationPath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
+    $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
+    $conversationId = [string](Get-Content -LiteralPath $activeConversationPath -Raw | ConvertFrom-Json)
+    $rowCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'New conversation'))
+    $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+    if ($null -eq $row) { throw 'The active disposable conversation is missing from the sidebar.' }
+    $row.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+
+    $renameCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::MenuItem),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Rename…'))
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $renameItem = $null
+    do {
+        $renameItem = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants, $renameCondition)
+        if ($null -ne $renameItem) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $renameItem) { throw 'The conversation context menu did not expose Rename….' }
+    $renameItem.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+
+    $dialog = Wait-ForTopLevelWindow 'Rename conversation'
+    if ($null -eq $dialog) { throw 'Choosing Rename… did not open its dialog.' }
+    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit)
+    $edit = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
+    if ($null -eq $edit) { throw 'The Rename conversation dialog has no editable name field.' }
+    $valuePattern = $null
+    if (-not $edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        throw 'The rename field does not expose its editable value to UI Automation.'
+    }
+    $renamedTitle = 'Codev UI smoke renamed'
+    $valuePattern.SetValue($renamedTitle)
+
+    $saveCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Save name'))
+    $save = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $saveCondition)
+    if ($null -eq $save) { throw 'The Rename conversation dialog has no Save name action.' }
+    $saveInvoke = $null
+    if (-not $save.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
+        throw 'The Save name action is not invokable through UI Automation.'
+    }
+    $saveInvoke.Invoke()
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        try {
+            $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $renamed = @($conversations | Where-Object { [string]$_.Id -eq $conversationId -and [string]$_.Title -eq $renamedTitle })
+            if ($renamed.Count -eq 1) { return }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'The renamed title was not persisted for the active conversation.'
+}
+
+function Test-ConversationArchiveRestore($Window, [string]$DataRoot) {
+    $conversationId = [string](Get-Content -LiteralPath (Join-Path $DataRoot 'Codev\avalonia-active-conversation.json') -Raw | ConvertFrom-Json)
+    $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
+    $title = 'New conversation'
+    $rowCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $title))
+    $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+    if ($null -eq $row) { throw 'The renamed conversation is missing from the sidebar before archive.' }
+    $row.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+    $archiveCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::MenuItem),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Archive / restore'))
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $archiveItem = $null
+    do {
+        $archiveItem = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants, $archiveCondition)
+        if ($null -ne $archiveItem) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $archiveItem) { throw 'The conversation context menu did not expose Archive / restore.' }
+    $archiveInvoke = $null
+    if ($archiveItem.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$archiveInvoke)) {
+        $archiveInvoke.Invoke()
+    }
+    else {
+        $archiveItem.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $archived = $false
+    do {
+        try {
+            $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $target = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+            $archived = $target.Count -eq 1 -and [bool]$target[0].IsArchived
+        }
+        catch { }
+        if ($archived) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $archived) { throw 'Archiving the disposable conversation did not persist its archived state.' }
+    $activeAfterArchive = [string](Get-Content -LiteralPath (Join-Path $DataRoot 'Codev\avalonia-active-conversation.json') -Raw | ConvertFrom-Json)
+    if ($activeAfterArchive -eq $conversationId) { throw 'Archiving the active conversation did not switch to another available conversation.' }
+
+    $buttonsCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button)
+    $buttons = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+    $archiveView = $null
+    for ($index = 0; $index -lt $buttons.Count; $index++) {
+        if ($buttons.Item($index).Current.Name -like '*Show archived*') { $archiveView = $buttons.Item($index); break }
+    }
+    if ($null -eq $archiveView) { throw 'The sidebar does not expose its Show archived action after archiving.' }
+    $archiveViewInvoke = $null
+    if (-not $archiveView.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$archiveViewInvoke)) {
+        throw 'The Show archived action cannot be opened through UI Automation.'
+    }
+    $archiveViewInvoke.Invoke()
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $row = $null
+    do {
+        $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+        if ($null -ne $row) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $row) { throw 'The archived conversation did not appear in the archived sidebar view.' }
+    $row.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $archiveItem = $null
+    do {
+        $archiveItem = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants, $archiveCondition)
+        if ($null -ne $archiveItem) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $archiveItem) { throw 'The archived conversation context menu did not expose Archive / restore.' }
+    $archiveInvoke = $null
+    if ($archiveItem.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$archiveInvoke)) {
+        $archiveInvoke.Invoke()
+    }
+    else {
+        $archiveItem.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        try {
+            $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $target = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+            $activeId = [string](Get-Content -LiteralPath (Join-Path $DataRoot 'Codev\avalonia-active-conversation.json') -Raw | ConvertFrom-Json)
+            $active = @($conversations | Where-Object { [string]$_.Id -eq $activeId })
+            if ($target.Count -eq 1 -and -not [bool]$target[0].IsArchived -and
+                $active.Count -eq 1 -and -not [bool]$active[0].IsArchived) { return }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Restoring the archived conversation did not persist its active state.'
+}
+
 function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string]$ExpectedLabel, [string]$ExpectedSetting) {
     $buttonInvoke = $null
     if (-not $ModeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$buttonInvoke)) {
@@ -459,6 +651,8 @@ public static class CodevCommonDialog
         }
     }
 
+    Test-ConversationRename $window $dataRoot
+
     $modeCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
         'ProjectCommandModeButton')
@@ -526,11 +720,22 @@ public static class CodevCommonDialog
         [string]$savedSettings.DefaultProjectCommandPermissionMode -ne 'Auto') {
         throw "The fresh app process did not restore Auto mode (label='$($modeButton.Current.Name)', setting='$($savedSettings.DefaultProjectCommandPermissionMode)')."
     }
+    $renamedRowCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Codev UI smoke renamed'))
+    if ($null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)) {
+        throw 'The renamed conversation was not visible in the sidebar after the Auto-mode restart.'
+    }
 
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot
+        Test-ConversationArchiveRestore $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, sidebar rename/archive/restore, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -597,8 +802,28 @@ public static class CodevCommonDialog
     }
 
     Test-NewConversationShortcut $window $dataRoot
+    Test-ConversationArchiveRestore $window $dataRoot
+
+    if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(10000)) {
+        throw 'The packaged app did not close cleanly after the conversation-management smoke.'
+    }
+    $app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -PassThru `
+        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $conversationRestartDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $windowHandle = [IntPtr]::Zero
+    while ([DateTime]::UtcNow -lt $conversationRestartDeadline) {
+        $app.Refresh()
+        if ($app.HasExited) { throw "Avalonia exited before restoring the renamed conversation (exit $($app.ExitCode))." }
+        $windowHandle = $app.MainWindowHandle
+        if ($windowHandle -ne [IntPtr]::Zero) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if ($windowHandle -eq [IntPtr]::Zero) { throw 'Avalonia did not reopen after the conversation-management smoke.' }
+    $window = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
+    $renamedRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)
+    if ($null -eq $renamedRow) { throw 'The renamed conversation was not visible in the sidebar after restart.' }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, and Ctrl+F/Ctrl+L focus. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, and persisted sidebar rename/archive/restore actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
