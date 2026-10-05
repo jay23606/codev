@@ -723,6 +723,44 @@ public sealed class MainWindowTests
         }
     }
 
+    [AvaloniaTheory]
+    [InlineData("openai")]
+    [InlineData("anthropic")]
+    public async Task Unknown_context_warning_stays_hidden_for_hosted_provider_turns(string provider)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+        conversation.Provider = provider;
+        conversation.Model = provider == "openai" ? "gpt-test" : "claude-test";
+        conversation.Messages.Add(new ChatMessage("user", "hello"));
+        conversation.Messages.Add(new ChatMessage("assistant", "hello"));
+        conversation.LastPromptProvider = provider;
+        conversation.LastPromptModel = conversation.Model;
+        conversation.LastPromptTokens = 12000;
+        conversation.LastPromptContext = 0;
+        var messageCounts = Assert.IsType<Dictionary<Guid, int>>(typeof(MainViewModel)
+            .GetField("_lastPromptMessageCounts", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewModel));
+        messageCounts[conversation.Id] = conversation.Messages.Count;
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            var warning = Assert.Single(window.GetVisualDescendants().OfType<TextBlock>(),
+                block => block.Text == viewModel.UnknownContextWarningLabel);
+            Assert.False(viewModel.ShouldWarnUnknownContext);
+            Assert.False(warning.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
     [AvaloniaFact]
     public void Attached_project_exposes_a_persistable_auto_command_mode_selector()
     {
