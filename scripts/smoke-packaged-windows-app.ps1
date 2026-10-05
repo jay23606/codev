@@ -24,6 +24,50 @@ function Find-ByAutomationId($Element, [string]$AutomationId) {
     return $Element.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Wait-ForTopLevelWindow([string]$Name, [int]$TimeoutSeconds = 5) {
+    $condition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Window),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $Name))
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -ne $candidate) { return $candidate }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $null
+}
+
+function Test-NewConversationShortcut($Window, [string]$DataRoot) {
+    $activeConversationPath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
+    if (-not (Test-Path -LiteralPath $activeConversationPath -PathType Leaf)) {
+        throw 'The isolated profile did not persist an active conversation before the Ctrl+N check.'
+    }
+    $previousConversationId = Get-Content -LiteralPath $activeConversationPath -Raw | ConvertFrom-Json
+    $composerCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Message Codev'))
+    $composer = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $composerCondition)
+    if ($null -eq $composer) { throw 'The named composer is missing for the Ctrl+N check.' }
+    $composer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^n')
+    $newConversationDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $currentConversationId = Get-Content -LiteralPath $activeConversationPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($null -ne $currentConversationId -and $currentConversationId -ne $previousConversationId) { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $newConversationDeadline)
+    throw 'Ctrl+N did not create and activate a new conversation.'
+}
+
 function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string]$ExpectedLabel, [string]$ExpectedSetting) {
     $buttonInvoke = $null
     if (-not $ModeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$buttonInvoke)) {
@@ -338,6 +382,58 @@ public static class CodevCommonDialog
         }
     }
 
+    # Exercise the shortcuts against the packaged native window, not only the
+    # Avalonia headless event handler. The app runs against an isolated profile.
+    [void][CodevCommonDialog]::ActivateWindow($windowHandle)
+    $composer.SetFocus()
+    Start-Sleep -Milliseconds 100
+    [System.Windows.Forms.SendKeys]::SendWait('{F1}')
+    $shortcutsWindow = Wait-ForTopLevelWindow 'Keyboard shortcuts'
+    if ($null -eq $shortcutsWindow) { throw 'F1 did not open the keyboard shortcuts reference.' }
+    $shortcutText = $shortcutsWindow.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    $shortcutNames = @($shortcutsWindow.Current.Name)
+    for ($index = 0; $index -lt $shortcutText.Count; $index++) {
+        $shortcutNames += $shortcutText.Item($index).Current.Name
+    }
+    foreach ($requiredShortcut in @('Ctrl/⌘+N', 'Ctrl/⌘+F', 'Ctrl/⌘+L', '/status')) {
+        if (-not ($shortcutNames -contains $requiredShortcut) -and
+            -not (($shortcutNames -join "`n").Contains($requiredShortcut, [StringComparison]::Ordinal))) {
+            throw "The keyboard shortcuts reference does not list '$requiredShortcut'."
+        }
+    }
+    $shortcutsHandle = [IntPtr]$shortcutsWindow.Current.NativeWindowHandle
+    if ($shortcutsHandle -eq [IntPtr]::Zero -or -not [CodevCommonDialog]::ActivateWindow($shortcutsHandle)) {
+        throw 'The keyboard shortcuts reference could not be activated for its Escape check.'
+    }
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $shortcutsWindow = Wait-ForTopLevelWindow 'Keyboard shortcuts' 1
+        if ($null -eq $shortcutsWindow) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $closeDeadline)
+    if ($null -ne $shortcutsWindow) { throw 'Escape did not close the keyboard shortcuts reference.' }
+
+    $searchCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Search conversations'))
+    $search = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $searchCondition)
+    if ($null -eq $search) { throw 'The named conversation search field is missing.' }
+    $composer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^f')
+    Start-Sleep -Milliseconds 100
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused.Current.Name -ne 'Search conversations') { throw 'Ctrl+F did not focus conversation search.' }
+    [System.Windows.Forms.SendKeys]::SendWait('^l')
+    Start-Sleep -Milliseconds 100
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused.Current.Name -ne 'Message Codev') { throw 'Ctrl+L did not focus the composer.' }
     $sendName = 'Send or queue prompt; stop when the composer is empty'
     $buttonCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
@@ -432,8 +528,9 @@ public static class CodevCommonDialog
     }
 
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+        Test-NewConversationShortcut $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal to the search, composer, and response-style controls, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -499,8 +596,9 @@ public static class CodevCommonDialog
         throw 'Importing the selected file did not preserve the original conversation and add one with a fresh ID.'
     }
 
+    Test-NewConversationShortcut $window $dataRoot
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, and successful Tab traversal to the search, composer, and response-style controls. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, and Ctrl+F/Ctrl+L focus. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
