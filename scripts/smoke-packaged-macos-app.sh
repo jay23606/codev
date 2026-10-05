@@ -108,6 +108,40 @@ PY
     sleep 0.1
   done
   cat "$log_path" >&2
+  osascript - "$app_pid" >&2 <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set reportText to ""
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    tell targetProcess
+      set windowContents to entire contents of window 1
+      repeat with elementIndex from 1 to count of windowContents
+        set currentElement to item elementIndex of windowContents
+        try
+          set elementRole to value of attribute "AXRole" of currentElement
+          if elementRole is "AXStaticText" or elementRole is "AXTextField" or elementRole is "AXTextArea" then
+            try
+              set elementValue to value of attribute "AXValue" of currentElement as text
+            on error
+              set elementValue to ""
+            end try
+            try
+              set elementName to name of currentElement as text
+            on error
+              set elementName to ""
+            end try
+            if elementValue contains "Code task" or elementValue contains "workspace" or elementValue contains "model" or elementName contains "Code task" or elementName contains "workspace" or elementName contains "model" then
+              set reportText to reportText & "UI status: name=" & elementName & ", value=" & elementValue & linefeed
+            end if
+          end if
+        end try
+      end repeat
+    end tell
+  end tell
+  return reportText
+end run
+APPLESCRIPT
   python3 - "$conversations_path" "$conversation_id" >&2 <<'PY'
 import json
 import sys
