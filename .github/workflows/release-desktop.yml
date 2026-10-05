@@ -74,6 +74,11 @@ jobs:
       - name: Publish self-contained headless CLI
         run: dotnet publish Codev.Cli/Codev.Cli.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish-cli/${{ matrix.rid }}
 
+      - name: Smoke-test upgrade from latest public Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-windows-upgrade.ps1 -CurrentAppPath "$PWD/artifacts/publish/win-x64/Codev.Avalonia.exe"
+
       - name: Smoke-test packaged Windows UI with UI Automation
         if: runner.os == 'Windows'
         shell: pwsh
