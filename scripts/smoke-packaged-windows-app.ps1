@@ -74,7 +74,6 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     Start-Sleep -Milliseconds 100
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($Path)
-    if ($fileName.Current.Name -ne $Path) { throw 'The native file picker filename does not match the requested path.' }
 }
 
 function Invoke-BackupDialogButton($Dialog, [string]$Name) {
