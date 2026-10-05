@@ -68,6 +68,131 @@ function Test-NewConversationShortcut($Window, [string]$DataRoot) {
     throw 'Ctrl+N did not create and activate a new conversation.'
 }
 
+function Test-ConversationModeShortcut($Window, [string]$DataRoot) {
+    $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
+    $activePath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
+    $conversationId = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+    $readActiveConversation = {
+        $saved = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+        return @($saved | Where-Object { [string]$_.Id -eq $conversationId })[0]
+    }
+    $conversation = & $readActiveConversation
+    if ($null -eq $conversation -or $conversation.IsPlanMode -or $conversation.IsCodeTask) {
+        throw 'The mode-cycle shortcut smoke requires the active conversation to start in Chat mode.'
+    }
+
+    $planButtonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Chat mode'))
+    $chatButton = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $planButtonCondition)
+    if ($null -eq $chatButton) { throw 'The visible conversation mode button did not identify Chat mode.' }
+    $composer = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+            'ComposerTextBox'))
+    if ($null -eq $composer) { throw 'The named composer is missing for the mode-cycle shortcut check.' }
+    $composer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^+m')
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $conversation = & $readActiveConversation
+        if ($null -ne $conversation -and $conversation.IsPlanMode -and -not $conversation.IsCodeTask) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $conversation -or -not $conversation.IsPlanMode -or $conversation.IsCodeTask) {
+        throw 'Ctrl+Shift+M did not switch the active conversation from Chat to Plan.'
+    }
+
+    $planButtonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Plan mode'))
+    if ($null -eq $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $planButtonCondition)) {
+        throw 'The mode control did not visibly update to Plan mode after Ctrl+Shift+M.'
+    }
+
+    $codeTaskButton = $null
+    foreach ($label in @('Code task unavailable', 'Enable Code task', 'Code task on')) {
+        $codeTaskButton = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.AndCondition]::new(
+                [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                    [System.Windows.Automation.ControlType]::Button),
+                [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::NameProperty,
+                    $label)))
+        if ($null -ne $codeTaskButton) { break }
+    }
+    if ($null -eq $codeTaskButton) { throw 'The Code task mode control is missing during mode-cycle smoke.' }
+    if ($codeTaskButton.Current.Name -eq 'Code task unavailable') {
+        $composer.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('^+m')
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $conversation = & $readActiveConversation
+            if ($null -ne $conversation -and -not $conversation.IsPlanMode -and -not $conversation.IsCodeTask) { break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if ($null -eq $conversation -or $conversation.IsPlanMode -or $conversation.IsCodeTask) {
+            throw 'When Code task is unavailable, Ctrl+Shift+M did not cycle Plan back to Chat.'
+        }
+        return 'Chat → Plan → Chat (Code task unavailable)'
+    }
+
+    if ([string]$conversation.Provider -eq 'ollama') {
+        $composer.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('^+m')
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $conversation = & $readActiveConversation
+            if ($null -ne $conversation -and $conversation.IsCodeTask -and -not $conversation.IsPlanMode) { break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if ($null -eq $conversation -or -not $conversation.IsCodeTask -or $conversation.IsPlanMode) {
+            throw 'Ctrl+Shift+M did not switch Plan into an eligible local Ollama Code task.'
+        }
+        $composer.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('^+m')
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $conversation = & $readActiveConversation
+            if ($null -ne $conversation -and -not $conversation.IsPlanMode -and -not $conversation.IsCodeTask) { break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if ($null -eq $conversation -or $conversation.IsPlanMode -or $conversation.IsCodeTask) {
+            throw 'Ctrl+Shift+M did not cycle an eligible local Code task back to Chat.'
+        }
+        return 'Chat → Plan → local Code task → Chat'
+    }
+
+    # Entering an eligible hosted Code task can request consent and is not suitable
+    # for an unattended smoke. Restore Chat through the visible Plan control.
+    $planModeButton = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $planButtonCondition)
+    $planInvoke = $null
+    if ($null -eq $planModeButton -or -not $planModeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$planInvoke)) {
+        throw 'Could not restore Chat mode after checking the eligible Code task branch.'
+    }
+    $planInvoke.Invoke()
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $conversation = & $readActiveConversation
+        if ($null -ne $conversation -and -not $conversation.IsPlanMode -and -not $conversation.IsCodeTask) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $conversation -or $conversation.IsPlanMode -or $conversation.IsCodeTask) {
+        throw 'Could not restore Chat mode after the mode-cycle shortcut smoke.'
+    }
+    return 'Chat → Plan; Code task eligible (hosted-consent branch intentionally not invoked)'
+}
+
 function Test-ConversationRename($Window, [string]$DataRoot) {
     $activeConversationPath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
     $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
@@ -1067,12 +1192,13 @@ public static class CodevCommonDialog
     if ($null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)) {
         throw 'The renamed conversation was not visible in the sidebar after the Auto-mode restart.'
     }
+    $modeCycleResult = Test-ConversationModeShortcut $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot
         Test-PinnedConversationSearchArchiveRestore $window $dataRoot
         Test-PermanentConversationDelete $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -1161,7 +1287,7 @@ public static class CodevCommonDialog
     $renamedRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)
     if ($null -eq $renamedRow) { throw 'The renamed conversation was not visible in the sidebar after restart.' }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, /status without a model request, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
