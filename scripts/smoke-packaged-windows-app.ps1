@@ -71,15 +71,19 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     if ($env:GITHUB_ACTIONS -eq 'true') {
         Write-Host "Native picker '$($Dialog.Current.Name)' filename: id='$($fileName.Current.AutomationId)' class='$($fileName.Current.ClassName)' type='$($fileName.Current.ControlType.ProgrammaticName)' bounds=$([int]$bounds.Left),$([int]$bounds.Top),$([int]$bounds.Width),$([int]$bounds.Height)"
     }
-    $dialogHandle = [IntPtr]$Dialog.Current.NativeWindowHandle
+    $dialogHandle = [CodevCommonDialog]::FindWindowByTitle($null, $Dialog.Current.Name)
+    if ($dialogHandle -eq [IntPtr]::Zero) { $dialogHandle = [IntPtr]$Dialog.Current.NativeWindowHandle }
+    if ($dialogHandle -eq [IntPtr]::Zero) { throw 'The native file picker window handle is missing.' }
+    [void][CodevCommonDialog]::ShowWindow($dialogHandle, 9)
     [void][CodevCommonDialog]::SetForegroundWindow($dialogHandle)
+    Start-Sleep -Milliseconds 150
     [CodevCommonDialog]::ClickAt([int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
     Start-Sleep -Milliseconds 100
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($Path)
     if ($env:GITHUB_ACTIONS -eq 'true') {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        Write-Host "Native picker filename after input: expected=$($fileName.Current.Name -eq $Path), focused-id='$($focused.Current.AutomationId)', focused-class='$($focused.Current.ClassName)'"
+        Write-Host "Native picker handles: dialog=$($dialogHandle.ToInt64()) foreground=$([CodevCommonDialog]::GetForegroundWindow().ToInt64()); filename focused=$($focused.Current.AutomationId -eq $fileName.Current.AutomationId)"
         $controls = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($control in $controls) {
             if ($control.Current.ClassName -notin @('Edit', 'Button', 'ComboBox', 'ComboBoxEx32')) { continue }
@@ -88,6 +92,10 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
             $safeName = if ($control.Current.Name -in @('Save', 'Open', 'Cancel', 'File name:')) { $control.Current.Name } else { '' }
             Write-Host "Native picker control: name='$safeName' id='$($control.Current.AutomationId)' class='$($control.Current.ClassName)' type='$($control.Current.ControlType.ProgrammaticName)' bounds=$([int]$controlBounds.Left),$([int]$controlBounds.Top),$([int]$controlBounds.Width),$([int]$controlBounds.Height)"
         }
+    }
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused.Current.AutomationId -ne $fileName.Current.AutomationId) {
+        throw 'Keyboard focus did not move to the native file picker filename field.'
     }
 }
 
@@ -128,8 +136,17 @@ using System.Runtime.InteropServices;
 
 public static class CodevCommonDialog
 {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowW")]
+    public static extern IntPtr FindWindowByTitle(string className, string windowTitle);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int command);
+
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
