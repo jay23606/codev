@@ -8,7 +8,7 @@
         Icon="/Assets/codev-icon.ico"
         KeyDown="MainWindow_KeyDown"
         Title="Codev"
-        Width="1280" Height="760" MinWidth="960" MinHeight="600"
+        Width="1320" Height="760" MinWidth="960" MinHeight="600"
         FontFamily="{Binding UiFontFamily}" FontSize="{Binding UiFontSize}"
         Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}">
 
@@ -185,7 +185,7 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,Auto,*,Auto,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="5">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
