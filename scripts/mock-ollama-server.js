@@ -24,8 +24,9 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "GET" && request.url === "/api/ps") {
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end('{"models":[]}');
+    const body = JSON.stringify({ models: [{ name: MODEL, model: MODEL, size_vram: 1 }] });
+    response.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+    response.end(body);
     return;
   }
   if (request.method === "GET" && request.url === "/api/version") {
