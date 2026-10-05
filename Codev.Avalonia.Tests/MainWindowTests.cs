@@ -1272,6 +1272,19 @@ public sealed class MainWindowTests
                 $"Expected only a viewport-sized slice of {messages.Length} messages to be realized, but indices {panel.FirstRealizedIndex} through {panel.LastRealizedIndex} were realized.");
             Assert.True(panel.LastRealizedIndex >= messages.Length - 30,
                 $"Expected the initial transcript view to follow the latest message, but it ended at {panel.LastRealizedIndex} of {messages.Length}.");
+
+            var scrollViewer = Assert.IsType<ScrollViewer>(window.FindControl<ScrollViewer>("ConversationScrollViewer"));
+            scrollViewer.Offset = new global::Avalonia.Vector(scrollViewer.Offset.X, 0);
+            window.UpdateLayout();
+            await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
+            Assert.Equal(0, panel.FirstRealizedIndex);
+
+            var bottom = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+            scrollViewer.Offset = new global::Avalonia.Vector(scrollViewer.Offset.X, bottom);
+            window.UpdateLayout();
+            await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
+            Assert.True(panel.LastRealizedIndex >= messages.Length - 30,
+                $"Expected scrolling to the bottom to realize the latest messages, but it ended at {panel.LastRealizedIndex} of {messages.Length}.");
         }
         finally
         {
