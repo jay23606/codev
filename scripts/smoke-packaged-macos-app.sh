@@ -12,11 +12,10 @@ command -v python3 >/dev/null || { echo 'python3 is required for the packaged ma
 smoke_root="$(mktemp -d)"
 export CODEV_DATA_ROOT="$smoke_root/data"
 log_path="$smoke_root/app.log"
-"$app_path" >"$log_path" 2>&1 &
-app_pid=$!
-
+app_pid=''
+mock_pid=''
 cleanup() {
-  if kill -0 "$app_pid" 2>/dev/null; then
+  if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
     kill "$app_pid" 2>/dev/null || true
     for _ in {1..20}; do
       kill -0 "$app_pid" 2>/dev/null || break
@@ -24,10 +23,27 @@ cleanup() {
     done
     kill -9 "$app_pid" 2>/dev/null || true
   fi
-  wait "$app_pid" 2>/dev/null || true
+  if [[ -n "$app_pid" ]]; then wait "$app_pid" 2>/dev/null || true; fi
+  if [[ -n "$mock_pid" ]]; then kill "$mock_pid" 2>/dev/null || true; wait "$mock_pid" 2>/dev/null || true; fi
   rm -rf -- "$smoke_root"
 }
 trap cleanup EXIT
+
+mock_port_path="$smoke_root/mock-ollama.port"
+mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
+python3 ./scripts/mock-ollama-server.py --port-file "$mock_port_path" --request-log "$mock_request_log" >"$smoke_root/mock-ollama.log" 2>&1 &
+mock_pid=$!
+for _ in {1..50}; do
+  if [[ -s "$mock_port_path" ]]; then break; fi
+  if ! kill -0 "$mock_pid" 2>/dev/null; then cat "$smoke_root/mock-ollama.log" >&2; exit 1; fi
+  sleep 0.1
+done
+if [[ ! -s "$mock_port_path" ]]; then echo 'Mock Ollama did not report its loopback port.' >&2; exit 1; fi
+mock_port="$(cat "$mock_port_path")"
+mkdir -p "$CODEV_DATA_ROOT/Codev"
+printf '{"Theme":"dark","OllamaEndpoint":"http://127.0.0.1:%s/"}\n' "$mock_port" >"$CODEV_DATA_ROOT/Codev/avalonia-settings.json"
+"$app_path" >"$log_path" 2>&1 &
+app_pid=$!
 
 active_path="$CODEV_DATA_ROOT/Codev/avalonia-active-conversation.json"
 conversations_path="$CODEV_DATA_ROOT/Codev/avalonia-conversations.json"
@@ -112,10 +128,12 @@ APPLESCRIPT
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with Command+Shift+M.'
 
-# The hosted runner has no Ollama model or hosted credentials, so Plan returns
-# to Chat on the next cycle instead of entering Code task.
+# The mock server supplies one local model, so exercise the eligible Code task
+# branch before restoring Chat for the plain streaming-chat round-trip.
 send_mode_shortcut
-assert_mode false false 'Packaged macOS app switched Plan → Chat when Code task was unavailable.'
+assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
+send_mode_shortcut
+assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
 
 # /status is handled locally and exercises the composer/send path without a model request.
 before_message_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
@@ -165,7 +183,7 @@ raise SystemExit(0 if success else 1)
 PY
   then
     echo 'Packaged macOS app sent /status from the composer and persisted the local status report without a model request.'
-    exit 0
+    break
   fi
   if ! kill -0 "$app_pid" 2>/dev/null; then
     cat "$log_path" >&2
@@ -175,15 +193,95 @@ PY
   sleep 0.1
 done
 
-cat "$log_path" >&2
-python3 - "$conversations_path" "$conversation_id" <<'PY' >&2 || true
+python3 - "$conversations_path" "$conversation_id" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as source:
     conversations = json.load(source)
 conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
-print({"Messages": conversation.get("Messages", [])[-4:]} if conversation else "conversation missing")
+messages = conversation.get("Messages", []) if conversation else []
+if len(messages) < 2 or messages[-2].get("Content") != "/status" or messages[-1].get("Role") != "assistant":
+    raise SystemExit("Packaged macOS app did not persist the expected local /status response.")
+if "Model: Ollama (local)" not in messages[-1].get("Content", "") or "Project command permissions:" not in messages[-1].get("Content", ""):
+    raise SystemExit("Packaged macOS app persisted an incomplete /status report.")
 PY
-echo 'Packaged macOS app did not persist the expected /status report from its composer.' >&2
-exit 1
+
+before_chat_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+if conversation is None:
+    raise SystemExit("The active macOS conversation disappeared before mock chat.")
+print(len(conversation.get("Messages", [])))
+PY
+)"
+chat_prompt='Smoke-test packaged chat on macOS.'
+osascript - "$app_pid" "$chat_prompt" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set promptText to item 2 of argv
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 0.25
+    key code 37 using {command down}
+    keystroke promptText
+    key code 36
+  end tell
+end run
+APPLESCRIPT
+
+for _ in {1..150}; do
+  if python3 - "$conversations_path" "$conversation_id" "$before_chat_count" "$chat_prompt" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+before = int(sys.argv[3])
+success = (len(messages) >= before + 2 and messages[-2].get("Content") == sys.argv[4] and
+           messages[-1].get("Role") == "assistant" and
+           messages[-1].get("Content") == "Packaged chat round-trip passed.")
+raise SystemExit(0 if success else 1)
+PY
+  then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during macOS mock chat.' >&2; exit 1; fi
+  sleep 0.1
+done
+
+python3 - "$conversations_path" "$conversation_id" "$chat_prompt" "$mock_request_log" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+if not any(message.get("Role") == "user" and message.get("Content") == sys.argv[3] for message in messages):
+    raise SystemExit("Packaged macOS chat did not persist the submitted user prompt.")
+if not messages or messages[-1].get("Role") != "assistant" or messages[-1].get("Content") != "Packaged chat round-trip passed.":
+    raise SystemExit(f"Packaged macOS chat did not persist the expected streamed reply: {messages[-2:]!r}")
+with open(sys.argv[4], encoding="utf-8") as source:
+    requests = [json.loads(line) for line in source if line.strip()]
+if len(requests) != 1 or requests[0] != {"path": "/api/chat", "model": "codev-smoke:latest", "stream": True, "keep_alive": "30m"}:
+    raise SystemExit(f"Packaged macOS chat request did not match expected model/stream/keep_alive fields: {requests!r}")
+PY
+
+echo 'macOS packaged app completed a real composer → streamed Ollama chat → persisted reply round-trip against a loopback mock server.'
+
+cat "$log_path" >&2
+python3 - "$conversations_path" "$conversation_id" <<'PY' >&2
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+print({"Model": conversation.get("Model"), "Messages": conversation.get("Messages", [])[-4:]} if conversation else "conversation missing")
+PY
