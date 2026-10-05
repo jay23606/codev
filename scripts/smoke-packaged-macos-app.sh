@@ -280,6 +280,41 @@ assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
 send_mode_shortcut
 assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
 
+await_saved_draft() {
+  local expected="$1"
+  local description="$2"
+  for _ in {1..100}; do
+    if python3 - "$conversations_path" "$conversation_id" "$expected" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+raise SystemExit(0 if conversation and conversation.get("Draft") == sys.argv[3] else 1)
+PY
+    then return 0; fi
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+      cat "$log_path" >&2
+      echo "Packaged Avalonia app exited while entering $description on macOS." >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  python3 - "$conversations_path" "$conversation_id" <<'PY' >&2
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+print({"Draft": conversation.get("Draft") if conversation else None})
+PY
+  cat "$log_path" >&2
+  echo "The macOS composer did not persist $description before the smoke submitted it." >&2
+  return 1
+}
+
 # /status is handled locally and exercises the composer/send path without a model request.
 before_message_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
 import json
@@ -302,7 +337,18 @@ on run argv
     set frontmost of targetProcess to true
     delay 1
     key code 37 using {command down}
+    delay 0.5
     keystroke "/status"
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "/status" "/status"
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
     key code 36
   end tell
 end run
@@ -376,7 +422,18 @@ on run argv
     set frontmost of targetProcess to true
     delay 0.25
     key code 37 using {command down}
+    delay 0.5
     keystroke promptText
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "$chat_prompt" "the mock chat prompt"
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
     key code 36
   end tell
 end run
