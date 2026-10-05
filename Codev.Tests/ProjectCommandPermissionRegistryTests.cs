@@ -323,10 +323,50 @@ public sealed class ProjectCommandPermissionRegistryTests : IDisposable
             loaded.Evaluate(_project, "cargo check --manifest-path space-invaders-game/signaling/Cargo.toml", "PowerShell", isVerification: true));
         var removeAndInspect = "Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short";
         var commitAndPush = "git -C space-invaders-game add game.js; git -C space-invaders-game commit -m \"Improve gameplay\"; git -C space-invaders-game push origin main";
+        var indirectDataPath = "Remove-Item \"$env:CODEV_DATA_ROOT/Codev/avalonia-settings.json\"";
         Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, removeAndInspect, "PowerShell"));
         Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, commitAndPush, "PowerShell"));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, indirectDataPath, "PowerShell"));
         await loaded.SetRuleAsync(_project, "git status --short", ProjectCommandPermissionDecision.Deny);
         Assert.Equal(ProjectCommandPermissionDecision.Deny, loaded.Evaluate(_project, "git status --short"));
+    }
+
+    [Theory]
+    [InlineData("Remove-Item \"$env:CODEV_DATA_ROOT/Codev/avalonia-settings.json\"")]
+    [InlineData("Remove-Item \"$env:USERPROFILE/AppData/Local/Codev/avalonia-settings.json\"")]
+    [InlineData("Remove-Item \"%LOCALAPPDATA%/Codev/avalonia-settings.json\"")]
+    [InlineData("rm ~/.local/share/Codev/settings.json")]
+    [InlineData("Remove-Item (Get-Item Env:LOCALAPPDATA).Value")]
+    [InlineData("Remove-Item ([Environment]::GetFolderPath('LocalApplicationData') + '\\Codev\\settings.json')")]
+    [InlineData("Remove-Item ([Environment]::GetEnvironmentVariable('CODEV_DATA_ROOT') + '\\Codev\\settings.json')")]
+    public void Commands_with_indirect_path_references_cannot_be_saved_as_allows(string command)
+    {
+        Assert.False(ProjectCommandPermissionRegistry.CanCreateAllowRule(command));
+    }
+
+    [Fact]
+    public void Loading_permissions_drops_legacy_indirect_allows_but_keeps_matching_denies()
+    {
+        const string indirectCommand = "Remove-Item \"$env:CODEV_DATA_ROOT/Codev/avalonia-settings.json\"";
+        const string deniedIndirectCommand = "Get-Content \"$env:CODEV_DATA_ROOT/Codev/avalonia-settings.json\"";
+        const string regularCommand = "dotnet test";
+        File.WriteAllText(_path, SerializePermissions(new[]
+        {
+            new ProjectCommandPermissions(_project, ProjectCommandPermissionMode.Allowlist,
+            [
+                new ProjectCommandPermissionRule(indirectCommand, ProjectCommandPermissionDecision.Allow),
+                new ProjectCommandPermissionRule(deniedIndirectCommand, ProjectCommandPermissionDecision.Deny),
+                new ProjectCommandPermissionRule(regularCommand, ProjectCommandPermissionDecision.Allow)
+            ])
+        }));
+
+        var loaded = ProjectCommandPermissionRegistry.Load(_path);
+
+        Assert.Equal(ProjectCommandPermissionDecision.Ask, loaded.Evaluate(_project, indirectCommand));
+        Assert.Equal(ProjectCommandPermissionDecision.Deny, loaded.Evaluate(_project, deniedIndirectCommand));
+        Assert.Equal(ProjectCommandPermissionDecision.Allow, loaded.Evaluate(_project, regularCommand));
+        Assert.DoesNotContain(loaded.GetRules(_project), rule =>
+            rule.Command == indirectCommand && rule.Decision == ProjectCommandPermissionDecision.Allow);
     }
 
     [Fact]

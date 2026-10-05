@@ -55,6 +55,13 @@ public sealed class ProjectCommandPermissionRegistry
     };
     private static readonly Regex GitCommand = new(@"\bgit(?:\.exe)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex GitMetadataPath = new(@"(?:^|[/\\\s])\.git(?:$|[/\\\s])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    // Saved allow rules are exact strings, but shells expand variables, home paths, and
+    // environment-provider lookups at execution time. Refuse these forms because their
+    // resolved target can include Codev's private data directory even when the literal
+    // command text does not.
+    private static readonly Regex IndirectPathReference = new(
+        @"\$|%[^%\r\n]+%|![^!\r\n]+!|`|(?:^|[;|&\s])~(?:$|[/\\])|\b(?:env:|GetEnvironmentVariable|GetFolderPath)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ConcurrentDictionary<string, ProjectCommandPermissions> _projects = new(PathComparer);
@@ -264,6 +271,10 @@ public sealed class ProjectCommandPermissionRegistry
             var command = NormalizeCommand(rule.Command);
             if (command.Length is 0 or > MaxCommandLength)
                 throw new InvalidDataException("The permission file contains an invalid command rule.");
+            // Drop legacy or manually edited persistent allows that bypassed the guard.
+            // Denies remain valid even when their command contains shell expansion.
+            if (rule.Decision == ProjectCommandPermissionDecision.Allow && !CanCreateAllowRule(command))
+                continue;
             normalized.RemoveAll(item => string.Equals(item.Command, command, StringComparison.Ordinal) && item.Decision == rule.Decision);
             if (normalized.Count < MaxRulesPerProject) normalized.Add(rule with { Command = command });
         }
@@ -282,7 +293,7 @@ public sealed class ProjectCommandPermissionRegistry
     private static bool TargetsProtectedLocation(string command)
     {
         if (string.IsNullOrWhiteSpace(command)) return true;
-        if (GitCommand.IsMatch(command) || GitMetadataPath.IsMatch(command)) return true;
+        if (GitCommand.IsMatch(command) || GitMetadataPath.IsMatch(command) || IndirectPathReference.IsMatch(command)) return true;
         var normalizedCommand = command.Replace('\\', '/');
         var appData = CodevDataPaths.LocalDataRoot;
         if (!string.IsNullOrWhiteSpace(appData))
