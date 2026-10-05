@@ -703,6 +703,88 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Loads_previous_public_release_conversation_store_and_active_selection()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        Directory.CreateDirectory(appData);
+        var conversationId = Guid.Parse("dbb54864-8ab8-42c5-8b55-3a1e55c7c04b");
+        // These persisted fields match the v2026.10.01 conversation/settings schema. Newer
+        // delegation, agent-profile, and retrieval fields are intentionally absent.
+        var previousReleaseStore = $$"""
+            [{
+              "Id": "{{conversationId:D}}",
+              "Title": "Previous release conversation",
+              "Draft": "unsent legacy draft",
+              "Model": "qwen3.6:35b-a3b",
+              "Provider": "ollama",
+              "IsPlanMode": false,
+              "IsCodeTask": true,
+              "ThinkEnabled": false,
+              "OutputStyle": "Balanced",
+              "NumCtx": 8192,
+              "Temperature": 0.2,
+              "LastPromptTokens": 42,
+              "LastPromptContext": 8192,
+              "LastPromptModel": "qwen3.6:35b-a3b",
+              "LastPromptProvider": "ollama",
+              "IsPinned": true,
+              "IsArchived": false,
+              "UpdatedAt": "2026-10-01T14:54:37+00:00",
+              "Messages": [
+                { "Role": "user", "Content": "old request", "Thinking": "" },
+                { "Role": "assistant", "Content": "old reply", "Thinking": "" }
+              ],
+              "FileChanges": [
+                { "RelativePath": "game.js", "CheckpointPath": null, "ChangedAt": "2026-10-01T14:55:00+00:00", "Kind": "Edit", "PreviousFileExisted": true }
+              ],
+              "ContextFiles": ["README.md"],
+              "TaskChecklist": [],
+              "PendingTurns": []
+            }]
+            """;
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-conversations.json"), previousReleaseStore);
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-active-conversation.json"),
+            JsonSerializer.Serialize(conversationId.ToString("D")));
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-settings.json"),
+            """{"Theme":"light","OllamaEndpoint":"http://localhost:11434/","PromptTemplates":null,"SamplingPresets":null,"ReadingWidth":960}""");
+
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var restored = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            Assert.Equal(conversationId, restored.Id);
+            Assert.Equal("Previous release conversation", restored.Title);
+            Assert.Equal("unsent legacy draft", restored.Draft);
+            Assert.Equal("qwen3.6:35b-a3b", restored.Model);
+            Assert.Equal(8192, restored.NumCtx);
+            Assert.Equal(42, restored.LastPromptTokens);
+            Assert.Equal(["old request", "old reply"], viewModel.Messages.Select(message => message.Content));
+            Assert.Equal("game.js", Assert.Single(restored.FileChanges).RelativePath);
+            Assert.Null(Assert.Single(restored.FileChanges).TurnUserMessageIndex);
+            Assert.Null(restored.ParentConversationId);
+            Assert.Null(restored.AgentProfileName);
+            Assert.Empty(restored.TaskChecklist);
+            Assert.False(restored.EnableSemanticSearch);
+            Assert.Equal(ProjectCommandPermissionMode.Auto, viewModel.ProjectCommandPermissionMode);
+            Assert.False(viewModel.IsDarkTheme);
+            Assert.True(viewModel.IsWideReadingWidth);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Debug_profile_ask_rule_does_not_prompt_in_auto_mode()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
