@@ -330,7 +330,8 @@ public sealed class MainWindowTests
             window.Show();
             window.UpdateLayout();
 
-            void PressModeShortcut() => window.RaiseEvent(new KeyEventArgs
+            var composer = Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox"));
+            void PressModeShortcut() => composer.RaiseEvent(new KeyEventArgs
             {
                 RoutedEvent = InputElement.KeyDownEvent,
                 Key = Key.M,

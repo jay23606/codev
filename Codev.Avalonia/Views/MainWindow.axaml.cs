@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     {
         _conversationBackupPicker = conversationBackupPicker;
         InitializeComponent();
+        AddHandler(InputElement.KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         DragDrop.SetAllowDrop(ComposerTextBox, true);
         DragDrop.AddDragOverHandler(ComposerTextBox, Composer_DragOver);
