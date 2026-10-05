@@ -137,6 +137,14 @@ jobs:
             exit 1
           fi
 
+      - name: Install Linux keyboard interaction helper
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends xdotool
+
+      - name: Smoke-test packaged Linux mode shortcut under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run -a bash ./scripts/smoke-packaged-linux-app.sh ./artifacts/publish/linux-x64/Codev.Avalonia
+
       - name: Smoke-test headless CLI on Linux
         if: runner.os == 'Linux'
         run: ./artifacts/publish-cli/linux-x64/Codev.Cli --help
