@@ -864,7 +864,7 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Untrusted backup checkpoint-path import regression (2026-10-05).** Added `Backup_import_discards_untrusted_checkpoint_file_paths` to `Codev.Tests`, which imports raw JSON containing an arbitrary local checkpoint path and verifies the file-change record remains while the path is cleared. The focused .NET 10 Release test passed 1/1. `Backup_round_trip_through_view_model_keeps_existing_history_and_drops_runtime_authority` also verifies checkpoint paths are absent from exported backup JSON and remain null after import.
 
-**Intel Mac preview cancellation (2026-10-05, docs head `e57e988`, run [#37278442411](https://github.com/jay23606/codev/actions/runs/37278442411)).** Windows, Linux, and Apple Silicon jobs passed, but the Intel Mac portable-test step remained in progress and the workflow was later marked cancelled after about 25 minutes. GitHub provided no test output or failure diagnostic for that step, so this run is inconclusive and is not counted as a pass; a fresh exact-head run remains necessary.
+**Intel Mac preview retry (2026-10-05, exact PR head `408acab`, run [#37313500438](https://github.com/jay23606/codev/actions/runs/37313500438)).** The first osx-x64 attempt was cancelled after 25 minutes with no logs, but rerunning that terminal job passed the portable tests, app/CLI packaging, and launch checks in 2m26s. Windows, Linux, Apple Silicon, and Intel Mac preview jobs all passed on this head; public release publishing was skipped as expected for a PR. This closes the unexplained Intel cancellation for the current candidate, while the Q3 manual interaction and release-readiness checks remain open.
 
 #### Q4. Exit rule and ownership
 
