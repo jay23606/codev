@@ -1248,6 +1248,38 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Long_transcript_realizes_only_the_visible_message_templates()
+    {
+        var window = new MainWindow { Width = 900, Height = 650 };
+        try
+        {
+            var messages = Enumerable.Range(0, 240)
+                .Select(index => new ChatMessage(index % 2 == 0 ? "user" : "assistant", $"Transcript message {index}: {new string('x', 300)}"))
+                .ToArray();
+            var messageList = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
+            messageList.ItemsSource = messages;
+
+            window.Show();
+            window.UpdateLayout();
+            await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout);
+            await Task.Delay(50);
+            await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
+
+            var panel = Assert.Single(messageList.GetVisualDescendants().OfType<VirtualizingStackPanel>());
+            Assert.True(panel.FirstRealizedIndex >= 0);
+            Assert.True(panel.LastRealizedIndex >= panel.FirstRealizedIndex);
+            Assert.True(panel.LastRealizedIndex - panel.FirstRealizedIndex + 1 < messages.Length / 4,
+                $"Expected only a viewport-sized slice of {messages.Length} messages to be realized, but indices {panel.FirstRealizedIndex} through {panel.LastRealizedIndex} were realized.");
+            Assert.True(panel.LastRealizedIndex >= messages.Length - 30,
+                $"Expected the initial transcript view to follow the latest message, but it ended at {panel.LastRealizedIndex} of {messages.Length}.");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Restored_queued_turn_explains_that_resume_is_required()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-restored-queue-ui", Guid.NewGuid().ToString("N"));
