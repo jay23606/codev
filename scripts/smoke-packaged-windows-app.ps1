@@ -54,8 +54,10 @@ function Wait-ForBackupDialog([string]$Title) {
 function Set-BackupDialogPath($Dialog, [string]$Path) {
     $fileName = Find-ByAutomationId $Dialog '1001'
     if ($null -eq $fileName) { throw 'The native file picker filename control is missing.' }
-    # The Windows common dialog gives the filename box focus on open; it exposes no
-    # ValuePattern on this platform, so enter the path as a normal keyboard user.
+    # The common dialog's initial focus varies across Windows builds. Alt+N selects
+    # its File name field; UIA does not expose a writable ValuePattern for that box.
+    [System.Windows.Forms.SendKeys]::SendWait('%n')
+    Start-Sleep -Milliseconds 100
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($Path)
 }
