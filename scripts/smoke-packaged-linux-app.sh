@@ -91,3 +91,35 @@ assert_mode true false 'Linux packaged app switched Chat → Plan with Ctrl+Shif
 xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+shift+m
 assert_mode false false 'Linux packaged app switched Plan → Chat when Code task was unavailable.'
+
+# /status is handled locally and exercises the composer/send path without a model request.
+before_message_count="$(jq --arg id "$conversation_id" '[.[] | select(.Id == $id) | .Messages[]] | length' "$conversations_path")"
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+l
+xdotool type --clearmodifiers --delay 1 '/status'
+xdotool key --clearmodifiers Return
+
+for _ in {1..100}; do
+  if jq -e --arg id "$conversation_id" --argjson before "$before_message_count" \
+    '.[] | select(.Id == $id) | .Messages as $messages |
+     ($messages | length) >= ($before + 2) and
+     $messages[-2].Content == "/status" and
+     $messages[-1].Role == "assistant" and
+     ($messages[-1].Content | contains("Model: Ollama (local)")) and
+     ($messages[-1].Content | contains("Project command permissions:"))' \
+    "$conversations_path" >/dev/null 2>&1; then
+    echo 'Linux packaged app sent /status from the composer and persisted the local status report without a model request.'
+    exit 0
+  fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then
+    cat "$log_path" >&2
+    echo 'Packaged Avalonia app exited during the Linux /status composer smoke.' >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+cat "$log_path" >&2
+jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Messages: .Messages[-4:]}' "$conversations_path" >&2 || true
+echo 'Linux packaged app did not persist the expected /status report from its composer.' >&2
+exit 1

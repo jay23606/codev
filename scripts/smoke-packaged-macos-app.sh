@@ -116,3 +116,74 @@ assert_mode true false 'Packaged macOS app switched Chat → Plan with Command+S
 # to Chat on the next cycle instead of entering Code task.
 send_mode_shortcut
 assert_mode false false 'Packaged macOS app switched Plan → Chat when Code task was unavailable.'
+
+# /status is handled locally and exercises the composer/send path without a model request.
+before_message_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+if conversation is None:
+    raise SystemExit("The active macOS conversation disappeared before the /status smoke.")
+print(len(conversation.get("Messages", [])))
+PY
+)"
+
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 0.25
+    key code 37 using {command down}
+    keystroke "/status"
+    key code 36
+  end tell
+end run
+APPLESCRIPT
+
+for _ in {1..100}; do
+  if python3 - "$conversations_path" "$conversation_id" "$before_message_count" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+before = int(sys.argv[3])
+report = messages[-1].get("Content", "") if messages else ""
+success = (len(messages) >= before + 2 and
+           messages[-2].get("Content") == "/status" and
+           messages[-1].get("Role") == "assistant" and
+           "Model: Ollama (local)" in report and
+           "Project command permissions:" in report)
+raise SystemExit(0 if success else 1)
+PY
+  then
+    echo 'Packaged macOS app sent /status from the composer and persisted the local status report without a model request.'
+    exit 0
+  fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then
+    cat "$log_path" >&2
+    echo 'Packaged Avalonia app exited during the macOS /status composer smoke.' >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+cat "$log_path" >&2
+python3 - "$conversations_path" "$conversation_id" <<'PY' >&2 || true
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+print({"Messages": conversation.get("Messages", [])[-4:]} if conversation else "conversation missing")
+PY
+echo 'Packaged macOS app did not persist the expected /status report from its composer.' >&2
+exit 1
