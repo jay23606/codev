@@ -734,7 +734,7 @@ public partial class MainWindow : Window
                     new Separator(),
                     new TextBlock { Text = "Local semantic search · Ollama embeddings model" },
                     embeddingModel,
-                    new TextBlock { Text = "Indexes the attached project only when you click Build. The directory must be trusted. Source text and vectors stay on this machine. Uses an installed model such as nomic-embed-text; downloads are never automatic. Rebuild after project changes; updates process only changed chunks.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxWidth = 550 },
+                    new TextBlock { Text = "Indexes the attached project only when you click Build. The directory must be trusted. Source text and vectors stay on this machine. Uses an installed model such as nomic-embed-text; downloads are never automatic. Rebuild after project changes; updates process only changed chunks. Turn on Use semantic search in a conversation's Code task menu to use the index. Retrieved excerpts enter hosted requests only when workspace sharing is enabled.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxWidth = 550 },
                     new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 8, Children = { buildSemanticIndex, deleteSemanticIndex } },
                     semanticStatus,
                     status,

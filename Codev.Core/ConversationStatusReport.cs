@@ -9,7 +9,8 @@ public static class ConversationStatusReport
         IReadOnlyList<string>? lastPromptInstructionFiles = null,
         ProjectCommandPermissionMode commandPermissionMode = ProjectCommandPermissionMode.AskEveryTime,
         int allowedCommandRules = 0, int deniedCommandRules = 0,
-        bool? automaticProjectContextIncluded = null)
+        bool? automaticProjectContextIncluded = null,
+        bool semanticIndexExists = false, bool semanticSearchAvailable = true)
     {
         ArgumentNullException.ThrowIfNull(conversation);
 
@@ -50,6 +51,13 @@ public static class ConversationStatusReport
         var canIncludeRepoMap = !string.IsNullOrWhiteSpace(conversation.ProjectPath) &&
             (conversation.ContextFiles.Count > 0 || projectFolderTrusted) &&
             (!CloudModelProviders.IsCloud(conversation.Provider) || conversation.IncludeProjectContextForHosted);
+        var semanticSearch = !conversation.EnableSemanticSearch
+            ? "off"
+            : !semanticSearchAvailable
+                ? "enabled · unavailable under current project/provider policy"
+                : !semanticIndexExists
+                    ? "enabled · no local index; build in Settings"
+                    : "on · local index exists";
         var lastPromptUsageMatches = conversation.LastPromptModel.Equals(conversation.Model, StringComparison.OrdinalIgnoreCase) &&
             conversation.LastPromptProvider.Equals(conversation.Provider, StringComparison.OrdinalIgnoreCase);
         var lastPromptUsage = lastPromptUsageMatches && (conversation.LastPromptTokens > 0 || conversation.LastPromptOutputTokens is not null)
@@ -97,6 +105,7 @@ public static class ConversationStatusReport
             $"Project context: {projectContext}",
             $"Project instruction files (last request): {instructionFiles}",
             $"Repository map: {(!conversation.IncludeRepoMap ? "off" : canIncludeRepoMap ? "included" : "unavailable under the current context policy")}",
+            $"Semantic project search: {semanticSearch}",
             $"Queue: {queue}",
             $"Hosted requests: {(CloudModelProviders.IsCloud(conversation.Provider) ? hostedRequestsEnabled ? "enabled for this session" : "disabled" : "not in use")}",
             $"Tools and file changes: {(conversation.IsCodeTask ? "available with project file-review and command approval policies" : "unavailable outside Code task mode")}",

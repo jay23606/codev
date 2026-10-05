@@ -2819,7 +2819,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 ? GetProjectCommandPermissionMode(statusProjectPath)
                 : _defaultProjectCommandPermissionMode,
             _projectCommandPermissions.GetRules(conversation.ProjectPath ?? "").Count(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Allow && Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(rule.Command)),
-            _projectCommandPermissions.GetRules(conversation.ProjectPath ?? "").Count(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Deny)));
+            _projectCommandPermissions.GetRules(conversation.ProjectPath ?? "").Count(rule => rule.Decision == Codev.ProjectCommandPermissionDecision.Deny),
+            semanticIndexExists: conversation.ProjectPath is { Length: > 0 } semanticProjectPath &&
+                Codev.ProjectEmbeddingIndex.HasIndex(SemanticIndexDirectory, semanticProjectPath),
+            semanticSearchAvailable: conversation.IsCodeTask && trustRoot is not null &&
+                Codev.OllamaEndpoint.IsLoopback(_ollamaEndpoint) &&
+                (!Codev.CloudModelProviders.IsCloud(conversation.Provider) || conversation.IncludeProjectContextForHosted)));
         conversation.Messages.Add(userMessage);
         conversation.Messages.Add(assistantMessage);
         conversation.Draft = "";
