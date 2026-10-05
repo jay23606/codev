@@ -492,6 +492,8 @@ public sealed class MainWindowTests
             Assert.Equal("Model picker", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ModelPicker"))));
             Assert.Equal("Context size", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ContextSizePicker"))));
             Assert.Equal("Primary agent profile", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"))));
+            Assert.Contains(window.GetVisualDescendants().OfType<Button>(), button => AutomationProperties.GetName(button) == viewModel.PlanModeLabel);
+            Assert.Contains(window.GetVisualDescendants().OfType<Button>(), button => AutomationProperties.GetName(button) == viewModel.CodeTaskLabel);
             var responseStyle = Assert.Single(window.GetVisualDescendants().OfType<ComboBox>(), control => AutomationProperties.GetName(control) == "Response style");
             Assert.Equal("Response style", AutomationProperties.GetName(responseStyle));
         }
