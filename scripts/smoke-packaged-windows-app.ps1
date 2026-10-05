@@ -260,6 +260,282 @@ function Test-ConversationArchiveRestore($Window, [string]$DataRoot) {
     throw 'Restoring the archived conversation did not persist its active state.'
 }
 
+function Find-ConversationMenuItem($Window, [string]$Title, [string]$MenuName) {
+    $rowCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $Title))
+    $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+    if ($null -eq $row) { throw "Conversation '$Title' is missing from the sidebar." }
+    $row.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
+    $menuCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::MenuItem),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $MenuName))
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $item = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants, $menuCondition)
+        if ($null -ne $item) { return $item }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "The context menu for '$Title' did not expose '$MenuName'."
+}
+
+function Invoke-AccessibleMenuItem($Item) {
+    $invoke = $null
+    if ($Item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+        $invoke.Invoke()
+    }
+    else {
+        $Item.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    }
+}
+
+function Test-PinnedConversationSearchArchiveRestore($Window, [string]$DataRoot) {
+    $activePath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
+    $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
+    $conversationId = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+    $title = 'New conversation'
+    $moreButton = Find-ByAutomationId $Window 'MoreButton'
+    if ($null -eq $moreButton) { throw 'The conversation More menu is missing.' }
+    $moreInvoke = $null
+    if (-not $moreButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$moreInvoke)) {
+        throw 'The conversation More menu cannot be opened through UI Automation.'
+    }
+    $moreInvoke.Invoke()
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $pinItem = $null
+    do {
+        $menuItems = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::MenuItem))
+        for ($index = 0; $index -lt $menuItems.Count; $index++) {
+            $name = $menuItems.Item($index).Current.Name
+            if ($name -like '*Pin*' -and $name -notlike '*Pinned*') { $pinItem = $menuItems.Item($index); break }
+        }
+        if ($null -ne $pinItem) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $pinItem) { throw 'The conversation More menu did not expose Pin.' }
+    Invoke-AccessibleMenuItem $pinItem
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $pinned = $false
+    do {
+        try {
+            $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $target = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+            $pinned = $target.Count -eq 1 -and [bool]$target[0].IsPinned
+        }
+        catch { }
+        if ($pinned) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $pinned) { throw 'Pin did not persist for the active conversation.' }
+
+    $searchCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Search conversations'))
+    $search = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $searchCondition)
+    if ($null -eq $search) { throw 'The named conversation search field is missing for the pinned-chat check.' }
+    $searchValue = $null
+    if (-not $search.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$searchValue)) {
+        throw 'Conversation search does not expose an editable value to UI Automation.'
+    }
+    $searchValue.SetValue($title)
+    $rowCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $title))
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+        if ($null -ne $row) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $row) { throw 'Searching did not find the pinned conversation.' }
+
+    $archiveItem = Find-ConversationMenuItem $Window $title 'Archive / restore'
+    Invoke-AccessibleMenuItem $archiveItem
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $archived = $false
+    do {
+        try {
+            $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $target = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+            $archived = $target.Count -eq 1 -and [bool]$target[0].IsArchived -and [bool]$target[0].IsPinned
+        }
+        catch { }
+        if ($archived) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $archived) { throw 'Archiving the searched pinned conversation did not persist both states.' }
+    $activeAfterArchive = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+    if ($activeAfterArchive -eq $conversationId) { throw 'Archiving the searched active conversation did not select another chat.' }
+
+    $buttonsCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button)
+    $buttons = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+    $archiveView = $null
+    for ($index = 0; $index -lt $buttons.Count; $index++) {
+        if ($buttons.Item($index).Current.Name -like '*Show archived*') { $archiveView = $buttons.Item($index); break }
+    }
+    if ($null -eq $archiveView) { throw 'The sidebar does not expose Show archived after archiving a pinned conversation.' }
+    $archiveViewInvoke = $null
+    if (-not $archiveView.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$archiveViewInvoke)) {
+        throw 'Show archived cannot be opened through UI Automation.'
+    }
+    $archiveViewInvoke.Invoke()
+    $archiveItem = Find-ConversationMenuItem $Window $title 'Archive / restore'
+    Invoke-AccessibleMenuItem $archiveItem
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        try {
+            $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $target = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+            if ($target.Count -eq 1 -and [bool]$target[0].IsPinned -and -not [bool]$target[0].IsArchived) { break }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $target -or $target.Count -ne 1 -or -not [bool]$target[0].IsPinned -or [bool]$target[0].IsArchived) {
+        throw 'Restoring the searched pinned conversation did not persist its pin and active state.'
+    }
+
+    $buttons = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+    $archiveView = $null
+    for ($index = 0; $index -lt $buttons.Count; $index++) {
+        if ($buttons.Item($index).Current.Name -like '*Show recent*') { $archiveView = $buttons.Item($index); break }
+    }
+    if ($null -eq $archiveView) { throw 'The sidebar does not expose Show recent after restoring the pinned conversation.' }
+    $archiveViewInvoke = $null
+    if (-not $archiveView.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$archiveViewInvoke)) {
+        throw 'Show recent cannot be opened through UI Automation.'
+    }
+    $archiveViewInvoke.Invoke()
+    $searchValue.SetValue('')
+}
+
+function Test-PermanentConversationDelete($Window, [string]$DataRoot) {
+    $activePath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
+    $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
+    $archiveView = $null
+    $buttonsCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button)
+    $buttons = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+    for ($index = 0; $index -lt $buttons.Count; $index++) {
+        if ($buttons.Item($index).Current.Name -like '*Show recent*') { $archiveView = $buttons.Item($index); break }
+    }
+    if ($null -ne $archiveView) {
+        $archiveViewInvoke = $null
+        if (-not $archiveView.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$archiveViewInvoke)) {
+            throw 'Show recent cannot be opened before deletion.'
+        }
+        $archiveViewInvoke.Invoke()
+    }
+    $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+    $target = @($conversations | Where-Object { [string]$_.Title -eq 'New conversation' })
+    if ($target.Count -ne 1) {
+        throw "Expected one disposable 'New conversation' before permanent deletion; found $($target.Count)."
+    }
+    $conversationId = [string]$target[0].Id
+    $title = [string]$target[0].Title
+    $rowCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $title))
+    $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+    if ($null -eq $row) { throw 'The disposable conversation to delete is missing from Recents.' }
+    $rowInvoke = $null
+    if (-not $row.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$rowInvoke)) {
+        throw 'The disposable conversation row cannot be selected through UI Automation.'
+    }
+    $rowInvoke.Invoke()
+    $selectDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $activeId = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+        if ($activeId -eq $conversationId) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $selectDeadline)
+    if ($activeId -ne $conversationId) { throw 'Selecting the disposable chat did not activate it before deletion.' }
+    $deleteItem = Find-ConversationMenuItem $Window $title 'Delete permanently…'
+    Invoke-AccessibleMenuItem $deleteItem
+    $dialog = Wait-ForTopLevelWindow 'Delete conversation?'
+    if ($null -eq $dialog) { throw 'Choosing Delete permanently… did not show its confirmation.' }
+    $confirmCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Delete conversation'))
+    $confirm = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $confirmCondition)
+    if ($null -eq $confirm) { throw 'The permanent-delete confirmation has no Delete conversation action.' }
+    $confirmInvoke = $null
+    if (-not $confirm.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$confirmInvoke)) {
+        throw 'The permanent-delete confirmation cannot be activated through UI Automation.'
+    }
+    $confirmInvoke.Invoke()
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+        $remaining = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+        $activeAfterDelete = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+        if ($remaining.Count -eq 0 -and $activeAfterDelete -ne $conversationId) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($remaining.Count -ne 0 -or $activeAfterDelete -eq $conversationId) {
+        throw 'Permanent deletion did not remove the conversation and activate another chat.'
+    }
+    $searchCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Search conversations'))
+    $search = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $searchCondition)
+    if ($null -eq $search) { throw 'The named conversation search field is missing after deletion.' }
+    $searchValue = $null
+    if (-not $search.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$searchValue)) {
+        throw 'Conversation search does not expose an editable value after deletion.'
+    }
+    $searchValue.SetValue($title)
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
+        if ($null -eq $row) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -ne $row) { throw 'The permanently deleted conversation still appears in search results.' }
+    $searchValue.SetValue('')
+}
+
 function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string]$ExpectedLabel, [string]$ExpectedSetting) {
     $buttonInvoke = $null
     if (-not $ModeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$buttonInvoke)) {
@@ -730,12 +1006,12 @@ public static class CodevCommonDialog
     if ($null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)) {
         throw 'The renamed conversation was not visible in the sidebar after the Auto-mode restart.'
     }
-
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot
-        Test-ConversationArchiveRestore $window $dataRoot
+        Test-PinnedConversationSearchArchiveRestore $window $dataRoot
+        Test-PermanentConversationDelete $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, sidebar rename/archive/restore, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -802,7 +1078,8 @@ public static class CodevCommonDialog
     }
 
     Test-NewConversationShortcut $window $dataRoot
-    Test-ConversationArchiveRestore $window $dataRoot
+    Test-PinnedConversationSearchArchiveRestore $window $dataRoot
+    Test-PermanentConversationDelete $window $dataRoot
 
     if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(10000)) {
         throw 'The packaged app did not close cleanly after the conversation-management smoke.'
@@ -823,7 +1100,7 @@ public static class CodevCommonDialog
     $renamedRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)
     if ($null -eq $renamedRow) { throw 'The renamed conversation was not visible in the sidebar after restart.' }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, and persisted sidebar rename/archive/restore actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Ctrl+N conversation creation, Ctrl+F/Ctrl+L focus, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
