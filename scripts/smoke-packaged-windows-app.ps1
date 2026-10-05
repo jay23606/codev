@@ -74,8 +74,7 @@ function Set-BackupDialogPath($Dialog, [string]$Path) {
     $dialogHandle = [CodevCommonDialog]::FindWindowByTitle($null, $Dialog.Current.Name)
     if ($dialogHandle -eq [IntPtr]::Zero) { $dialogHandle = [IntPtr]$Dialog.Current.NativeWindowHandle }
     if ($dialogHandle -eq [IntPtr]::Zero) { throw 'The native file picker window handle is missing.' }
-    [void][CodevCommonDialog]::ShowWindow($dialogHandle, 9)
-    [void][CodevCommonDialog]::SetForegroundWindow($dialogHandle)
+    [void][CodevCommonDialog]::ActivateWindow($dialogHandle)
     Start-Sleep -Milliseconds 150
     [CodevCommonDialog]::ClickAt([int]($bounds.Left + $bounds.Width / 2), [int]($bounds.Top + $bounds.Height / 2))
     Start-Sleep -Milliseconds 100
@@ -148,6 +147,24 @@ public static class CodevCommonDialog
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetActiveWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hWnd);
+
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
 
@@ -159,6 +176,24 @@ public static class CodevCommonDialog
         if (!SetCursorPos(x, y)) throw new InvalidOperationException("Could not focus the native filename field.");
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    public static bool ActivateWindow(IntPtr hWnd)
+    {
+        var currentThread = GetCurrentThreadId();
+        var targetThread = GetWindowThreadProcessId(hWnd, IntPtr.Zero);
+        if (targetThread == 0) return false;
+        if (!AttachThreadInput(currentThread, targetThread, true)) return false;
+        try
+        {
+            ShowWindow(hWnd, 9);
+            BringWindowToTop(hWnd);
+            SetActiveWindow(hWnd);
+            SetForegroundWindow(hWnd);
+            SetFocus(hWnd);
+            return GetForegroundWindow() == hWnd;
+        }
+        finally { AttachThreadInput(currentThread, targetThread, false); }
     }
 }
 '@
