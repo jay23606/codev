@@ -5,7 +5,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if ($env:GITHUB_ACTIONS -ne 'true' -or [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
+    [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     throw 'The package-upgrade smoke must run on a disposable GitHub-hosted runner.'
 }
 if (-not [string]::IsNullOrWhiteSpace($env:CODEV_DATA_ROOT)) {
@@ -17,9 +18,6 @@ if (-not (Test-Path -LiteralPath $CurrentAppPath -PathType Leaf)) {
 
 $localDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
 $codevProfile = Join-Path $localDataRoot 'Codev'
-if (Test-Path -LiteralPath $codevProfile) {
-    throw "Refusing to use a non-empty runner profile; expected no existing Codev data at $codevProfile."
-}
 if (Get-Process -Name 'Codev.Avalonia' -ErrorAction SilentlyContinue) {
     throw 'A Codev.Avalonia process is already running on the disposable runner.'
 }
@@ -33,6 +31,9 @@ $previousDirectory = Join-Path $smokeRoot 'previous-release'
 $stdoutPath = Join-Path $smokeRoot 'codev.stdout.log'
 $stderrPath = Join-Path $smokeRoot 'codev.stderr.log'
 $previousReleaseUri = 'https://github.com/jay23606/codev/releases/latest/download/Codev-Avalonia-preview-win-x64.zip'
+$profileBackupPath = Join-Path $localDataRoot ('.Codev-pre-upgrade-' + [guid]::NewGuid().ToString('N'))
+$testProfilePath = Join-Path $localDataRoot ('.Codev-upgrade-test-' + [guid]::NewGuid().ToString('N'))
+$profileStaged = $false
 $process = $null
 
 function Start-CodevPackage([string]$ExecutablePath) {
@@ -94,6 +95,19 @@ try {
         throw 'The latest public Windows release archive did not contain Codev.Avalonia.exe.'
     }
 
+    if (Test-Path -LiteralPath $codevProfile) {
+        $existingProfile = Get-Item -LiteralPath $codevProfile -Force
+        if (-not $existingProfile.PSIsContainer -or
+            ($existingProfile.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing to move an unexpected Codev profile entry at $codevProfile."
+        }
+        Move-Item -LiteralPath $codevProfile -Destination $profileBackupPath
+        $profileStaged = $true
+    }
+    if (Test-Path -LiteralPath $codevProfile) {
+        throw 'Could not clear the disposable runner profile for the upgrade smoke.'
+    }
+
     $draft = 'Codev package upgrade smoke · ' + [guid]::NewGuid().ToString('N')
     $previousWindow = Start-CodevPackage $previousAppPath
     $previousComposer = Find-Composer $previousWindow
@@ -143,4 +157,16 @@ try {
 }
 finally {
     try { Stop-CodevPackage } catch { Write-Warning $_ }
+    if (Test-Path -LiteralPath $codevProfile) {
+        if (Test-Path -LiteralPath $testProfilePath) {
+            throw "Refusing to overwrite the retained upgrade-test profile at $testProfilePath."
+        }
+        Move-Item -LiteralPath $codevProfile -Destination $testProfilePath
+    }
+    if ($profileStaged) {
+        if (Test-Path -LiteralPath $codevProfile) {
+            throw 'Could not restore the pre-existing disposable runner profile after the upgrade smoke.'
+        }
+        Move-Item -LiteralPath $profileBackupPath -Destination $codevProfile
+    }
 }
