@@ -508,6 +508,81 @@ public sealed class LiveLocalModelTests
     }
 
     [LiveOllamaFact]
+    public async Task Live_local_chat_queues_behind_a_recovered_turn_and_resumes_in_order()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-queue-order", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        Directory.CreateDirectory(appData);
+        var model = Environment.GetEnvironmentVariable("CODEV_OLLAMA_MODEL") ?? "qwen3.6:35b-a3b";
+        const string firstExpected = "Recovered turn completed first";
+        const string secondExpected = "Queued follow-up completed second";
+        var fixture = new Conversation
+        {
+            Title = "Recovered local queue order smoke",
+            Model = model,
+            Provider = "ollama",
+            Messages =
+            [
+                new ChatMessage("user", $"Reply with this exact phrase: {firstExpected}"),
+                new ChatMessage("assistant", "Saved locally · select Resume saved queue to run")
+            ],
+            PendingTurns =
+            [
+                new PersistedQueuedTurn(1, model, 8192, false, false, null, [], [], DateTimeOffset.Now,
+                    Temperature: 0, NumPredict: 160)
+            ]
+        };
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-conversations.json"),
+            JsonSerializer.Serialize(new[] { fixture }));
+
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var conversation = Assert.Single(viewModel.RecentConversations, item => item.Id == fixture.Id);
+            Assert.True(viewModel.IsQueuePaused);
+            Assert.Single(conversation.PendingTurns);
+
+            viewModel.Draft = $"Reply with this exact phrase: {secondExpected}";
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            await Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+
+            Assert.False(viewModel.IsGenerating, "A follow-up started before the recovered queue was resumed.");
+            Assert.True(viewModel.IsQueuePaused);
+            Assert.Equal(2, conversation.PendingTurns.Count);
+            Assert.Equal("Saved locally · select Resume saved queue to run", conversation.Messages[1].Content);
+            Assert.Contains(secondExpected, conversation.Messages[2].Content, StringComparison.Ordinal);
+            Assert.True(conversation.Messages[2].IsQueued);
+
+            viewModel.ResumeQueueCommand.Execute(null);
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(4);
+            while (DateTimeOffset.UtcNow < deadline &&
+                   (viewModel.IsGenerating || viewModel.HasQueuedTurns ||
+                    conversation.Messages.ElementAtOrDefault(1)?.Content is "Saved locally · select Resume saved queue to run" or "" ||
+                    conversation.Messages.ElementAtOrDefault(3)?.Content is ""))
+                await Task.Delay(100);
+
+            Assert.False(viewModel.IsGenerating, "The queued local requests did not finish within four minutes.");
+            Assert.False(viewModel.HasQueuedTurns, "The recovered queue still contained turns after both replies.");
+            Assert.Contains(firstExpected, conversation.Messages[1].Content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(secondExpected, conversation.Messages[3].Content, StringComparison.OrdinalIgnoreCase);
+            Assert.All(conversation.Messages.Where(message => message.Role == "assistant"),
+                message => Assert.NotNull(message.GenerationStats));
+        }
+        finally
+        {
+            if (viewModel is not null)
+            {
+                if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                await viewModel.SavePendingDraftAsync();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [LiveOllamaFact]
     public async Task Live_local_chat_resumes_a_saved_turn_streams_a_reply_and_clears_queue_state()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-queue", Guid.NewGuid().ToString("N"));
