@@ -1,6 +1,9 @@
+param(
+    [string]$AppPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/publish/win-x64/Codev.Avalonia.exe')
+)
+
 $ErrorActionPreference = 'Stop'
 
-$appPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/publish/win-x64/Codev.Avalonia.exe'
 if (-not (Test-Path -LiteralPath $appPath -PathType Leaf)) {
     throw "Packaged Avalonia app was not found at $appPath."
 }
@@ -61,7 +64,44 @@ try {
     $sendButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
     if ($null -eq $sendButton) { throw "The composer send button is missing its accessible name '$sendName'." }
 
-    Write-Host "Packaged Codev window opened with $($edits.Count) editable text control(s) and an accessible send button."
+    $modeCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+        'ProjectCommandModeButton')
+    $modeButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $modeCondition)
+    if ($null -eq $modeButton) { throw 'The footer permission mode selector is missing.' }
+    if (-not $modeButton.Current.IsEnabled) { throw 'The footer permission mode selector is disabled for a fresh profile.' }
+    if ($modeButton.Current.Name -ne 'Auto ▾') {
+        throw "A fresh profile should start in Auto mode; UI Automation reported '$($modeButton.Current.Name)'."
+    }
+
+    $invokePattern = $null
+    if (-not $modeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePattern)) {
+        throw 'The footer permission mode selector cannot be opened through UI Automation.'
+    }
+    $invokePattern.Invoke()
+    Start-Sleep -Milliseconds 250
+
+    $menuItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::MenuItem)
+    $menuItems = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $menuItemCondition)
+    $menuItemNames = @()
+    for ($index = 0; $index -lt $menuItems.Count; $index++) {
+        $menuItemNames += $menuItems.Item($index).Current.Name
+    }
+
+    $expectedModes = @(
+        'Auto · approve unless denied',
+        'Allowlist · run saved exact commands',
+        'Read-only · allow recognized inspections',
+        'Ask every time')
+    foreach ($expectedMode in $expectedModes) {
+        if ($expectedMode -notin $menuItemNames) {
+            throw "The footer permission menu is missing '$expectedMode'. Found: $($menuItemNames -join ', ')"
+        }
+    }
+
+    Write-Host "Packaged Codev window opened with $($edits.Count) editable text control(s), an accessible send button, and the enabled Auto footer selector exposing all four permission modes."
 }
 finally {
     if ($null -ne $app) {
