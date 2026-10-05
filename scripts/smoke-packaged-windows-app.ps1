@@ -24,6 +24,46 @@ function Find-ByAutomationId($Element, [string]$AutomationId) {
     return $Element.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string]$ExpectedLabel, [string]$ExpectedSetting) {
+    $buttonInvoke = $null
+    if (-not $ModeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$buttonInvoke)) {
+        throw 'The footer permission mode selector cannot be opened through UI Automation.'
+    }
+    $buttonInvoke.Invoke()
+    Start-Sleep -Milliseconds 150
+
+    $menuItemCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::MenuItem),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $MenuItemName))
+    $menuItem = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $menuItemCondition)
+    if ($null -eq $menuItem) { throw "The footer permission menu item '$MenuItemName' is missing." }
+    # Avalonia MenuFlyout items are exposed in UI Automation without InvokePattern.
+    # Focus plus Enter exercises their normal keyboard activation path.
+    $menuItem.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+
+    $settingsPath = Join-Path $dataRoot 'Codev\avalonia-settings.json'
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $persistedMode = $null
+        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+            try {
+                $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+                $persistedMode = [string]$settings.DefaultProjectCommandPermissionMode
+            }
+            catch { }
+        }
+        if ($ModeButton.Current.Name -eq $ExpectedLabel -and $persistedMode -eq $ExpectedSetting) { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Selecting '$MenuItemName' did not persist '$ExpectedSetting' or update the footer to '$ExpectedLabel' (label='$($ModeButton.Current.Name)', setting='$persistedMode')."
+}
+
 function Invoke-BackupMenuItem([string]$AutomationId) {
     $item = Find-ByAutomationId ([System.Windows.Automation.AutomationElement]::RootElement) $AutomationId
     if ($null -eq $item) { throw "The backup menu item '$AutomationId' is missing." }
@@ -293,10 +333,39 @@ public static class CodevCommonDialog
     }
     $invokePattern.Invoke()
     Start-Sleep -Milliseconds 150
+    Set-PermissionMode $window $modeButton 'Ask every time' 'Ask every time ▾' 'AskEveryTime'
+    Set-PermissionMode $window $modeButton 'Auto · approve unless denied' 'Auto ▾' 'Auto'
+
+    if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(10000)) {
+        throw 'The packaged app did not close cleanly after changing the permission mode.'
+    }
+    $app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -PassThru `
+        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $restartDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $windowHandle = [IntPtr]::Zero
+    while ([DateTime]::UtcNow -lt $restartDeadline) {
+        $app.Refresh()
+        if ($app.HasExited) {
+            Get-Content $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+            throw "Avalonia exited before restoring its saved mode (exit $($app.ExitCode))."
+        }
+        $windowHandle = $app.MainWindowHandle
+        if ($windowHandle -ne [IntPtr]::Zero) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if ($windowHandle -eq [IntPtr]::Zero) { throw 'Avalonia did not reopen after the saved-mode check.' }
+    $window = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
+    $modeButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $modeCondition)
+    $settingsPath = Join-Path $dataRoot 'Codev\avalonia-settings.json'
+    $savedSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+    if ($null -eq $modeButton -or $modeButton.Current.Name -ne 'Auto ▾' -or
+        [string]$savedSettings.DefaultProjectCommandPermissionMode -ne 'Auto') {
+        throw "The fresh app process did not restore Auto mode (label='$($modeButton.Current.Name)', setting='$($savedSettings.DefaultProjectCommandPermissionMode)')."
+    }
 
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         $smokeSucceeded = $true
-        Write-Host 'Packaged app and Auto footer selector smoke passed. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11.'
+        Write-Host 'Packaged app and Auto mode-change/restart persistence smoke passed. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11.'
         return
     }
 
@@ -363,7 +432,7 @@ public static class CodevCommonDialog
     }
 
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened with $($edits.Count) editable text control(s), an accessible send button, and the Auto footer selector. Native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened with $($edits.Count) editable text control(s), an accessible send button, and the Auto footer selector. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
