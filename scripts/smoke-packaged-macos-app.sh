@@ -134,6 +134,37 @@ end tell
 APPLESCRIPT
 }
 
+report_code_task_button_state() {
+  osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    tell targetProcess
+      repeat with currentElement in entire contents of window 1
+        try
+          if (value of attribute "AXIdentifier" of currentElement as text) is "CodeTaskModeButton" then
+            try
+              set buttonName to name of currentElement as text
+            on error
+              set buttonName to "missing"
+            end try
+            try
+              set buttonHelp to value of attribute "AXDescription" of currentElement as text
+            on error
+              set buttonHelp to "missing"
+            end try
+            return "Code task mode button: name=" & buttonName & ", help=" & buttonHelp & ", enabled=" & (enabled of currentElement as text)
+          end if
+        end try
+      end repeat
+      return "CodeTaskModeButton was not found in the macOS accessibility tree."
+    end tell
+  end tell
+end run
+APPLESCRIPT
+}
+
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with Command+Shift+M.'
 send_mode_shortcut
@@ -180,7 +211,8 @@ PY
 assert_mode false false 'Packaged macOS app restored the same conversation in Chat mode after relaunch.'
 # A fresh Intel-Mac process may still be compiling Skia shaders just after
 # conversation/model discovery completes. Let the window settle before input.
-sleep 1
+sleep 2
+report_code_task_button_state
 
 # Exercise the complete mode cycle now that the local model is available.
 send_mode_shortcut
