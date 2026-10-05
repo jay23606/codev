@@ -277,6 +277,12 @@ public static class CodevCommonDialog
     if ($window.Current.Name -ne 'Codev') {
         throw "Expected the Codev main window; UI Automation reported '$($window.Current.Name)'."
     }
+    $workingArea = [System.Windows.Forms.Screen]::FromHandle($windowHandle).WorkingArea
+    $windowBounds = $window.Current.BoundingRectangle
+    if ($windowBounds.Left -lt $workingArea.Left -or $windowBounds.Top -lt $workingArea.Top -or
+        $windowBounds.Right -gt $workingArea.Right -or $windowBounds.Bottom -gt $workingArea.Bottom) {
+        throw "The packaged main window extends outside the monitor work area (window=$([int]$windowBounds.Left),$([int]$windowBounds.Top),$([int]$windowBounds.Width),$([int]$windowBounds.Height); workArea=$($workingArea.X),$($workingArea.Y),$($workingArea.Width),$($workingArea.Height))."
+    }
 
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -421,7 +427,7 @@ public static class CodevCommonDialog
 
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal to the search, composer, and response-style controls, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal to the search, composer, and response-style controls, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -488,7 +494,7 @@ public static class CodevCommonDialog
     }
 
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, and successful Tab traversal to the search, composer, and response-style controls. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, and successful Tab traversal to the search, composer, and response-style controls. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
 }
 finally {
     if ($null -ne $app) {
