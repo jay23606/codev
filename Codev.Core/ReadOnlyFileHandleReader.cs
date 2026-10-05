@@ -70,7 +70,7 @@ internal static class ReadOnlyFileHandleReader
         var relative = Path.GetRelativePath(ToRegularPath(finalRoot), ToRegularPath(finalFile));
         if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
         var segments = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        if (segments.Any(segment => WorkspaceFileService.IsSensitiveFileName(segment) || WorkspaceFileService.IsIgnoredDirectory(segment))) return false;
+        if (WorkspaceFileService.IsSensitiveRelativePath(relative) || segments.Any(WorkspaceFileService.IsIgnoredDirectory)) return false;
         var workspace = new WorkspaceFileService(projectRoot, exclusions);
         if (!workspace.IsSupportedContextFile(relative) || workspace.IsContextExcluded(relative)) return false;
 

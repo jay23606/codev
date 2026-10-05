@@ -70,6 +70,23 @@ public sealed class WorkspaceFileServiceTests : IDisposable
         Assert.Equal(0, Service.EstimateContextTokens([".env"]));
     }
 
+    [Theory]
+    [InlineData(".npmrc")]
+    [InlineData("NuGet.Config")]
+    [InlineData(".config/gh/hosts.yml")]
+    [InlineData(".config/gcloud/application_default_credentials.json")]
+    [InlineData(".terraform/terraform.tfstate")]
+    [InlineData("appsettings.Production.json")]
+    public void Project_file_access_rejects_common_credential_paths(string relativePath)
+    {
+        var path = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "sensitive");
+
+        Assert.Throws<UnauthorizedAccessException>(() => Service.ResolvePath(relativePath));
+        Assert.Equal(0, Service.EstimateContextTokens([relativePath]));
+    }
+
     [Fact]
     public void Project_context_exclusions_filter_context_without_limiting_agent_file_access()
     {
