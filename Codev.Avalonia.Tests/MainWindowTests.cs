@@ -511,6 +511,56 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task New_private_code_task_workspace_runs_compound_command_without_approval_when_default_is_auto()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        Directory.CreateDirectory(appData);
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-settings.json"),
+            AvaloniaUiSettings.Serialize(AvaloniaUiSettings.Default with { DefaultProjectCommandPermissionMode = ProjectCommandPermissionMode.Auto }));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+            Assert.Equal("Auto ▾", Assert.IsType<Button>(window.FindControl<Button>("ProjectCommandModeButton")).Content?.ToString());
+
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            var enableCodeTask = typeof(MainViewModel).GetMethod("EnableCodeTaskWithWorkspaceAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            await Assert.IsAssignableFrom<Task>(enableCodeTask.Invoke(viewModel, [conversation]));
+            Assert.True(conversation.IsCodeTask);
+            Assert.NotNull(conversation.ProjectPath);
+            Assert.Equal(ProjectCommandPermissionMode.Auto, viewModel.ProjectCommandPermissionMode);
+
+            var approvalRequests = 0;
+            viewModel.ApproveProjectCommandAsync = _ =>
+            {
+                approvalRequests++;
+                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+            };
+            var approvePolicy = typeof(MainViewModel).GetMethod("ApproveCommandWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var proposal = new CodeTaskCommandProposal(
+                "Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short",
+                conversation.ProjectPath!, "PowerShell");
+            var pendingApproval = Assert.IsAssignableFrom<Task<CommandApprovalOutcome>>(
+                approvePolicy.Invoke(viewModel, [proposal, Array.Empty<string>()]));
+
+            Assert.Equal(CommandApprovalOutcome.Approved, await pendingApproval);
+            Assert.Equal(0, approvalRequests);
+            Assert.False(Assert.IsType<Border>(window.FindControl<Border>("InlineApprovalPanel")).IsVisible);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Best_of_n_is_a_one_shot_local_code_task_choice_captured_by_the_queue()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-best-of-n-ui", Guid.NewGuid().ToString("N"));
