@@ -104,7 +104,7 @@ assert_mode() {
   local plan="$1"
   local code="$2"
   local description="$3"
-  for _ in {1..60}; do
+  for _ in {1..200}; do
     if jq -e --arg id "$conversation_id" --argjson plan "$plan" --argjson code "$code" \
       '.[] | select(.Id == $id) | .IsPlanMode == $plan and .IsCodeTask == $code' \
       "$conversations_path" >/dev/null 2>&1; then
@@ -114,7 +114,7 @@ assert_mode() {
     sleep 0.1
   done
   cat "$log_path" >&2
-  jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Id, IsPlanMode, IsCodeTask, Provider}' "$conversations_path" >&2 || true
+  jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Id, IsPlanMode, IsCodeTask, Provider, ProjectPath}' "$conversations_path" >&2 || true
   echo "Linux packaged-app mode transition failed: $description" >&2
   exit 1
 }

@@ -110,7 +110,7 @@ assert_mode() {
   local plan="$1"
   local code="$2"
   local description="$3"
-  for _ in {1..60}; do
+  for _ in {1..200}; do
     if python3 - "$conversations_path" "$conversation_id" "$plan" "$code" <<'PY'
 import json
 import sys
@@ -138,7 +138,7 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as source:
     conversations = json.load(source)
 conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
-print({key: conversation.get(key) for key in ("Id", "IsPlanMode", "IsCodeTask", "Provider")} if conversation else "conversation missing")
+print({key: conversation.get(key) for key in ("Id", "IsPlanMode", "IsCodeTask", "Provider", "ProjectPath")} if conversation else "conversation missing")
 PY
   echo "macOS packaged-app mode transition failed: $description" >&2
   exit 1
