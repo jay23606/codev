@@ -337,6 +337,10 @@ public sealed class MainWindowTests
                 Key = Key.M,
                 KeyModifiers = (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control) | KeyModifiers.Shift
             });
+            composer.AddHandler(InputElement.KeyDownEvent, (_, args) =>
+            {
+                if (args.Key == Key.M) args.Handled = true;
+            }, RoutingStrategies.Tunnel, handledEventsToo: true);
 
             PressModeShortcut();
             Assert.True(viewModel.IsPlanMode);
