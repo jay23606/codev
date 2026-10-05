@@ -10,6 +10,7 @@ command -v osascript >/dev/null || { echo 'osascript is required for the package
 command -v python3 >/dev/null || { echo 'python3 is required for the packaged macOS interaction smoke.' >&2; exit 1; }
 
 smoke_root="$(mktemp -d)"
+smoke_root="$(cd "$smoke_root" && pwd -P)"
 export CODEV_DATA_ROOT="$smoke_root/data"
 log_path="$smoke_root/app.log"
 app_pid=''
