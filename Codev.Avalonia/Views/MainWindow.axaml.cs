@@ -27,9 +27,13 @@ public partial class MainWindow : Window
     private Window? _keyboardShortcutsWindow;
     private bool _shutdownStarted;
     private bool _closeAfterShutdown;
+    private readonly IConversationBackupPicker? _conversationBackupPicker;
 
-    public MainWindow()
+    public MainWindow() : this(null) { }
+
+    public MainWindow(IConversationBackupPicker? conversationBackupPicker)
     {
+        _conversationBackupPicker = conversationBackupPicker;
         InitializeComponent();
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         DragDrop.SetAllowDrop(ComposerTextBox, true);
@@ -3892,21 +3896,26 @@ public partial class MainWindow : Window
     private async void ExportBackup_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
-        if (!StorageProvider.CanSave)
+        if (!(_conversationBackupPicker?.CanSave ?? StorageProvider.CanSave))
         {
             viewModel.ReportContextActionStatus("This platform does not provide a local save dialog.");
             return;
         }
         try
         {
-            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            var options = new FilePickerSaveOptions
             {
                 Title = "Export all Codev conversations",
                 SuggestedFileName = $"codev-backup-{DateTime.Now:yyyy-MM-dd}.codev.json",
                 DefaultExtension = "json",
                 ShowOverwritePrompt = true,
                 FileTypeChoices = [new FilePickerFileType("Codev conversation backup") { Patterns = ["*.codev.json", "*.json"] }]
-            });
+            };
+            var file = _conversationBackupPicker is null
+                ? await StorageProvider.SaveFilePickerAsync(options) is { } nativeFile
+                    ? new AvaloniaConversationBackupFile(nativeFile)
+                    : null
+                : await _conversationBackupPicker.SaveFilePickerAsync(options);
             if (file is null) return;
             var backup = await viewModel.ExportConversationBackupAsync();
             await WriteTextFileAsync(file, backup);
@@ -3921,19 +3930,29 @@ public partial class MainWindow : Window
     private async void ImportBackup_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
-        if (!StorageProvider.CanOpen)
+        if (!(_conversationBackupPicker?.CanOpen ?? StorageProvider.CanOpen))
         {
             viewModel.ReportContextActionStatus("This platform does not provide a local file picker.");
             return;
         }
         try
         {
-            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            var options = new FilePickerOpenOptions
             {
                 Title = "Import Codev conversation backup",
                 AllowMultiple = false,
                 FileTypeFilter = [new FilePickerFileType("Codev conversation backup") { Patterns = ["*.codev.json", "*.json"] }]
-            });
+            };
+            IReadOnlyList<IConversationBackupFile> files;
+            if (_conversationBackupPicker is null)
+            {
+                var nativeFiles = await StorageProvider.OpenFilePickerAsync(options);
+                files = nativeFiles.Select(file => (IConversationBackupFile)new AvaloniaConversationBackupFile(file)).ToArray();
+            }
+            else
+            {
+                files = await _conversationBackupPicker.OpenFilePickerAsync(options);
+            }
             var file = files.FirstOrDefault();
             if (file is null) return;
             viewModel.ReportContextActionStatus($"Reading backup · {file.Name}");
@@ -3947,14 +3966,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task WriteTextFileAsync(IStorageFile file, string contents)
+    private static async Task WriteTextFileAsync(IConversationBackupFile file, string contents)
     {
         await using var stream = await file.OpenWriteAsync();
         await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         await writer.WriteAsync(contents);
     }
 
-    private static async Task<string> ReadTextFileAsync(IStorageFile file, int maxBytes)
+    private static Task WriteTextFileAsync(IStorageFile file, string contents) =>
+        WriteTextFileAsync(new AvaloniaConversationBackupFile(file), contents);
+
+    private static async Task<string> ReadTextFileAsync(IConversationBackupFile file, int maxBytes)
     {
         await using var stream = await file.OpenReadAsync();
         if (stream.CanSeek && stream.Length > maxBytes)
@@ -3971,6 +3993,9 @@ public partial class MainWindow : Window
         }
         return Encoding.UTF8.GetString(buffer.ToArray()).TrimStart('\uFEFF');
     }
+
+    private static Task<string> ReadTextFileAsync(IStorageFile file, int maxBytes) =>
+        ReadTextFileAsync(new AvaloniaConversationBackupFile(file), maxBytes);
 
     private static string SafeExportName(string title)
     {

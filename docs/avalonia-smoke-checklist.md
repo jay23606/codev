@@ -75,9 +75,11 @@ Use this checklist for the Avalonia desktop app while it is the active UI-port t
 - [x] Export an empty conversation as Markdown and verify its title/model metadata. Windows 11 passed on 2026-09-28; see the dated partial-pass log.
 - [ ] Export a non-empty conversation as Markdown and verify its message content and metadata.
 - [ ] Export a disposable conversation as standalone HTML; verify headings, lists, tables and fenced code render, raw HTML is inert, no remote assets load, local full paths/checkpoint paths are absent, reviewed Codev file diffs appear, and the pre-export review masks common credential matches. Redact one selected value, verify it is replaced throughout the export, then cancel an export and verify no file is written. Confirm the UI says detection is heuristic.
-- [ ] Export all chats to a JSON backup and verify the selected file is written.
+- [ ] Export all chats to a JSON backup and verify the selected file is written through the native platform picker. The actual menu handlers, picker options, serialization, and import round-trip are covered by the headless integration test recorded below; native OS picker behavior still needs manual confirmation.
 - [x] Import a synthetic JSON backup and verify it adds a conversation with a new ID while keeping existing chats; confirm rollback checkpoint paths are not restored.
 - [ ] Delete the disposable conversation and verify it no longer appears in recents, pins, or search.
+
+**Chat backup menu integration (2026-10-05, working tree based on `535d01f`).** A new Avalonia headless test opens the Chat backups flyout, invokes the actual Export all chats and Import chats menu handlers through an injected picker, verifies the suggested JSON filter and written backup contents, then imports it and confirms the new conversation has a distinct ID while retaining message history. Focused test passed 1/1; full local .NET 10 Release Avalonia suite passed 35 tests with 9 opt-in live-model skips. The test exercises Codev's UI handlers and serialization with an in-memory picker adapter; native Windows/macOS/Linux picker dialogs, cancellation, and OS-level permissions remain unverified.
 
 ## Accessibility smoke (Windows, macOS, and Linux)
 

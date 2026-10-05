@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Input;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Codev;
@@ -20,6 +21,59 @@ namespace Codev.Avalonia.Tests;
 
 public sealed class MainWindowTests
 {
+    [AvaloniaFact]
+    public async Task Backup_menu_exports_and_imports_through_the_platform_picker()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var picker = new FakeConversationBackupPicker();
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var original = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            original.Title = "Menu backup round trip";
+            original.Messages = [new("user", "Keep this conversation"), new("assistant", "Backup UI passed")];
+            var initialConversationCount = viewModel.RecentConversations.Count;
+
+            window = new MainWindow(picker) { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var button = Assert.IsType<Button>(window.FindControl<Button>("ChatBackupsButton"));
+            var flyout = Assert.IsType<MenuFlyout>(button.Flyout);
+            flyout.ShowAt(button);
+            var exportItem = Assert.Single(flyout.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "Export all chats…");
+            await Dispatcher.UIThread.InvokeAsync(() => exportItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)));
+            await WaitForContextActionStatusAsync(viewModel, "Backup saved · backup.codev.json");
+
+            var saveOptions = Assert.IsType<FilePickerSaveOptions>(picker.LastSaveOptions);
+            Assert.Contains("*.codev.json", Assert.Single(saveOptions.FileTypeChoices!).Patterns!);
+            Assert.Contains("Menu backup round trip", picker.File.ReadAllText(), StringComparison.Ordinal);
+            Assert.Contains("Backup UI passed", picker.File.ReadAllText(), StringComparison.Ordinal);
+
+            flyout.ShowAt(button);
+            var importItem = Assert.Single(flyout.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "Import chats…");
+            await Dispatcher.UIThread.InvokeAsync(() => importItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)));
+            await WaitForContextActionStatusAsync(viewModel, "Imported 1 conversation(s).");
+
+            Assert.NotNull(picker.LastOpenOptions);
+            Assert.False(picker.LastOpenOptions!.AllowMultiple);
+            Assert.Equal(initialConversationCount + 1, viewModel.RecentConversations.Count);
+            Assert.Contains(viewModel.RecentConversations, conversation => conversation.Id == original.Id);
+            var imported = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            Assert.NotEqual(original.Id, imported.Id);
+            Assert.Equal("Menu backup round trip", imported.Title);
+            Assert.Equal("Backup UI passed", imported.Messages[1].Content);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
     [AvaloniaFact]
     public async Task Model_picker_shows_loading_empty_and_unavailable_states_without_blank_options()
     {
@@ -1699,6 +1753,88 @@ public sealed class MainWindowTests
             await Task.Delay(10);
         }
         Assert.Contains(expected, status.Text, StringComparison.Ordinal);
+    }
+
+    private static async Task WaitForContextActionStatusAsync(MainViewModel viewModel, string expected)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+            if (viewModel.ContextActionStatus.Contains(expected, StringComparison.Ordinal)) return;
+            await Task.Delay(10);
+        }
+        Assert.Contains(expected, viewModel.ContextActionStatus, StringComparison.Ordinal);
+    }
+
+    private sealed class FakeConversationBackupPicker : IConversationBackupPicker
+    {
+        public bool CanOpen => true;
+        public bool CanSave => true;
+        public MemoryStorageFile File { get; } = new("backup.codev.json");
+        public FilePickerSaveOptions? LastSaveOptions { get; private set; }
+        public FilePickerOpenOptions? LastOpenOptions { get; private set; }
+
+        public Task<IConversationBackupFile?> SaveFilePickerAsync(FilePickerSaveOptions options)
+        {
+            LastSaveOptions = options;
+            return Task.FromResult<IConversationBackupFile?>(File);
+        }
+
+        public Task<IReadOnlyList<IConversationBackupFile>> OpenFilePickerAsync(FilePickerOpenOptions options)
+        {
+            LastOpenOptions = options;
+            return Task.FromResult<IReadOnlyList<IConversationBackupFile>>([File]);
+        }
+    }
+
+    private sealed class MemoryStorageFile(string name) : IConversationBackupFile
+    {
+        private byte[] _contents = [];
+        public string Name => name;
+
+        public Task<Stream> OpenReadAsync() => Task.FromResult<Stream>(new MemoryStream(_contents, writable: false));
+
+        public Task<Stream> OpenWriteAsync()
+        {
+            var stream = new MemoryStream();
+            return Task.FromResult<Stream>(new CommitOnDisposeStream(stream, contents => _contents = contents));
+        }
+
+        public string ReadAllText() => Encoding.UTF8.GetString(_contents);
+    }
+
+    private sealed class CommitOnDisposeStream(MemoryStream inner, Action<byte[]> commit) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer, cancellationToken);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => inner.WriteAsync(buffer, cancellationToken);
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                commit(inner.ToArray());
+                inner.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            commit(inner.ToArray());
+            await inner.DisposeAsync();
+            GC.SuppressFinalize(this);
+        }
     }
 
     private static double ContrastRatio(Color foreground, Color background)

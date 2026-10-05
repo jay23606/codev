@@ -150,11 +150,11 @@
                     <Button Classes="nav" Content="☁  Connect hosted models…" Click="ConfigureCloudProvider_Click" ToolTip.Tip="Connect OpenAI or Anthropic using an API key; cloud requests require an explicit acknowledgement" />
                     <Button Classes="nav" Content="⚙  Settings…" Click="Settings_Click" ToolTip.Tip="Configure Ollama and local semantic indexes" />
                     <Button Classes="nav" Content="🔌  MCP servers…" Click="McpServers_Click" ToolTip.Tip="Configure external MCP tools for Code tasks" />
-                    <Button Classes="nav" Content="⇧⇩  Chat backups…" ToolTip.Tip="Import or export conversation backups">
+                    <Button x:Name="ChatBackupsButton" AutomationProperties.AutomationId="ChatBackupsButton" Classes="nav" Content="⇧⇩  Chat backups…" ToolTip.Tip="Import or export conversation backups">
                         <Button.Flyout>
                             <MenuFlyout>
-                                <MenuItem Header="Export all chats…" Click="ExportBackup_Click" />
-                                <MenuItem Header="Import chats…" Click="ImportBackup_Click" />
+                                <MenuItem x:Name="ExportAllChatsMenuItem" AutomationProperties.AutomationId="ExportAllChatsMenuItem" Header="Export all chats…" Click="ExportBackup_Click" />
+                                <MenuItem x:Name="ImportChatsMenuItem" AutomationProperties.AutomationId="ImportChatsMenuItem" Header="Import chats…" Click="ImportBackup_Click" />
                             </MenuFlyout>
                         </Button.Flyout>
                     </Button>
