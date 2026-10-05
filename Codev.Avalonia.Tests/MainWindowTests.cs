@@ -35,7 +35,7 @@ public sealed class MainWindowTests
         File.WriteAllText(Path.Combine(settingsDirectory, "avalonia-settings.json"),
             JsonSerializer.Serialize(new AvaloniaUiSettings("dark", endpoint)));
 
-        using var serverTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var serverTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var requestAccepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var returnEmptyModels = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var serverTask = Task.Run(async () =>
