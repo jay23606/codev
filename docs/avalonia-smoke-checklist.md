@@ -4,6 +4,7 @@ Use this checklist for the Avalonia desktop app across its supported operating s
 
 ## Windows smoke run
 
+- [ ] In a long conversation, press Ctrl+Shift+F on Windows/Linux or Cmd+Shift+F on macOS, search for text in an earlier message, verify the result excerpt, and select it to navigate to that message. Escape should close the find panel; F1 should list the shortcut. The Avalonia headless UI regression covers the flow; native Windows interaction and macOS/Linux keyboard use remain unchecked.
 - [x] Change the footer permission mode from Auto to Ask and back; verify each selection updates the label and persists, then relaunch and confirm Auto remains selected. Verified on Windows 11 with isolated `CODEV_DATA_ROOT` on 2026-10-02 and again on 2026-10-05 using the self-contained win-x64 artifact from preview #37333529921; the current packaged smoke confirmed the fresh-profile Auto default, Ask/Auto labels, persisted setting, and Auto restoration after restart.
 - [x] Launch `Codev.Avalonia` and verify the window opens responsively in the persisted theme.
 - [x] Packaged Windows UI Automation smoke: launched the win-x64 preview with an isolated `CODEV_DATA_ROOT` and confirmed the `Codev` window, editable text controls, and the composer send button accessibility name. Preview #37270051556, PR head `963e4f9`, 2026-10-05. This automated startup check does not replace the manual theme, keyboard, or full-interaction checks; native macOS/Linux interaction remains pending.

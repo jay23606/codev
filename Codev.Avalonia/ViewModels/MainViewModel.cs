@@ -48,6 +48,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private readonly Codev.ProjectMcpToolPermissionRegistry _projectMcpPermissions;
     private Codev.Conversation? _active;
     private string _searchText = "";
+    private string _conversationFindQuery = "";
+    private bool _isConversationFindOpen;
+    private IReadOnlyList<Codev.ConversationMessageMatch> _conversationFindMatches = [];
     private string _draft = "";
     private string _model = "";
     private string _provider = "ollama";
@@ -183,6 +186,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     public MainViewModel(string? localDataRoot = null, HttpMessageHandler? httpMessageHandler = null)
     {
+        Messages.CollectionChanged += (_, _) => RefreshConversationFindResults();
         _http = new HttpClient(httpMessageHandler ?? new SocketsHttpHandler { AllowAutoRedirect = false })
         {
             Timeout = Timeout.InfiniteTimeSpan
@@ -281,6 +285,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         {
             if (SetProperty(ref _active, value))
             {
+                if (IsConversationFindOpen) IsConversationFindOpen = false;
+                if (_conversationFindQuery.Length > 0) ConversationFindQuery = "";
                 OnPropertyChanged(nameof(ConversationTitle));
                 ((RelayCommand)RewindConversationCommand).NotifyCanExecuteChanged();
                 ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
@@ -601,6 +607,46 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
     }
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) RebuildLists(); } }
+    public bool IsConversationFindOpen
+    {
+        get => _isConversationFindOpen;
+        private set => SetProperty(ref _isConversationFindOpen, value);
+    }
+    public string ConversationFindQuery
+    {
+        get => _conversationFindQuery;
+        set
+        {
+            if (!SetProperty(ref _conversationFindQuery, value ?? "")) return;
+            RefreshConversationFindResults();
+        }
+    }
+    public IReadOnlyList<Codev.ConversationMessageMatch> ConversationFindMatches => _conversationFindMatches;
+    public bool HasConversationFindQuery => !string.IsNullOrWhiteSpace(ConversationFindQuery);
+    public bool HasConversationFindMatches => ConversationFindMatches.Count > 0;
+    public string ConversationFindStatus => !HasConversationFindQuery
+        ? "Search messages in this conversation"
+        : ConversationFindMatches.Count == 0 ? "No matching messages"
+        : ConversationFindMatches.Count == 1 ? "1 matching message" : $"{ConversationFindMatches.Count} matching messages";
+
+    public void OpenConversationFind()
+    {
+        IsConversationFindOpen = true;
+        OnPropertyChanged(nameof(ConversationFindStatus));
+    }
+
+    public void CloseConversationFind() => IsConversationFindOpen = false;
+
+    private void RefreshConversationFindResults()
+    {
+        _conversationFindMatches = string.IsNullOrWhiteSpace(ConversationFindQuery)
+            ? []
+            : Codev.ConversationSearch.FindMessageMatches(new Codev.Conversation { Messages = Messages.ToList() }, ConversationFindQuery);
+        OnPropertyChanged(nameof(ConversationFindMatches));
+        OnPropertyChanged(nameof(HasConversationFindQuery));
+        OnPropertyChanged(nameof(HasConversationFindMatches));
+        OnPropertyChanged(nameof(ConversationFindStatus));
+    }
     public string Draft
     {
         get => _draft;

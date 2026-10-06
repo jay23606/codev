@@ -28,11 +28,12 @@ Trusted Avalonia projects can opt into formatters that run after accepted Code t
 
 - A chat-first desktop layout, with dark mode as the default and light mode available
 - Independent persistent conversations with per-chat autosaved composer drafts and a local-save indicator, pinning, and a debounced sidebar filter over conversation titles and messages; all query words can match across a conversation, and the filter searches conversations across projects within the selected archived or active view
+- Find within the active conversation with message excerpts and direct navigation (`Ctrl/Cmd+Shift+F`)
 - Optional completion toasts for responses that finish while you are away from their conversation
 - Conversation rename and archive/restore, with permanent deletion available from the archive view
 - Regenerate the latest answer, edit/resend the last prompt, and branch a new conversation from a message
 - Continue an explicitly stopped answer from its partial text
-- Avalonia keyboard shortcuts include new conversation, conversation search, composer focus, mode and primary-agent cycling, and stopping a response; press F1 for the in-app shortcut reference.
+- Avalonia keyboard shortcuts include new conversation, sidebar conversation search, in-conversation find, composer focus, mode and primary-agent cycling, and stopping a response; press F1 for the in-app shortcut reference.
 - Save reusable local prompt templates and insert them into the composer for editing before sending
 - Dark and light themes, with dark as the default and the choice remembered locally
 - Per-conversation Ollama model selection, with friendly quick choices for the original three and automatic discovery of other installed models

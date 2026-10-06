@@ -4046,12 +4046,47 @@ public partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(cleaned) ? "codev-conversation" : cleaned;
     }
 
+    private void OpenConversationFind_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        viewModel.OpenConversationFind();
+        ConversationFindTextBox.Focus();
+    }
+
+    private void CloseConversationFind_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel) viewModel.CloseConversationFind();
+    }
+
+    private void ClearConversationFind_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        viewModel.ConversationFindQuery = "";
+        ConversationFindTextBox.Focus();
+    }
+
+    private void ConversationFindResult_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel ||
+            sender is not Button { DataContext: Codev.ConversationMessageMatch match } ||
+            match.MessageIndex < 0 || match.MessageIndex >= viewModel.Messages.Count) return;
+
+        _followOutput = false;
+        MessageList.ScrollIntoView(match.MessageIndex);
+        viewModel.CloseConversationFind();
+    }
+
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         var primaryModifier = PlatformKeyboardShortcuts.HasPrimaryModifier(e.KeyModifiers);
         if (e.Key == Key.F1)
             ShowKeyboardShortcuts();
+        else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.F)
+        {
+            viewModel.OpenConversationFind();
+            ConversationFindTextBox.Focus();
+        }
         else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.M)
             viewModel.CycleConversationMode();
         else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.A)
@@ -4062,6 +4097,8 @@ public partial class MainWindow : Window
             SearchTextBox.Focus();
         else if (primaryModifier && e.Key == Key.L)
             ComposerTextBox.Focus();
+        else if (e.Key == Key.Escape && viewModel.IsConversationFindOpen)
+            viewModel.CloseConversationFind();
         else if (e.Key == Key.Escape && viewModel.IsGenerating)
             viewModel.StopGenerationCommand.Execute(null);
         else
@@ -4098,6 +4135,7 @@ public partial class MainWindow : Window
         {
             $"{modifier}+N  New conversation",
             $"{modifier}+F  Search conversations",
+            $"{modifier}+Shift+F  Find in this conversation",
             $"{modifier}+L  Focus the composer",
             $"{modifier}+Shift+M  Cycle Chat, Plan, and Code task",
             $"{modifier}+Shift+A  Cycle the primary agent",

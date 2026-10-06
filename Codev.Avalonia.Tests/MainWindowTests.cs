@@ -361,6 +361,7 @@ public sealed class MainWindowTests
             var lines = dialog.GetVisualDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
             var modifier = OperatingSystem.IsMacOS() ? "⌘" : "Ctrl";
             Assert.Contains(lines, line => line?.Contains($"{modifier}+Shift+M", StringComparison.Ordinal) == true);
+            Assert.Contains(lines, line => line?.Contains($"{modifier}+Shift+F  Find in this conversation", StringComparison.Ordinal) == true);
             Assert.Contains($"{modifier}+Shift+M", viewModel.ConversationModeCycleTooltip, StringComparison.Ordinal);
             Assert.Contains($"{modifier}+Shift+A", viewModel.PrimaryAgentTooltip, StringComparison.Ordinal);
             Assert.Contains(lines, line => line?.Contains("/status", StringComparison.Ordinal) == true);
@@ -371,6 +372,83 @@ public sealed class MainWindowTests
         {
             window?.Close();
             if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task In_conversation_find_shows_message_excerpts_and_jumps_to_selected_match()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root, new TestHttpMessageHandler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))));
+        MainWindow? window = null;
+        try
+        {
+            for (var index = 0; index < 96; index++)
+            {
+                var content = index == 5
+                    ? $"An earlier note contains the needle to find. {new string('x', 420)}"
+                    : $"Transcript message {index}. {new string('x', 420)}";
+                viewModel.Messages.Add(new ChatMessage(index % 2 == 0 ? "user" : "assistant", content));
+            }
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+            await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
+
+            var keyModifiers = (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control) | KeyModifiers.Shift;
+            window.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Key = Key.F,
+                KeyModifiers = keyModifiers
+            });
+            Assert.True(viewModel.IsConversationFindOpen);
+            Assert.True(Assert.IsType<TextBox>(window.FindControl<TextBox>("ConversationFindTextBox")).IsFocused);
+
+            var findText = Assert.IsType<TextBox>(window.FindControl<TextBox>("ConversationFindTextBox"));
+            findText.Text = "needle";
+            await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
+            var match = Assert.Single(viewModel.ConversationFindMatches);
+            Assert.Equal(5, match.MessageIndex);
+            Assert.Contains("needle", match.Excerpt, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("1 matching message", viewModel.ConversationFindStatus);
+
+            var scrollViewer = Assert.IsType<ScrollViewer>(window.FindControl<ScrollViewer>("ConversationScrollViewer"));
+            Assert.True(scrollViewer.Offset.Y > 0, "The transcript should initially follow its latest messages.");
+            var results = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("ConversationFindResults"));
+            var resultButton = Assert.Single(results.GetVisualDescendants().OfType<Button>());
+            await Dispatcher.UIThread.InvokeAsync(() => resultButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
+
+            Assert.False(viewModel.IsConversationFindOpen);
+            var messagePanel = Assert.Single(window.FindControl<ItemsControl>("MessageList")!
+                .GetVisualDescendants().OfType<VirtualizingStackPanel>());
+            Assert.InRange(5, messagePanel.FirstRealizedIndex, messagePanel.LastRealizedIndex);
+            Assert.True(scrollViewer.Offset.Y < scrollViewer.Extent.Height - scrollViewer.Viewport.Height,
+                "Selecting a search result should move the transcript away from the bottom and show that message.");
+
+            window.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Key = Key.F,
+                KeyModifiers = keyModifiers
+            });
+            Assert.True(viewModel.IsConversationFindOpen);
+            window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
+            Assert.False(viewModel.IsConversationFindOpen);
+
+            viewModel.NewConversationCommand.Execute(null);
+            Assert.False(viewModel.IsConversationFindOpen);
+            Assert.Empty(viewModel.ConversationFindQuery);
+            Assert.Empty(viewModel.ConversationFindMatches);
+        }
+        finally
+        {
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
             await DeleteAutoModeTestDirectoryAsync(root);
         }
     }

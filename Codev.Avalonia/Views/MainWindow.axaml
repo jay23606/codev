@@ -243,6 +243,7 @@
                     <Button x:Name="MoreButton" Grid.Column="7" Classes="soft" Content="More" ToolTip.Tip="Conversation and model actions">
                         <Button.Flyout>
                             <MenuFlyout>
+                                <MenuItem Header="Find in this conversation…" Click="OpenConversationFind_Click" />
                                 <MenuItem Header="{Binding PinLabel}" Command="{Binding TogglePinCommand}" />
                                 <MenuItem Header="{Binding ArchiveLabel}" Command="{Binding ArchiveConversationCommand}" />
                                 <MenuItem Header="Export conversation…">
@@ -387,6 +388,35 @@
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+            <Border x:Name="ConversationFindPanel" Grid.Row="2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12"
+                    Width="420" MaxHeight="380" Padding="10" CornerRadius="8" ZIndex="10"
+                    Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1"
+                    IsVisible="{Binding IsConversationFindOpen}" AutomationProperties.AutomationId="ConversationFindPanel">
+                <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
+                        <TextBox x:Name="ConversationFindTextBox" Watermark="Find in this conversation" Text="{Binding ConversationFindQuery, Mode=TwoWay}"
+                                 AutomationProperties.Name="Find in this conversation" AutomationProperties.AutomationId="ConversationFindTextBox" />
+                        <Button Grid.Column="1" Content="Clear" Classes="soft" Padding="8,3" Click="ClearConversationFind_Click"
+                                IsVisible="{Binding HasConversationFindQuery}" AutomationProperties.Name="Clear conversation search" />
+                        <Button Grid.Column="2" Content="Close" Classes="soft" Padding="8,3" Click="CloseConversationFind_Click"
+                                AutomationProperties.Name="Close conversation search" />
+                    </Grid>
+                    <TextBlock Text="{Binding ConversationFindStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
+                    <ScrollViewer MaxHeight="290" VerticalScrollBarVisibility="Auto" IsVisible="{Binding HasConversationFindMatches}">
+                        <ItemsControl x:Name="ConversationFindResults" ItemsSource="{Binding ConversationFindMatches}"
+                                      AutomationProperties.Name="Conversation search results" AutomationProperties.AutomationId="ConversationFindResults">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="core:ConversationMessageMatch">
+                                    <Button Classes="nav" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,5"
+                                            Click="ConversationFindResult_Click" AutomationProperties.Name="{Binding DisplayText}">
+                                        <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" MaxWidth="370" />
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </StackPanel>
+            </Border>
             <Border x:Name="InlineApprovalPanel" Grid.Row="3" IsVisible="False" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,8,16,8" MaxHeight="390">
                 <ContentControl x:Name="InlineApprovalContent" />
             </Border>
