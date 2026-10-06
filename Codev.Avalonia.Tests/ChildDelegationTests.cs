@@ -26,9 +26,17 @@ public sealed class ChildDelegationTests
             await viewModel.SetProjectCommandPermissionModeAsync(Codev.ProjectCommandPermissionMode.Auto);
             var permissionField = typeof(MainViewModel).GetField("_projectCommandPermissions", BindingFlags.Instance | BindingFlags.NonPublic);
             var permissions = Assert.IsType<Codev.ProjectCommandPermissionRegistry>(permissionField?.GetValue(viewModel));
+            var mcpPermissionField = typeof(MainViewModel).GetField("_projectMcpPermissions", BindingFlags.Instance | BindingFlags.NonPublic);
+            var mcpPermissions = Assert.IsType<Codev.ProjectMcpToolPermissionRegistry>(mcpPermissionField?.GetValue(viewModel));
             const string deniedCommand = "Remove-Item protected.txt";
             await permissions.SetRuleAsync(repository, deniedCommand, Codev.ProjectCommandPermissionDecision.Deny);
             await permissions.SetRuleAsync(repository, "dotnet test", Codev.ProjectCommandPermissionDecision.Allow);
+            using var mcpSchema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{},"additionalProperties":false}""");
+            var deniedMcpTool = new Codev.McpCodeTaskTool("mcp_github_delete_repo", "github", "GitHub", "delete_repo",
+                "Delete a GitHub repository.", mcpSchema.RootElement.Clone(), null,
+                ConfigurationFingerprint: new string('a', 64));
+            await mcpPermissions.SetRuleAsync(repository, deniedMcpTool.ServerId, deniedMcpTool.ToolName,
+                Codev.ProjectCommandPermissionDecision.Deny, deniedMcpTool.PermissionFingerprint);
 
             var generationField = typeof(MainViewModel).GetField("_generationConversation", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(generationField);
@@ -53,6 +61,33 @@ public sealed class ChildDelegationTests
                 rule.Command == "dotnet test" && rule.Decision == Codev.ProjectCommandPermissionDecision.Allow);
             Assert.Equal(Codev.ProjectCommandPermissionDecision.Deny, permissions.Evaluate(child.ProjectPath!, deniedCommand));
             Assert.Equal(Codev.ProjectCommandPermissionDecision.Allow, permissions.Evaluate(child.ProjectPath!, "dotnet build"));
+            Assert.Equal(Codev.ProjectCommandPermissionDecision.Deny,
+                mcpPermissions.Evaluate(child.ProjectPath!, Codev.ProjectCommandPermissionMode.Auto,
+                    deniedMcpTool.ServerId, deniedMcpTool.ToolName, deniedMcpTool.PermissionFingerprint));
+            var serverCalls = 0;
+            var childExecutor = new Codev.CodeTaskToolExecutor(new Codev.WorkspaceFileService(child.ProjectPath!), new Codev.Conversation(),
+                _ => Task.FromResult(false), _ => Task.FromResult(false),
+                mcpTools: new Dictionary<string, Codev.McpCodeTaskTool>(StringComparer.Ordinal) { [deniedMcpTool.FunctionName] = deniedMcpTool },
+                mcpPermissionApproval: (tool, _, _) =>
+                {
+                    var decision = mcpPermissions.Evaluate(child.ProjectPath!, permissions.GetMode(child.ProjectPath!),
+                        tool.ServerId, tool.ToolName, tool.PermissionFingerprint);
+                    return Task.FromResult(decision switch
+                    {
+                        Codev.ProjectCommandPermissionDecision.Allow => Codev.CommandApprovalOutcome.Approved,
+                        Codev.ProjectCommandPermissionDecision.Deny => Codev.CommandApprovalOutcome.Denied,
+                        _ => Codev.CommandApprovalOutcome.Rejected
+                    });
+                },
+                mcpCall: (_, _, _) =>
+                {
+                    serverCalls++;
+                    return Task.FromResult("unsafe result");
+                });
+            using var mcpArguments = System.Text.Json.JsonDocument.Parse("{}");
+            var deniedMcpResult = await childExecutor.ExecuteAsync(deniedMcpTool.FunctionName, mcpArguments.RootElement);
+            Assert.Contains("Denied by a saved project MCP tool permission rule", deniedMcpResult, StringComparison.Ordinal);
+            Assert.Equal(0, serverCalls);
             Assert.False((await new Codev.GitRepositoryService(repository).GetStatusAsync()).HasChanges);
             Assert.Contains("Shell commands still run with your account permissions and are not sandboxed", viewModel.ContextActionStatus, StringComparison.Ordinal);
             Assert.False(await viewModel.CreateIsolatedChildSessionAsync(parent));

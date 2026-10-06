@@ -950,6 +950,37 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Auto_stops_repeated_tool_loop_without_opening_confirmation_modal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(Path.Combine(root, "app-data"));
+            Assert.Equal(ProjectCommandPermissionMode.Auto, viewModel.GetProjectCommandPermissionMode(project));
+            var confirmationRequests = 0;
+            viewModel.ConfirmRepeatedToolCallAsync = _ =>
+            {
+                confirmationRequests++;
+                return Task.FromResult(true);
+            };
+
+            var confirm = typeof(MainViewModel).GetMethod("ConfirmRepeatedToolCallForProjectAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var pending = Assert.IsAssignableFrom<Task<bool>>(confirm.Invoke(viewModel, [project, "read_file"]));
+
+            Assert.False(await pending);
+            Assert.Equal(0, confirmationRequests);
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Best_of_n_is_a_one_shot_local_code_task_choice_captured_by_the_queue()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-best-of-n-ui", Guid.NewGuid().ToString("N"));

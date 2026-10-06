@@ -123,6 +123,50 @@ public sealed class ProjectMcpToolPermissionRegistry
         }, cancellationToken);
     }
 
+    /// <summary>Copies only explicit MCP Deny rules into an isolated child project.</summary>
+    public async Task CopyDenyRulesAsync(string sourceProjectPath, string destinationProjectPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CanPersist) throw new InvalidOperationException(LoadError ?? "MCP tool permissions are read-only.");
+        var sourcePath = NormalizePath(sourceProjectPath);
+        var destinationPath = NormalizePath(destinationProjectPath);
+        if (PathComparer.Equals(sourcePath, destinationPath)) return;
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var deniedRules = _projects.TryGetValue(sourcePath, out var source)
+                ? source.Rules.Where(rule => rule.Decision == ProjectCommandPermissionDecision.Deny).ToArray()
+                : [];
+            if (deniedRules.Length == 0) return;
+
+            var destination = _projects.TryGetValue(destinationPath, out var currentDestination)
+                ? currentDestination
+                : new ProjectMcpToolPermissions(destinationPath, []);
+            var rules = destination.Rules.ToList();
+            foreach (var deny in deniedRules)
+            {
+                rules.RemoveAll(existing => SameTool(existing, deny));
+                rules.Add(deny);
+            }
+            if (rules.Count > MaxRulesPerProject)
+                throw new InvalidOperationException("Copied MCP deny rules exceed the per-project rule limit.");
+
+            var next = new ProjectMcpToolPermissions(destinationPath, rules);
+            var candidate = new Dictionary<string, ProjectMcpToolPermissions>(_projects, PathComparer)
+            {
+                [destinationPath] = next
+            };
+            if (candidate.Count > MaxProjects) throw new InvalidOperationException("Too many projects have MCP tool permissions.");
+            var json = JsonSerializer.Serialize(candidate.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
+            if (System.Text.Encoding.UTF8.GetByteCount(json) > MaxFileBytes)
+                throw new InvalidOperationException("Copied MCP permissions would exceed the size limit.");
+            await AtomicTextFile.WriteAsync(_path, json, cancellationToken).ConfigureAwait(false);
+            _projects[destinationPath] = next;
+        }
+        finally { _gate.Release(); }
+    }
+
     private ProjectMcpToolPermissions? GetProject(string projectPath)
     {
         if (string.IsNullOrWhiteSpace(projectPath)) return null;

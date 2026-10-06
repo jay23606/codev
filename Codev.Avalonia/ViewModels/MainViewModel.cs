@@ -1892,6 +1892,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             await _projectFolderTrust.TrustAsync(worktree.WorktreePath);
 
             await _projectCommandPermissions.CopyProjectSettingsAsync(parentProjectPath, worktree.WorktreePath);
+            await _projectMcpPermissions.CopyDenyRulesAsync(parentProjectPath, worktree.WorktreePath);
 
             if (selectChild) SelectConversation(child);
             RebuildLists();
@@ -1903,7 +1904,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TimeoutException)
         {
             ReportContextActionStatus(child is not null
-                ? $"Child worktree was kept so you can recover it; setup stopped before all trust and command rules were copied ({ex.Message})."
+                ? $"Child worktree was kept so you can recover it; setup stopped before all trust, shell, and MCP deny rules were copied ({ex.Message})."
                 : $"Could not create isolated child session: {ex.Message}");
             return null;
         }
@@ -3195,7 +3196,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             {
                 token.ThrowIfCancellationRequested();
                 if (isolatedAttempt) return false;
-                return await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
+                return await ConfirmRepeatedToolCallForProjectAsync(turn.ProjectPath, name);
             },
             onTranscript: publishAttemptTranscript ?? (text => SetAssistantTranscriptAsync(conversation, assistantIndex, text)),
             initialTranscript: initialTranscript, maxSteps: maxSteps, cancellationToken: cancellationToken);
@@ -3487,7 +3488,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }, async (name, _, token) =>
         {
             token.ThrowIfCancellationRequested();
-            return await Dispatcher.UIThread.InvokeAsync(async () => await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
+            return await ConfirmRepeatedToolCallForProjectAsync(turn.ProjectPath, name);
         },
         status: status => SetConnectionStatusAsync(status),
         onResponse: async (response, turnUsage) =>
@@ -3600,6 +3601,18 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 OnPropertyChanged(nameof(ShouldWarnUnknownContext));
             }
         });
+    }
+
+    private async Task<bool> ConfirmRepeatedToolCallForProjectAsync(string? projectPath, string name)
+    {
+        // Auto never interrupts a task with a modal. Stop the repeated-call loop at the runner's
+        // guard threshold; the runner records the stop in its transcript and asks for follow-up.
+        if (!string.IsNullOrWhiteSpace(projectPath) &&
+            GetProjectCommandPermissionMode(projectPath) == Codev.ProjectCommandPermissionMode.Auto)
+            return false;
+
+        return await Dispatcher.UIThread.InvokeAsync(async () =>
+            await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
     }
 
     public void CyclePrimaryAgent()

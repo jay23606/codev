@@ -53,6 +53,31 @@ public sealed class ProjectMcpToolPermissionRegistryTests : IDisposable
     }
 
     [Fact]
+    public async Task Isolated_child_inherits_only_parent_mcp_denies_with_their_fingerprints()
+    {
+        var childProject = Path.Combine(_root, "isolated-child");
+        Directory.CreateDirectory(childProject);
+        var registry = ProjectMcpToolPermissionRegistry.Load(_path);
+        await registry.SetRuleAsync(_project, "github", "delete_repo", ProjectCommandPermissionDecision.Deny, Fingerprint);
+        await registry.SetRuleAsync(_project, "github", "search", ProjectCommandPermissionDecision.Allow, Fingerprint);
+        await registry.SetRuleAsync(childProject, "github", "delete_repo", ProjectCommandPermissionDecision.Allow, Fingerprint);
+
+        await registry.CopyDenyRulesAsync(_project, childProject);
+        var reloaded = ProjectMcpToolPermissionRegistry.Load(_path);
+
+        Assert.Equal(ProjectCommandPermissionDecision.Deny,
+            reloaded.Evaluate(childProject, ProjectCommandPermissionMode.Auto, "github", "delete_repo", Fingerprint));
+        Assert.Equal(ProjectCommandPermissionDecision.Ask,
+            reloaded.Evaluate(childProject, ProjectCommandPermissionMode.Allowlist, "github", "search", Fingerprint));
+        Assert.Contains(reloaded.GetRules(childProject), rule => rule.ServerId == "github" &&
+            rule.ToolName == "delete_repo" && rule.Decision == ProjectCommandPermissionDecision.Deny &&
+            rule.ConfigurationFingerprint == Fingerprint);
+        Assert.DoesNotContain(reloaded.GetRules(childProject), rule => rule.ToolName == "search");
+        Assert.Equal(ProjectCommandPermissionDecision.Deny,
+            reloaded.Evaluate(_project, ProjectCommandPermissionMode.Auto, "github", "delete_repo", Fingerprint));
+    }
+
+    [Fact]
     public async Task Changing_http_endpoint_with_same_server_id_and_tool_requires_a_new_allow()
     {
         var original = new McpServerConfiguration("github", "GitHub", McpServerTransportKind.Http, true,
