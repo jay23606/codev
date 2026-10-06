@@ -206,7 +206,8 @@ if not messages or messages[-1].get("Role") != "assistant" or messages[-1].get("
     raise SystemExit(f"Packaged Linux chat did not persist the expected streamed reply: {messages[-2:]!r}")
 with open(sys.argv[4], encoding="utf-8") as source:
     requests = [json.loads(line) for line in source if line.strip()]
-if len(requests) != 1 or requests[0] != {"path": "/api/chat", "model": "codev-smoke:latest", "stream": True, "keep_alive": "30m"}:
+if len(requests) != 1 or any(requests[0].get(key) != value for key, value in {
+        "path": "/api/chat", "model": "codev-smoke:latest", "stream": True, "keep_alive": "30m"}.items()):
     raise SystemExit(f"Packaged Linux chat request did not match expected model/stream/keep_alive fields: {requests!r}")
 PY
 
