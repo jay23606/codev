@@ -884,7 +884,7 @@ function Test-PermanentConversationDelete($Window, [string]$DataRoot) {
     $searchValue.SetValue('')
 }
 
-function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string]$ExpectedLabel, [string]$ExpectedSetting) {
+function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string]$ExpectedLabel, [string]$ExpectedSetting, [string]$ProjectPath = '') {
     $buttonInvoke = $null
     if (-not $ModeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$buttonInvoke)) {
         throw 'The footer permission mode selector cannot be opened through UI Automation.'
@@ -919,14 +919,29 @@ function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string
         throw "Selecting '$MenuItemName' did not update the footer to '$ExpectedLabel' (label='$currentLabel')."
     }
 
-    $settingsPath = Join-Path $dataRoot 'Codev\avalonia-settings.json'
-    $persistedMode = $null
-    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-        try {
-            $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-            $persistedMode = [string]$settings.DefaultProjectCommandPermissionMode
+    if (-not [string]::IsNullOrWhiteSpace($ProjectPath)) {
+        $permissionsPath = Join-Path $dataRoot 'Codev\avalonia-command-permissions.json'
+        $permissionProjects = @()
+        if (Test-Path -LiteralPath $permissionsPath -PathType Leaf) {
+            try { $permissionProjects = @(Get-Content -LiteralPath $permissionsPath -Raw | ConvertFrom-Json) }
+            catch { throw "Could not read saved project command permissions after the footer confirmed completion: $($_.Exception.Message)" }
         }
-        catch { throw "Could not read the saved permission mode after the footer confirmed completion: $($_.Exception.Message)" }
+        $normalizedProjectPath = [System.IO.Path]::GetFullPath($ProjectPath)
+        $permissionEntry = @($permissionProjects | Where-Object {
+            [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($normalizedProjectPath, [StringComparison]::OrdinalIgnoreCase)
+        })
+        $persistedMode = if ($permissionEntry.Count -eq 1) { [string]$permissionEntry[0].Mode } else { $null }
+    }
+    else {
+        $settingsPath = Join-Path $dataRoot 'Codev\avalonia-settings.json'
+        $persistedMode = $null
+        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+            try {
+                $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+                $persistedMode = [string]$settings.DefaultProjectCommandPermissionMode
+            }
+            catch { throw "Could not read the saved permission mode after the footer confirmed completion: $($_.Exception.Message)" }
+        }
     }
     if ($persistedMode -ne $ExpectedSetting) {
         throw "Selecting '$MenuItemName' did not persist '$ExpectedSetting' (setting='$persistedMode')."
@@ -1578,7 +1593,127 @@ public static class CodevCommonDialog
         @($mockRequests | Where-Object { $_.keep_alive -ne '30m' }).Count -ne 0) {
         throw "The packaged Windows model/tool request round-trip was unexpected: $($mockRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
-    Write-Host 'Packaged Windows Auto mode ran a destructive compound command without approval, removed only its isolated fixture, and persisted the successful tool result.'
+
+    # Save an exact Deny through the real Ask-mode approval surface, return to
+    # Auto, and prove the same command is blocked without another prompt.
+    $null = New-Item -ItemType Directory -Path $commandFixture
+    Set-Content -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt') -Value 'disposable Auto deny fixture' -NoNewline
+    Set-PermissionMode $window $modeButton 'Ask every time' 'Ask every time ▾' 'AskEveryTime' $autoProject
+    $denyPrompt = 'Run the packaged Auto exact-deny smoke.'
+    $autoComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait($denyPrompt)
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $approvalDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    $inlineApprovalPanel = $null
+    do {
+        $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
+        if ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $approvalDeadline)
+    if ($null -eq $inlineApprovalPanel -or -not $inlineApprovalPanel.Current.IsVisible) {
+        throw 'The Ask-mode exact-deny smoke did not show the inline command approval panel.'
+    }
+    $denyButtonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Deny exact command'))
+    $denyButton = $inlineApprovalPanel.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $denyButtonCondition)
+    if ($null -eq $denyButton) { throw 'The inline command approval panel is missing Deny exact command.' }
+    $denyInvoke = $null
+    if ($denyButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$denyInvoke)) {
+        $denyInvoke.Invoke()
+    }
+    else {
+        $denyButton.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    }
+    $permissionsPath = Join-Path $dataRoot 'Codev\avalonia-command-permissions.json'
+    $manualDenialText = 'Exact command denied for this project; it was not run.'
+    $savedDenialText = 'Denied by a saved project command permission rule; the command was not started.'
+    $denySaveDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    $savedDeny = $false
+    do {
+        try {
+            $savedPermissions = @(Get-Content -LiteralPath $permissionsPath -Raw | ConvertFrom-Json)
+            $permissionEntry = @($savedPermissions | Where-Object {
+                [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
+            })
+            $savedDeny = $permissionEntry.Count -eq 1 -and @($permissionEntry[0].Rules | Where-Object {
+                [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and [string]$_.Decision -eq 'Deny'
+            }).Count -eq 1
+            if ($savedDeny) { break }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $denySaveDeadline)
+    if (-not $savedDeny) { throw 'Deny exact command did not persist the exact destructive command rule for the private workspace.' }
+    $denyTranscript = ''
+    $denyReplyDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1) {
+                $denyTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($denyTranscript.Contains($manualDenialText, [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $denyReplyDeadline)
+    if (-not $denyTranscript.Contains($manualDenialText, [StringComparison]::Ordinal) -or
+        -not (Test-Path -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt'))) {
+        throw 'The Ask-mode Deny exact command action did not preserve the fixture and record the denied command result.'
+    }
+    Set-PermissionMode $window $modeButton 'Auto · approve unless denied' 'Auto ▾' 'Auto' $autoProject
+    $autoDeniedPrompt = 'Run the packaged Auto exact-deny smoke.'
+    $autoComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait($autoDeniedPrompt)
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $autoDeniedDeadline = [DateTime]::UtcNow.AddSeconds(25)
+    $autoDeniedTranscript = ''
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1) {
+                $autoDeniedTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($autoDeniedTranscript.Contains('Packaged Auto exact-deny command passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $autoDeniedDeadline)
+    $savedPermissions = @(Get-Content -LiteralPath $permissionsPath -Raw | ConvertFrom-Json)
+    $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
+    if (-not $autoDeniedTranscript.Contains('Packaged Auto exact-deny command passed.', [StringComparison]::Ordinal) -or
+        -not $autoDeniedTranscript.Contains($savedDenialText, [StringComparison]::Ordinal) -or
+        -not (Test-Path -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt')) -or
+        ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) -or
+        $modeButton.Current.Name -ne 'Auto ▾') {
+        throw "Auto did not preserve and enforce the saved exact Deny without prompting: $($autoDeniedTranscript.Substring([Math]::Max(0, $autoDeniedTranscript.Length - 1500)))"
+    }
+    $permissionEntry = @($savedPermissions | Where-Object {
+        [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
+    })
+    $denyRulePersisted = $permissionEntry.Count -eq 1 -and @($permissionEntry[0].Rules | Where-Object {
+        [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and [string]$_.Decision -eq 'Deny'
+    }).Count -eq 1
+    if ($permissionEntry.Count -ne 1 -or [string]$permissionEntry[0].Mode -ne 'Auto' -or -not $denyRulePersisted) {
+        throw 'The exact Deny or Auto mode did not remain saved together after the denied Auto run.'
+    }
+    $mockRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json })
+    if ($mockRequests.Count -ne 6 -or $mockRequests[2].last_user_message -ne $denyPrompt -or
+        $mockRequests[2].last_role -ne 'user' -or $mockRequests[3].last_role -ne 'tool' -or
+        $mockRequests[4].last_user_message -ne $autoDeniedPrompt -or $mockRequests[4].last_role -ne 'user' -or
+        $mockRequests[5].last_role -ne 'tool' -or $mockRequests[5].last_tool_name -ne 'run_command' -or
+        @($mockRequests | Where-Object { $_.keep_alive -ne '30m' }).Count -ne 0) {
+        throw "The exact-deny model/tool request sequence was unexpected: $($mockRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    Write-Host 'Packaged Windows Auto mode ran an unlisted destructive command, saved an exact Deny in Ask mode, returned to Auto, and blocked the same command without approval or side effects.'
 
     # A second deterministic Code task exercises a mixed activity sequence in
     # one assistant turn and checks the real packaged summary starts collapsed.
