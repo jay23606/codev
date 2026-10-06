@@ -8,6 +8,16 @@ if (-not (Test-Path -LiteralPath $appPath -PathType Leaf)) {
     throw "Packaged Avalonia app was not found at $appPath."
 }
 
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$desktopFocus = [System.Windows.Automation.AutomationElement]::FocusedElement
+if ($null -ne $desktopFocus -and $desktopFocus.Current.ProcessId -gt 0) {
+    $focusOwner = Get-Process -Id $desktopFocus.Current.ProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $focusOwner -and $focusOwner.ProcessName -in @('LockApp', 'LogonUI')) {
+        throw 'Windows is showing its lock or sign-in screen; unlock the desktop before running the packaged UI smoke.'
+    }
+}
+
 $smokeRoot = Join-Path $env:TEMP ("Codev-Windows-UI-Smoke-" + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $smokeRoot
 $dataRoot = Join-Path $smokeRoot 'data'
@@ -1059,8 +1069,6 @@ try {
         throw 'Avalonia remained running but did not expose a main-window handle within 30 seconds.'
     }
 
-    Add-Type -AssemblyName UIAutomationClient
-    Add-Type -AssemblyName UIAutomationTypes
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -TypeDefinition @'
 using System;
