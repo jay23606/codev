@@ -39,7 +39,7 @@ public sealed record AgentProfileLoadResult(IReadOnlyList<AgentProfile> Profiles
 
 public static class AgentProfilePolicy
 {
-    /// <summary>Profile Allow defers to Codev's project mode; Ask adds a one-call confirmation outside Auto; the last matching rule determines the permission.</summary>
+    /// <summary>Matching Deny rules always win; otherwise the last matching rule determines permission. Allow defers to Codev's project mode, and Ask adds a one-call confirmation outside Auto.</summary>
     public static AgentToolPermission PermissionFor(AgentProfile? profile, string toolName, string? command = null)
     {
         if (profile is null) return AgentToolPermission.Allow;
