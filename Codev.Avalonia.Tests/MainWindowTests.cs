@@ -23,6 +23,65 @@ namespace Codev.Avalonia.Tests;
 public sealed class MainWindowTests
 {
     [AvaloniaFact]
+    public async Task Sidebar_conversation_sections_toggle_and_persist_expanded_state()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        MainViewModel? reloadedViewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var pinned = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            pinned.Title = "Pinned sidebar fixture";
+            viewModel.TogglePinCommand.Execute(null);
+            viewModel.NewConversationCommand.Execute(null);
+            var recent = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            recent.Title = "Recent sidebar fixture";
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var pinnedToggle = Assert.IsType<Button>(window.FindControl<Button>("PinnedConversationsToggleButton"));
+            var pinnedList = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("PinnedConversationsList"));
+            var recentToggle = Assert.IsType<Button>(window.FindControl<Button>("RecentConversationsToggleButton"));
+            var recentList = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("RecentConversationsList"));
+            Assert.True(pinnedList.IsVisible);
+            Assert.True(recentList.IsVisible);
+
+            await Dispatcher.UIThread.InvokeAsync(() => pinnedToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await Dispatcher.UIThread.InvokeAsync(() => recentToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            window.UpdateLayout();
+            Assert.False(pinnedList.IsVisible);
+            Assert.False(recentList.IsVisible);
+            Assert.Contains("›", pinnedToggle.Content?.ToString(), StringComparison.Ordinal);
+            Assert.Contains("›", recentToggle.Content?.ToString(), StringComparison.Ordinal);
+
+            await Dispatcher.UIThread.InvokeAsync(() => pinnedToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            window.UpdateLayout();
+            Assert.True(pinnedList.IsVisible);
+            Assert.False(recentList.IsVisible);
+            await viewModel.SavePendingDraftAsync();
+            window.Close();
+            window = null;
+            await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            viewModel = null;
+
+            reloadedViewModel = new MainViewModel(root);
+            Assert.True(reloadedViewModel.PinnedConversationsExpanded);
+            Assert.False(reloadedViewModel.RecentConversationsExpanded);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            if (reloadedViewModel is not null) await StopAndFlushAsync(reloadedViewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Backup_menu_exports_and_imports_through_the_platform_picker()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

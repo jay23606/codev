@@ -97,8 +97,8 @@
                 <TextBox x:Name="SearchTextBox" Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" AutomationProperties.Name="Search conversations" />
                 <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="2">
-                        <Button Classes="nav" Content="{Binding PinnedConversationsSectionLabel}" Click="TogglePinnedConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" />
-                        <ItemsControl ItemsSource="{Binding PinnedConversations}" IsVisible="{Binding PinnedConversationsExpanded}">
+                        <Button x:Name="PinnedConversationsToggleButton" AutomationProperties.AutomationId="PinnedConversationsToggleButton" Classes="nav" Content="{Binding PinnedConversationsSectionLabel}" Click="TogglePinnedConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" />
+                        <ItemsControl x:Name="PinnedConversationsList" ItemsSource="{Binding PinnedConversations}" IsVisible="{Binding PinnedConversationsExpanded}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
                                 <StackPanel>
                                     <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
@@ -130,8 +130,8 @@
                             </DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <Button Classes="nav" Content="{Binding ArchiveViewLabel}" Command="{Binding ToggleArchiveViewCommand}" Margin="1,12,0,0" />
-                        <Button Classes="nav" Content="{Binding RecentConversationsSectionLabel}" Click="ToggleRecentConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" Margin="0,8,0,0" />
-                        <ItemsControl ItemsSource="{Binding RecentConversations}" IsVisible="{Binding RecentConversationsExpanded}">
+                        <Button x:Name="RecentConversationsToggleButton" AutomationProperties.AutomationId="RecentConversationsToggleButton" Classes="nav" Content="{Binding RecentConversationsSectionLabel}" Click="ToggleRecentConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" Margin="0,8,0,0" />
+                        <ItemsControl x:Name="RecentConversationsList" ItemsSource="{Binding RecentConversations}" IsVisible="{Binding RecentConversationsExpanded}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
                                 <StackPanel>
                                     <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
