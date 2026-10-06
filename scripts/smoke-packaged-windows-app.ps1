@@ -1857,7 +1857,12 @@ public static class CodevCommonDialog
         $visibleActivityRows = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
                 Where-Object { $_ -match 'read|search|creat|command|activit' })
-        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). Related UI elements: $($visibleActivityRows -join ' | ')"
+        $activityChildDiagnostics = @($activityExpander.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+                $current = $_.Current
+                "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen)"
+            } | Select-Object -First 30)
+        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$($activityExpanderPattern.Current.ExpandCollapseState); headerOffscreen=$($activityHeader.Current.IsOffscreen); children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
     }
     $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new(
