@@ -390,6 +390,7 @@ function Test-ConversationRename($Window, [string]$DataRoot) {
             'New conversation'))
     $row = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $rowCondition)
     if ($null -eq $row) { throw 'The active disposable conversation is missing from the sidebar.' }
+    [void][CodevCommonDialog]::ActivateWindow([IntPtr]$Window.Current.NativeWindowHandle)
     $row.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('+{F10}')
 
@@ -414,6 +415,7 @@ function Test-ConversationRename($Window, [string]$DataRoot) {
 
     $dialog = Wait-ForTopLevelWindow 'Rename conversation'
     if ($null -eq $dialog) { throw 'Choosing Rename… did not open its dialog.' }
+    [void][CodevCommonDialog]::ActivateWindow([IntPtr]$dialog.Current.NativeWindowHandle)
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Edit)
@@ -424,7 +426,11 @@ function Test-ConversationRename($Window, [string]$DataRoot) {
         throw 'The rename field does not expose its editable value to UI Automation.'
     }
     $renamedTitle = 'Codev UI smoke renamed'
+    $edit.SetFocus()
     $valuePattern.SetValue($renamedTitle)
+    if ($valuePattern.Current.Value -ne $renamedTitle) {
+        throw "The rename field did not retain the UI Automation value ('$($valuePattern.Current.Value)')."
+    }
 
     $saveCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
@@ -451,7 +457,13 @@ function Test-ConversationRename($Window, [string]$DataRoot) {
         catch { }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'The renamed title was not persisted for the active conversation.'
+    $savedTitle = if ($null -ne $conversations) {
+        $match = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+        if ($match.Count -eq 1) { [string]$match[0].Title } else { '<conversation missing>' }
+    }
+    else { '<conversation file unreadable>' }
+    $dialogStillOpen = $null -ne (Wait-ForTopLevelWindow 'Rename conversation' 1)
+    throw "The renamed title was not persisted for the active conversation (stored='$savedTitle', dialogOpen=$dialogStillOpen)."
 }
 
 function Test-ConversationArchiveRestore($Window, [string]$DataRoot) {
@@ -1260,7 +1272,9 @@ public static class CodevCommonDialog
         if ($null -eq $focused -or $focused.Current.ProcessId -ne $app.Id) {
             $focusName = if ($null -eq $focused) { '<none>' } else { $focused.Current.Name }
             $focusProcessId = if ($null -eq $focused) { 0 } else { $focused.Current.ProcessId }
-            throw "Tab traversal left the packaged Codev process (focused='$focusName', process=$focusProcessId, tab=$($tab + 1))."
+            $focusOwner = if ($focusProcessId -gt 0) { (Get-Process -Id $focusProcessId -ErrorAction SilentlyContinue).ProcessName } else { '<none>' }
+            $focusAutomationId = if ($null -eq $focused) { '<none>' } else { $focused.Current.AutomationId }
+            throw "Tab traversal left the packaged Codev process (focused='$focusName', automationId='$focusAutomationId', process=$focusProcessId/$focusOwner, expected=$($app.Id), tab=$($tab + 1))."
         }
         if (-not [string]::IsNullOrWhiteSpace($focused.Current.Name)) {
             $visitedTabNames[$focused.Current.Name] = $true
@@ -1913,10 +1927,15 @@ public static class CodevCommonDialog
     }
 
     $backup = @(Get-Content -LiteralPath $backupPath -Raw | ConvertFrom-Json -AsHashtable)
-    if ($backup.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$backup[0].Id)) {
+    $backupIds = @($backup | ForEach-Object { [string]$_.Id })
+    if ($backup.Count -lt 1 -or @($backupIds | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0 -or
+        @($backupIds | Select-Object -Unique).Count -ne $backup.Count) {
         throw 'The native Save dialog output did not contain the expected conversation backup.'
     }
-    $originalConversationId = [string]$backup[0].Id
+    $conversationPath = Join-Path $dataRoot 'Codev\avalonia-conversations.json'
+    $beforeImport = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json -AsHashtable)
+    $beforeImportIds = @($beforeImport | ForEach-Object { [string]$_.Id })
+    $expectedConversationCount = $beforeImport.Count + $backup.Count
 
     $backupButtonInvoke.Invoke()
     Start-Sleep -Milliseconds 200
@@ -1926,7 +1945,6 @@ public static class CodevCommonDialog
     Set-BackupDialogPath $openDialog $backupPath
     Invoke-BackupDialogButton $openDialog 'Open'
 
-    $conversationPath = Join-Path $dataRoot 'Codev\avalonia-conversations.json'
     $importDeadline = [DateTime]::UtcNow.AddSeconds(10)
     $importedConversations = @()
     do {
@@ -1937,15 +1955,19 @@ public static class CodevCommonDialog
             }
         }
         catch { }
-    } while ($importedConversations.Count -lt 2 -and [DateTime]::UtcNow -lt $importDeadline)
-    if ($importedConversations.Count -ne 2) {
-        throw "The native Open dialog did not import a second conversation; persisted count was $($importedConversations.Count)."
+    } while ($importedConversations.Count -lt $expectedConversationCount -and [DateTime]::UtcNow -lt $importDeadline)
+    if ($importedConversations.Count -ne $expectedConversationCount) {
+        throw "The native Open dialog did not import every backed-up conversation; expected $expectedConversationCount total entries, persisted $($importedConversations.Count)."
     }
-    $originalMatches = @($importedConversations | Where-Object { [string]$_.Id -eq $originalConversationId })
-    $newMatches = @($importedConversations | Where-Object { [string]$_.Id -ne $originalConversationId })
-    if ($originalMatches.Count -ne 1 -or $newMatches.Count -ne 1 -or
-        [string]::IsNullOrWhiteSpace([string]$newMatches[0].Id)) {
-        throw 'Importing the selected file did not preserve the original conversation and add one with a fresh ID.'
+    $missingOriginals = @($beforeImportIds | Where-Object {
+        $id = $_
+        @($importedConversations | Where-Object { [string]$_.Id -eq $id }).Count -ne 1
+    })
+    $newMatches = @($importedConversations | Where-Object { [string]$_.Id -notin $beforeImportIds })
+    if ($missingOriginals.Count -gt 0 -or $newMatches.Count -ne $backup.Count -or
+        @($newMatches | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Id) }).Count -gt 0 -or
+        @($newMatches | ForEach-Object { [string]$_.Id } | Select-Object -Unique).Count -ne $backup.Count) {
+        throw 'Importing the selected file did not preserve existing conversations and add one fresh-ID copy of every backup entry.'
     }
 
     Test-NewConversationShortcut $window $dataRoot
