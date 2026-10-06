@@ -227,7 +227,7 @@ assert_mode_button_state() {
   local expected_help="$3"
   local state
   state="$(report_mode_button_state "$automation_id")"
-  if [[ "$state" != *"name=$expected_name,"* || "$state" != *"help=$expected_help"* || "$state" != *"enabled=true"* ]]; then
+  if [[ "$state" != *"name=$expected_name,"* || "$state" != *"$expected_help"* || "$state" != *"enabled=true"* ]]; then
     echo "macOS accessibility state for $automation_id was incomplete: $state" >&2
     exit 1
   fi
