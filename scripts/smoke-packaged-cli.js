@@ -13,7 +13,10 @@ if (!executable) throw new Error("Usage: node scripts/smoke-packaged-cli.js <Cod
 const cliPath = path.resolve(executable);
 assert.ok(fs.existsSync(cliPath), `Packaged CLI not found: ${cliPath}`);
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "codev-cli-provider-smoke-"));
+// macOS exposes /var as a symlink to /private/var. Resolve the temporary
+// directory first because Codev deliberately rejects workspace paths that
+// traverse symbolic links.
+const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "codev-cli-provider-smoke-"));
 const workspace = path.join(root, "workspace");
 const fixturePath = path.join(workspace, "smoke.txt");
 const fixture = "CLI_PROVIDER_ROUND_TRIP_7E31A4\n";
