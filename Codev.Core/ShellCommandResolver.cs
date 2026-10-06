@@ -11,6 +11,7 @@ public sealed record ShellCommandSpec(string Executable, string DisplayName, IRe
             FileName = Executable,
             UseShellExecute = false,
             CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true

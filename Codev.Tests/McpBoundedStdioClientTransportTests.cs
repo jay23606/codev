@@ -25,6 +25,7 @@ public sealed class McpBoundedStdioClientTransportTests
             var startInfo = McpBoundedStdioClientTransport.CreateStartInfo(options);
             Assert.False(startInfo.UseShellExecute);
             Assert.True(startInfo.CreateNoWindow);
+            Assert.Equal(ProcessWindowStyle.Hidden, startInfo.WindowStyle);
             startInfo.RedirectStandardOutput = true;
             startInfo.RedirectStandardError = true;
             using var process = Process.Start(startInfo)!;

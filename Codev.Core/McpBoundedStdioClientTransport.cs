@@ -82,6 +82,7 @@ internal sealed class McpBoundedStdioClientTransport : IClientTransport
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
             WorkingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory,
             StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
