@@ -1761,6 +1761,86 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Selected_agent_profile_instructions_are_included_in_code_task_request()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(appData);
+        Directory.CreateDirectory(project);
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-settings.json"),
+            AvaloniaUiSettings.Serialize(AvaloniaUiSettings.Default));
+
+        var chatRequest = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new TestHttpMessageHandler(async (request, cancellationToken) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/api/tags", StringComparison.Ordinal))
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"models\":[{\"name\":\"profile-smoke-model\",\"capabilities\":[\"completion\"]}]}", Encoding.UTF8, "application/json")
+                };
+            if (path.EndsWith("/api/ps", StringComparison.Ordinal))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"models\":[]}", Encoding.UTF8, "application/json") };
+            if (path.EndsWith("/api/generate", StringComparison.Ordinal))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"done\":true}\n", Encoding.UTF8, "application/json") };
+            if (path.EndsWith("/api/chat", StringComparison.Ordinal))
+            {
+                chatRequest.TrySetResult(await request.Content!.ReadAsStringAsync(cancellationToken));
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"message\":{\"role\":\"assistant\",\"content\":\"profile prompt smoke passed\"},\"done\":true}\n", Encoding.UTF8, "application/x-ndjson")
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        MainViewModel? viewModel = null;
+        try
+        {
+            var profileStore = new UserAgentProfileStore(Path.Combine(appData, "agents"));
+            await profileStore.SaveAsync("qa-profile.md",
+                "---\nname: QA Prompt Probe\ndescription: Validate profile prompt wiring.\ndefault_permission: ask\n---\nAlways include the marker PROFILE-CONTEXT-91 in the final answer.\n");
+
+            viewModel = new MainViewModel(root, handler);
+            await viewModel.LoadModelsAsync();
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            await viewModel.RefreshAgentProfilesAsync();
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            conversation.Provider = "ollama";
+            conversation.Model = "profile-smoke-model";
+            conversation.IsPlanMode = false;
+            conversation.IsCodeTask = true;
+            conversation.NumCtx = 8192;
+            conversation.NumPredict = 128;
+            conversation.ThinkEnabled = false;
+            viewModel.SelectedAgentProfileName = "QA Prompt Probe";
+            Assert.Equal("QA Prompt Probe", conversation.AgentProfileName);
+            viewModel.Draft = "Confirm the selected profile guidance and reply briefly.";
+
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            await Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+            var requestBody = await chatRequest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            using var requestJson = JsonDocument.Parse(requestBody);
+            Assert.True(requestJson.RootElement.TryGetProperty("messages", out var messages));
+            var systemPrompt = string.Join("\n", messages.EnumerateArray()
+                .Where(message => message.TryGetProperty("role", out var role) && role.GetString() == "system")
+                .Select(message => message.GetProperty("content").GetString()));
+            Assert.Contains("Selected agent profile: QA Prompt Probe", systemPrompt, StringComparison.Ordinal);
+            Assert.Contains("PROFILE-CONTEXT-91", systemPrompt, StringComparison.Ordinal);
+            Assert.Contains("Always include the marker PROFILE-CONTEXT-91 in the final answer.", systemPrompt, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Code_task_profile_picker_selects_a_saved_profile_on_the_active_conversation()
     {
         var root = Path.Combine(AppContext.BaseDirectory, "Codev-agent-profile-picker-ui", Guid.NewGuid().ToString("N"));
