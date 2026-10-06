@@ -200,15 +200,24 @@ function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
 
     $profilePath = Join-Path $DataRoot 'Codev\agents\smoke-qa.md'
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $profileSaved = $false
     do {
         if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
-            $savedContents = [System.IO.File]::ReadAllText($profilePath)
-            if ($savedContents.Contains('Updated disposable profile instructions from the native editor smoke.', [StringComparison]::Ordinal)) { break }
+            try {
+                $savedContents = [System.IO.File]::ReadAllText($profilePath)
+                if ($savedContents.Contains('Updated disposable profile instructions from the native editor smoke.', [StringComparison]::Ordinal)) {
+                    $profileSaved = $true
+                    break
+                }
+            }
+            catch [System.IO.IOException] {
+                # The profile store replaces files atomically; retry if Windows still has the
+                # destination briefly locked while the editor's save/refresh completes.
+            }
         }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf) -or
-        -not ([System.IO.File]::ReadAllText($profilePath).Contains('Updated disposable profile instructions from the native editor smoke.', [StringComparison]::Ordinal))) {
+    if (-not $profileSaved) {
         throw 'Saving edited profile instructions in the packaged UI did not persist the new content.'
     }
 
