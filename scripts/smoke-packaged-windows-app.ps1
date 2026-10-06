@@ -1765,7 +1765,43 @@ public static class CodevCommonDialog
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $verificationExpandDeadline)
     if (-not $verificationExpanded) {
-        throw 'The packaged verification output row did not report an expanded state after toggling.'
+        # Fall back to the same Space-key action a keyboard user would use if
+        # the UIA Toggle call succeeded without updating Avalonia's template.
+        $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityExpanderCondition)
+        $verificationRow = $null
+        if ($null -ne $activityExpander) {
+            $verificationRow = $activityExpander.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
+        }
+        if ($null -ne $verificationRow) {
+            $verificationRow.SetFocus()
+            [System.Windows.Forms.SendKeys]::SendWait('{SPACE}')
+            $verificationExpandDeadline = [DateTime]::UtcNow.AddSeconds(3)
+            do {
+                $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityExpanderCondition)
+                if ($null -ne $activityExpander) {
+                    $verificationRow = $activityExpander.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                        [System.Windows.Automation.PropertyCondition]::new(
+                            [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
+                }
+                $verificationToggle = $null
+                if ($null -ne $verificationRow -and
+                    $verificationRow.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$verificationToggle) -and
+                    $verificationToggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) {
+                    $verificationExpanded = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 100
+            } while ([DateTime]::UtcNow -lt $verificationExpandDeadline)
+        }
+    }
+    if (-not $verificationExpanded) {
+        $lastToggleState = 'unavailable'
+        $lastRowOffscreen = 'unavailable'
+        try { $lastToggleState = [string]$verificationToggle.Current.ToggleState } catch {}
+        try { $lastRowOffscreen = [string]$verificationRow.Current.IsOffscreen } catch {}
+        throw "The packaged verification output row did not report an expanded state after UIA and keyboard toggles. state=$lastToggleState offscreen=$lastRowOffscreen"
     }
     # Expanding the nested output can add enough height to move its text box
     # below the viewport. Scroll after that expansion so UIA exposes the
