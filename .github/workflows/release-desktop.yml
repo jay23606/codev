@@ -74,6 +74,11 @@ jobs:
       - name: Publish self-contained headless CLI
         run: dotnet publish Codev.Cli/Codev.Cli.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish-cli/${{ matrix.rid }}
 
+      - name: Set up Node for packaged desktop mock server
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
       - name: Smoke-test upgrade from latest public Windows release
         if: runner.os == 'Windows'
         shell: pwsh
@@ -117,12 +122,6 @@ jobs:
                   raise SystemExit(f"Avalonia exited before the 15-second macOS launch smoke (exit {app.returncode}).")
           print("Avalonia remained running for the macOS launch smoke.")
           PY
-
-      - name: Set up Node for packaged desktop mock server
-        if: runner.os != 'Windows'
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
 
       - name: Smoke-test packaged macOS modes, Auto command, and local chat under the window server
         if: runner.os == 'macOS'

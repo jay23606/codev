@@ -13,9 +13,14 @@ $null = New-Item -ItemType Directory -Path $smokeRoot
 $dataRoot = Join-Path $smokeRoot 'data'
 $stdoutPath = Join-Path $smokeRoot 'stdout.log'
 $stderrPath = Join-Path $smokeRoot 'stderr.log'
+$mockPortPath = Join-Path $smokeRoot 'mock-ollama.port'
+$mockRequestLog = Join-Path $smokeRoot 'mock-ollama-requests.jsonl'
+$mockStdoutPath = Join-Path $smokeRoot 'mock-ollama.stdout.log'
+$mockStderrPath = Join-Path $smokeRoot 'mock-ollama.stderr.log'
 $previousDataRoot = $env:CODEV_DATA_ROOT
 $smokeSucceeded = $false
 $app = $null
+$mockServer = $null
 
 function Find-ByAutomationId($Element, [string]$AutomationId) {
     $condition = [System.Windows.Automation.PropertyCondition]::new(
@@ -966,6 +971,29 @@ try {
     $env:CODEV_DATA_ROOT = $dataRoot
     $agentProfileDirectory = Join-Path $dataRoot 'Codev\agents'
     $null = New-Item -ItemType Directory -Path $agentProfileDirectory -Force
+    $settingsDirectory = Join-Path $dataRoot 'Codev'
+    $null = New-Item -ItemType Directory -Path $settingsDirectory -Force
+    $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
+    $mockServerPath = Join-Path $PSScriptRoot 'mock-ollama-server.js'
+    $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
+        -ArgumentList @($mockServerPath, '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
+    $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
+        $mockServer.Refresh()
+        if ($mockServer.HasExited) {
+            Get-Content $mockStdoutPath, $mockStderrPath -ErrorAction SilentlyContinue
+            throw "The loopback mock Ollama server exited during startup (exit $($mockServer.ExitCode))."
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
+        throw 'The loopback mock Ollama server did not report its port within 20 seconds.'
+    }
+    $mockPort = [int](Get-Content -LiteralPath $mockPortPath -Raw)
+    if ($mockPort -lt 1 -or $mockPort -gt 65535) { throw "The mock Ollama server reported an invalid port: $mockPort." }
+    @{ Theme = 'dark'; OllamaEndpoint = "http://127.0.0.1:$mockPort/"; DefaultProjectCommandPermissionMode = 'Auto' } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $settingsDirectory 'avalonia-settings.json') -Encoding utf8
     [System.IO.File]::WriteAllText(
         (Join-Path $agentProfileDirectory 'smoke-qa.md'),
         "---`nname: Smoke QA`ndescription: Inspect the disposable UI smoke conversation.`n---`nUse only the isolated smoke data; report observations without editing files.`n",
@@ -1394,6 +1422,99 @@ public static class CodevCommonDialog
         throw 'The renamed conversation was not visible in the sidebar after the Auto-mode restart.'
     }
     $modeCycleResult = Test-ConversationModeShortcut $window $dataRoot
+    # Run one real packaged Auto command turn against the same deterministic
+    # loopback Ollama fixture used by Linux/macOS. Use a fresh conversation so
+    # the Smoke QA read-only profile selected by the mode-cycle check cannot
+    # affect Build's command-tool availability.
+    Test-NewConversationShortcut $window $dataRoot
+    $conversationPath = Join-Path $dataRoot 'Codev\avalonia-conversations.json'
+    $activePath = Join-Path $dataRoot 'Codev\avalonia-active-conversation.json'
+    $autoConversationId = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+    $autoConversationDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    $autoConversation = $null
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1 -and [string]$matches[0].Model -eq 'codev-smoke:latest' -and
+                [string]$matches[0].Provider -eq 'ollama') { $autoConversation = $matches[0]; break }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $autoConversationDeadline)
+    if ($null -eq $autoConversation) {
+        throw 'The fresh packaged Windows conversation did not select the loopback Ollama model.'
+    }
+    $autoComposer = Find-ByAutomationId $window 'ComposerTextBox'
+    if ($null -eq $autoComposer) { throw 'The composer is missing for the packaged Auto command round-trip.' }
+    $autoComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^+m')
+    $autoModeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+        $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+        if ($matches.Count -eq 1 -and $matches[0].IsPlanMode) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $autoModeDeadline)
+    if ($matches.Count -ne 1 -or -not $matches[0].IsPlanMode) { throw 'The fresh conversation did not enter Plan before Code task mode.' }
+    $autoComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^+m')
+    $autoModeDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+        $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+        if ($matches.Count -eq 1 -and $matches[0].IsCodeTask -and -not $matches[0].IsPlanMode) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $autoModeDeadline)
+    if ($matches.Count -ne 1 -or -not $matches[0].IsCodeTask -or $matches[0].IsPlanMode) {
+        throw 'The fresh local-model conversation did not enter Code task mode for the Auto smoke.'
+    }
+    $autoPrompt = 'Run the packaged Auto mode command smoke.'
+    $autoComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait($autoPrompt)
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $autoReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    $autoTranscript = ''
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1 -and @($matches[0].Messages).Count -gt 0) {
+                $autoTranscript = [string]$matches[0].Messages[-1].Content
+                if ($autoTranscript.Contains('Packaged Auto command round-trip passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $autoReplyDeadline)
+    if (-not $autoTranscript.Contains('Verification PASSED (exit code 0)', [StringComparison]::Ordinal) -or
+        -not $autoTranscript.Contains('node --version', [StringComparison]::Ordinal) -or
+        -not $autoTranscript.Contains('Packaged Auto command round-trip passed.', [StringComparison]::Ordinal)) {
+        Get-Content $mockStdoutPath, $mockStderrPath -ErrorAction SilentlyContinue
+        throw "The packaged Windows Auto command did not complete without approval: $($autoTranscript.Substring([Math]::Max(0, $autoTranscript.Length - 1500)))"
+    }
+    $permissionPath = Join-Path $dataRoot 'Codev\avalonia-command-permissions.json'
+    $savedPermissions = @(Get-Content -LiteralPath $permissionPath -Raw | ConvertFrom-Json)
+    $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $dataRoot 'Codev\workspaces')).TrimEnd('\') + '\'
+    $autoProject = [System.IO.Path]::GetFullPath([string]$matches[0].ProjectPath)
+    if (-not $autoProject.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The Windows Auto command smoke did not use a private workspace: '$autoProject'."
+    }
+    $permissionEntry = @($savedPermissions | Where-Object {
+        [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($permissionEntry.Count -ne 1 -or [string]$permissionEntry[0].Mode -ne 'Auto') {
+        throw 'The private Windows Code task workspace did not persist inherited Auto permission mode.'
+    }
+    $mockRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json })
+    if ($mockRequests.Count -ne 2 -or $mockRequests[0].stream -ne $false -or
+        $mockRequests[0].last_role -ne 'user' -or $mockRequests[0].last_user_message -ne $autoPrompt -or
+        'verify_command' -notin @($mockRequests[0].tool_names) -or
+        $mockRequests[1].last_role -ne 'tool' -or $mockRequests[1].last_tool_name -ne 'verify_command' -or
+        @($mockRequests | Where-Object { $_.keep_alive -ne '30m' }).Count -ne 0) {
+        throw "The packaged Windows model/tool request round-trip was unexpected: $($mockRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    Write-Host 'Packaged Windows Auto mode ran node --version without command approval and persisted the successful tool result.'
     Test-AgentProfileEditorInPackagedApp $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot
@@ -1507,6 +1628,14 @@ finally {
         if (-not $app.HasExited) {
             $app.Kill($true)
             $app.WaitForExit(5000)
+        }
+    }
+
+    if ($null -ne $mockServer) {
+        $mockServer.Refresh()
+        if (-not $mockServer.HasExited) {
+            $mockServer.Kill($true)
+            $mockServer.WaitForExit(5000)
         }
     }
 
