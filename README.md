@@ -78,7 +78,7 @@ Choose **Connect hosted models…**. Select OpenAI or Anthropic (Claude) and ent
 
 ## Run
 
-Codev has two front ends over one shared, cross-platform core:
+Codev's supported desktop front end is Avalonia, built on the shared cross-platform core:
 
 | Front end | Platforms | Status |
 |---|---|---|

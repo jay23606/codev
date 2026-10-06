@@ -1014,6 +1014,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **C8 exact-branch secret-pattern scan (2026-10-06, head `d0ff81b`).** Compiled the repository's current `GitSecretPatternScanner` in a temporary .NET 10 harness and scanned added lines across all 229 paths in `origin/main...HEAD`. It returned 11 pattern matches. Sanitized inspection classified them as one cancellation-token identifier, two environment-backed MCP OAuth client-secret references (no literal secret), and eight synthetic test fixtures for credential strings or a dummy private-key header. No real credential value was found. The scanner only reports path, line, and match category; this heuristic scan does not replace the remaining manual security review of trust, command execution, MCP/OAuth, and untrusted project content.
 
+**README/design platform-status consistency correction (2026-10-06, prior head `3a00909`).** A documentation cross-check found that README said Codev had two front ends although Avalonia is now the only supported desktop app, and the design's storage note said macOS/Linux data-path support was “once ported.” README now names Avalonia as the supported desktop front end; the design identifies `%LOCALAPPDATA%` on Windows and `Environment.SpecialFolder.LocalApplicationData` on macOS/Linux, matching `CodevDataPaths`. This corrects those two stale platform claims; the full in-app help/status audit and remaining Q3 manual checks are still open.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
@@ -1062,4 +1064,4 @@ Checked on 2026-09-27. Product capabilities change, so revisit these when planni
 
 - C# and .NET provide the shared core. Avalonia is the supported UI across Windows, macOS and Linux.
 - Ollama's HTTP API provides local model discovery and inference, reusing the user's existing model files and CPU-only runtime configuration.
-- Conversations and UI preferences are stored locally under `%LOCALAPPDATA%\Codev` on Windows (the per-user local application data folder on other platforms once ported); move from JSON to versioned SQLite when project/task state needs transactions, indexing, or migrations.
+- Conversations and UI preferences are stored locally under `%LOCALAPPDATA%\Codev` on Windows and under the platform's per-user local application-data directory on macOS and Linux, through `Environment.SpecialFolder.LocalApplicationData`; move from JSON to versioned SQLite when project/task state needs transactions, indexing, or migrations.
