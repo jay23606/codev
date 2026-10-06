@@ -49,7 +49,7 @@ done
 if [[ ! -s "$mock_port_path" ]]; then cat "$smoke_root/mock-ollama.log" >&2; echo 'Mock Ollama did not report its loopback port within 20 seconds.' >&2; exit 1; fi
 mock_port="$(cat "$mock_port_path")"
 mkdir -p "$CODEV_DATA_ROOT/Codev"
-printf '{"Theme":"dark","OllamaEndpoint":"http://127.0.0.1:%s/"}\n' "$mock_port" >"$CODEV_DATA_ROOT/Codev/avalonia-settings.json"
+printf '{"Theme":"dark","OllamaEndpoint":"http://127.0.0.1:%s/","DefaultProjectCommandPermissionMode":"Auto"}\n' "$mock_port" >"$CODEV_DATA_ROOT/Codev/avalonia-settings.json"
 "$app_path" >"$log_path" 2>&1 &
 app_pid=$!
 
@@ -211,6 +211,81 @@ if len(requests) != 1 or requests[0] != {"path": "/api/chat", "model": "codev-sm
 PY
 
 echo 'Linux packaged app completed a real composer → streamed Ollama chat → persisted reply round-trip against a loopback mock server.'
+
+# Exercise the real packaged Auto command path with a deterministic model call.
+# The private Code task workspace inherits Auto, and the harmless Node version
+# inspection must complete without opening the inline command-approval panel.
+auto_prompt='Run the packaged Auto mode command smoke.'
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+shift+m
+assert_mode true false 'Linux packaged app entered Plan before the Auto Code task smoke.'
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+shift+m
+assert_mode false true 'Linux packaged app entered Code task for the Auto command smoke.'
+before_auto_count="$(jq --arg id "$conversation_id" '[.[] | select(.Id == $id) | .Messages[]] | length' "$conversations_path")"
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+l
+xdotool type --clearmodifiers --delay 1 "$auto_prompt"
+xdotool key --clearmodifiers Return
+
+for _ in {1..300}; do
+  if jq -e --arg id "$conversation_id" --argjson before "$before_auto_count" --arg prompt "$auto_prompt" \
+    '.[] | select(.Id == $id) | .Messages as $messages |
+     ($messages | length) >= ($before + 2) and
+     $messages[-2].Content == $prompt and
+     $messages[-1].Role == "assistant" and
+     ($messages[-1].Content | contains("Verification PASSED (exit code 0)")) and
+     ($messages[-1].Content | contains("node --version")) and
+     ($messages[-1].Content | contains("Packaged Auto command round-trip passed."))' \
+    "$conversations_path" >/dev/null 2>&1; then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the Linux Auto command smoke.' >&2; exit 1; fi
+  sleep 0.1
+done
+
+python3 - "$conversations_path" "$conversation_id" "$CODEV_DATA_ROOT" "$mock_request_log" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+if not conversation or not conversation.get("IsCodeTask"):
+    raise SystemExit("The packaged Linux conversation did not persist Code task mode.")
+project = conversation.get("ProjectPath") or ""
+workspace_root = os.path.join(sys.argv[3], "Codev", "workspaces")
+if not os.path.realpath(project).startswith(os.path.realpath(workspace_root) + os.sep):
+    raise SystemExit(f"The Auto smoke did not use a private Codev workspace: {project!r}")
+if not messages or messages[-1].get("Role") != "assistant":
+    raise SystemExit("The packaged Linux Auto command did not finish its assistant turn.")
+transcript = messages[-1].get("Content", "")
+if not all(value in transcript for value in ("Verification PASSED (exit code 0)", "node --version", "Packaged Auto command round-trip passed.")):
+    raise SystemExit(f"The packaged Linux Auto command transcript did not show successful execution: {transcript[-2000:]!r}")
+
+with open(os.path.join(sys.argv[3], "Codev", "avalonia-command-permissions.json"), encoding="utf-8") as source:
+    permissions = json.load(source)
+entry = next((item for item in permissions if os.path.normcase(os.path.realpath(item.get("ProjectPath", ""))) ==
+             os.path.normcase(os.path.realpath(project))), None)
+if entry is None or entry.get("Mode") != "Auto":
+    raise SystemExit(f"The private workspace did not persist inherited Auto mode: {entry!r}")
+
+with open(sys.argv[4], encoding="utf-8") as source:
+    requests = [json.loads(line) for line in source if line.strip()]
+expected_prompt = "Run the packaged Auto mode command smoke."
+if len(requests) != 3:
+    raise SystemExit(f"Expected one streamed chat and two Code task requests, received {requests!r}")
+if requests[1].get("stream") is not False or requests[1].get("last_role") != "user" or \
+        requests[1].get("last_user_message") != expected_prompt or "verify_command" not in requests[1].get("tool_names", []):
+    raise SystemExit(f"The packaged Linux Code task did not request the verification tool: {requests[1]!r}")
+if requests[2].get("stream") is not False or requests[2].get("last_role") != "tool" or \
+        requests[2].get("last_tool_name") != "verify_command" or requests[2].get("last_user_message") != expected_prompt:
+    raise SystemExit(f"The packaged Linux model did not receive the executed verification result: {requests[2]!r}")
+if any(request.get("keep_alive") != "30m" for request in requests):
+    raise SystemExit(f"A packaged Linux Ollama request omitted the persistent keep-alive: {requests!r}")
+PY
+
+echo 'Linux packaged Auto mode ran node --version without command approval and persisted the successful tool result.'
 
 cat "$log_path" >&2
 jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Model, Messages: .Messages[-4:]}' "$conversations_path" >&2

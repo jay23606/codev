@@ -51,7 +51,7 @@ done
 if [[ ! -s "$mock_port_path" ]]; then cat "$smoke_root/mock-ollama.log" >&2; echo 'Mock Ollama did not report its loopback port within 20 seconds.' >&2; exit 1; fi
 mock_port="$(cat "$mock_port_path")"
 mkdir -p "$CODEV_DATA_ROOT/Codev"
-printf '{"Theme":"dark","OllamaEndpoint":"http://127.0.0.1:%s/"}\n' "$mock_port" >"$CODEV_DATA_ROOT/Codev/avalonia-settings.json"
+printf '{"Theme":"dark","OllamaEndpoint":"http://127.0.0.1:%s/","DefaultProjectCommandPermissionMode":"Auto"}\n' "$mock_port" >"$CODEV_DATA_ROOT/Codev/avalonia-settings.json"
 "$app_path" >"$log_path" 2>&1 &
 app_pid=$!
 
@@ -495,6 +495,118 @@ if len(requests) != 1 or requests[0] != {"path": "/api/chat", "model": "codev-sm
 PY
 
 echo 'macOS packaged app completed a real composer → streamed Ollama chat → persisted reply round-trip against a loopback mock server.'
+
+# Exercise the real packaged Auto command path with a deterministic model call.
+# The private Code task workspace inherits Auto, and the harmless Node version
+# inspection must complete without opening the inline command-approval panel.
+auto_prompt='Run the packaged Auto mode command smoke.'
+send_mode_shortcut
+assert_mode true false 'Packaged macOS app entered Plan before the Auto Code task smoke.'
+send_mode_shortcut
+assert_mode false true 'Packaged macOS app entered Code task for the Auto command smoke.'
+before_auto_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+if conversation is None:
+    raise SystemExit("The active macOS conversation disappeared before the Auto command smoke.")
+print(len(conversation.get("Messages", [])))
+PY
+)"
+osascript - "$app_pid" "$auto_prompt" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set promptText to item 2 of argv
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 0.25
+    key code 37 using {command down}
+    delay 0.5
+    keystroke promptText
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "$auto_prompt" "the Auto command smoke prompt"
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 36
+  end tell
+end run
+APPLESCRIPT
+
+for _ in {1..300}; do
+  if python3 - "$conversations_path" "$conversation_id" "$before_auto_count" "$auto_prompt" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+before = int(sys.argv[3])
+success = (len(messages) >= before + 2 and messages[-2].get("Content") == sys.argv[4] and
+          messages[-1].get("Role") == "assistant" and
+          all(value in messages[-1].get("Content", "") for value in
+              ("Verification PASSED (exit code 0)", "node --version", "Packaged Auto command round-trip passed.")))
+raise SystemExit(0 if success else 1)
+PY
+  then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the macOS Auto command smoke.' >&2; exit 1; fi
+  sleep 0.1
+done
+
+python3 - "$conversations_path" "$conversation_id" "$CODEV_DATA_ROOT" "$mock_request_log" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+if not conversation or not conversation.get("IsCodeTask"):
+    raise SystemExit("The packaged macOS conversation did not persist Code task mode.")
+project = conversation.get("ProjectPath") or ""
+workspace_root = os.path.join(sys.argv[3], "Codev", "workspaces")
+if not os.path.realpath(project).startswith(os.path.realpath(workspace_root) + os.sep):
+    raise SystemExit(f"The Auto smoke did not use a private Codev workspace: {project!r}")
+if not messages or messages[-1].get("Role") != "assistant":
+    raise SystemExit("The packaged macOS Auto command did not finish its assistant turn.")
+transcript = messages[-1].get("Content", "")
+if not all(value in transcript for value in ("Verification PASSED (exit code 0)", "node --version", "Packaged Auto command round-trip passed.")):
+    raise SystemExit(f"The packaged macOS Auto command transcript did not show successful execution: {transcript[-2000:]!r}")
+
+with open(os.path.join(sys.argv[3], "Codev", "avalonia-command-permissions.json"), encoding="utf-8") as source:
+    permissions = json.load(source)
+entry = next((item for item in permissions if os.path.normcase(os.path.realpath(item.get("ProjectPath", ""))) ==
+             os.path.normcase(os.path.realpath(project))), None)
+if entry is None or entry.get("Mode") != "Auto":
+    raise SystemExit(f"The private workspace did not persist inherited Auto mode: {entry!r}")
+
+with open(sys.argv[4], encoding="utf-8") as source:
+    requests = [json.loads(line) for line in source if line.strip()]
+expected_prompt = "Run the packaged Auto mode command smoke."
+if len(requests) != 3:
+    raise SystemExit(f"Expected one streamed chat and two Code task requests, received {requests!r}")
+if requests[1].get("stream") is not False or requests[1].get("last_role") != "user" or \
+        requests[1].get("last_user_message") != expected_prompt or "verify_command" not in requests[1].get("tool_names", []):
+    raise SystemExit(f"The packaged macOS Code task did not request the verification tool: {requests[1]!r}")
+if requests[2].get("stream") is not False or requests[2].get("last_role") != "tool" or \
+        requests[2].get("last_tool_name") != "verify_command" or requests[2].get("last_user_message") != expected_prompt:
+    raise SystemExit(f"The packaged macOS model did not receive the executed verification result: {requests[2]!r}")
+if any(request.get("keep_alive") != "30m" for request in requests):
+    raise SystemExit(f"A packaged macOS Ollama request omitted the persistent keep-alive: {requests!r}")
+PY
+
+echo 'macOS packaged Auto mode ran node --version without command approval and persisted the successful tool result.'
 
 cat "$log_path" >&2
 python3 - "$conversations_path" "$conversation_id" <<'PY' >&2

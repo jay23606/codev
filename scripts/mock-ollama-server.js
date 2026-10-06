@@ -6,6 +6,7 @@ const http = require("node:http");
 
 const MODEL = "codev-smoke:latest";
 const REPLY = "Packaged chat round-trip passed.";
+const AUTO_COMMAND_PROMPT = "Run the packaged Auto mode command smoke.";
 const args = process.argv.slice(2);
 function option(name) {
   const index = args.indexOf(name);
@@ -49,11 +50,54 @@ const server = http.createServer((request, response) => {
     let payload;
     try { payload = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
     catch { response.writeHead(400); response.end("invalid JSON"); return; }
-    const entry = { path: request.url, model: payload.model, stream: payload.stream, keep_alive: payload.keep_alive };
+    const messages = Array.isArray(payload.messages) ? payload.messages : [];
+    const lastMessage = messages.at(-1) ?? {};
+    const lastUserMessage = [...messages].reverse().find(message => message.role === "user");
+    const tools = Array.isArray(payload.tools) ? payload.tools : [];
+    const entry = {
+      path: request.url,
+      model: payload.model,
+      stream: payload.stream,
+      keep_alive: payload.keep_alive,
+      last_role: lastMessage.role ?? null,
+      last_tool_name: lastMessage.tool_name ?? null,
+      last_user_message: lastUserMessage?.content ?? null,
+      tool_names: tools.map(tool => tool.function?.name ?? tool.name).filter(Boolean),
+    };
     fs.appendFileSync(requestLog, `${JSON.stringify(entry)}\n`, "utf8");
-    if (!modelEnabled() || entry.model !== MODEL || entry.stream !== true) {
+    if (!modelEnabled() || entry.model !== MODEL || ![true, false].includes(entry.stream)) {
       response.writeHead(400);
       response.end("unexpected chat request");
+      return;
+    }
+
+    const writeJson = body => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "user") {
+      if (!entry.tool_names.includes("verify_command")) {
+        response.writeHead(400);
+        response.end("Code task request did not expose verify_command");
+        return;
+      }
+      writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
+        { function: { name: "verify_command", arguments: { command: "node --version" } } },
+      ] }, done: true });
+      return;
+    }
+    if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "tool") {
+      if (entry.last_tool_name !== "verify_command") {
+        response.writeHead(400);
+        response.end("Auto smoke returned an unexpected tool result");
+        return;
+      }
+      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged Auto command round-trip passed." }, done: true });
+      return;
+    }
+    if (entry.stream !== true) {
+      response.writeHead(400);
+      response.end("unexpected non-streaming request");
       return;
     }
 
