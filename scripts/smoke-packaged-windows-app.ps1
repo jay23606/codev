@@ -1628,13 +1628,23 @@ public static class CodevCommonDialog
         }
     }
     $activityExpanderPattern.Expand()
-    Start-Sleep -Milliseconds 150
     $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran node --version')
-    foreach ($rowName in $activityRows) {
-        if ($null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $rowName))) {
-            throw "Expanding the packaged activity summary did not expose '$rowName'."
-        }
+    $activityRowsDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    $missingActivityRows = @()
+    do {
+        $missingActivityRows = @($activityRows | Where-Object {
+            $rowName = $_
+            $null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $rowName))
+        })
+        if ($missingActivityRows.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $activityRowsDeadline)
+    if ($missingActivityRows.Count -gt 0) {
+        $visibleActivityRows = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
+                Where-Object { $_ -match 'read|search|creat|command|activit' })
+        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). Related UI elements: $($visibleActivityRows -join ' | ')"
     }
     Write-Host 'Packaged Windows Code task grouped read, search, create, and verification results under one collapsed summary; expanding it exposed all named activity rows.'
 
