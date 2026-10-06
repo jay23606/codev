@@ -1,0 +1,828 @@
+{
+  "Date": "2026-10-06",
+  "Commit": "691f07c",
+  "Platform": "Windows 11 Home build 26200; AMD Ryzen AI 9 HX 370; Radeon 890M; 64 GiB RAM; self-contained win-x64 package",
+  "Method": "Three launches per scenario, alternating loaded and empty profile. Process.Start-to-main-window-handle elapsed time is recorded, then each process is sampled every 500ms for 10 seconds. Each loaded run copied the same synthetic profile into a unique CODEV_DATA_ROOT; empty runs used a fresh root. Both scenarios force the Ollama endpoint to the refused loopback address recorded below. No prompt was sent or model inference run. App processes launched without shell execution and stayed in the background.",
+  "Project": {
+    "SelectedContextFiles": 100,
+    "Bytes": 4966000.0,
+    "Synthetic": true,
+    "Files": 1000
+  },
+  "Conversation": {
+    "Synthetic": true,
+    "Characters": 537276,
+    "Messages": 240
+  },
+  "PromptSent": false,
+  "NetworkEndpoint": "http://127.0.0.1:1",
+  "ModelInference": false,
+  "Runs": [
+    {
+      "Run": 1,
+      "Scenario": "loaded",
+      "WindowHandleMs": 1468.7,
+      "Samples": [
+        {
+          "Sample": 1,
+          "ElapsedMs": 0,
+          "PrivateMiB": 95.8,
+          "WorkingSetMiB": 169.3
+        },
+        {
+          "Sample": 2,
+          "ElapsedMs": 500,
+          "PrivateMiB": 168.0,
+          "WorkingSetMiB": 211.6
+        },
+        {
+          "Sample": 3,
+          "ElapsedMs": 1000,
+          "PrivateMiB": 168.0,
+          "WorkingSetMiB": 211.7
+        },
+        {
+          "Sample": 4,
+          "ElapsedMs": 1500,
+          "PrivateMiB": 152.6,
+          "WorkingSetMiB": 204.2
+        },
+        {
+          "Sample": 5,
+          "ElapsedMs": 2000,
+          "PrivateMiB": 160.5,
+          "WorkingSetMiB": 204.9
+        },
+        {
+          "Sample": 6,
+          "ElapsedMs": 2500,
+          "PrivateMiB": 167.5,
+          "WorkingSetMiB": 205.0
+        },
+        {
+          "Sample": 7,
+          "ElapsedMs": 3000,
+          "PrivateMiB": 160.0,
+          "WorkingSetMiB": 205.0
+        },
+        {
+          "Sample": 8,
+          "ElapsedMs": 3500,
+          "PrivateMiB": 160.0,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 9,
+          "ElapsedMs": 4000,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 10,
+          "ElapsedMs": 4500,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 11,
+          "ElapsedMs": 5000,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 12,
+          "ElapsedMs": 5500,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 13,
+          "ElapsedMs": 6000,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 14,
+          "ElapsedMs": 6500,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 15,
+          "ElapsedMs": 7000,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.1
+        },
+        {
+          "Sample": 16,
+          "ElapsedMs": 7500,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.2
+        },
+        {
+          "Sample": 17,
+          "ElapsedMs": 8000,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.2
+        },
+        {
+          "Sample": 18,
+          "ElapsedMs": 8500,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.2
+        },
+        {
+          "Sample": 19,
+          "ElapsedMs": 9000,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.2
+        },
+        {
+          "Sample": 20,
+          "ElapsedMs": 9500,
+          "PrivateMiB": 160.1,
+          "WorkingSetMiB": 205.2
+        }
+      ],
+      "PrivateMiBMedian": 160.1,
+      "PrivateMiBMax": 168.0,
+      "WorkingSetMiBMedian": 205.1,
+      "WorkingSetMiBMax": 211.7,
+      "MainWindowHandleObserved": true,
+      "WindowTitle": "Codev"
+    },
+    {
+      "Run": 2,
+      "Scenario": "empty",
+      "WindowHandleMs": 841.0,
+      "Samples": [
+        {
+          "Sample": 1,
+          "ElapsedMs": 0,
+          "PrivateMiB": 79.3,
+          "WorkingSetMiB": 149.7
+        },
+        {
+          "Sample": 2,
+          "ElapsedMs": 500,
+          "PrivateMiB": 80.5,
+          "WorkingSetMiB": 152.3
+        },
+        {
+          "Sample": 3,
+          "ElapsedMs": 1000,
+          "PrivateMiB": 150.4,
+          "WorkingSetMiB": 191.9
+        },
+        {
+          "Sample": 4,
+          "ElapsedMs": 1500,
+          "PrivateMiB": 150.4,
+          "WorkingSetMiB": 191.9
+        },
+        {
+          "Sample": 5,
+          "ElapsedMs": 2000,
+          "PrivateMiB": 142.4,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 6,
+          "ElapsedMs": 2500,
+          "PrivateMiB": 141.2,
+          "WorkingSetMiB": 184.6
+        },
+        {
+          "Sample": 7,
+          "ElapsedMs": 3000,
+          "PrivateMiB": 147.2,
+          "WorkingSetMiB": 184.7
+        },
+        {
+          "Sample": 8,
+          "ElapsedMs": 3500,
+          "PrivateMiB": 141.0,
+          "WorkingSetMiB": 184.7
+        },
+        {
+          "Sample": 9,
+          "ElapsedMs": 4000,
+          "PrivateMiB": 141.0,
+          "WorkingSetMiB": 184.7
+        },
+        {
+          "Sample": 10,
+          "ElapsedMs": 4500,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.8
+        },
+        {
+          "Sample": 11,
+          "ElapsedMs": 5000,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.8
+        },
+        {
+          "Sample": 12,
+          "ElapsedMs": 5500,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.8
+        },
+        {
+          "Sample": 13,
+          "ElapsedMs": 6000,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.8
+        },
+        {
+          "Sample": 14,
+          "ElapsedMs": 6500,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.8
+        },
+        {
+          "Sample": 15,
+          "ElapsedMs": 7000,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.8
+        },
+        {
+          "Sample": 16,
+          "ElapsedMs": 7500,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.9
+        },
+        {
+          "Sample": 17,
+          "ElapsedMs": 8000,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.9
+        },
+        {
+          "Sample": 18,
+          "ElapsedMs": 8500,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.9
+        },
+        {
+          "Sample": 19,
+          "ElapsedMs": 9000,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.9
+        },
+        {
+          "Sample": 20,
+          "ElapsedMs": 9500,
+          "PrivateMiB": 141.1,
+          "WorkingSetMiB": 184.9
+        }
+      ],
+      "PrivateMiBMedian": 141.1,
+      "PrivateMiBMax": 150.4,
+      "WorkingSetMiBMedian": 184.8,
+      "WorkingSetMiBMax": 191.9,
+      "MainWindowHandleObserved": true,
+      "WindowTitle": "Codev"
+    },
+    {
+      "Run": 3,
+      "Scenario": "loaded",
+      "WindowHandleMs": 1254.9,
+      "Samples": [
+        {
+          "Sample": 1,
+          "ElapsedMs": 0,
+          "PrivateMiB": 96.5,
+          "WorkingSetMiB": 169.4
+        },
+        {
+          "Sample": 2,
+          "ElapsedMs": 500,
+          "PrivateMiB": 159.0,
+          "WorkingSetMiB": 202.4
+        },
+        {
+          "Sample": 3,
+          "ElapsedMs": 1000,
+          "PrivateMiB": 160.2,
+          "WorkingSetMiB": 204.1
+        },
+        {
+          "Sample": 4,
+          "ElapsedMs": 1500,
+          "PrivateMiB": 144.7,
+          "WorkingSetMiB": 196.7
+        },
+        {
+          "Sample": 5,
+          "ElapsedMs": 2000,
+          "PrivateMiB": 152.6,
+          "WorkingSetMiB": 197.5
+        },
+        {
+          "Sample": 6,
+          "ElapsedMs": 2500,
+          "PrivateMiB": 159.7,
+          "WorkingSetMiB": 197.6
+        },
+        {
+          "Sample": 7,
+          "ElapsedMs": 3000,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.6
+        },
+        {
+          "Sample": 8,
+          "ElapsedMs": 3500,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.6
+        },
+        {
+          "Sample": 9,
+          "ElapsedMs": 4000,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.6
+        },
+        {
+          "Sample": 10,
+          "ElapsedMs": 4500,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.6
+        },
+        {
+          "Sample": 11,
+          "ElapsedMs": 5000,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 12,
+          "ElapsedMs": 5500,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 13,
+          "ElapsedMs": 6000,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 14,
+          "ElapsedMs": 6500,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 15,
+          "ElapsedMs": 7000,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 16,
+          "ElapsedMs": 7500,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 17,
+          "ElapsedMs": 8000,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 18,
+          "ElapsedMs": 8500,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 19,
+          "ElapsedMs": 9000,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        },
+        {
+          "Sample": 20,
+          "ElapsedMs": 9500,
+          "PrivateMiB": 152.2,
+          "WorkingSetMiB": 197.7
+        }
+      ],
+      "PrivateMiBMedian": 152.2,
+      "PrivateMiBMax": 160.2,
+      "WorkingSetMiBMedian": 197.7,
+      "WorkingSetMiBMax": 204.1,
+      "MainWindowHandleObserved": true,
+      "WindowTitle": "Codev"
+    },
+    {
+      "Run": 4,
+      "Scenario": "empty",
+      "WindowHandleMs": 831.2,
+      "Samples": [
+        {
+          "Sample": 1,
+          "ElapsedMs": 0,
+          "PrivateMiB": 78.1,
+          "WorkingSetMiB": 150.1
+        },
+        {
+          "Sample": 2,
+          "ElapsedMs": 500,
+          "PrivateMiB": 79.2,
+          "WorkingSetMiB": 152.8
+        },
+        {
+          "Sample": 3,
+          "ElapsedMs": 1000,
+          "PrivateMiB": 149.7,
+          "WorkingSetMiB": 193.0
+        },
+        {
+          "Sample": 4,
+          "ElapsedMs": 1500,
+          "PrivateMiB": 149.7,
+          "WorkingSetMiB": 193.1
+        },
+        {
+          "Sample": 5,
+          "ElapsedMs": 2000,
+          "PrivateMiB": 157.0,
+          "WorkingSetMiB": 193.3
+        },
+        {
+          "Sample": 6,
+          "ElapsedMs": 2500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 7,
+          "ElapsedMs": 3000,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 8,
+          "ElapsedMs": 3500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 9,
+          "ElapsedMs": 4000,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 10,
+          "ElapsedMs": 4500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 11,
+          "ElapsedMs": 5000,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 12,
+          "ElapsedMs": 5500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 13,
+          "ElapsedMs": 6000,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 14,
+          "ElapsedMs": 6500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.8
+        },
+        {
+          "Sample": 15,
+          "ElapsedMs": 7000,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.9
+        },
+        {
+          "Sample": 16,
+          "ElapsedMs": 7500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.9
+        },
+        {
+          "Sample": 17,
+          "ElapsedMs": 8000,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.9
+        },
+        {
+          "Sample": 18,
+          "ElapsedMs": 8500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.9
+        },
+        {
+          "Sample": 19,
+          "ElapsedMs": 9000,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.9
+        },
+        {
+          "Sample": 20,
+          "ElapsedMs": 9500,
+          "PrivateMiB": 141.8,
+          "WorkingSetMiB": 185.9
+        }
+      ],
+      "PrivateMiBMedian": 141.8,
+      "PrivateMiBMax": 157.0,
+      "WorkingSetMiBMedian": 185.8,
+      "WorkingSetMiBMax": 193.3,
+      "MainWindowHandleObserved": true,
+      "WindowTitle": "Codev"
+    },
+    {
+      "Run": 5,
+      "Scenario": "loaded",
+      "WindowHandleMs": 1278.2,
+      "Samples": [
+        {
+          "Sample": 1,
+          "ElapsedMs": 0,
+          "PrivateMiB": 89.9,
+          "WorkingSetMiB": 165.5
+        },
+        {
+          "Sample": 2,
+          "ElapsedMs": 500,
+          "PrivateMiB": 161.0,
+          "WorkingSetMiB": 205.9
+        },
+        {
+          "Sample": 3,
+          "ElapsedMs": 1000,
+          "PrivateMiB": 162.1,
+          "WorkingSetMiB": 207.3
+        },
+        {
+          "Sample": 4,
+          "ElapsedMs": 1500,
+          "PrivateMiB": 146.6,
+          "WorkingSetMiB": 199.9
+        },
+        {
+          "Sample": 5,
+          "ElapsedMs": 2000,
+          "PrivateMiB": 154.6,
+          "WorkingSetMiB": 200.8
+        },
+        {
+          "Sample": 6,
+          "ElapsedMs": 2500,
+          "PrivateMiB": 161.6,
+          "WorkingSetMiB": 200.8
+        },
+        {
+          "Sample": 7,
+          "ElapsedMs": 3000,
+          "PrivateMiB": 154.1,
+          "WorkingSetMiB": 200.8
+        },
+        {
+          "Sample": 8,
+          "ElapsedMs": 3500,
+          "PrivateMiB": 154.1,
+          "WorkingSetMiB": 200.8
+        },
+        {
+          "Sample": 9,
+          "ElapsedMs": 4000,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 10,
+          "ElapsedMs": 4500,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 11,
+          "ElapsedMs": 5000,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 12,
+          "ElapsedMs": 5500,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 13,
+          "ElapsedMs": 6000,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 14,
+          "ElapsedMs": 6500,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 15,
+          "ElapsedMs": 7000,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 16,
+          "ElapsedMs": 7500,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 200.9
+        },
+        {
+          "Sample": 17,
+          "ElapsedMs": 8000,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 201.0
+        },
+        {
+          "Sample": 18,
+          "ElapsedMs": 8500,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 201.0
+        },
+        {
+          "Sample": 19,
+          "ElapsedMs": 9000,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 201.0
+        },
+        {
+          "Sample": 20,
+          "ElapsedMs": 9500,
+          "PrivateMiB": 154.2,
+          "WorkingSetMiB": 201.0
+        }
+      ],
+      "PrivateMiBMedian": 154.2,
+      "PrivateMiBMax": 162.1,
+      "WorkingSetMiBMedian": 200.9,
+      "WorkingSetMiBMax": 207.3,
+      "MainWindowHandleObserved": true,
+      "WindowTitle": "Codev"
+    },
+    {
+      "Run": 6,
+      "Scenario": "empty",
+      "WindowHandleMs": 839.6,
+      "Samples": [
+        {
+          "Sample": 1,
+          "ElapsedMs": 0,
+          "PrivateMiB": 78.2,
+          "WorkingSetMiB": 149.9
+        },
+        {
+          "Sample": 2,
+          "ElapsedMs": 500,
+          "PrivateMiB": 149.3,
+          "WorkingSetMiB": 191.2
+        },
+        {
+          "Sample": 3,
+          "ElapsedMs": 1000,
+          "PrivateMiB": 149.4,
+          "WorkingSetMiB": 191.5
+        },
+        {
+          "Sample": 4,
+          "ElapsedMs": 1500,
+          "PrivateMiB": 133.8,
+          "WorkingSetMiB": 183.5
+        },
+        {
+          "Sample": 5,
+          "ElapsedMs": 2000,
+          "PrivateMiB": 141.4,
+          "WorkingSetMiB": 184.1
+        },
+        {
+          "Sample": 6,
+          "ElapsedMs": 2500,
+          "PrivateMiB": 141.4,
+          "WorkingSetMiB": 184.3
+        },
+        {
+          "Sample": 7,
+          "ElapsedMs": 3000,
+          "PrivateMiB": 141.4,
+          "WorkingSetMiB": 184.4
+        },
+        {
+          "Sample": 8,
+          "ElapsedMs": 3500,
+          "PrivateMiB": 141.4,
+          "WorkingSetMiB": 184.4
+        },
+        {
+          "Sample": 9,
+          "ElapsedMs": 4000,
+          "PrivateMiB": 141.4,
+          "WorkingSetMiB": 184.4
+        },
+        {
+          "Sample": 10,
+          "ElapsedMs": 4500,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.4
+        },
+        {
+          "Sample": 11,
+          "ElapsedMs": 5000,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.4
+        },
+        {
+          "Sample": 12,
+          "ElapsedMs": 5500,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 13,
+          "ElapsedMs": 6000,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 14,
+          "ElapsedMs": 6500,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 15,
+          "ElapsedMs": 7000,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 16,
+          "ElapsedMs": 7500,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 17,
+          "ElapsedMs": 8000,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 18,
+          "ElapsedMs": 8500,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 19,
+          "ElapsedMs": 9000,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        },
+        {
+          "Sample": 20,
+          "ElapsedMs": 9500,
+          "PrivateMiB": 141.5,
+          "WorkingSetMiB": 184.5
+        }
+      ],
+      "PrivateMiBMedian": 141.5,
+      "PrivateMiBMax": 149.4,
+      "WorkingSetMiBMedian": 184.5,
+      "WorkingSetMiBMax": 191.5,
+      "MainWindowHandleObserved": true,
+      "WindowTitle": "Codev"
+    }
+  ],
+  "ReferenceBudget": {
+    "Profile": "Windows 11 Home build 26200; Ryzen AI 9 HX 370; Radeon 890M; 64 GiB RAM; self-contained win-x64 package",
+    "MaxProcessStartToWindowHandleMs": 2500,
+    "MaxLoadedPrivateMemoryPeakMiB": 200,
+    "Enforced": true,
+    "Passed": true,
+    "Violations": []
+  }
+}

@@ -151,6 +151,15 @@ public sealed class LiveLocalModelTests
             var elapsed = Stopwatch.GetElapsedTime(start);
             var stats = reply.GenerationStats;
             _output.WriteLine($"Model={conversation.Model}; Context={conversation.NumCtx}; ProjectFiles=48; ProjectBytes={Directory.EnumerateFiles(project, "*.cs").Sum(path => new FileInfo(path).Length)}; PromptTokens={conversation.LastPromptTokens}; TTFTms={stats?.TimeToFirstToken?.TotalMilliseconds}; ModelLoadMs={stats?.ModelLoadTime?.TotalMilliseconds}; WallMs={elapsed.TotalMilliseconds:F0}; PrivateBytesBefore={privateBytesBefore}; PrivateBytesPeak={peakPrivateBytes}; PrivateBytesAfter={process.PrivateMemorySize64}.");
+            if (string.Equals(Environment.GetEnvironmentVariable("CODEV_Q3_ENFORCE_REFERENCE_PERFORMANCE_BUDGETS"), "1", StringComparison.Ordinal))
+            {
+                Assert.NotNull(stats?.TimeToFirstToken);
+                var modelLoadMs = stats?.ModelLoadTime?.TotalMilliseconds ?? 0;
+                var timeToFirstToken = stats!.TimeToFirstToken!.Value;
+                var ttftBudget = modelLoadMs > 100 ? TimeSpan.FromSeconds(150) : TimeSpan.FromSeconds(1);
+                Assert.True(timeToFirstToken <= ttftBudget,
+                    $"Time to first token {timeToFirstToken} exceeded the {ttftBudget} {(modelLoadMs > 100 ? "cold" : "warm")} reference budget. Model load: {modelLoadMs:F1} ms.");
+            }
         }
         finally
         {

@@ -6,7 +6,8 @@ param(
     [int] $SamplesPerRun = 20,
     [string] $Commit = '',
     [string] $Platform = '',
-    [string] $NetworkEndpoint = 'http://127.0.0.1:1'
+    [string] $NetworkEndpoint = 'http://127.0.0.1:1',
+    [switch] $EnforceReferenceBudgets
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,5 +103,30 @@ $result = [ordered]@{
     NetworkEndpoint = $NetworkEndpoint
     ModelInference = $false
     Runs = @($runs)
+    ReferenceBudget = $null
 }
+$referenceBudget = [ordered]@{
+    Profile = 'Windows 11 Home build 26200; Ryzen AI 9 HX 370; Radeon 890M; 64 GiB RAM; self-contained win-x64 package'
+    MaxProcessStartToWindowHandleMs = 2500
+    MaxLoadedPrivateMemoryPeakMiB = 200
+    Enforced = [bool]$EnforceReferenceBudgets
+    Passed = $null
+}
+if ($EnforceReferenceBudgets) {
+    $violations = [System.Collections.Generic.List[string]]::new()
+    foreach ($run in $runs) {
+        if ($run.WindowHandleMs -gt $referenceBudget.MaxProcessStartToWindowHandleMs) {
+            $violations.Add("$($run.Scenario) run $($run.Run) startup took $($run.WindowHandleMs) ms")
+        }
+        if ($run.Scenario -eq 'loaded' -and $run.PrivateMiBMax -gt $referenceBudget.MaxLoadedPrivateMemoryPeakMiB) {
+            $violations.Add("loaded run $($run.Run) peaked at $($run.PrivateMiBMax) MiB private memory")
+        }
+    }
+    $referenceBudget.Passed = $violations.Count -eq 0
+    $referenceBudget.Violations = @($violations)
+}
+$result.ReferenceBudget = $referenceBudget
 $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $OutputRoot 'results.json') -Encoding utf8
+if ($EnforceReferenceBudgets -and -not $referenceBudget.Passed) {
+    throw "The Windows reference performance budget failed: $($referenceBudget.Violations -join '; ')"
+}
