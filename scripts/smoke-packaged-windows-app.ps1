@@ -1768,20 +1768,16 @@ public static class CodevCommonDialog
         throw "The packaged multi-action Code task did not complete all four tools in Auto: $($activityTranscript.Substring([Math]::Max(0, $activityTranscript.Length - 2500)))"
     }
     $activityName = 'Read files, searched files, created a file, ran commands'
-    $activityIdCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander')
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, $activityName)
     $activityDeadline = [DateTime]::UtcNow.AddSeconds(8)
-    $activityExpander = $null
     $activityHeader = $null
     do {
-        $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityIdCondition)
         $activityHeader = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
-        if ($null -ne $activityExpander -or $null -ne $activityHeader) { break }
+        if ($null -ne $activityHeader) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $activityDeadline)
-    if ($null -eq $activityHeader -and $null -eq $activityExpander) {
+    if ($null -eq $activityHeader) {
         $activitySnapshot = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
                 $current = $_.Current
@@ -1793,7 +1789,9 @@ public static class CodevCommonDialog
     }
     $activityWalker = [System.Windows.Automation.TreeWalker]::RawViewWalker
     $activityDiagnostics = [System.Collections.Generic.List[string]]::new()
-    $activityCandidate = if ($null -ne $activityExpander) { $activityExpander } else { $activityHeader }
+    # Earlier command turns also expose CommandToolOutputsExpander. Start at
+    # the exact summary header so UIA does not expand a stale conversation row.
+    $activityCandidate = $activityHeader
     $activityExpander = $null
     for ($depth = 0; $null -ne $activityCandidate -and $depth -lt 8; $depth++) {
         $candidatePattern = $null
