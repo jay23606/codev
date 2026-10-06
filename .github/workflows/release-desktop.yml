@@ -97,12 +97,9 @@ jobs:
         shell: pwsh
         run: ./scripts/smoke-packaged-windows-data-survival.ps1
 
-      - name: Smoke-test headless CLI on Windows
+      - name: Smoke-test packaged Windows headless CLI with loopback Ollama
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & (Join-Path $PWD 'artifacts/publish-cli/win-x64/Codev.Cli.exe') --help
-          if ($LASTEXITCODE -ne 0) { throw 'Headless CLI help smoke failed.' }
+        run: node scripts/smoke-packaged-cli.js ./artifacts/publish-cli/win-x64/Codev.Cli.exe
 
       - name: Launch Avalonia under the macOS window server
         if: runner.os == 'macOS'
@@ -135,9 +132,9 @@ jobs:
         if: runner.os == 'macOS'
         run: bash ./scripts/smoke-packaged-macos-app.sh ./artifacts/publish/${{ matrix.rid }}/Codev.Avalonia
 
-      - name: Smoke-test headless CLI on macOS
+      - name: Smoke-test packaged macOS headless CLI with loopback Ollama
         if: runner.os == 'macOS'
-        run: ./artifacts/publish-cli/${{ matrix.rid }}/Codev.Cli --help
+        run: node scripts/smoke-packaged-cli.js ./artifacts/publish-cli/${{ matrix.rid }}/Codev.Cli
 
       - name: Launch Avalonia under a virtual Linux display
         if: runner.os == 'Linux'
@@ -162,9 +159,9 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a bash ./scripts/smoke-packaged-linux-app.sh ./artifacts/publish/linux-x64/Codev.Avalonia
 
-      - name: Smoke-test headless CLI on Linux
+      - name: Smoke-test packaged Linux headless CLI with loopback Ollama
         if: runner.os == 'Linux'
-        run: ./artifacts/publish-cli/linux-x64/Codev.Cli --help
+        run: node scripts/smoke-packaged-cli.js ./artifacts/publish-cli/linux-x64/Codev.Cli
 
       - name: Package Windows app
         if: runner.os == 'Windows'

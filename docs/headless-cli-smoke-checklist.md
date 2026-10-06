@@ -6,6 +6,8 @@
 - Try OpenAI without `--allow-hosted-data` and a remote Ollama endpoint without `--allow-remote-endpoint`; verify both fail before sending a request.
 - Repeat provider-request smokes on Windows, macOS, and Linux; use only loopback Ollama endpoints unless remote sharing is explicitly enabled for the test.
 
+The desktop release workflow also runs each self-contained CLI against an isolated loopback Ollama-protocol fixture on its native runner. This verifies the packaged HTTP/tool-call round trip and read-only defaults without installing a model; it complements, but does not replace, the real-model checks recorded below.
+
 ## Run record
 
 | Date | Build | OS / model | Result | Notes |
