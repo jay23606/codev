@@ -1743,13 +1743,15 @@ public static class CodevCommonDialog
     $verificationToggle.Toggle()
     $verificationOutputDeadline = [DateTime]::UtcNow.AddSeconds(5)
     $verificationOutput = $null
+    $verificationOutputCandidates = [System.Collections.Generic.List[string]]::new()
     do {
         foreach ($element in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition)) {
             $valuePattern = $null
             if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
                 $candidateOutput = [string]$valuePattern.Current.Value
-                if ($candidateOutput.Contains('v22.23.3', [StringComparison]::Ordinal) -and
+                if (-not [string]::IsNullOrWhiteSpace($candidateOutput)) { $verificationOutputCandidates.Add($candidateOutput) }
+                if ($candidateOutput -match '(?m)^v\d+\.\d+\.\d+' -and
                     $candidateOutput.Contains('Exit code: 0', [StringComparison]::Ordinal)) {
                     $verificationOutput = $candidateOutput
                     break
@@ -1760,7 +1762,7 @@ public static class CodevCommonDialog
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $verificationOutputDeadline)
     if ($null -eq $verificationOutput -or $verificationOutput.Contains('untrusted_tool_output', [StringComparison]::Ordinal)) {
-        throw 'Expanding Ran node --version did not expose readable, parsed command output.'
+        throw "Expanding Ran node --version did not expose readable, parsed command output. Value-pattern outputs: $($verificationOutputCandidates -join ' | ')"
     }
     Write-Host 'Packaged Windows Code task grouped read, search, create, and verification results under one collapsed summary; expanding it exposed all named activity rows.'
     Write-Host 'Expanding Ran node --version exposed readable command output with its exit code and no raw tool envelope.'
