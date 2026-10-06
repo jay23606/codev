@@ -137,6 +137,96 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
     throw 'Selecting Smoke QA in the packaged primary-agent picker did not persist to the active conversation.'
 }
 
+function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
+    $moreButton = Find-ByAutomationId $Window 'MoreButton'
+    if ($null -eq $moreButton) { throw 'The More menu button is missing for the agent-profile editor smoke.' }
+    $invoke = $null
+    if (-not $moreButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+        throw 'The More menu button does not expose an invoke action.'
+    }
+    $invoke.Invoke()
+
+    $menuCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::MenuItem),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Manage agent profiles…'))
+    $menuItem = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants, $menuCondition)
+    if ($null -eq $menuItem) { throw 'The More menu did not expose Manage agent profiles.' }
+    $menuInvoke = $null
+    if ($menuItem.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$menuInvoke)) {
+        $menuInvoke.Invoke()
+    }
+    else {
+        $menuSelection = $null
+        if ($menuItem.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$menuSelection)) {
+            $menuSelection.Select()
+        }
+        else {
+            $menuBounds = $menuItem.Current.BoundingRectangle
+            if ($menuBounds.IsEmpty) { throw 'Manage agent profiles has no screen bounds and exposes no UI Automation invoke action.' }
+            [CodevCommonDialog]::ClickAt(
+                [int]($menuBounds.Left + $menuBounds.Width / 2),
+                [int]($menuBounds.Top + $menuBounds.Height / 2))
+        }
+    }
+
+    $editorWindow = Wait-ForTopLevelWindow 'Manage agent profiles' 10
+    if ($null -eq $editorWindow) { throw 'The Manage agent profiles window did not open.' }
+    $fileName = Find-ByAutomationId $editorWindow 'AgentProfileFileNameTextBox'
+    $contents = Find-ByAutomationId $editorWindow 'AgentProfileContentsTextBox'
+    $saveButton = Find-ByAutomationId $editorWindow 'SaveAgentProfileButton'
+    if ($null -eq $fileName -or $null -eq $contents -or $null -eq $saveButton) {
+        throw 'The profile editor did not expose its file-name, Markdown, and save controls to UI Automation.'
+    }
+
+    $fileNameValue = $null
+    $contentsValue = $null
+    if (-not $fileName.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$fileNameValue) -or
+        -not $contents.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$contentsValue)) {
+        throw 'The editable profile fields do not expose UI Automation ValuePattern.'
+    }
+    $profileText = "---`nname: Smoke QA`ndescription: Updated through the packaged profile editor.`ndefault_permission: ask`n---`nUpdated disposable profile instructions from the native editor smoke.`n"
+    $contentsValue.SetValue($profileText)
+
+    $saveInvoke = $null
+    if (-not $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
+        throw 'Save profile does not expose a UI Automation invoke action.'
+    }
+    $saveInvoke.Invoke()
+
+    $profilePath = Join-Path $DataRoot 'Codev\agents\smoke-qa.md'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+            $savedContents = [System.IO.File]::ReadAllText($profilePath)
+            if ($savedContents.Contains('Updated disposable profile instructions from the native editor smoke.', [StringComparison]::Ordinal)) { break }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf) -or
+        -not ([System.IO.File]::ReadAllText($profilePath).Contains('Updated disposable profile instructions from the native editor smoke.', [StringComparison]::Ordinal))) {
+        throw 'Saving edited profile instructions in the packaged UI did not persist the new content.'
+    }
+
+    $closeCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Close'))
+    $closeButton = $editorWindow.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $closeCondition)
+    $closeInvoke = $null
+    if ($null -eq $closeButton -or -not $closeButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$closeInvoke)) {
+        throw 'The profile editor did not expose its Close button to UI Automation.'
+    }
+    $closeInvoke.Invoke()
+}
+
 function Test-ConversationModeShortcut($Window, [string]$DataRoot) {
     $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
     $activePath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
@@ -1234,7 +1324,10 @@ public static class CodevCommonDialog
     $menuItemCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::MenuItem)
-    $menuItems = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $menuItemCondition)
+    # Avalonia Flyout popups are separate native top-level windows, so search
+    # from the desktop root instead of assuming they remain children of Codev.
+    $menuItems = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants, $menuItemCondition)
     $menuItemNames = @()
     for ($index = 0; $index -lt $menuItems.Count; $index++) {
         $menuItemNames += $menuItems.Item($index).Current.Name
@@ -1292,12 +1385,13 @@ public static class CodevCommonDialog
         throw 'The renamed conversation was not visible in the sidebar after the Auto-mode restart.'
     }
     $modeCycleResult = Test-ConversationModeShortcut $window $dataRoot
+    Test-AgentProfileEditorInPackagedApp $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot
         Test-PinnedConversationSearchArchiveRestore $window $dataRoot
         Test-PermanentConversationDelete $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -1394,7 +1488,8 @@ public static class CodevCommonDialog
         }
     }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected in Code task mode, edited and saved through the native profile editor, and remained selected across app restarts.' }
     if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected through the native Code task picker and persisted across app restarts.' }
 }
 finally {
