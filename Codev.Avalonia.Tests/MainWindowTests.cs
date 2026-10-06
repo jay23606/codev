@@ -1421,7 +1421,10 @@ public sealed class MainWindowTests
 
             rows[^1].IsChecked = true;
             window.UpdateLayout();
-            Assert.Contains(outputList.GetVisualDescendants().OfType<TextBox>(), text => text.Text?.Contains("All tests passed.", StringComparison.Ordinal) == true);
+            var outputText = Assert.Single(outputList.GetVisualDescendants().OfType<TextBox>(),
+                text => text.Text?.Contains("All tests passed.", StringComparison.Ordinal) == true);
+            Assert.Equal("ToolOutputContent", AutomationProperties.GetAutomationId(outputText));
+            Assert.Equal(outputText.Text, AutomationProperties.GetName(outputText));
         }
         finally
         {
