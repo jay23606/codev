@@ -1650,7 +1650,8 @@ public static class CodevCommonDialog
                 [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
             })
             $savedDeny = $permissionEntry.Count -eq 1 -and @($permissionEntry[0].Rules | Where-Object {
-                [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and [string]$_.Decision -eq 'Deny'
+                [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and
+                ($_.Decision -eq 2 -or [string]$_.Decision -eq 'Deny')
             }).Count -eq 1
             if ($savedDeny) { break }
         }
@@ -1715,7 +1716,8 @@ public static class CodevCommonDialog
         [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
     })
     $denyRulePersisted = $permissionEntry.Count -eq 1 -and @($permissionEntry[0].Rules | Where-Object {
-        [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and [string]$_.Decision -eq 'Deny'
+        [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and
+        ($_.Decision -eq 2 -or [string]$_.Decision -eq 'Deny')
     }).Count -eq 1
     if ($permissionEntry.Count -ne 1 -or [string]$permissionEntry[0].Mode -ne 'Auto' -or -not $denyRulePersisted) {
         throw 'The exact Deny or Auto mode did not remain saved together after the denied Auto run.'
