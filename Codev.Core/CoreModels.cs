@@ -124,6 +124,8 @@ public sealed record ChatMessage(string Role, string Content)
     [JsonIgnore] public bool HasCommandToolOutputs => HasToolOutputs;
     [JsonIgnore] public bool HasNonCommandToolOutputs => false;
     [JsonIgnore] public bool HasToolOutputs => ToolOutputs.Count > 0;
+    [JsonIgnore] public bool HasSingleToolOutput => ToolOutputs.Count == 1;
+    [JsonIgnore] public bool HasMultipleToolOutputs => ToolOutputs.Count > 1;
     [JsonIgnore] public string CommandToolOutputsHeader => ToolOutputSummary.Build(ToolOutputs);
 }
 

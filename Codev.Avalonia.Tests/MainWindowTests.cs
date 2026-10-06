@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Automation;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -1266,7 +1267,7 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void Tool_output_details_start_collapsed()
+    public void Single_tool_output_has_no_redundant_outer_group_and_starts_collapsed()
     {
         var window = new MainWindow();
         try
@@ -1276,10 +1277,55 @@ public sealed class MainWindowTests
             var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
             messages.ItemsSource = new[] { message };
             window.UpdateLayout();
-            var details = Assert.Single(window.GetVisualDescendants().OfType<Expander>(),
-                expander => expander.Header?.ToString() == "Ran commands");
+            Assert.DoesNotContain(window.GetVisualDescendants().OfType<Expander>(),
+                expander => expander.Header?.ToString() == "Ran commands" && expander.IsVisible);
+            var outputRow = Assert.Single(window.GetVisualDescendants().OfType<ToggleButton>(),
+                button => AutomationProperties.GetName(button) == "Ran dotnet test");
+            Assert.False(outputRow.IsChecked);
 
-            Assert.False(details.IsExpanded);
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == "Ran dotnet test");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Multiple_tool_outputs_keep_one_collapsed_action_summary_and_expand_to_readable_results()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var transcript = "Final answer stays visible.\n" +
+                "**read_file**\n" + UntrustedToolOutput.Format("project file", "README contents", path: "README.md", activity: "read_file") + "\n" +
+                "**search_files**\n" + UntrustedToolOutput.Format("project search results", "Matched source line", activity: "search_files") + "\n" +
+                "**write_file**\n" + UntrustedToolOutput.Format("project file updated", "Updated JavaScript source", path: "game.js", activity: "edited_file") + "\n" +
+                "**run_command**\n" + UntrustedToolOutput.Format("approved command output", "Exit code: 0\nAll tests passed.", command: "npm test");
+            var message = new ChatMessage("assistant", transcript);
+            var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
+            messages.ItemsSource = new[] { message };
+            window.UpdateLayout();
+
+            var group = Assert.Single(window.GetVisualDescendants().OfType<Expander>(),
+                expander => expander.Header?.ToString() == "Read files, searched files, edited a file, ran commands");
+            Assert.False(group.IsExpanded);
+            Assert.Equal("Final answer stays visible.", message.DisplayContent);
+
+            group.IsExpanded = true;
+            window.UpdateLayout();
+            var outputList = Assert.IsType<ItemsControl>(group.Content);
+            var rows = outputList.GetVisualDescendants().OfType<ToggleButton>().ToArray();
+            Assert.Equal(4, rows.Length);
+            Assert.Equal(new[] { "Read file · README.md", "Searched files", "Edited file · game.js", "Ran npm test" },
+                outputList.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text).Where(text => text is not null &&
+                    (text.StartsWith("Read file", StringComparison.Ordinal) || text.StartsWith("Searched files", StringComparison.Ordinal) ||
+                     text.StartsWith("Edited file", StringComparison.Ordinal) || text.StartsWith("Ran npm", StringComparison.Ordinal))));
+
+            rows[^1].IsChecked = true;
+            window.UpdateLayout();
+            Assert.Contains(outputList.GetVisualDescendants().OfType<TextBox>(), text => text.Text?.Contains("All tests passed.", StringComparison.Ordinal) == true);
         }
         finally
         {
