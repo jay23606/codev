@@ -42,6 +42,7 @@ for ($index = 0; $index -lt $scenarios.Count; $index++) {
     $startInfo.UseShellExecute = $false
     $startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
     $startInfo.Environment['CODEV_DATA_ROOT'] = $dataRoot
+    $launchTimer = [System.Diagnostics.Stopwatch]::StartNew()
     $process = [System.Diagnostics.Process]::Start($startInfo)
     try {
         $windowDeadline = [DateTime]::UtcNow.AddSeconds(30)
@@ -52,6 +53,8 @@ for ($index = 0; $index -lt $scenarios.Count; $index++) {
 
         if ($process.HasExited) { throw "App exited during $scenario run $runNumber with code $($process.ExitCode)." }
         if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw "No main window handle during $scenario run $runNumber." }
+        $launchTimer.Stop()
+        $windowHandleMs = [Math]::Round($launchTimer.Elapsed.TotalMilliseconds, 1)
 
         $samples = [System.Collections.Generic.List[object]]::new()
         for ($sampleIndex = 0; $sampleIndex -lt $SamplesPerRun; $sampleIndex++) {
@@ -70,6 +73,7 @@ for ($index = 0; $index -lt $scenarios.Count; $index++) {
         $runs.Add([pscustomobject]@{
             Run = $runNumber
             Scenario = $scenario
+            WindowHandleMs = $windowHandleMs
             Samples = @($samples)
             PrivateMiBMedian = [Math]::Round(($private[[int][Math]::Floor(($private.Count - 1) / 2)] + $private[[int][Math]::Floor($private.Count / 2)]) / 2, 1)
             PrivateMiBMax = [Math]::Round(($samples.PrivateMiB | Measure-Object -Maximum).Maximum, 1)
@@ -91,7 +95,7 @@ $result = [ordered]@{
     Date = Get-Date -Format 'yyyy-MM-dd'
     Commit = $Commit
     Platform = $Platform
-    Method = 'Three launches per scenario, alternating loaded and empty profile; each process sampled every 500ms for 10 seconds after its MainWindowHandle appeared. Each loaded run copied the same synthetic profile into a unique CODEV_DATA_ROOT; empty runs used a fresh root. Both scenarios force the Ollama endpoint to the refused loopback address recorded below. No prompt was sent or model inference run. App processes launched without shell execution and stayed in the background.'
+    Method = 'Three launches per scenario, alternating loaded and empty profile. Process.Start-to-main-window-handle elapsed time is recorded, then each process is sampled every 500ms for 10 seconds. Each loaded run copied the same synthetic profile into a unique CODEV_DATA_ROOT; empty runs used a fresh root. Both scenarios force the Ollama endpoint to the refused loopback address recorded below. No prompt was sent or model inference run. App processes launched without shell execution and stayed in the background.'
     Project = @{ Bytes = ($projectFiles | Measure-Object -Property Length -Sum).Sum; SelectedContextFiles = 100; Synthetic = $true; Files = $projectFiles.Count }
     Conversation = @{ Characters = 537276; Messages = 240; Synthetic = $true }
     PromptSent = $false
