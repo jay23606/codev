@@ -68,6 +68,75 @@ function Test-NewConversationShortcut($Window, [string]$DataRoot) {
     throw 'Ctrl+N did not create and activate a new conversation.'
 }
 
+$script:AgentProfileSmokeConversationId = $null
+
+function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$ConversationId) {
+    $pickerCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::ComboBox),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Primary agent profile'))
+    $picker = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $pickerCondition)
+    if ($null -eq $picker -or -not $picker.Current.IsEnabled) {
+        throw 'The primary agent profile picker is missing or disabled in Code task mode.'
+    }
+    $expandPattern = $null
+    if (-not $picker.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandPattern)) {
+        throw 'The primary agent profile picker does not expose its popup to UI Automation.'
+    }
+    $expandPattern.Expand()
+    Start-Sleep -Milliseconds 200
+
+    $candidate = $null
+    $elements = $null
+    $pickerDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $elements = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        for ($index = 0; $index -lt $elements.Count; $index++) {
+            $element = $elements.Item($index)
+            $name = [string]$element.Current.Name
+            if ($name -notin @('Smoke QA', 'Smoke QA agent') -and -not $name.StartsWith('Smoke QA · ', [StringComparison]::Ordinal)) { continue }
+            $selectionItem = $null
+            if ($element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionItem)) {
+                $candidate = $selectionItem
+                break
+            }
+        }
+        if ($null -eq $candidate) { Start-Sleep -Milliseconds 100 }
+    } while ($null -eq $candidate -and [DateTime]::UtcNow -lt $pickerDeadline)
+    if ($null -eq $candidate) {
+        $visibleItems = @()
+        for ($index = 0; $index -lt $elements.Count; $index++) {
+            $element = $elements.Item($index)
+            if ($element.Current.ControlType -in @([System.Windows.Automation.ControlType]::ListItem, [System.Windows.Automation.ControlType]::DataItem)) {
+                $visibleItems += [string]$element.Current.Name
+            }
+        }
+        throw "The expanded agent profile picker did not expose the Smoke QA selection. Visible profile items: $($visibleItems -join ', ')"
+    }
+    $candidate.Select()
+
+    $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        try {
+            $saved = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $conversation = @($saved | Where-Object { [string]$_.Id -eq $ConversationId })
+            if ($conversation.Count -eq 1 -and [string]$conversation[0].AgentProfileName -eq 'Smoke QA') {
+                $script:AgentProfileSmokeConversationId = $ConversationId
+                return
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Selecting Smoke QA in the packaged primary-agent picker did not persist to the active conversation.'
+}
+
 function Test-ConversationModeShortcut($Window, [string]$DataRoot) {
     $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
     $activePath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
@@ -159,6 +228,7 @@ function Test-ConversationModeShortcut($Window, [string]$DataRoot) {
         if ($null -eq $conversation -or -not $conversation.IsCodeTask -or $conversation.IsPlanMode) {
             throw 'Ctrl+Shift+M did not switch Plan into an eligible local Ollama Code task.'
         }
+        Select-AgentProfileInPackagedApp $Window $DataRoot $conversationId
         $composer.SetFocus()
         [System.Windows.Forms.SendKeys]::SendWait('^+m')
         $deadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -795,6 +865,12 @@ function Invoke-BackupDialogButton($Dialog, [string]$Name) {
 
 try {
     $env:CODEV_DATA_ROOT = $dataRoot
+    $agentProfileDirectory = Join-Path $dataRoot 'Codev\agents'
+    $null = New-Item -ItemType Directory -Path $agentProfileDirectory -Force
+    [System.IO.File]::WriteAllText(
+        (Join-Path $agentProfileDirectory 'smoke-qa.md'),
+        "---`nname: Smoke QA`ndescription: Inspect the disposable UI smoke conversation.`n---`nUse only the isolated smoke data; report observations without editing files.`n",
+        [System.Text.UTF8Encoding]::new($false))
     $app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -PassThru `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 
@@ -1309,8 +1385,17 @@ public static class CodevCommonDialog
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
     $renamedRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $renamedRowCondition)
     if ($null -eq $renamedRow) { throw 'The renamed conversation was not visible in the sidebar after restart.' }
+    if ($null -ne $script:AgentProfileSmokeConversationId) {
+        $conversationPath = Join-Path $dataRoot 'Codev\avalonia-conversations.json'
+        $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+        $profileConversation = @($savedConversations | Where-Object { [string]$_.Id -eq $script:AgentProfileSmokeConversationId })
+        if ($profileConversation.Count -ne 1 -or [string]$profileConversation[0].AgentProfileName -ne 'Smoke QA') {
+            throw 'The user-selected Smoke QA profile did not persist across the packaged app restart.'
+        }
+    }
     $smokeSucceeded = $true
     Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected through the native Code task picker and persisted across app restarts.' }
 }
 finally {
     if ($null -ne $app) {
