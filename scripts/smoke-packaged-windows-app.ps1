@@ -1646,7 +1646,39 @@ public static class CodevCommonDialog
                 Where-Object { $_ -match 'read|search|creat|command|activit' })
         throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). Related UI elements: $($visibleActivityRows -join ' | ')"
     }
+    $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
+    $verificationToggle = $null
+    if ($null -eq $verificationRow -or
+        -not $verificationRow.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$verificationToggle) -or
+        $verificationToggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw 'The packaged verification output row did not start collapsed or was not exposed as a toggle.'
+    }
+    $verificationToggle.Toggle()
+    $verificationOutputDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    $verificationOutput = $null
+    do {
+        foreach ($element in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition)) {
+            $valuePattern = $null
+            if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+                $candidateOutput = [string]$valuePattern.Current.Value
+                if ($candidateOutput.Contains('v22.23.3', [StringComparison]::Ordinal) -and
+                    $candidateOutput.Contains('Exit code: 0', [StringComparison]::Ordinal)) {
+                    $verificationOutput = $candidateOutput
+                    break
+                }
+            }
+        }
+        if ($null -ne $verificationOutput) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $verificationOutputDeadline)
+    if ($null -eq $verificationOutput -or $verificationOutput.Contains('untrusted_tool_output', [StringComparison]::Ordinal)) {
+        throw 'Expanding Ran node --version did not expose readable, parsed command output.'
+    }
     Write-Host 'Packaged Windows Code task grouped read, search, create, and verification results under one collapsed summary; expanding it exposed all named activity rows.'
+    Write-Host 'Expanding Ran node --version exposed readable command output with its exit code and no raw tool envelope.'
 
     Test-AgentProfileEditorInPackagedApp $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
