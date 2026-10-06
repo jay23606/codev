@@ -1478,7 +1478,18 @@ public static class CodevCommonDialog
     if ($matches.Count -ne 1 -or -not $matches[0].IsCodeTask -or $matches[0].IsPlanMode) {
         throw 'The fresh local-model conversation did not enter Code task mode for the Auto smoke.'
     }
-    $autoPrompt = 'Run the packaged Auto mode command smoke.'
+    $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $dataRoot 'Codev\workspaces')).TrimEnd('\') + '\'
+    $autoProject = [System.IO.Path]::GetFullPath([string]$matches[0].ProjectPath)
+    if (-not $autoProject.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The Windows Auto command smoke did not use an isolated private workspace: '$autoProject'."
+    }
+    $commandFixture = Join-Path $autoProject 'signaling'
+    if (Test-Path -LiteralPath $commandFixture) {
+        throw "The Windows Auto command fixture unexpectedly already exists: '$commandFixture'."
+    }
+    $null = New-Item -ItemType Directory -Path $commandFixture
+    Set-Content -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt') -Value 'disposable Auto command fixture' -NoNewline
+    $autoPrompt = 'Run the packaged Auto destructive-command smoke.'
     $autoComposer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait($autoPrompt)
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
@@ -1489,26 +1500,26 @@ public static class CodevCommonDialog
             $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
             $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
             if ($matches.Count -eq 1 -and @($matches[0].Messages).Count -gt 0) {
-                $autoTranscript = [string]$matches[0].Messages[-1].Content
-                if ($autoTranscript.Contains('Packaged Auto command round-trip passed.', [StringComparison]::Ordinal)) { break }
+                $autoTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($autoTranscript.Contains('Packaged Auto destructive command round-trip passed.', [StringComparison]::Ordinal)) { break }
             }
         }
         catch { }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $autoReplyDeadline)
-    if (-not $autoTranscript.Contains('Verification PASSED (exit code 0)', [StringComparison]::Ordinal) -or
-        -not $autoTranscript.Contains('node --version', [StringComparison]::Ordinal) -or
-        -not $autoTranscript.Contains('Packaged Auto command round-trip passed.', [StringComparison]::Ordinal)) {
+    if (-not $autoTranscript.Contains('git version', [StringComparison]::OrdinalIgnoreCase) -or
+        -not $autoTranscript.Contains('Remove-Item -Recurse -Force signaling; git --version', [StringComparison]::Ordinal) -or
+        -not $autoTranscript.Contains('Packaged Auto destructive command round-trip passed.', [StringComparison]::Ordinal) -or
+        (Test-Path -LiteralPath $commandFixture)) {
         Get-Content $mockStdoutPath, $mockStderrPath -ErrorAction SilentlyContinue
-        throw "The packaged Windows Auto command did not complete without approval: $($autoTranscript.Substring([Math]::Max(0, $autoTranscript.Length - 1500)))"
+        throw "The packaged Windows Auto destructive command did not complete without approval: $($autoTranscript.Substring([Math]::Max(0, $autoTranscript.Length - 1500)))"
+    }
+    $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
+    if ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) {
+        throw 'The packaged destructive command displayed an inline approval panel while Auto was selected.'
     }
     $permissionPath = Join-Path $dataRoot 'Codev\avalonia-command-permissions.json'
     $savedPermissions = @(Get-Content -LiteralPath $permissionPath -Raw | ConvertFrom-Json)
-    $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $dataRoot 'Codev\workspaces')).TrimEnd('\') + '\'
-    $autoProject = [System.IO.Path]::GetFullPath([string]$matches[0].ProjectPath)
-    if (-not $autoProject.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "The Windows Auto command smoke did not use a private workspace: '$autoProject'."
-    }
     $permissionEntry = @($savedPermissions | Where-Object {
         [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
     })
@@ -1518,12 +1529,12 @@ public static class CodevCommonDialog
     $mockRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json })
     if ($mockRequests.Count -ne 2 -or $mockRequests[0].stream -ne $false -or
         $mockRequests[0].last_role -ne 'user' -or $mockRequests[0].last_user_message -ne $autoPrompt -or
-        'verify_command' -notin @($mockRequests[0].tool_names) -or
-        $mockRequests[1].last_role -ne 'tool' -or $mockRequests[1].last_tool_name -ne 'verify_command' -or
+        'run_command' -notin @($mockRequests[0].tool_names) -or
+        $mockRequests[1].last_role -ne 'tool' -or $mockRequests[1].last_tool_name -ne 'run_command' -or
         @($mockRequests | Where-Object { $_.keep_alive -ne '30m' }).Count -ne 0) {
         throw "The packaged Windows model/tool request round-trip was unexpected: $($mockRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
-    Write-Host 'Packaged Windows Auto mode ran node --version without command approval and persisted the successful tool result.'
+    Write-Host 'Packaged Windows Auto mode ran a destructive compound command without approval, removed only its isolated fixture, and persisted the successful tool result.'
     Test-AgentProfileEditorInPackagedApp $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot

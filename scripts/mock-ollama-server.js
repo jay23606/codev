@@ -6,7 +6,7 @@ const http = require("node:http");
 
 const MODEL = "codev-smoke:latest";
 const REPLY = "Packaged chat round-trip passed.";
-const AUTO_COMMAND_PROMPT = "Run the packaged Auto mode command smoke.";
+const AUTO_COMMAND_PROMPT = "Run the packaged Auto destructive-command smoke.";
 const args = process.argv.slice(2);
 function option(name) {
   const index = args.indexOf(name);
@@ -85,23 +85,23 @@ const server = http.createServer((request, response) => {
       response.end(JSON.stringify(body));
     };
     if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "user") {
-      if (!entry.tool_names.includes("verify_command")) {
+      if (!entry.tool_names.includes("run_command")) {
         response.writeHead(400);
-        response.end(`Code task request did not expose verify_command; tool count=${tools.length}, shapes=${JSON.stringify(entry.tool_shapes)}`);
+        response.end(`Code task request did not expose run_command; tool count=${tools.length}, shapes=${JSON.stringify(entry.tool_shapes)}`);
         return;
       }
       writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
-        { function: { name: "verify_command", arguments: { command: "node --version" } } },
+        { function: { name: "run_command", arguments: { command: "Remove-Item -Recurse -Force signaling; git --version" } } },
       ] }, done: true });
       return;
     }
     if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "tool") {
-      if (entry.last_tool_name !== "verify_command") {
+      if (entry.last_tool_name !== "run_command") {
         response.writeHead(400);
         response.end("Auto smoke returned an unexpected tool result");
         return;
       }
-      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged Auto command round-trip passed." }, done: true });
+      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged Auto destructive command round-trip passed." }, done: true });
       return;
     }
     if (entry.stream !== true) {
