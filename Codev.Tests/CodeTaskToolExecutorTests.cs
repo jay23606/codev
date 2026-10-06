@@ -468,6 +468,63 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_policy_executes_destructive_compound_command_in_the_project_without_approval()
+    {
+        var target = Path.Combine(_root, "signaling");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "marker.txt"), "disposable fixture");
+        var command = OperatingSystem.IsWindows()
+            ? "Remove-Item -Recurse -Force signaling; git --version"
+            : "rm -rf signaling; git --version";
+        var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-destructive-command-permissions.json"));
+        await registry.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
+        var approvalDialogShown = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false),
+            permissionApproval: async proposal => (await approvalPolicy.ApproveAsync(proposal, requestApproval: _ =>
+            {
+                approvalDialogShown = true;
+                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+            })).Outcome);
+
+        var result = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command }));
+
+        Assert.Contains("git version", result, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(target));
+        Assert.False(approvalDialogShown);
+    }
+
+    [Fact]
+    public async Task Exact_deny_blocks_destructive_command_in_auto_before_execution_or_approval()
+    {
+        var target = Path.Combine(_root, "signaling");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "marker.txt"), "disposable fixture");
+        var command = OperatingSystem.IsWindows()
+            ? "Remove-Item -Recurse -Force signaling; git --version"
+            : "rm -rf signaling; git --version";
+        var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-deny-destructive-command-permissions.json"));
+        await registry.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        await registry.SetRuleAsync(_root, command, ProjectCommandPermissionDecision.Deny);
+        var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
+        var approvalDialogShown = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false),
+            permissionApproval: async proposal => (await approvalPolicy.ApproveAsync(proposal, requestApproval: _ =>
+            {
+                approvalDialogShown = true;
+                return Task.FromResult(ProjectCommandApprovalChoice.RunOnce);
+            })).Outcome);
+
+        var result = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command }));
+
+        Assert.Contains("denied", result, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(target, "marker.txt")));
+        Assert.False(approvalDialogShown);
+    }
+
+    [Fact]
     public async Task Auto_policy_starts_background_command_without_showing_approval_dialog()
     {
         var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-background-command-permissions.json"));
