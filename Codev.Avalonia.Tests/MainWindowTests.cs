@@ -1785,6 +1785,57 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Auto_mcp_tool_runs_without_inline_approval_or_a_saved_allow_rule()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        var viewModel = new MainViewModel(root);
+        MainWindow? window = null;
+        try
+        {
+            viewModel.SetProjectFolder(project);
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            Assert.True(viewModel.CanPersistMcpToolPermissions);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            using var schema = JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}""");
+            using var arguments = JsonDocument.Parse("""{"query":"codev"}""");
+            var tool = new McpCodeTaskTool("mcp_github_search_0123456789abcdef", "github", "GitHub", "search",
+                "Search repositories.", schema.RootElement.Clone(), null!);
+            var approve = typeof(MainViewModel).GetMethod("ApproveMcpToolWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var calls = 0;
+            var executor = new CodeTaskToolExecutor(new WorkspaceFileService(project), conversation,
+                _ => Task.FromResult(false), _ => Task.FromResult(false),
+                mcpTools: new Dictionary<string, McpCodeTaskTool> { [tool.FunctionName] = tool },
+                mcpPermissionApproval: (candidate, candidateArguments, profileApproved) =>
+                    (Task<CommandApprovalOutcome>)approve.Invoke(viewModel,
+                        [conversation, candidate, candidateArguments, profileApproved])!,
+                mcpCall: (_, _, _) =>
+                {
+                    calls++;
+                    return Task.FromResult("safe MCP result");
+                });
+
+            var result = await executor.ExecuteAsync(tool.FunctionName, arguments.RootElement.Clone());
+
+            Assert.Contains("safe MCP result", result, StringComparison.Ordinal);
+            Assert.Contains("untrusted_tool_output", result, StringComparison.Ordinal);
+            Assert.Equal(1, calls);
+            Assert.False(window.FindControl<Border>("InlineApprovalPanel")!.IsVisible);
+            var permissionRegistry = ProjectMcpToolPermissionRegistry.Load(Path.Combine(root, "Codev", "avalonia-mcp-permissions.json"));
+            Assert.Empty(permissionRegistry.GetRules(project));
+        }
+        finally
+        {
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Agent_profile_one_call_approval_is_inline_and_allow_once_resolves_the_request()
     {
         var window = new MainWindow();
