@@ -646,7 +646,7 @@ An item is not marked Done until each row below is true, or is marked not applic
 
 #### Q2. A short smoke card per feature
 
-Each shipped feature adds a short manual checklist to `docs/`, extending `docs/avalonia-smoke-checklist.md` or a file beside it: the steps, the expected result, and a dated log line for each run (build tested, operating system, pass or fail). Keep each card under ten lines. Dated log lines are a record of real runs and are never rewritten later.
+Each shipped feature adds a short manual checklist to `docs/`, extending `docs/avalonia-smoke-checklist.md` or a file beside it: the steps, the expected result, and a dated log line for each run (build tested, operating system, pass or fail). Keep each card under ten lines. Dated log lines are a record of real runs and are never rewritten later. The previously empty MCP server diagnostics card now lists seven transport, tool/permission, OAuth, failure-bound, and persistence scenarios; it remains unchecked until an actual manual run.
 
 #### Q3. The hardening pass
 

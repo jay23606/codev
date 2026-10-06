@@ -326,6 +326,14 @@ Code + conversation rewind and broader Git review scopes beyond the implemented 
 
 ## MCP server diagnostics
 
+- [ ] Configure one stdio server and one Streamable HTTP server with a harmless tool; verify both connect, discover the tool, and complete a Code task call. Configure an SSE-only server and verify Codev falls back to SSE after the Streamable HTTP probe.
+- [ ] Have a test server advertise a tool, a prompt with required and optional arguments, a text resource, and a parameterized resource template; verify each operation is discoverable, results are bounded and marked untrusted, and the activity summary/expanded details are readable.
+- [ ] In Ask mode, deny a tool, prompt, and resource read and verify none reaches the server. In Auto, verify each runs without another prompt; add an exact Deny rule and verify it blocks before server invocation.
+- [ ] Disable a server, then test an invalid configuration and an unavailable endpoint; verify each outcome is reported under one collapsed activity group, expands to a useful server/status explanation, and exposes no environment values, headers, or credentials.
+- [ ] Configure a test OAuth server; verify browser sign-in, matching-state callback validation, token reuse after restart, and a new sign-in after **Forget saved OAuth sign-ins**. Confirm tokens and client-registration data are absent from MCP settings, conversation history, and diagnostics.
+- [ ] Configure short startup, catalog, execution, and shutdown limits; simulate a slow server, cancellation, oversized text/structured results, and slow shutdown. Verify each operation stays within its bound and leaves the rest of Codev responsive.
+- [ ] Save settings, restart, and verify they persist. Then test one malformed server entry, duplicate IDs, and malformed top-level JSON; valid unrelated servers should continue where possible, and unreadable source JSON must be preserved rather than overwritten.
+
 ## Local semantic project search (A9)
 
 - Attach and trust a disposable source project. In Settings, set an installed local Ollama embedding model such as `nomic-embed-text`, build/update the index, and verify progress, chunk count, and no model download. Confirm the index file is under the Codev data folder and its name does not expose the project path.
