@@ -985,7 +985,7 @@ try {
     $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
     $mockServerPath = Join-Path $PSScriptRoot 'mock-ollama-server.js'
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
-        -ArgumentList @($mockServerPath, '--auto-destructive', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
     $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
@@ -1535,13 +1535,90 @@ public static class CodevCommonDialog
         throw "The packaged Windows model/tool request round-trip was unexpected: $($mockRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
     Write-Host 'Packaged Windows Auto mode ran a destructive compound command without approval, removed only its isolated fixture, and persisted the successful tool result.'
+
+    # A second deterministic Code task exercises a mixed activity sequence in
+    # one assistant turn and checks the real packaged summary starts collapsed.
+    $activityMarker = 'ACTIVITY_SOURCE_MARKER'
+    Set-Content -LiteralPath (Join-Path $autoProject 'activity-source.txt') -Value "Fixture marker: $activityMarker" -NoNewline
+    $activityPrompt = 'Run the packaged multi-action activity-summary smoke.'
+    $activityComposer = Find-ByAutomationId $window 'ComposerTextBox'
+    if ($null -eq $activityComposer) { throw 'The composer is missing for the packaged multi-action smoke.' }
+    $activityComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait($activityPrompt)
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $activityDeadline = [DateTime]::UtcNow.AddSeconds(60)
+    $activityTranscript = ''
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1 -and @($matches[0].Messages).Count -gt 0) {
+                $activityTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($activityTranscript.Contains('Packaged multi-action activity summary passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $activityDeadline)
+    $activityResultPath = Join-Path $autoProject 'activity-result.txt'
+    if (-not $activityTranscript.Contains('activity-source.txt', [StringComparison]::Ordinal) -or
+        -not $activityTranscript.Contains($activityMarker, [StringComparison]::Ordinal) -or
+        -not $activityTranscript.Contains('activity-result.txt', [StringComparison]::Ordinal) -or
+        -not $activityTranscript.Contains('Verification PASSED (exit code 0)', [StringComparison]::Ordinal) -or
+        -not (Test-Path -LiteralPath $activityResultPath) -or
+        (Get-Content -LiteralPath $activityResultPath -Raw) -ne $activityMarker) {
+        throw "The packaged multi-action Code task did not complete all four tools in Auto: $($activityTranscript.Substring([Math]::Max(0, $activityTranscript.Length - 2500)))"
+    }
+    $activityName = 'Read files, searched files, created a file, ran commands'
+    $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::NameProperty, $activityName)
+    $activityElements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
+    $activityToggle = $null
+    foreach ($candidate in $activityElements) {
+        $togglePattern = $null
+        if ($candidate.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$togglePattern)) {
+            $activityToggle = $candidate
+            break
+        }
+    }
+    if ($null -eq $activityToggle) { throw "The packaged activity summary '$activityName' was not exposed as a toggle." }
+    $activityTogglePattern = $null
+    if (-not $activityToggle.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$activityTogglePattern) -or
+        $activityTogglePattern.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+        throw 'The packaged multi-action activity summary did not start collapsed.'
+    }
+    $activityRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.last_user_message -eq $activityPrompt })
+    $expectedActivityTools = @('read_file', 'search_files', 'create_file', 'verify_command')
+    if ($activityRequests.Count -ne 5 -or $activityRequests[0].last_role -ne 'user' -or
+        $activityRequests[0].tool_names -notcontains 'read_file') {
+        throw "The packaged activity smoke did not begin with the expected read_file request: $($activityRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    for ($index = 0; $index -lt $expectedActivityTools.Count; $index++) {
+        $request = $activityRequests[$index + 1]
+        if ($request.last_role -ne 'tool' -or $request.last_tool_name -ne $expectedActivityTools[$index] -or
+            $request.keep_alive -ne '30m') {
+            throw "The packaged activity smoke tool round $($index + 1) was unexpected: $($request | ConvertTo-Json -Depth 8 -Compress)"
+        }
+    }
+    $activityTogglePattern.Toggle()
+    Start-Sleep -Milliseconds 150
+    $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran node --version')
+    foreach ($rowName in $activityRows) {
+        if ($null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $rowName))) {
+            throw "Expanding the packaged activity summary did not expose '$rowName'."
+        }
+    }
+    Write-Host 'Packaged Windows Code task grouped read, search, create, and verification results under one collapsed summary; expanding it exposed all named activity rows.'
+
     Test-AgentProfileEditorInPackagedApp $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot
         Test-PinnedConversationSearchArchiveRestore $window $dataRoot
         Test-PermanentConversationDelete $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, sidebar rename/pin/search/archive/restore/permanent-delete, and Auto mode-change/restart persistence. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, sidebar rename/pin/search/archive/restore/permanent-delete, persisted Auto mode, and a collapsed multi-action tool group that expands to readable rows. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -1638,7 +1715,7 @@ public static class CodevCommonDialog
         }
     }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, and persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart, and a collapsed multi-action activity summary that expands to readable rows. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
     if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected in Code task mode, edited and saved through the native profile editor, and remained selected across app restarts.' }
     if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected through the native Code task picker and persisted across app restarts.' }
 }

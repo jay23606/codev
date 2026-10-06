@@ -8,9 +8,11 @@ const MODEL = "codev-smoke:latest";
 const REPLY = "Packaged chat round-trip passed.";
 const args = process.argv.slice(2);
 const autoDestructive = args.includes("--auto-destructive");
+const activitySummary = args.includes("--activity-summary");
 const AUTO_COMMAND_PROMPT = autoDestructive
   ? "Run the packaged Auto destructive-command smoke."
   : "Run the packaged Auto mode command smoke.";
+const ACTIVITY_SUMMARY_PROMPT = "Run the packaged multi-action activity-summary smoke.";
 function option(name) {
   const index = args.indexOf(name);
   if (index < 0 || !args[index + 1]) throw new Error(`Missing ${name} argument.`);
@@ -87,6 +89,41 @@ const server = http.createServer((request, response) => {
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify(body));
     };
+    const callTool = (name, args) => writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
+      { function: { name, arguments: args } },
+    ] }, done: true });
+    if (activitySummary && entry.last_user_message === ACTIVITY_SUMMARY_PROMPT && entry.last_role === "user") {
+      if (!entry.tool_names.includes("read_file")) {
+        response.writeHead(400);
+        response.end("The activity-summary smoke did not expose read_file");
+        return;
+      }
+      callTool("read_file", { relative_path: "activity-source.txt" });
+      return;
+    }
+    if (activitySummary && entry.last_user_message === ACTIVITY_SUMMARY_PROMPT && entry.last_role === "tool") {
+      const nextTool = {
+        read_file: ["search_files", { query: "ACTIVITY_SOURCE_MARKER" }],
+        search_files: ["create_file", { relative_path: "activity-result.txt", content: "ACTIVITY_SOURCE_MARKER" }],
+        create_file: ["verify_command", { command: "node --version" }],
+      }[entry.last_tool_name];
+      if (nextTool) {
+        if (!entry.tool_names.includes(nextTool[0])) {
+          response.writeHead(400);
+          response.end(`The activity-summary smoke did not expose ${nextTool[0]}`);
+          return;
+        }
+        callTool(nextTool[0], nextTool[1]);
+        return;
+      }
+      if (entry.last_tool_name === "verify_command") {
+        writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged multi-action activity summary passed." }, done: true });
+        return;
+      }
+      response.writeHead(400);
+      response.end(`Unexpected activity-summary tool result: ${entry.last_tool_name}`);
+      return;
+    }
     if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "user") {
       const autoCommandTool = autoDestructive ? "run_command" : "verify_command";
       if (!entry.tool_names.includes(autoCommandTool)) {

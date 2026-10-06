@@ -79,6 +79,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Validate packaged multi-action Ollama mock
+        run: node scripts/test-mock-ollama-activity.js
+
       - name: Smoke-test upgrade from latest public Windows release
         if: runner.os == 'Windows'
         shell: pwsh

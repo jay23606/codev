@@ -32,7 +32,7 @@ trap cleanup EXIT
 
 mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
-node ./scripts/mock-ollama-server.js --port-file "$mock_port_path" --request-log "$mock_request_log" >"$smoke_root/mock-ollama.log" 2>&1 &
+node ./scripts/mock-ollama-server.js --activity-summary --port-file "$mock_port_path" --request-log "$mock_request_log" >"$smoke_root/mock-ollama.log" 2>&1 &
 mock_pid=$!
 for _ in {1..200}; do
   if [[ -s "$mock_port_path" ]]; then break; fi
@@ -287,6 +287,64 @@ if any(request.get("keep_alive") != "30m" for request in requests):
 PY
 
 echo 'Linux packaged Auto mode ran node --version without command approval and persisted the successful tool result.'
+
+# Exercise a deterministic read/search/create/verify Code task through the
+# packaged app so the persisted transcript contains several real tool results
+# for the collapsed-activity view.
+activity_prompt='Run the packaged multi-action activity-summary smoke.'
+private_project="$(jq -r --arg id "$conversation_id" '.[] | select(.Id == $id) | .ProjectPath' "$conversations_path")"
+if [[ -z "$private_project" || "$private_project" == null ]]; then echo 'The Linux activity smoke has no private project.' >&2; exit 1; fi
+printf 'Fixture marker: ACTIVITY_SOURCE_MARKER\n' >"$private_project/activity-source.txt"
+before_activity_count="$(jq --arg id "$conversation_id" '[.[] | select(.Id == $id) | .Messages[]] | length' "$conversations_path")"
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+l
+xdotool type --clearmodifiers --delay 1 "$activity_prompt"
+xdotool key --clearmodifiers Return
+
+for _ in {1..300}; do
+  if jq -e --arg id "$conversation_id" --argjson before "$before_activity_count" --arg prompt "$activity_prompt" \
+    '.[] | select(.Id == $id) | .Messages as $messages |
+     ($messages | length) >= ($before + 2) and
+     $messages[-2].Content == $prompt and
+     $messages[-1].Role == "assistant" and
+     ($messages[-1].Content | contains("Packaged multi-action activity summary passed."))' \
+    "$conversations_path" >/dev/null 2>&1; then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the Linux multi-action smoke.' >&2; exit 1; fi
+  sleep 0.1
+done
+
+python3 - "$conversations_path" "$conversation_id" "$mock_request_log" "$private_project" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+if conversation is None:
+    raise SystemExit("The Linux activity-summary conversation disappeared.")
+messages = conversation.get("Messages", [])
+turns = [message for message in messages if message.get("Role") == "assistant" and
+         "Packaged multi-action activity summary passed." in message.get("Content", "")]
+if len(turns) != 1:
+    raise SystemExit(f"Expected one completed multi-action transcript: {turns!r}")
+content = turns[0]["Content"]
+if not all(value in content for value in ("activity-source.txt", "ACTIVITY_SOURCE_MARKER", "activity-result.txt", "node --version")):
+    raise SystemExit(f"The multi-action transcript omitted a tool result: {content[-4000:]!r}")
+if not os.path.isfile(os.path.join(sys.argv[4], "activity-result.txt")):
+    raise SystemExit("The Auto multi-action task did not create its result file.")
+with open(sys.argv[3], encoding="utf-8") as source:
+    requests = [json.loads(line) for line in source if line.strip()]
+turn = [request for request in requests if request.get("last_user_message") == "Run the packaged multi-action activity-summary smoke."]
+expected = [("user", None), ("tool", "read_file"), ("tool", "search_files"), ("tool", "create_file"), ("tool", "verify_command")]
+actual = [(request.get("last_role"), request.get("last_tool_name")) for request in turn]
+if actual != expected:
+    raise SystemExit(f"The packaged Linux multi-action sequence was unexpected: {actual!r}")
+if any(request.get("keep_alive") != "30m" for request in turn):
+    raise SystemExit(f"A Linux multi-action request omitted keep_alive: {turn!r}")
+PY
+
+echo 'Linux packaged Code task read, searched, created a file, and verified a command in one Auto turn.'
 
 cat "$log_path" >&2
 jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Model, Messages: .Messages[-4:]}' "$conversations_path" >&2

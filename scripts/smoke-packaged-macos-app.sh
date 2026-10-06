@@ -34,7 +34,7 @@ mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
 model_enabled_path="$smoke_root/mock-ollama-model.enabled"
 printf '0' >"$model_enabled_path"
-node ./scripts/mock-ollama-server.js --port-file "$mock_port_path" --request-log "$mock_request_log" --model-enabled-file "$model_enabled_path" >"$smoke_root/mock-ollama.log" 2>&1 &
+node ./scripts/mock-ollama-server.js --activity-summary --port-file "$mock_port_path" --request-log "$mock_request_log" --model-enabled-file "$model_enabled_path" >"$smoke_root/mock-ollama.log" 2>&1 &
 mock_pid=$!
 for _ in {1..200}; do
   if [[ -s "$mock_port_path" ]]; then break; fi
@@ -664,6 +664,108 @@ if any(request.get("keep_alive") != "30m" for request in requests):
 PY
 
 echo 'macOS packaged Auto mode ran node --version without command approval and persisted the successful tool result.'
+
+# Exercise multiple real tool results through the packaged app so the activity
+# summary is validated on the macOS window-server build as well.
+activity_prompt='Run the packaged multi-action activity-summary smoke.'
+private_project="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next(item for item in conversations if item.get("Id") == sys.argv[2])
+print(conversation.get("ProjectPath") or "")
+PY
+)"
+if [[ -z "$private_project" ]]; then echo 'The packaged macOS activity smoke has no private project.' >&2; exit 1; fi
+printf 'Fixture marker: ACTIVITY_SOURCE_MARKER\n' >"$private_project/activity-source.txt"
+before_activity_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next(item for item in conversations if item.get("Id") == sys.argv[2])
+print(len(conversation.get("Messages", [])))
+PY
+)"
+osascript - "$app_pid" "$activity_prompt" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set promptText to item 2 of argv
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 0.25
+    key code 37 using {command down}
+    delay 0.5
+    keystroke promptText
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "$activity_prompt" "the multi-action activity-summary prompt"
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 36
+  end tell
+end run
+APPLESCRIPT
+
+for _ in {1..300}; do
+  if python3 - "$conversations_path" "$conversation_id" "$before_activity_count" "$activity_prompt" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+before = int(sys.argv[3])
+success = (len(messages) >= before + 2 and messages[-2].get("Content") == sys.argv[4] and
+          messages[-1].get("Role") == "assistant" and
+          "Packaged multi-action activity summary passed." in messages[-1].get("Content", ""))
+raise SystemExit(0 if success else 1)
+PY
+  then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the macOS multi-action smoke.' >&2; exit 1; fi
+  sleep 0.1
+done
+
+python3 - "$conversations_path" "$conversation_id" "$mock_request_log" "$private_project" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+turns = [message for message in messages if message.get("Role") == "assistant" and
+         "Packaged multi-action activity summary passed." in message.get("Content", "")]
+if len(turns) != 1:
+    raise SystemExit(f"Expected one completed multi-action transcript: {turns!r}")
+content = turns[0]["Content"]
+if not all(value in content for value in ("activity-source.txt", "ACTIVITY_SOURCE_MARKER", "activity-result.txt", "node --version")):
+    raise SystemExit(f"The multi-action transcript omitted a tool result: {content[-4000:]!r}")
+if not os.path.isfile(os.path.join(sys.argv[4], "activity-result.txt")):
+    raise SystemExit("The Auto multi-action task did not create its result file.")
+with open(sys.argv[3], encoding="utf-8") as source:
+    requests = [json.loads(line) for line in source if line.strip()]
+turn = [request for request in requests if request.get("last_user_message") == "Run the packaged multi-action activity-summary smoke."]
+expected = [("user", None), ("tool", "read_file"), ("tool", "search_files"), ("tool", "create_file"), ("tool", "verify_command")]
+actual = [(request.get("last_role"), request.get("last_tool_name")) for request in turn]
+if actual != expected:
+    raise SystemExit(f"The packaged macOS multi-action sequence was unexpected: {actual!r}")
+if any(request.get("keep_alive") != "30m" for request in turn):
+    raise SystemExit(f"A macOS multi-action request omitted keep_alive: {turn!r}")
+PY
+
+echo 'macOS packaged Code task read, searched, created a file, and verified a command in one Auto turn.'
 
 cat "$log_path" >&2
 python3 - "$conversations_path" "$conversation_id" <<'PY' >&2
