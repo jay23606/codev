@@ -332,7 +332,7 @@
                     <TextBlock Text="{Binding CodeTaskUnavailableReason}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </Grid>
             </Border>
-            <ScrollViewer x:Name="ConversationScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
+            <ScrollViewer x:Name="ConversationScrollViewer" AutomationProperties.AutomationId="ConversationScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ConversationScrollViewer_ScrollChanged">
                 <ItemsControl x:Name="MessageList" ItemsSource="{Binding Messages}" Margin="0,22" MaxWidth="{Binding ReadingWidth}" HorizontalAlignment="Center">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>

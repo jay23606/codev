@@ -1767,6 +1767,13 @@ public static class CodevCommonDialog
         (Get-Content -LiteralPath $activityResultPath -Raw) -ne $activityMarker) {
         throw "The packaged multi-action Code task did not complete all four tools in Auto: $($activityTranscript.Substring([Math]::Max(0, $activityTranscript.Length - 2500)))"
     }
+    $conversationScrollViewer = Find-ByAutomationId $window 'ConversationScrollViewer'
+    $conversationScrollPattern = $null
+    if ($null -ne $conversationScrollViewer -and
+        $conversationScrollViewer.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$conversationScrollPattern) -and
+        $conversationScrollPattern.Current.VerticallyScrollable) {
+        $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+    }
     $activityName = 'Read files, searched files, created a file, ran commands'
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, $activityName)
