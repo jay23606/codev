@@ -1603,16 +1603,6 @@ public static class CodevCommonDialog
     $autoComposer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait($denyPrompt)
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-    $approvalDeadline = [DateTime]::UtcNow.AddSeconds(15)
-    $inlineApprovalPanel = $null
-    do {
-        $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
-        if ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) { break }
-        Start-Sleep -Milliseconds 100
-    } while ([DateTime]::UtcNow -lt $approvalDeadline)
-    if ($null -eq $inlineApprovalPanel -or -not $inlineApprovalPanel.Current.IsVisible) {
-        throw 'The Ask-mode exact-deny smoke did not show the inline command approval panel.'
-    }
     $denyButtonCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -1620,8 +1610,26 @@ public static class CodevCommonDialog
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::NameProperty,
             'Deny exact command'))
-    $denyButton = $inlineApprovalPanel.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $denyButtonCondition)
-    if ($null -eq $denyButton) { throw 'The inline command approval panel is missing Deny exact command.' }
+    $approvalDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    $denyButton = $null
+    do {
+        # The non-focusable Border that hosts approval UI may be omitted from
+        # UIA; the actual action button is the reliable visibility signal.
+        $denyButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $denyButtonCondition)
+        if ($null -ne $denyButton) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $approvalDeadline)
+    if ($null -eq $denyButton) {
+        $diagnosticRequests = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue | ForEach-Object { $_ | ConvertFrom-Json })
+        $diagnosticTranscript = ''
+        try {
+            $diagnosticConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $diagnosticMatches = @($diagnosticConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($diagnosticMatches.Count -eq 1) { $diagnosticTranscript = (@($diagnosticMatches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n") }
+        }
+        catch { }
+        throw "The Ask-mode exact-deny smoke did not expose Deny exact command (mode='$($modeButton.Current.Name)', requests=$($diagnosticRequests | ConvertTo-Json -Depth 6 -Compress), transcript='$($diagnosticTranscript.Substring([Math]::Max(0, $diagnosticTranscript.Length - 1000)))')."
+    }
     $denyInvoke = $null
     if ($denyButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$denyInvoke)) {
         $denyInvoke.Invoke()
@@ -1688,11 +1696,11 @@ public static class CodevCommonDialog
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $autoDeniedDeadline)
     $savedPermissions = @(Get-Content -LiteralPath $permissionsPath -Raw | ConvertFrom-Json)
-    $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
+    $unexpectedDenyButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $denyButtonCondition)
     if (-not $autoDeniedTranscript.Contains('Packaged Auto exact-deny command passed.', [StringComparison]::Ordinal) -or
         -not $autoDeniedTranscript.Contains($savedDenialText, [StringComparison]::Ordinal) -or
         -not (Test-Path -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt')) -or
-        ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) -or
+        $null -ne $unexpectedDenyButton -or
         $modeButton.Current.Name -ne 'Auto ▾') {
         throw "Auto did not preserve and enforce the saved exact Deny without prompting: $($autoDeniedTranscript.Substring([Math]::Max(0, $autoDeniedTranscript.Length - 1500)))"
     }
