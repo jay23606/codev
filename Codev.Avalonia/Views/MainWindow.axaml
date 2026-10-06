@@ -75,7 +75,7 @@
                     </Border>
                 </ToggleButton>
                 <Border IsVisible="{Binding #ToolOutputToggle.IsChecked}" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="0,0,8,8" Padding="10" MaxHeight="360" Margin="0,-1,0,0">
-                    <TextBox Text="{Binding Content}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="{Binding $parent[Window].DataContext.UiFontSize}" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0" />
+                    <TextBox Text="{Binding Content}" AutomationProperties.AutomationId="ToolOutputContent" AutomationProperties.Name="{Binding Content}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="{Binding $parent[Window].DataContext.UiFontSize}" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0" />
                 </Border>
             </StackPanel>
         </DataTemplate>

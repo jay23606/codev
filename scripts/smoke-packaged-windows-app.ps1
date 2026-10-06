@@ -1762,6 +1762,15 @@ public static class CodevCommonDialog
     do {
         foreach ($element in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition)) {
+            if ($element.Current.AutomationId -eq 'ToolOutputContent') {
+                $candidateName = [string]$element.Current.Name
+                if (-not [string]::IsNullOrWhiteSpace($candidateName)) { $verificationOutputCandidates.Add($candidateName) }
+                if ($candidateName -match '(?m)^v\d+\.\d+\.\d+' -and
+                    $candidateName.Contains('Exit code: 0', [StringComparison]::Ordinal)) {
+                    $verificationOutput = $candidateName
+                    break
+                }
+            }
             $valuePattern = $null
             if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
                 $candidateOutput = [string]$valuePattern.Current.Value
