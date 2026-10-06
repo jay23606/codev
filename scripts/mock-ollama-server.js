@@ -6,8 +6,11 @@ const http = require("node:http");
 
 const MODEL = "codev-smoke:latest";
 const REPLY = "Packaged chat round-trip passed.";
-const AUTO_COMMAND_PROMPT = "Run the packaged Auto destructive-command smoke.";
 const args = process.argv.slice(2);
+const autoDestructive = args.includes("--auto-destructive");
+const AUTO_COMMAND_PROMPT = autoDestructive
+  ? "Run the packaged Auto destructive-command smoke."
+  : "Run the packaged Auto mode command smoke.";
 function option(name) {
   const index = args.indexOf(name);
   if (index < 0 || !args[index + 1]) throw new Error(`Missing ${name} argument.`);
@@ -85,23 +88,30 @@ const server = http.createServer((request, response) => {
       response.end(JSON.stringify(body));
     };
     if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "user") {
-      if (!entry.tool_names.includes("run_command")) {
+      const autoCommandTool = autoDestructive ? "run_command" : "verify_command";
+      if (!entry.tool_names.includes(autoCommandTool)) {
         response.writeHead(400);
-        response.end(`Code task request did not expose run_command; tool count=${tools.length}, shapes=${JSON.stringify(entry.tool_shapes)}`);
+        response.end(`Code task request did not expose ${autoCommandTool}; tool count=${tools.length}, shapes=${JSON.stringify(entry.tool_shapes)}`);
         return;
       }
       writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
-        { function: { name: "run_command", arguments: { command: "Remove-Item -Recurse -Force signaling; git --version" } } },
+        { function: { name: autoCommandTool, arguments: { command: autoDestructive
+          ? "Remove-Item -Recurse -Force signaling; git --version"
+          : "node --version" } } },
       ] }, done: true });
       return;
     }
     if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "tool") {
-      if (entry.last_tool_name !== "run_command") {
+      const autoCommandTool = autoDestructive ? "run_command" : "verify_command";
+      if (entry.last_tool_name !== autoCommandTool) {
         response.writeHead(400);
         response.end("Auto smoke returned an unexpected tool result");
         return;
       }
-      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged Auto destructive command round-trip passed." }, done: true });
+      const autoReply = autoDestructive
+        ? "Packaged Auto destructive command round-trip passed."
+        : "Packaged Auto command round-trip passed.";
+      writeJson({ model: MODEL, message: { role: "assistant", content: autoReply }, done: true });
       return;
     }
     if (entry.stream !== true) {

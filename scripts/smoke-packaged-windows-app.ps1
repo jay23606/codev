@@ -985,7 +985,7 @@ try {
     $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
     $mockServerPath = Join-Path $PSScriptRoot 'mock-ollama-server.js'
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
-        -ArgumentList @($mockServerPath, '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -ArgumentList @($mockServerPath, '--auto-destructive', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
     $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
