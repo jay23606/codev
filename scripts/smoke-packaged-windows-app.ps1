@@ -1772,12 +1772,39 @@ public static class CodevCommonDialog
                     break
                 }
             }
+            $textPattern = $null
+            if ($element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$textPattern)) {
+                $candidateText = [string]$textPattern.DocumentRange.GetText(-1)
+                if (-not [string]::IsNullOrWhiteSpace($candidateText)) { $verificationOutputCandidates.Add($candidateText) }
+                if ($candidateText -match '(?m)^v\d+\.\d+\.\d+' -and
+                    $candidateText.Contains('Exit code: 0', [StringComparison]::Ordinal)) {
+                    $verificationOutput = $candidateText
+                    break
+                }
+            }
         }
         if ($null -ne $verificationOutput) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $verificationOutputDeadline)
     if ($null -eq $verificationOutput -or $verificationOutput.Contains('untrusted_tool_output', [StringComparison]::Ordinal)) {
-        throw "Expanding Ran node --version did not expose readable, parsed command output. Value-pattern outputs: $($verificationOutputCandidates -join ' | ')"
+        $verificationChildren = @()
+        try {
+            $verificationChildren = @($verificationRow.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+                    $current = $_.Current
+                    $patterns = @()
+                    foreach ($patternId in @(
+                        [System.Windows.Automation.ValuePattern]::Pattern,
+                        [System.Windows.Automation.TextPattern]::Pattern,
+                        [System.Windows.Automation.TogglePattern]::Pattern)) {
+                        $pattern = $null
+                        if ($_.TryGetCurrentPattern($patternId, [ref]$pattern)) { $patterns += $patternId.ProgrammaticName }
+                    }
+                    "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen) patterns=$($patterns -join ',')"
+                } | Select-Object -First 30)
+        }
+        catch { $verificationChildren = @("Verification row subtree unavailable ($($_.Exception.GetType().Name))") }
+        throw "Expanding Ran node --version did not expose readable, parsed command output. Value-pattern outputs: $($verificationOutputCandidates -join ' | '); verification row children: $($verificationChildren -join ' | ')"
     }
     Write-Host 'Packaged Windows Code task grouped read, search, create, and verification results under one collapsed summary; expanding it exposed all named activity rows.'
     Write-Host 'Expanding Ran node --version exposed readable command output with its exit code and no raw tool envelope.'
