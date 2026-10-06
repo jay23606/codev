@@ -1301,7 +1301,7 @@ public static class CodevCommonDialog
     for ($index = 0; $index -lt $shortcutText.Count; $index++) {
         $shortcutNames += $shortcutText.Item($index).Current.Name
     }
-    foreach ($requiredShortcut in @('Ctrl+N', 'Ctrl+F', 'Ctrl+L', 'Ctrl+Shift+M', '/status')) {
+    foreach ($requiredShortcut in @('Ctrl+N', 'Ctrl+F', 'Ctrl+L', 'Ctrl+Shift+F', 'Ctrl+Shift+M', '/status')) {
         if (-not ($shortcutNames -contains $requiredShortcut) -and
             -not (($shortcutNames -join "`n").Contains($requiredShortcut, [StringComparison]::Ordinal))) {
             throw "The keyboard shortcuts reference does not list '$requiredShortcut'."
@@ -1746,6 +1746,81 @@ public static class CodevCommonDialog
         throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; expanderOffscreen=$expanderOffscreen; scrollPercent=$activityScrollPosition; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
     }
     Write-Host 'Packaged Windows Code task grouped read, search, create, and verification results under one collapsed summary; expanding it exposed all named activity rows.'
+
+    # Exercise native Ctrl+Shift+F through the packaged window after several
+    # model turns have populated a searchable transcript. Select the earlier
+    # user prompt and verify navigation moves away from the latest messages.
+    $autoComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^+f')
+    $conversationFindBox = Find-ByAutomationId $window 'ConversationFindTextBox'
+    if ($null -eq $conversationFindBox -or $conversationFindBox.Current.IsOffscreen) {
+        throw 'Ctrl+Shift+F did not open the in-conversation find panel.'
+    }
+    $conversationFindValue = $null
+    if (-not $conversationFindBox.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$conversationFindValue)) {
+        throw 'The in-conversation find field does not expose an editable value to UI Automation.'
+    }
+    $conversationFindValue.SetValue('Run the packaged Auto destructive-command smoke.')
+    $targetSearchResultName = 'You · Run the packaged Auto destructive-command smoke.'
+    $targetSearchResultCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $targetSearchResultName))
+    $searchResultDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    $targetSearchResult = $null
+    do {
+        $targetSearchResult = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $targetSearchResultCondition)
+        if ($null -ne $targetSearchResult) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $searchResultDeadline)
+    if ($null -eq $targetSearchResult) {
+        throw 'Searching the packaged transcript did not expose the earlier Auto prompt as a selectable excerpt.'
+    }
+    $findScrollPattern = $null
+    if (-not $conversationScrollViewer.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$findScrollPattern)) {
+        throw 'The packaged transcript lost its UI Automation scroll pattern before find navigation.'
+    }
+    $findBeforeSelection = [double]$findScrollPattern.Current.VerticalScrollPercent
+    $searchResultInvoke = $null
+    if (-not $targetSearchResult.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$searchResultInvoke)) {
+        throw 'The matching conversation excerpt cannot be selected through UI Automation.'
+    }
+    $searchResultInvoke.Invoke()
+    $findNavigationDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    $findAfterSelection = $findBeforeSelection
+    do {
+        $findPanel = Find-ByAutomationId $window 'ConversationFindPanel'
+        $findAfterSelection = [double]$findScrollPattern.Current.VerticalScrollPercent
+        if (($null -eq $findPanel -or $findPanel.Current.IsOffscreen) -and $findAfterSelection -lt ($findBeforeSelection - 1)) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $findNavigationDeadline)
+    if (($null -ne $findPanel -and -not $findPanel.Current.IsOffscreen) -or $findAfterSelection -ge ($findBeforeSelection - 1)) {
+        $panelDiagnostics = if ($null -eq $findPanel) { 'panel absent from the UI Automation tree' } else {
+            "panel offscreen=$($findPanel.Current.IsOffscreen), bounds=$($findPanel.Current.BoundingRectangle), name='$($findPanel.Current.Name)'"
+        }
+        $findBoxDiagnostics = Find-ByAutomationId $window 'ConversationFindTextBox'
+        if ($null -ne $findBoxDiagnostics) {
+            $panelDiagnostics += "; find box offscreen=$($findBoxDiagnostics.Current.IsOffscreen), bounds=$($findBoxDiagnostics.Current.BoundingRectangle)"
+        }
+        throw "Selecting an earlier transcript excerpt did not close the panel and move the conversation (scroll $findBeforeSelection -> $findAfterSelection; $panelDiagnostics)."
+    }
+    $autoComposer.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^+f')
+    Start-Sleep -Milliseconds 100
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $findEscapeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $findPanel = Find-ByAutomationId $window 'ConversationFindPanel'
+        if ($null -eq $findPanel -or $findPanel.Current.IsOffscreen) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $findEscapeDeadline)
+    if ($null -ne $findPanel -and -not $findPanel.Current.IsOffscreen) {
+        throw 'Escape did not close the native in-conversation find panel.'
+    }
+    Write-Host "Packaged Windows Ctrl+Shift+F search found and navigated to an earlier message excerpt (transcript scroll $findBeforeSelection -> $findAfterSelection); Escape closed the panel."
 
     # Save an exact Deny through the real Ask-mode approval surface, return to
     # Auto, and prove the same command is blocked without another prompt.
