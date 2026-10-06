@@ -372,7 +372,7 @@
                                     </Border>
                                 </Expander>
                                 <md:MarkdownScrollViewer Markdown="{Binding DisplayContent}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
-                                <Expander x:Name="CommandToolOutputsExpander" Header="{Binding CommandToolOutputsHeader}" IsExpanded="False" IsVisible="{Binding HasMultipleToolOutputs}" ToolTip.Tip="Expand to inspect each tool action and its output.">
+                                <Expander x:Name="CommandToolOutputsExpander" Header="{Binding CommandToolOutputsHeader}" IsExpanded="False" IsVisible="{Binding HasMultipleToolOutputs}" ToolTip.Tip="Expand to inspect each tool action and its output." AutomationProperties.Name="{Binding CommandToolOutputsHeader}" AutomationProperties.AutomationId="CommandToolOutputsExpander">
                                     <ItemsControl ItemsSource="{Binding CommandToolOutputs}" ItemTemplate="{StaticResource ToolOutputItemTemplate}" />
                                 </Expander>
                                 <ItemsControl x:Name="SingleToolOutputDetails" ItemsSource="{Binding CommandToolOutputs}" ItemTemplate="{StaticResource ToolOutputItemTemplate}" IsVisible="{Binding HasSingleToolOutput}" />

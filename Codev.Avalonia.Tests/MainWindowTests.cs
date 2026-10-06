@@ -1369,6 +1369,8 @@ public sealed class MainWindowTests
 
             var group = Assert.Single(window.GetVisualDescendants().OfType<Expander>(),
                 expander => expander.Header?.ToString() == "Read files, searched files, edited a file, ran commands");
+            Assert.Equal("Read files, searched files, edited a file, ran commands", AutomationProperties.GetName(group));
+            Assert.Equal("CommandToolOutputsExpander", AutomationProperties.GetAutomationId(group));
             Assert.False(group.IsExpanded);
             Assert.Equal("Final answer stays visible.", message.DisplayContent);
 

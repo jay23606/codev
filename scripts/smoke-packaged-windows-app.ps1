@@ -1570,18 +1570,28 @@ public static class CodevCommonDialog
         throw "The packaged multi-action Code task did not complete all four tools in Auto: $($activityTranscript.Substring([Math]::Max(0, $activityTranscript.Length - 2500)))"
     }
     $activityName = 'Read files, searched files, created a file, ran commands'
+    $activityIdCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander')
+    $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityIdCondition)
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, $activityName)
-    $activityElements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
+    $activityHeader = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
+    if ($null -eq $activityHeader) { throw "The packaged activity summary '$activityName' was not exposed to UI Automation." }
+    $activityWalker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $activityDiagnostics = [System.Collections.Generic.List[string]]::new()
+    $activityCandidate = if ($null -ne $activityExpander) { $activityExpander } else { $activityHeader }
     $activityExpander = $null
-    foreach ($candidate in $activityElements) {
-        $expandCollapsePattern = $null
-        if ($candidate.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) {
-            $activityExpander = $candidate
-            break
-        }
+    for ($depth = 0; $null -ne $activityCandidate -and $depth -lt 8; $depth++) {
+        $candidatePattern = $null
+        $hasExpandCollapse = $activityCandidate.TryGetCurrentPattern(
+            [System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$candidatePattern)
+        $activityDiagnostics.Add("name='$($activityCandidate.Current.Name)' id='$($activityCandidate.Current.AutomationId)' class='$($activityCandidate.Current.ClassName)' type='$($activityCandidate.Current.ControlType.ProgrammaticName)' expand=$hasExpandCollapse")
+        if ($hasExpandCollapse) { $activityExpander = $activityCandidate; break }
+        $activityCandidate = $activityWalker.GetParent($activityCandidate)
     }
-    if ($null -eq $activityExpander) { throw "The packaged activity summary '$activityName' was not exposed as an expandable group." }
+    if ($null -eq $activityExpander) {
+        throw "The packaged activity summary '$activityName' did not expose ExpandCollapse through its header or ancestors: $($activityDiagnostics -join ' | ')"
+    }
     $activityExpanderPattern = $null
     if (-not $activityExpander.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$activityExpanderPattern) -or
         $activityExpanderPattern.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) {
