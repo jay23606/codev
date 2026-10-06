@@ -211,15 +211,12 @@ public static class ToolOutputTranscriptParser
             if (lineEnd < 0) lineEnd = transcript.Length;
             var heading = transcript[lineStart..lineEnd].TrimEnd('\r');
             var contentStart = lineEnd < transcript.Length ? lineEnd + 1 : lineEnd;
-            var jsonStart = contentStart;
-            while (jsonStart < transcript.Length && char.IsWhiteSpace(transcript[jsonStart])) jsonStart++;
-
             if (heading.Length >= 4 && heading.StartsWith("**", StringComparison.Ordinal) &&
-                heading.EndsWith("**", StringComparison.Ordinal) && jsonStart < transcript.Length &&
-                transcript[jsonStart] == '{' && TryFindJsonEnd(transcript, jsonStart, out var jsonEnd) &&
-                TryReadToolOutput(transcript[jsonStart..jsonEnd], out var output))
+                heading.EndsWith("**", StringComparison.Ordinal) &&
+                TryFindToolOutputEnvelope(transcript, contentStart, out var jsonStart, out var jsonEnd, out var output))
             {
                 visible.Append(transcript, cursor, lineStart - cursor);
+                visible.Append(transcript, contentStart, jsonStart - contentStart);
                 outputs.Add(output with { Header = heading[2..^2] + " · " + output.Header });
                 cursor = jsonEnd;
                 while (cursor < transcript.Length && transcript[cursor] is '\r' or '\n') cursor++;
@@ -230,6 +227,38 @@ public static class ToolOutputTranscriptParser
             cursor = contentStart;
         }
         return (visible.ToString().TrimEnd(), outputs);
+    }
+
+    private static bool TryFindToolOutputEnvelope(string transcript, int start, out int jsonStart, out int jsonEnd,
+        out ChatToolOutput output)
+    {
+        jsonStart = -1;
+        jsonEnd = -1;
+        output = new ChatToolOutput("Tool output", "");
+        var lineStart = start;
+        while (lineStart < transcript.Length)
+        {
+            var lineEnd = transcript.IndexOf('\n', lineStart);
+            if (lineEnd < 0) lineEnd = transcript.Length;
+            var candidate = lineStart;
+            while (candidate < lineEnd && char.IsWhiteSpace(transcript[candidate])) candidate++;
+
+            if (candidate < lineEnd && transcript[candidate] == '{' &&
+                TryFindJsonEnd(transcript, candidate, out var candidateEnd) &&
+                TryReadToolOutput(transcript[candidate..candidateEnd], out output))
+            {
+                jsonStart = candidate;
+                jsonEnd = candidateEnd;
+                return true;
+            }
+
+            var line = transcript[lineStart..lineEnd].TrimEnd('\r').Trim();
+            if (line.StartsWith("**", StringComparison.Ordinal) && line.EndsWith("**", StringComparison.Ordinal)) break;
+            if (lineEnd == transcript.Length) break;
+            lineStart = lineEnd + 1;
+        }
+
+        return false;
     }
 
     private static bool TryReadToolOutput(string json, out ChatToolOutput output)

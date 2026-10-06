@@ -60,6 +60,22 @@ public sealed class ToolOutputTranscriptParserTests
     }
 
     [Fact]
+    public void Verification_status_before_tool_envelope_keeps_command_in_collapsed_activity()
+    {
+        const string command = "node --version";
+        var envelope = UntrustedToolOutput.Format("approved verification command output", "v22.23.3\nExit code: 0", command: command);
+
+        var (displayText, outputs) = ToolOutputTranscriptParser.Parse("**verify command**\nVerification PASSED (exit code 0).\n" + envelope);
+
+        Assert.Equal("Verification PASSED (exit code 0).", displayText);
+        var output = Assert.Single(outputs);
+        Assert.Equal("verify command · approved verification command output", output.Header);
+        Assert.Equal("Ran node --version", output.Summary);
+        Assert.Contains("v22.23.3", output.Content);
+        Assert.DoesNotContain("untrusted_tool_output", displayText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Assistant_message_separates_command_outputs_for_the_collapsed_ran_commands_group()
     {
         var command = UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "git status --short");
