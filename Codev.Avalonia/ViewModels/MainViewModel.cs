@@ -1847,6 +1847,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
         Codev.Conversation? child = null;
         Codev.GitChildWorktree? worktree = null;
+        var childSecuritySetupComplete = false;
         try
         {
             var childId = Guid.NewGuid();
@@ -1883,17 +1884,16 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 ProjectPath = worktree.WorktreePath,
                 UpdatedAt = DateTimeOffset.Now
             };
+            await _projectCommandPermissions.CopyProjectSettingsAsync(parentProjectPath, worktree.WorktreePath);
+            await _projectMcpPermissions.CopyDenyRulesAsync(parentProjectPath, worktree.WorktreePath);
+            // Trust is the gate that makes Code task available. Finish every inherited
+            // permission before exposing the child or granting trust to its worktree.
+            await _projectFolderTrust.TrustAsync(worktree.WorktreePath);
+            childSecuritySetupComplete = true;
+
             parent.ChildConversationsExpanded = true;
             _conversations.Insert(0, child);
             RebuildLists();
-            Persist();
-            await _persistenceTask;
-
-            await _projectFolderTrust.TrustAsync(worktree.WorktreePath);
-
-            await _projectCommandPermissions.CopyProjectSettingsAsync(parentProjectPath, worktree.WorktreePath);
-            await _projectMcpPermissions.CopyDenyRulesAsync(parentProjectPath, worktree.WorktreePath);
-
             if (selectChild) SelectConversation(child);
             RebuildLists();
             Persist();
@@ -1903,8 +1903,20 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TimeoutException)
         {
+            if (child is not null && !_conversations.Contains(child))
+            {
+                if (!childSecuritySetupComplete) child.IsCodeTask = false;
+                parent.ChildConversationsExpanded = true;
+                _conversations.Insert(0, child);
+                RebuildLists();
+                Persist();
+                try { await _persistenceTask; }
+                catch (Exception persistenceError) when (persistenceError is IOException or UnauthorizedAccessException) { }
+            }
             ReportContextActionStatus(child is not null
-                ? $"Child worktree was kept so you can recover it; setup stopped before all trust, shell, and MCP deny rules were copied ({ex.Message})."
+                ? childSecuritySetupComplete
+                    ? $"Child worktree is ready, but Codev could not finish saving its conversation ({ex.Message})."
+                    : $"Child worktree was kept untrusted so you can recover it; setup stopped before all trust, shell, and MCP deny rules were copied ({ex.Message})."
                 : $"Could not create isolated child session: {ex.Message}");
             return null;
         }

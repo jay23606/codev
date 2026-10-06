@@ -106,6 +106,61 @@ public sealed class ChildDelegationTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Child_worktree_is_not_trusted_when_inherited_mcp_permissions_cannot_be_copied()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-child-permission-order-tests", Guid.NewGuid().ToString("N"));
+        var dataRoot = Path.Combine(root, "app-data");
+        var codevData = Path.Combine(dataRoot, "Codev");
+        var repository = Path.Combine(root, "repository");
+        Directory.CreateDirectory(codevData);
+        Directory.CreateDirectory(repository);
+        await File.WriteAllTextAsync(Path.Combine(codevData, "avalonia-mcp-permissions.json"), "{ invalid json");
+        MainViewModel? viewModel = null;
+        Codev.Conversation? child = null;
+        try
+        {
+            await InitializeRepositoryAsync(repository);
+            viewModel = new MainViewModel(dataRoot);
+            Assert.False(viewModel.CanPersistMcpToolPermissions);
+            var parent = Assert.IsType<Codev.Conversation>(viewModel.ActiveConversation);
+            viewModel.SetProjectFolder(repository);
+            await viewModel.TrustProjectFolderAsync(repository);
+            parent.AgentProfileName = "Orchestrator";
+            await viewModel.SetProjectCommandPermissionModeAsync(Codev.ProjectCommandPermissionMode.Auto);
+
+            var createChild = typeof(MainViewModel).GetMethod("CreateIsolatedChildSessionCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(createChild);
+            var childTask = Assert.IsAssignableFrom<Task>(createChild!.Invoke(viewModel, [parent, false, false]));
+            await childTask;
+            Assert.Null(childTask.GetType().GetProperty("Result")?.GetValue(childTask));
+
+            var conversationsField = typeof(MainViewModel).GetField("_conversations", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(conversationsField);
+            var conversations = Assert.IsAssignableFrom<IEnumerable<Codev.Conversation>>(conversationsField!.GetValue(viewModel));
+            child = Assert.Single(conversations, conversation => conversation.ParentConversationId == parent.Id);
+            Assert.True(Directory.Exists(child.ProjectPath));
+            Assert.True(new Codev.GitChildWorktreeManager(dataRoot).IsManagedWorktreePath(child.ProjectPath!));
+            Assert.False(child.IsCodeTask);
+            Assert.False(Codev.ProjectFolderTrustRegistry.Load(Path.Combine(codevData, "avalonia-trusted-folders.json"))
+                .IsTrusted(child.ProjectPath!));
+            Assert.Contains("setup stopped before all trust, shell, and MCP deny rules were copied", viewModel.ContextActionStatus,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (viewModel is not null) await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            if (child?.ProjectPath is { } childPath && Directory.Exists(repository))
+                await RunGitAsync(repository, "worktree", "remove", "--force", childPath);
+            if (Directory.Exists(root))
+            {
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     [LiveOllamaFact]
     public async Task Live_orchestrator_starts_two_read_only_children_in_parallel_worktrees()
     {
