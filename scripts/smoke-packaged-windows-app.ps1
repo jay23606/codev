@@ -1809,6 +1809,10 @@ public static class CodevCommonDialog
         $activityExpanderPattern.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) {
         throw 'The packaged multi-action activity summary did not start collapsed.'
     }
+    $activityScrollItem = $null
+    if ($activityHeader.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$activityScrollItem)) {
+        $activityScrollItem.ScrollIntoView()
+    }
     $activityRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
         Where-Object { $_.last_user_message -eq $activityPrompt })
     $expectedActivityTools = @('read_file', 'search_files', 'create_file', 'verify_command')
@@ -1824,6 +1828,12 @@ public static class CodevCommonDialog
         }
     }
     $activityExpanderPattern.Expand()
+    $activityHeader = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
+    $activityScrollItem = $null
+    if ($null -ne $activityHeader -and
+        $activityHeader.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$activityScrollItem)) {
+        $activityScrollItem.ScrollIntoView()
+    }
     $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran node --version')
     $activityRowsDeadline = [DateTime]::UtcNow.AddSeconds(5)
     $missingActivityRows = @()
