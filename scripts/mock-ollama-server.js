@@ -54,6 +54,10 @@ const server = http.createServer((request, response) => {
     const lastMessage = messages.at(-1) ?? {};
     const lastUserMessage = [...messages].reverse().find(message => message.role === "user");
     const tools = Array.isArray(payload.tools) ? payload.tools : [];
+    const toolName = tool => {
+      const functionSpec = tool?.function ?? tool?.Function;
+      return functionSpec?.name ?? functionSpec?.Name ?? tool?.name ?? tool?.Name ?? null;
+    };
     const entry = {
       path: request.url,
       model: payload.model,
@@ -62,7 +66,12 @@ const server = http.createServer((request, response) => {
       last_role: lastMessage.role ?? null,
       last_tool_name: lastMessage.tool_name ?? null,
       last_user_message: lastUserMessage?.content ?? null,
-      tool_names: tools.map(tool => tool.function?.name ?? tool.name).filter(Boolean),
+      tool_names: tools.map(toolName).filter(Boolean),
+      tool_shapes: tools.slice(0, 8).map(tool => ({
+        keys: tool && typeof tool === "object" ? Object.keys(tool) : [],
+        function_keys: tool?.function && typeof tool.function === "object" ? Object.keys(tool.function) : [],
+        function_name: toolName(tool),
+      })),
     };
     fs.appendFileSync(requestLog, `${JSON.stringify(entry)}\n`, "utf8");
     if (!modelEnabled() || entry.model !== MODEL || ![true, false].includes(entry.stream)) {
@@ -78,7 +87,7 @@ const server = http.createServer((request, response) => {
     if (entry.last_user_message === AUTO_COMMAND_PROMPT && entry.last_role === "user") {
       if (!entry.tool_names.includes("verify_command")) {
         response.writeHead(400);
-        response.end("Code task request did not expose verify_command");
+        response.end(`Code task request did not expose verify_command; tool count=${tools.length}, shapes=${JSON.stringify(entry.tool_shapes)}`);
         return;
       }
       writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
