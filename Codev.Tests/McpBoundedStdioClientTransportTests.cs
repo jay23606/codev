@@ -201,7 +201,7 @@ public sealed class McpBoundedStdioClientTransportTests
             {
                 Command = "powershell.exe",
                 Arguments = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-                    $"$child = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -LiteralPath '{safeProcessIdPath}' -Value \"$PID $($child.Id)\"; Start-Sleep -Seconds 30"],
+                    $"$childStart = [System.Diagnostics.ProcessStartInfo]::new((Join-Path $env:windir 'System32\\timeout.exe'), '/t 30 /nobreak'); $childStart.UseShellExecute = $false; $childStart.CreateNoWindow = $true; $childStart.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden; $child = [System.Diagnostics.Process]::Start($childStart); Set-Content -NoNewline -LiteralPath '{safeProcessIdPath}' -Value \"$PID $($child.Id)\"; Start-Sleep -Seconds 30"],
                 Name = "process-tree-lifecycle-test"
             }
             : new StdioClientTransportOptions
