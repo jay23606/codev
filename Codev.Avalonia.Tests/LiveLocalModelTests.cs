@@ -583,6 +583,85 @@ public sealed class LiveLocalModelTests
     }
 
     [LiveOllamaFact]
+    public async Task Live_local_code_task_collapses_read_search_and_create_activity()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-activity", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "app-data");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        const string marker = "ACTIVITY_SMOKE_MARKER_76f2";
+        await File.WriteAllTextAsync(Path.Combine(project, "README.md"), $"Fixture marker: {marker}\n");
+        await File.WriteAllTextAsync(Path.Combine(project, "game.js"), "const answer = 42;\n");
+        MainViewModel? viewModel = null;
+        var approvalRequests = 0;
+        try
+        {
+            viewModel = new MainViewModel(appData);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            conversation.Model = Environment.GetEnvironmentVariable("CODEV_OLLAMA_MODEL") ?? "qwen3.6:35b-a3b";
+            conversation.Provider = "ollama";
+            conversation.IsCodeTask = true;
+            conversation.IsPlanMode = false;
+            conversation.AgentProfileName = null;
+            conversation.NumCtx = 8192;
+            conversation.NumPredict = 1200;
+            conversation.ThinkEnabled = false;
+            conversation.Temperature = 0;
+            viewModel.ApproveProjectCommandAsync = _ =>
+            {
+                Interlocked.Increment(ref approvalRequests);
+                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+            };
+            viewModel.Draft = $"Use the Codev tools in this exact order: (1) read_file README.md, (2) search_files for the exact text {marker}, (3) create_file activity-report.txt with exactly the text {marker}. Call each tool once and wait for its result before the next. Do not use any other tools or edit other files. After all three results, briefly report what you did.";
+
+            var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(send);
+            await Assert.IsAssignableFrom<Task>(send!.Invoke(viewModel, null));
+
+            var sawGeneration = false;
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(6);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                sawGeneration |= viewModel.IsGenerating;
+                if (sawGeneration && !viewModel.IsGenerating) break;
+                await Task.Delay(100);
+            }
+
+            var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
+            Assert.True(sawGeneration, $"The local Code task did not start. Transcript: {transcript}");
+            Assert.False(viewModel.IsGenerating, $"The local Code task did not finish within six minutes. Transcript: {transcript}");
+            Assert.Equal(0, Volatile.Read(ref approvalRequests));
+            Assert.Equal(marker, (await File.ReadAllTextAsync(Path.Combine(project, "activity-report.txt"))).Trim());
+
+            var assistantMessages = conversation.Messages.Where(message => message.Role == "assistant").ToArray();
+            var outputs = assistantMessages.SelectMany(message => message.ToolOutputs).ToArray();
+            Assert.Contains(outputs, output => output.Activity == "read_file" && output.Path == "README.md");
+            Assert.Contains(outputs, output => output.Activity == "search_files" && output.Content.Contains(marker, StringComparison.Ordinal));
+            Assert.Contains(outputs, output => output.Activity == "created_file" && output.Path == "activity-report.txt");
+            Assert.Contains(assistantMessages, message => message.HasMultipleToolOutputs &&
+                message.CommandToolOutputsHeader.Contains("read files", StringComparison.OrdinalIgnoreCase) &&
+                message.CommandToolOutputsHeader.Contains("searched files", StringComparison.OrdinalIgnoreCase) &&
+                message.CommandToolOutputsHeader.Contains("created a file", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("\"keep_alive\":\"30m\"", viewModel.GetLastPromptContextDetails(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (viewModel is not null)
+            {
+                if (viewModel.IsGenerating) viewModel.StopGenerationCommand.Execute(null);
+                var stopDeadline = DateTimeOffset.UtcNow.AddSeconds(15);
+                while (viewModel.IsGenerating && DateTimeOffset.UtcNow < stopDeadline) await Task.Delay(100);
+                await viewModel.StopBackgroundCommandsAndShutdownAsync();
+                await viewModel.SavePendingDraftAsync();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [LiveOllamaFact]
     public async Task Live_local_chat_resumes_a_saved_turn_streams_a_reply_and_clears_queue_state()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-live-ollama-queue", Guid.NewGuid().ToString("N"));
