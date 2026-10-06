@@ -1835,11 +1835,14 @@ public static class CodevCommonDialog
         }
     }
     $activityExpanderPattern.Expand()
-    $activityHeader = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
-    $activityScrollItem = $null
-    if ($null -ne $activityHeader -and
-        $activityHeader.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$activityScrollItem)) {
-        $activityScrollItem.ScrollIntoView()
+    $conversationScrollViewer = Find-ByAutomationId $window 'ConversationScrollViewer'
+    $conversationScrollPattern = $null
+    if ($null -ne $conversationScrollViewer -and
+        $conversationScrollViewer.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$conversationScrollPattern) -and
+        $conversationScrollPattern.Current.VerticallyScrollable) {
+        # Expanding adds the tool rows after the initial scroll-to-bottom. Move
+        # again so the newly materialized details are visible to UI Automation.
+        $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
     }
     $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran node --version')
     $activityRowsDeadline = [DateTime]::UtcNow.AddSeconds(5)
