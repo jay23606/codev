@@ -1741,6 +1741,26 @@ public static class CodevCommonDialog
         throw 'The packaged verification output row did not start collapsed or was not exposed as a toggle.'
     }
     $verificationToggle.Toggle()
+    $verificationExpanded = $false
+    $verificationExpandDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        # TogglePattern.Toggle can return before Avalonia has updated the
+        # template, and the original UIA element may be invalidated by it.
+        $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
+        $verificationToggle = $null
+        if ($null -ne $verificationRow -and
+            $verificationRow.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$verificationToggle) -and
+            $verificationToggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) {
+            $verificationExpanded = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $verificationExpandDeadline)
+    if (-not $verificationExpanded) {
+        throw 'The packaged verification output row did not report an expanded state after toggling.'
+    }
     # Expanding the nested output can add enough height to move its text box
     # below the viewport. Scroll after that expansion so UIA exposes the
     # actual output control instead of only the always-visible settings UI.
@@ -1797,6 +1817,9 @@ public static class CodevCommonDialog
     } while ([DateTime]::UtcNow -lt $verificationOutputDeadline)
     if ($null -eq $verificationOutput -or $verificationOutput.Contains('untrusted_tool_output', [StringComparison]::Ordinal)) {
         $verificationChildren = @()
+        $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
         try {
             $verificationChildren = @($verificationRow.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                     [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
@@ -1812,7 +1835,7 @@ public static class CodevCommonDialog
                     "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen) patterns=$($patterns -join ',')"
                 } | Select-Object -First 30)
         }
-        catch { $verificationChildren = @("Verification row subtree unavailable ($($_.Exception.GetType().Name))") }
+        catch { $verificationChildren = @("Verification row subtree unavailable ($($_.Exception.GetType().Name): $($_.Exception.InnerException.Message))") }
         throw "Expanding Ran node --version did not expose readable, parsed command output. Value-pattern outputs: $($verificationOutputCandidates -join ' | '); verification row children: $($verificationChildren -join ' | ')"
     }
     Write-Host 'Packaged Windows Code task grouped read, search, create, and verification results under one collapsed summary; expanding it exposed all named activity rows.'
