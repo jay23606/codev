@@ -169,6 +169,17 @@ end tell
 APPLESCRIPT
 }
 
+send_primary_agent_shortcut() {
+  osascript <<APPLESCRIPT
+tell application "System Events"
+  set targetProcess to first process whose unix id is ${app_pid}
+  set frontmost of targetProcess to true
+  delay 0.25
+  key code 0 using {command down, shift down}
+end tell
+APPLESCRIPT
+}
+
 report_mode_button_state() {
   local automation_id="$1"
   osascript - "$app_pid" "$automation_id" <<'APPLESCRIPT'
@@ -505,6 +516,40 @@ send_mode_shortcut
 assert_mode true false 'Packaged macOS app entered Plan before the Auto Code task smoke.'
 send_mode_shortcut
 assert_mode false true 'Packaged macOS app entered Code task for the Auto command smoke.'
+selected_agent_profile="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+if conversation is None:
+    raise SystemExit("The active macOS conversation disappeared before the Auto command smoke.")
+print(conversation.get("AgentProfileName") or "")
+PY
+)"
+if [[ "$selected_agent_profile" == "Plan" ]]; then
+  echo 'The macOS smoke selected the read-only Plan agent; switching to Build before verifying Auto command execution.'
+  send_primary_agent_shortcut
+  for _ in {1..100}; do
+    selected_agent_profile="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+print((conversation or {}).get("AgentProfileName") or "")
+PY
+)"
+    [[ -z "$selected_agent_profile" ]] && break
+    sleep 0.1
+  done
+fi
+if [[ -n "$selected_agent_profile" ]]; then
+  echo "Expected the default Build agent for the packaged Auto command smoke, got '$selected_agent_profile'." >&2
+  exit 1
+fi
 before_auto_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
 import json
 import sys
