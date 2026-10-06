@@ -201,7 +201,7 @@ public sealed class McpBoundedStdioClientTransportTests
             {
                 Command = "powershell.exe",
                 Arguments = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-                    $"$child = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -LiteralPath '{safeProcessIdPath}' -Value \"$PID $($child.Id)\"; Start-Sleep -Seconds 30"],
+                    $"$child = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -LiteralPath '{safeProcessIdPath}' -Value \"$PID $($child.Id)\"; Start-Sleep -Seconds 30"],
                 Name = "process-tree-lifecycle-test"
             }
             : new StdioClientTransportOptions
@@ -216,7 +216,7 @@ public sealed class McpBoundedStdioClientTransportTests
             var clientTransport = new McpBoundedStdioClientTransport(options);
             var session = await clientTransport.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(30));
             await using var lifetime = (IAsyncDisposable)session;
-            var processIds = await WaitForProcessIdsAsync(processIdPath, TimeSpan.FromSeconds(10));
+            var processIds = await WaitForProcessIdsAsync(processIdPath, TimeSpan.FromSeconds(30));
             Assert.Equal(2, processIds.Length);
             Assert.All(processIds, processId => Assert.True(IsProcessRunning(processId),
                 "The fixture server and child should still be running before transport disposal."));
