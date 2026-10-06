@@ -1857,12 +1857,22 @@ public static class CodevCommonDialog
         $visibleActivityRows = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
                 Where-Object { $_ -match 'read|search|creat|command|activit' })
-        $activityChildDiagnostics = @($activityExpander.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
-                $current = $_.Current
-                "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen)"
-            } | Select-Object -First 30)
-        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$($activityExpanderPattern.Current.ExpandCollapseState); headerOffscreen=$($activityHeader.Current.IsOffscreen); children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
+        $activityChildDiagnostics = @()
+        $activityExpandState = 'unavailable'
+        try { $activityExpandState = [string]$activityExpanderPattern.Current.ExpandCollapseState }
+        catch { $activityExpandState = "unavailable ($($_.Exception.GetType().Name))" }
+        try {
+            $activityChildDiagnostics = @($activityExpander.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+                    $current = $_.Current
+                    "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen)"
+                } | Select-Object -First 30)
+        }
+        catch { $activityChildDiagnostics = @("UIA subtree unavailable ($($_.Exception.GetType().Name))") }
+        $headerOffscreen = 'unavailable'
+        try { $headerOffscreen = [string]$activityHeader.Current.IsOffscreen }
+        catch { $headerOffscreen = "unavailable ($($_.Exception.GetType().Name))" }
+        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; headerOffscreen=$headerOffscreen; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
     }
     $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new(
