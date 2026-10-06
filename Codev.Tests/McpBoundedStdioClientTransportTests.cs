@@ -23,6 +23,8 @@ public sealed class McpBoundedStdioClientTransportTests
                 Arguments = ["-NoProfile", "-NonInteractive", "-File", scriptPath, "%PATH%"]
             };
             var startInfo = McpBoundedStdioClientTransport.CreateStartInfo(options);
+            Assert.False(startInfo.UseShellExecute);
+            Assert.True(startInfo.CreateNoWindow);
             startInfo.RedirectStandardOutput = true;
             startInfo.RedirectStandardError = true;
             using var process = Process.Start(startInfo)!;
