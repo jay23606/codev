@@ -494,8 +494,10 @@ public sealed class MainWindowTests
             Assert.Equal("Primary agent profile", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"))));
             var planModeButton = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button => AutomationProperties.GetAutomationId(button) == "PlanModeButton");
             Assert.Equal(viewModel.PlanModeLabel, AutomationProperties.GetName(planModeButton));
+            Assert.Equal(viewModel.ConversationModeCycleTooltip, AutomationProperties.GetHelpText(planModeButton));
             var codeTaskModeButton = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button => AutomationProperties.GetAutomationId(button) == "CodeTaskModeButton");
             Assert.Equal(viewModel.CodeTaskLabel, AutomationProperties.GetName(codeTaskModeButton));
+            Assert.Equal(viewModel.CodeTaskTooltip, AutomationProperties.GetHelpText(codeTaskModeButton));
             var responseStyle = Assert.Single(window.GetVisualDescendants().OfType<ComboBox>(), control => AutomationProperties.GetName(control) == "Response style");
             Assert.Equal("Response style", AutomationProperties.GetName(responseStyle));
         }

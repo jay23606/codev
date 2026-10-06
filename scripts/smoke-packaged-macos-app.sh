@@ -169,15 +169,16 @@ end tell
 APPLESCRIPT
 }
 
-report_code_task_button_state() {
-  osascript - "$app_pid" <<'APPLESCRIPT'
+report_mode_button_state() {
+  local automation_id="$1"
+  osascript - "$app_pid" "$automation_id" <<'APPLESCRIPT'
 on run argv
   set targetPid to item 1 of argv as integer
+  set targetIdentifier to item 2 of argv as text
   tell application "System Events"
     set targetProcess to first process whose unix id is targetPid
     tell targetProcess
       set windowContents to entire contents of window 1
-      set buttonReport to ""
       repeat with elementIndex from 1 to count of windowContents
         set currentElement to item elementIndex of windowContents
         try
@@ -190,43 +191,55 @@ on run argv
         on error
           set buttonRole to "missing"
         end try
-        if buttonRole is "AXButton" then
-          try
-            set buttonName to name of currentElement as text
-          on error
-            set buttonName to "missing"
-          end try
-          set identifierLabel to "missing"
-          if buttonIdentifier is not missing value then set identifierLabel to buttonIdentifier as text
-          set buttonReport to buttonReport & elementIndex & ": id=" & identifierLabel & ", name=" & buttonName & linefeed
-        end if
         if buttonIdentifier is not missing value then
-          if (buttonIdentifier as text) is "CodeTaskModeButton" then
+          if (buttonIdentifier as text) is targetIdentifier and buttonRole is "AXButton" then
             try
               set buttonName to name of currentElement as text
             on error
               set buttonName to "missing"
             end try
             try
-              set buttonHelp to value of attribute "AXDescription" of currentElement as text
+              set buttonHelp to value of attribute "AXHelp" of currentElement as text
             on error
               set buttonHelp to "missing"
             end try
-            return "Code task mode button: name=" & buttonName & ", help=" & buttonHelp & ", enabled=" & (enabled of currentElement as text)
+            if buttonHelp is "missing" then
+              try
+                set buttonHelp to value of attribute "AXDescription" of currentElement as text
+              on error
+                set buttonHelp to "missing"
+              end try
+            end if
+            return "name=" & buttonName & ", help=" & buttonHelp & ", enabled=" & (enabled of currentElement as text)
           end if
         end if
       end repeat
-      return "CodeTaskModeButton was not found in the macOS accessibility tree." & linefeed & buttonReport
+      return "Button " & targetIdentifier & " was not found in the macOS accessibility tree."
     end tell
   end tell
 end run
 APPLESCRIPT
 }
 
+assert_mode_button_state() {
+  local automation_id="$1"
+  local expected_name="$2"
+  local expected_help="$3"
+  local state
+  state="$(report_mode_button_state "$automation_id")"
+  if [[ "$state" != *"name=$expected_name,"* || "$state" != *"help=$expected_help"* || "$state" != *"enabled=true"* ]]; then
+    echo "macOS accessibility state for $automation_id was incomplete: $state" >&2
+    exit 1
+  fi
+  echo "macOS accessibility state passed for $automation_id: $state"
+}
+
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with Command+Shift+M.'
+assert_mode_button_state PlanModeButton 'Plan mode' 'switches Plan to Chat'
 send_mode_shortcut
 assert_mode false false 'Packaged macOS app switched Plan → Chat when Code task was unavailable.'
+assert_mode_button_state PlanModeButton 'Chat mode' 'switches Chat to Plan'
 
 # Keep the mode-cycle check independent from model startup, then relaunch with
 # the model enabled for the local chat round-trip.
@@ -270,15 +283,19 @@ assert_mode false false 'Packaged macOS app restored the same conversation in Ch
 # A fresh Intel-Mac process may still be compiling Skia shaders just after
 # conversation/model discovery completes. Let the window settle before input.
 sleep 2
-report_code_task_button_state
+assert_mode_button_state PlanModeButton 'Chat mode' 'switches Chat to Plan'
+assert_mode_button_state CodeTaskModeButton 'Enable Code task' 'Enable Code task'
 
 # Exercise the complete mode cycle now that the local model is available.
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with a local model available.'
+assert_mode_button_state PlanModeButton 'Plan mode' 'switches Plan to Code task'
 send_mode_shortcut
 assert_mode false true 'Packaged macOS app switched Plan → local Code task.'
+assert_mode_button_state CodeTaskModeButton 'Code task on' 'Code task is on'
 send_mode_shortcut
 assert_mode false false 'Packaged macOS app switched local Code task → Chat.'
+assert_mode_button_state PlanModeButton 'Chat mode' 'switches Chat to Plan'
 
 await_saved_draft() {
   local expected="$1"

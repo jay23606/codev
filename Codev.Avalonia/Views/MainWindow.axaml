@@ -205,8 +205,8 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" AutomationProperties.Name="{Binding PlanModeLabel}" AutomationProperties.AutomationId="PlanModeButton" />
-                    <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" AutomationProperties.Name="{Binding CodeTaskLabel}" AutomationProperties.AutomationId="CodeTaskModeButton" />
+                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" AutomationProperties.Name="{Binding PlanModeLabel}" AutomationProperties.HelpText="{Binding ConversationModeCycleTooltip}" AutomationProperties.AutomationId="PlanModeButton" />
+                    <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" AutomationProperties.Name="{Binding CodeTaskLabel}" AutomationProperties.HelpText="{Binding CodeTaskTooltip}" AutomationProperties.AutomationId="CodeTaskModeButton" />
                     <ComboBox x:Name="AgentProfileSelectionComboBox" Grid.Column="5" Width="124" ItemsSource="{Binding AgentProfiles}" SelectedItem="{Binding SelectedAgentProfileChoice, Mode=TwoWay}" IsEnabled="{Binding IsCodeTask}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="{Binding PrimaryAgentTooltip}" AutomationProperties.Name="Primary agent profile">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:AgentProfileChoice">
