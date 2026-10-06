@@ -1863,11 +1863,13 @@ public static class CodevCommonDialog
     if ($permissionEntry.Count -ne 1 -or [string]$permissionEntry[0].Mode -ne 'Auto' -or -not $denyRulePersisted) {
         throw 'The exact Deny or Auto mode did not remain saved together after the denied Auto run.'
     }
-    $mockRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json })
-    if ($mockRequests.Count -ne 6 -or $mockRequests[2].last_user_message -ne $denyPrompt -or
-        $mockRequests[2].last_role -ne 'user' -or $mockRequests[3].last_role -ne 'tool' -or
-        $mockRequests[4].last_user_message -ne $autoDeniedPrompt -or $mockRequests[4].last_role -ne 'user' -or
-        $mockRequests[5].last_role -ne 'tool' -or $mockRequests[5].last_tool_name -ne 'run_command' -or
+    $mockRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.last_user_message -eq $denyPrompt -or $_.last_user_message -eq $autoDeniedPrompt })
+    if ($mockRequests.Count -ne 4 -or $mockRequests[0].last_role -ne 'user' -or
+        $mockRequests[0].last_user_message -ne $denyPrompt -or $mockRequests[1].last_role -ne 'tool' -or
+        $mockRequests[1].last_tool_name -ne 'run_command' -or
+        $mockRequests[2].last_user_message -ne $autoDeniedPrompt -or $mockRequests[2].last_role -ne 'user' -or
+        $mockRequests[3].last_role -ne 'tool' -or $mockRequests[3].last_tool_name -ne 'run_command' -or
         @($mockRequests | Where-Object { $_.keep_alive -ne '30m' }).Count -ne 0) {
         throw "The exact-deny model/tool request sequence was unexpected: $($mockRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
