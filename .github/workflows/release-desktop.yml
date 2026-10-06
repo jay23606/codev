@@ -92,6 +92,11 @@ jobs:
         shell: pwsh
         run: ./scripts/smoke-packaged-windows-app.ps1
 
+      - name: Smoke-test packaged Windows data survives portable app removal
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-packaged-windows-data-survival.ps1
+
       - name: Smoke-test headless CLI on Windows
         if: runner.os == 'Windows'
         shell: pwsh
