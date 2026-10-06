@@ -1572,11 +1572,27 @@ public static class CodevCommonDialog
     $activityName = 'Read files, searched files, created a file, ran commands'
     $activityIdCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander')
-    $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityIdCondition)
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, $activityName)
-    $activityHeader = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
-    if ($null -eq $activityHeader) { throw "The packaged activity summary '$activityName' was not exposed to UI Automation." }
+    $activityDeadline = [DateTime]::UtcNow.AddSeconds(8)
+    $activityExpander = $null
+    $activityHeader = $null
+    do {
+        $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityIdCondition)
+        $activityHeader = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
+        if ($null -ne $activityExpander -or $null -ne $activityHeader) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $activityDeadline)
+    if ($null -eq $activityHeader -and $null -eq $activityExpander) {
+        $activitySnapshot = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+                $current = $_.Current
+                if ($current.Name -match 'read|search|creat|command|activit') {
+                    "name='$($current.Name)' id='$($current.AutomationId)' class='$($current.ClassName)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen)"
+                }
+            } | Where-Object { $_ })
+        throw "The packaged activity summary '$activityName' was not exposed to UI Automation within eight seconds. Related elements: $($activitySnapshot -join ' | ')"
+    }
     $activityWalker = [System.Windows.Automation.TreeWalker]::RawViewWalker
     $activityDiagnostics = [System.Collections.Generic.List[string]]::new()
     $activityCandidate = if ($null -ne $activityExpander) { $activityExpander } else { $activityHeader }
