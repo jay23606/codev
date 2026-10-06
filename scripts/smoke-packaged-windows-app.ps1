@@ -1657,7 +1657,14 @@ public static class CodevCommonDialog
         catch { }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $denySaveDeadline)
-    if (-not $savedDeny) { throw 'Deny exact command did not persist the exact destructive command rule for the private workspace.' }
+    if (-not $savedDeny) {
+        $permissionDiagnostic = if (Test-Path -LiteralPath $permissionsPath -PathType Leaf) {
+            try { Get-Content -LiteralPath $permissionsPath -Raw }
+            catch { "<could not read permission file: $($_.Exception.GetType().Name)>" }
+        }
+        else { '<permission file missing>' }
+        throw "Deny exact command did not persist the exact destructive command rule for the private workspace (project='$autoProject', footer='$($modeButton.Current.Name)', permissions=$permissionDiagnostic)."
+    }
     $denyTranscript = ''
     $denyReplyDeadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
