@@ -580,9 +580,20 @@ function Find-ConversationMenuItem($Window, [string]$Title, [string]$MenuName) {
             $MenuName))
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
-        $item = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+        $items = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
             [System.Windows.Automation.TreeScope]::Descendants, $menuCondition)
-        if ($null -ne $item) { return $item }
+        for ($index = 0; $index -lt $items.Count; $index++) {
+            $item = $items.Item($index)
+            try {
+                $current = $item.Current
+                $bounds = $current.BoundingRectangle
+                if ($current.ProcessId -eq $Window.Current.ProcessId -and $current.IsEnabled -and
+                    -not $current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
+                    return $item
+                }
+            }
+            catch { }
+        }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "The context menu for '$Title' did not expose '$MenuName'."
@@ -620,8 +631,19 @@ function Test-PinnedConversationSearchArchiveRestore($Window, [string]$DataRoot)
                 [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
                 [System.Windows.Automation.ControlType]::MenuItem))
         for ($index = 0; $index -lt $menuItems.Count; $index++) {
-            $name = $menuItems.Item($index).Current.Name
-            if ($name -like '*Pin*' -and $name -notlike '*Pinned*') { $pinItem = $menuItems.Item($index); break }
+            $candidate = $menuItems.Item($index)
+            try {
+                $current = $candidate.Current
+                $bounds = $current.BoundingRectangle
+                $name = $current.Name
+                if ($name -like '*Pin*' -and $name -notlike '*Pinned*' -and
+                    $current.ProcessId -eq $Window.Current.ProcessId -and $current.IsEnabled -and
+                    -not $current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
+                    $pinItem = $candidate
+                    break
+                }
+            }
+            catch { }
         }
         if ($null -ne $pinItem) { break }
         Start-Sleep -Milliseconds 100
@@ -641,7 +663,16 @@ function Test-PinnedConversationSearchArchiveRestore($Window, [string]$DataRoot)
         if ($pinned) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not $pinned) { throw 'Pin did not persist for the active conversation.' }
+    if (-not $pinned) {
+        $observed = 'missing conversation'
+        try {
+            $conversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $target = @($conversations | Where-Object { [string]$_.Id -eq $conversationId })
+            if ($target.Count -eq 1) { $observed = "IsPinned=$($target[0].IsPinned), IsArchived=$($target[0].IsArchived), Title='$($target[0].Title)'" }
+        }
+        catch { $observed = "could not read persisted conversation: $($_.Exception.Message)" }
+        throw "Pin did not persist for active conversation '$conversationId' ($observed)."
+    }
 
     $searchCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
