@@ -1639,8 +1639,7 @@ public static class CodevCommonDialog
         [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     }
     $permissionsPath = Join-Path $dataRoot 'Codev\avalonia-command-permissions.json'
-    $manualDenialText = 'Exact command denied for this project; it was not run.'
-    $savedDenialText = 'Denied by a saved project command permission rule; the command was not started.'
+    $denialResultText = 'Denied by a saved project command permission rule; the command was not run.'
     $denySaveDeadline = [DateTime]::UtcNow.AddSeconds(10)
     $savedDeny = $false
     do {
@@ -1674,13 +1673,13 @@ public static class CodevCommonDialog
             $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
             if ($matches.Count -eq 1) {
                 $denyTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
-                if ($denyTranscript.Contains($manualDenialText, [StringComparison]::Ordinal)) { break }
+                if ($denyTranscript.Contains($denialResultText, [StringComparison]::Ordinal)) { break }
             }
         }
         catch { }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $denyReplyDeadline)
-    if (-not $denyTranscript.Contains($manualDenialText, [StringComparison]::Ordinal) -or
+    if (-not $denyTranscript.Contains($denialResultText, [StringComparison]::Ordinal) -or
         -not (Test-Path -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt'))) {
         $denyRequestDiagnostics = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue |
             ForEach-Object { $_ | ConvertFrom-Json } | Select-Object -Last 4 | ConvertTo-Json -Depth 8 -Compress)
@@ -1692,6 +1691,7 @@ public static class CodevCommonDialog
     [System.Windows.Forms.SendKeys]::SendWait($autoDeniedPrompt)
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     $autoDeniedDeadline = [DateTime]::UtcNow.AddSeconds(25)
+    $savedDenialText = $denialResultText
     $autoDeniedTranscript = ''
     do {
         try {
