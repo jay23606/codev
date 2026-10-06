@@ -1819,12 +1819,24 @@ public static class CodevCommonDialog
     $activityExpanderPattern.Expand()
     $conversationScrollViewer = Find-ByAutomationId $window 'ConversationScrollViewer'
     $conversationScrollPattern = $null
-    if ($null -ne $conversationScrollViewer -and
-        $conversationScrollViewer.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$conversationScrollPattern) -and
-        $conversationScrollPattern.Current.VerticallyScrollable) {
+    if ($null -eq $conversationScrollViewer -or
+        -not $conversationScrollViewer.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$conversationScrollPattern)) {
+        throw 'The conversation scroll viewer did not expose UI Automation scrolling.'
+    }
+    $activityScrollPosition = [double]$conversationScrollPattern.Current.VerticalScrollPercent
+    if ($conversationScrollPattern.Current.VerticallyScrollable) {
         # Expanding adds the tool rows after the initial scroll-to-bottom. Move
         # again so the newly materialized details are visible to UI Automation.
         $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+        $scrollDeadline = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+            $activityScrollPosition = [double]$conversationScrollPattern.Current.VerticalScrollPercent
+            if ($activityScrollPosition -ge 99) { break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $scrollDeadline)
+        if ($activityScrollPosition -lt 99) {
+            throw "The conversation did not scroll to the expanded activity rows (vertical=$activityScrollPosition)."
+        }
     }
     $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran node --version')
     $activityRowsDeadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -1857,7 +1869,7 @@ public static class CodevCommonDialog
         $expanderOffscreen = 'unavailable'
         try { $expanderOffscreen = [string]$activityExpander.Current.IsOffscreen }
         catch { $expanderOffscreen = "unavailable ($($_.Exception.GetType().Name))" }
-        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; expanderOffscreen=$expanderOffscreen; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
+        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; expanderOffscreen=$expanderOffscreen; scrollPercent=$activityScrollPosition; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
     }
     $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new(
