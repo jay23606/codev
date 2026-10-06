@@ -1235,6 +1235,40 @@ public sealed class MainWindowTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Debug_profile_ask_rule_uses_footer_auto_mode_without_attached_project()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        try
+        {
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            Assert.Null(conversation.ProjectPath);
+            Assert.Equal(ProjectCommandPermissionMode.Auto, viewModel.ProjectCommandPermissionMode);
+            var debugProfile = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Debug");
+            var profilePrompts = 0;
+            viewModel.ConfirmAgentProfileToolAsync = (_, _, _) =>
+            {
+                profilePrompts++;
+                return Task.FromResult(false);
+            };
+            var profilePermission = typeof(MainViewModel).GetMethod("CheckAgentProfileToolPermissionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            using var arguments = JsonDocument.Parse("""{"command":"dotnet --version"}""");
+
+            var result = await (Task<AgentToolProfileDecision>)profilePermission.Invoke(viewModel,
+                [conversation, debugProfile, "run_command", arguments.RootElement.Clone()])!;
+
+            Assert.Equal(AgentToolProfileDecision.DeferToProjectPolicy, result);
+            Assert.Equal(0, profilePrompts);
+        }
+        finally
+        {
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
     private static async Task StopAndFlushAsync(MainViewModel viewModel)
     {
         var startup = typeof(MainViewModel).GetField("_managedWorkspacePermissionDefaultsTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task;

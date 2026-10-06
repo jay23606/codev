@@ -1147,7 +1147,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         if (permission == Codev.AgentToolPermission.Deny) return Codev.AgentToolProfileDecision.Denied;
         var projectMode = conversation.ProjectPath is { Length: > 0 } path
             ? GetProjectCommandPermissionMode(path)
-            : Codev.ProjectCommandPermissionMode.AskEveryTime;
+            : _projectCommandPermissions.CanPersist
+                ? _defaultProjectCommandPermissionMode
+                : Codev.ProjectCommandPermissionMode.AskEveryTime;
         if (permission == Codev.AgentToolPermission.Allow ||
             !Codev.AgentProfilePolicy.RequiresOneCallApproval(permission, projectMode))
             return Codev.AgentToolProfileDecision.DeferToProjectPolicy;
