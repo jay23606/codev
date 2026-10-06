@@ -169,13 +169,28 @@ end tell
 APPLESCRIPT
 }
 
-send_primary_agent_shortcut() {
+select_build_agent() {
   osascript <<APPLESCRIPT
 tell application "System Events"
   set targetProcess to first process whose unix id is ${app_pid}
   set frontmost of targetProcess to true
+  tell targetProcess
+    set profilePicker to missing value
+    set windowContents to entire contents of window 1
+    repeat with currentElement in windowContents
+      try
+        if (name of currentElement as text) is "Primary agent profile" then
+          set profilePicker to currentElement
+          exit repeat
+        end if
+      end try
+    end repeat
+    if profilePicker is missing value then error "Could not find the primary agent profile picker."
+    click profilePicker
+  end tell
   delay 0.25
-  key code 0 using {command down, shift down}
+  key code 115
+  key code 36
 end tell
 APPLESCRIPT
 }
@@ -534,7 +549,7 @@ selected_agent_profile="$(read_selected_agent_profile)"
 if [[ "$selected_agent_profile" == "Plan" ]]; then
   echo 'The macOS smoke selected the read-only Plan agent; switching to Build before verifying Auto command execution.'
   for attempt in {1..5}; do
-    send_primary_agent_shortcut
+    select_build_agent
     for _ in {1..20}; do
       selected_agent_profile="$(read_selected_agent_profile)"
       [[ -z "$selected_agent_profile" ]] && break 2
