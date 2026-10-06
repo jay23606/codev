@@ -1775,16 +1775,19 @@ public static class CodevCommonDialog
         $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
     }
     $activityName = 'Read files, searched files, created a file, ran commands'
+    $activityIdCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander')
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, $activityName)
+    $activityExpanderCondition = [System.Windows.Automation.AndCondition]::new($activityIdCondition, $activityNameCondition)
     $activityDeadline = [DateTime]::UtcNow.AddSeconds(8)
-    $activityHeader = $null
+    $activityExpander = $null
     do {
-        $activityHeader = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
-        if ($null -ne $activityHeader) { break }
+        $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityExpanderCondition)
+        if ($null -ne $activityExpander) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $activityDeadline)
-    if ($null -eq $activityHeader) {
+    if ($null -eq $activityExpander) {
         $activitySnapshot = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
                 $current = $_.Current
@@ -1794,31 +1797,10 @@ public static class CodevCommonDialog
             } | Where-Object { $_ })
         throw "The packaged activity summary '$activityName' was not exposed to UI Automation within eight seconds. Related elements: $($activitySnapshot -join ' | ')"
     }
-    $activityWalker = [System.Windows.Automation.TreeWalker]::RawViewWalker
-    $activityDiagnostics = [System.Collections.Generic.List[string]]::new()
-    # Earlier command turns also expose CommandToolOutputsExpander. Start at
-    # the exact summary header so UIA does not expand a stale conversation row.
-    $activityCandidate = $activityHeader
-    $activityExpander = $null
-    for ($depth = 0; $null -ne $activityCandidate -and $depth -lt 8; $depth++) {
-        $candidatePattern = $null
-        $hasExpandCollapse = $activityCandidate.TryGetCurrentPattern(
-            [System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$candidatePattern)
-        $activityDiagnostics.Add("name='$($activityCandidate.Current.Name)' id='$($activityCandidate.Current.AutomationId)' class='$($activityCandidate.Current.ClassName)' type='$($activityCandidate.Current.ControlType.ProgrammaticName)' expand=$hasExpandCollapse")
-        if ($hasExpandCollapse) { $activityExpander = $activityCandidate; break }
-        $activityCandidate = $activityWalker.GetParent($activityCandidate)
-    }
-    if ($null -eq $activityExpander) {
-        throw "The packaged activity summary '$activityName' did not expose ExpandCollapse through its header or ancestors: $($activityDiagnostics -join ' | ')"
-    }
     $activityExpanderPattern = $null
     if (-not $activityExpander.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$activityExpanderPattern) -or
         $activityExpanderPattern.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) {
         throw 'The packaged multi-action activity summary did not start collapsed.'
-    }
-    $activityScrollItem = $null
-    if ($activityHeader.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$activityScrollItem)) {
-        $activityScrollItem.ScrollIntoView()
     }
     $activityRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
         Where-Object { $_.last_user_message -eq $activityPrompt })
@@ -1872,10 +1854,10 @@ public static class CodevCommonDialog
                 } | Select-Object -First 30)
         }
         catch { $activityChildDiagnostics = @("UIA subtree unavailable ($($_.Exception.GetType().Name))") }
-        $headerOffscreen = 'unavailable'
-        try { $headerOffscreen = [string]$activityHeader.Current.IsOffscreen }
-        catch { $headerOffscreen = "unavailable ($($_.Exception.GetType().Name))" }
-        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; headerOffscreen=$headerOffscreen; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
+        $expanderOffscreen = 'unavailable'
+        try { $expanderOffscreen = [string]$activityExpander.Current.IsOffscreen }
+        catch { $expanderOffscreen = "unavailable ($($_.Exception.GetType().Name))" }
+        throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; expanderOffscreen=$expanderOffscreen; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
     }
     $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new(
