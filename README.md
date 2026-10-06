@@ -20,6 +20,8 @@ Codev is a standalone, cross-platform desktop coding workspace for local and hos
 
 Avalonia Code tasks include reusable built-in and Markdown agent profiles. See [custom agent profiles](docs/custom-agent-profiles.md) for the profile format and permission behavior.
 
+Code tasks can also use external MCP tools, prompts, and resources. See [MCP server setup](docs/mcp-servers.md) for transport configuration, credential handling, and project permission behavior.
+
 Trusted Avalonia projects can opt into formatters that run after accepted Code task file changes. See [project formatters](docs/project-formatters.md) for setup, command permissions, and limits.
 
 ## First preview
@@ -55,6 +57,7 @@ Trusted Avalonia projects can opt into formatters that run after accepted Code t
 - Browse project text files, filter the list, preview them read-only, and add a selected file directly to chat context; the shared source allowlist covers common .NET, JavaScript/TypeScript, Python, Java, Go, Rust, C/C++, Kotlin, Swift, PHP, Ruby, Dart, and web component files while excluding binaries and archives
 - Drop supported project source/text files onto the composer to add them to local context; files outside the active project, secret files, excluded files, and binary/unsupported types are ignored
 - Explicit Code task mode with project-scoped list/read/search tools and file creation/replacement governed by the project permission mode; Auto applies proposals with rollback checkpoints, while instruction-risk matches remain advisory. OpenAI-hosted Code tasks use strict function schemas backed by local argument validation. Changes create local recovery checkpoints and can be reviewed, restored, or undone/redone through Files
+- Optional MCP integrations for Code tasks over stdio or HTTP, including tools, prompts, resources, environment-backed credentials, browser-based OAuth, and project-scoped permissions; see [MCP server setup](docs/mcp-servers.md)
 - Optional Avalonia semantic project search for trusted projects: build or incrementally update an Ollama embedding index in Settings, then enable **Use semantic search** per conversation. Indexing and vectors stay local; install the selected embedding model separately. Retrieved excerpts are sent to a hosted provider only when the existing workspace-sharing option is enabled. The feature is off by default, and its index can be deleted in Settings.
 - Conversation history stays in `%LOCALAPPDATA%\Codev\conversations.json` on Windows (other systems use the per-user local application data folder, under `Codev`) and is written atomically; unreadable history is preserved before Codev switches to a separate recovery file
 - Right-click complete conversation turns to propose and edit a summary for a selected range; summaries affect future prompts only, stay in backups, and can be cleared to restore full history. Ollama nearing an explicitly selected context limit offers compaction for review; model-default context usage is shown without guessing its size.
@@ -166,7 +169,7 @@ To run Codev with a separate local profile, set `CODEV_DATA_ROOT` to an absolute
 | `Codev.Tests/` | Portable tests for the core (plain .NET; runs on every OS) |
 | `Codev.Windows.Tests/` | Windows-only tests for PowerShell command execution |
 | `Codev.Avalonia/` | The cross-platform Avalonia desktop app |
-| `docs/` | Manual test checklists |
+| `docs/` | User guides and manual test checklists |
 | `bench/` | A local-model coding benchmark (nine tasks checked against hidden tests) and its results; see [bench/README.md](bench/README.md) |
 | `DESIGN.md` | The interaction model, roadmap and feature backlog |
 
