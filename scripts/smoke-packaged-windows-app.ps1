@@ -865,22 +865,31 @@ function Set-PermissionMode($Window, $ModeButton, [string]$MenuItemName, [string
     $menuItem.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 
-    $settingsPath = Join-Path $dataRoot 'Codev\avalonia-settings.json'
-    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    # The view-model updates the footer only after its atomic settings write completes.
+    # Wait for that signal before opening the settings file; polling the destination during
+    # File.Move(overwrite: true) can hold a Windows read handle and make the save fail.
+    $labelDeadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
-        $persistedMode = $null
-        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-            try {
-                $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-                $persistedMode = [string]$settings.DefaultProjectCommandPermissionMode
-            }
-            catch { }
-        }
-        if ($ModeButton.Current.Name -eq $ExpectedLabel -and $persistedMode -eq $ExpectedSetting) { return }
+        $currentLabel = $ModeButton.Current.Name
+        if ($currentLabel -eq $ExpectedLabel) { break }
         Start-Sleep -Milliseconds 100
-    } while ([DateTime]::UtcNow -lt $deadline)
+    } while ([DateTime]::UtcNow -lt $labelDeadline)
+    if ($currentLabel -ne $ExpectedLabel) {
+        throw "Selecting '$MenuItemName' did not update the footer to '$ExpectedLabel' (label='$currentLabel')."
+    }
 
-    throw "Selecting '$MenuItemName' did not persist '$ExpectedSetting' or update the footer to '$ExpectedLabel' (label='$($ModeButton.Current.Name)', setting='$persistedMode')."
+    $settingsPath = Join-Path $dataRoot 'Codev\avalonia-settings.json'
+    $persistedMode = $null
+    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+        try {
+            $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+            $persistedMode = [string]$settings.DefaultProjectCommandPermissionMode
+        }
+        catch { throw "Could not read the saved permission mode after the footer confirmed completion: $($_.Exception.Message)" }
+    }
+    if ($persistedMode -ne $ExpectedSetting) {
+        throw "Selecting '$MenuItemName' did not persist '$ExpectedSetting' (setting='$persistedMode')."
+    }
 }
 
 function Invoke-BackupMenuItem([string]$AutomationId) {
