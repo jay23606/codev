@@ -1682,7 +1682,9 @@ public static class CodevCommonDialog
     } while ([DateTime]::UtcNow -lt $denyReplyDeadline)
     if (-not $denyTranscript.Contains($manualDenialText, [StringComparison]::Ordinal) -or
         -not (Test-Path -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt'))) {
-        throw 'The Ask-mode Deny exact command action did not preserve the fixture and record the denied command result.'
+        $denyRequestDiagnostics = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue |
+            ForEach-Object { $_ | ConvertFrom-Json } | Select-Object -Last 4 | ConvertTo-Json -Depth 8 -Compress)
+        throw "The Ask-mode Deny exact command action did not preserve the fixture and record the denied command result (markerExists=$(Test-Path -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt')), requests=$denyRequestDiagnostics, transcript='$($denyTranscript.Substring([Math]::Max(0, $denyTranscript.Length - 1800)))')."
     }
     Set-PermissionMode $window $modeButton 'Auto · approve unless denied' 'Auto ▾' 'Auto' $autoProject
     $autoDeniedPrompt = 'Run the packaged Auto exact-deny smoke.'
