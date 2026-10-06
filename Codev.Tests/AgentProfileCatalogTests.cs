@@ -90,6 +90,32 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Theory]
+    [InlineData("tools: mcp:*=deny, mcp_github_*=allow", "mcp_github_search_repos")]
+    [InlineData("tools: mcp_github_*=allow, mcp:*=deny", "mcp_github_search_repos")]
+    [InlineData("commands: npm test=deny, npm *=allow", "npm test")]
+    [InlineData("commands: npm *=allow, npm test=deny", "npm test")]
+    public void Matching_profile_deny_rules_cannot_be_overridden_by_overlapping_allows(string policy, string subject)
+    {
+        var contents = $"---\nname: DenyWins\ndescription: Denials remain effective when patterns overlap.\n{policy}\n---\nKeep denied actions blocked.";
+        Assert.True(AgentProfileCatalog.TryParse("deny-wins.md", contents, "user", out var profile, out var error), error);
+
+        var permission = policy.StartsWith("tools:", StringComparison.Ordinal)
+            ? AgentProfilePolicy.PermissionFor(profile, subject)
+            : AgentProfilePolicy.PermissionFor(profile, "run_command", subject);
+
+        Assert.Equal(AgentToolPermission.Deny, permission);
+    }
+
+    [Fact]
+    public void Command_allow_cannot_override_a_matching_tool_deny()
+    {
+        const string contents = "---\nname: DenyCommands\ndescription: Keep command execution denied.\ntools: run_command=deny\ncommands: *=allow\n---\nDo not run commands.";
+        Assert.True(AgentProfileCatalog.TryParse("deny-commands.md", contents, "user", out var profile, out var error), error);
+
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "npm test"));
+    }
+
+    [Theory]
     [InlineData("temperature: 2.1", "temperature must be")]
     [InlineData("max_steps: 99", "max_steps must be")]
     [InlineData("default_permission: execute", "default_permission must be")]

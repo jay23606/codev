@@ -51,12 +51,20 @@ public static class AgentProfilePolicy
                 : pattern.Contains('*')
                     ? AgentProfileCatalog.GlobMatches(pattern, toolName)
                     : pattern.Equals(toolName, StringComparison.OrdinalIgnoreCase);
-            if (matches) permission = rule;
+            if (matches)
+            {
+                if (rule == AgentToolPermission.Deny) return AgentToolPermission.Deny;
+                permission = rule;
+            }
         }
         if ((toolName is "run_command" or "verify_command" or "start_background_command") && command is not null)
         {
             foreach (var (pattern, rule) in profile.CommandPermissions ?? new Dictionary<string, AgentToolPermission>())
-                if (AgentProfileCatalog.CommandPatternMatches(pattern, command)) permission = rule;
+            {
+                if (!AgentProfileCatalog.CommandPatternMatches(pattern, command)) continue;
+                if (rule == AgentToolPermission.Deny) return AgentToolPermission.Deny;
+                permission = rule;
+            }
         }
         return permission;
     }
