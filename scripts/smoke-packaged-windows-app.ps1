@@ -1741,6 +1741,21 @@ public static class CodevCommonDialog
         throw 'The packaged verification output row did not start collapsed or was not exposed as a toggle.'
     }
     $verificationToggle.Toggle()
+    # Expanding the nested output can add enough height to move its text box
+    # below the viewport. Scroll after that expansion so UIA exposes the
+    # actual output control instead of only the always-visible settings UI.
+    if ($conversationScrollPattern.Current.VerticallyScrollable) {
+        $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+        $outputScrollDeadline = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+            $activityScrollPosition = [double]$conversationScrollPattern.Current.VerticalScrollPercent
+            if ($activityScrollPosition -ge 99) { break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $outputScrollDeadline)
+        if ($activityScrollPosition -lt 99) {
+            throw "The conversation did not scroll to the expanded verification output (vertical=$activityScrollPosition)."
+        }
+    }
     $verificationOutputDeadline = [DateTime]::UtcNow.AddSeconds(5)
     $verificationOutput = $null
     $verificationOutputCandidates = [System.Collections.Generic.List[string]]::new()
