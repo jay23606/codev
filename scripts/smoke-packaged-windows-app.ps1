@@ -1745,7 +1745,13 @@ public static class CodevCommonDialog
     $verificationExpandDeadline = [DateTime]::UtcNow.AddSeconds(3)
     do {
         # TogglePattern.Toggle can return before Avalonia has updated the
-        # template, and the original UIA element may be invalidated by it.
+        # template, and expanding can invalidate both the child row and its
+        # parent UIA element. Reacquire both from the exact activity summary.
+        $activityExpander = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $activityExpanderCondition)
+        if ($null -eq $activityExpander) {
+            Start-Sleep -Milliseconds 100
+            continue
+        }
         $verificationRow = $activityExpander.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.PropertyCondition]::new(
                 [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
