@@ -971,6 +971,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Exact-head CI and four-RID desktop preview (2026-10-06, source head `a3f0bc1`).** Windows CI [#37419359371](https://github.com/jay23606/codev/actions/runs/37419359371) passed portable, Windows-specific, and Avalonia UI tests on Windows, Linux, and macOS. Desktop preview [#37419359538](https://github.com/jay23606/codev/actions/runs/37419359538) passed packaged app/CLI checks for win-x64, linux-x64, osx-arm64, and osx-x64, including Windows UI/Auto, Linux Xvfb, and both macOS window-server interaction smokes. The public-release job was skipped because the change remains on an open PR. This closes the exact-head automated package gate; clean-machine installs and remaining Q3 manual security/accessibility/platform checks remain open.
 
+**Local queue and conversation-isolation recheck (2026-10-06, Windows 11, Qwen3.6-35B-A3B).** Two opt-in Avalonia live tests passed. A new conversation completed while another conversation's recovered queue stayed paused, and a recovered prompt plus a follow-up remained queued until explicit resume, then completed in FIFO order with generation statistics and no queued turns left. These exercise the view-model/model integration with actual local inference; they do not verify the packaged app's visible queue controls, closing/relaunching during active generation, or follow-up scheduling behind a currently streaming response.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
