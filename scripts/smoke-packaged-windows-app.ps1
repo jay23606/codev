@@ -1377,14 +1377,19 @@ public static class CodevCommonDialog
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Button)
     $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $allButtonCondition)
+    $keyboardFocusableAppButtonCount = 0
     for ($index = 0; $index -lt $buttons.Count; $index++) {
         $button = $buttons.Item($index)
         if ([string]::IsNullOrWhiteSpace($button.Current.Name)) {
             throw "A packaged-app button has no accessible name (automation id '$($button.Current.AutomationId)')."
         }
+        # Windows exposes native caption buttons as UIA buttons even though they
+        # are system commands, not stops in the app's Tab order.
+        if ($button.Current.Name -in @('Minimize', 'Maximize', 'Close')) { continue }
         if (-not $button.Current.IsKeyboardFocusable) {
-            throw "A packaged-app button is not keyboard-focusable ('$($button.Current.Name)')."
+            throw "A packaged-app button is not keyboard-focusable ('$($button.Current.Name)', automation id '$($button.Current.AutomationId)')."
         }
+        $keyboardFocusableAppButtonCount++
     }
 
     Test-ConversationRename $window $dataRoot
@@ -1725,7 +1730,7 @@ public static class CodevCommonDialog
         Test-PinnedConversationSearchArchiveRestore $window $dataRoot
         Test-PermanentConversationDelete $window $dataRoot
         $smokeSucceeded = $true
-        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $($buttons.Count) named, keyboard-focusable buttons, $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, sidebar rename/pin/search/archive/restore/permanent-delete, persisted Auto mode, and a collapsed multi-action tool group that expands to readable rows. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
+        Write-Host "Packaged app smoke passed with a window inside the monitor work area, $keyboardFocusableAppButtonCount named, keyboard-focusable app buttons (native window-caption controls are checked for names but are not app Tab stops), $($edits.Count) named text fields, $($comboBoxes.Count) named selectors, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, sidebar rename/pin/search/archive/restore/permanent-delete, persisted Auto mode, and a collapsed multi-action tool group that expands to readable rows. Native Save/Open dialogs are skipped on GitHub-hosted runners because their desktop does not expose them as an activatable foreground window; the native round-trip passed locally on Windows 11."
         return
     }
 
@@ -1822,7 +1827,7 @@ public static class CodevCommonDialog
         }
     }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $($buttons.Count) named keyboard-focusable buttons, successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart, and a collapsed multi-action activity summary that expands to readable rows. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $keyboardFocusableAppButtonCount named, keyboard-focusable app button(s), successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart, and a collapsed multi-action activity summary that expands to readable rows. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
     if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected in Code task mode, edited and saved through the native profile editor, and remained selected across app restarts.' }
     if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected through the native Code task picker and persisted across app restarts.' }
 }
