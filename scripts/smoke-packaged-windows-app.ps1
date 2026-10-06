@@ -1731,7 +1731,7 @@ public static class CodevCommonDialog
         catch { $expanderOffscreen = "unavailable ($($_.Exception.GetType().Name))" }
         throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; expanderOffscreen=$expanderOffscreen; scrollPercent=$activityScrollPosition; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
     }
-    $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+    $verificationRow = $activityExpander.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
     $verificationToggle = $null
@@ -1746,7 +1746,7 @@ public static class CodevCommonDialog
     do {
         # TogglePattern.Toggle can return before Avalonia has updated the
         # template, and the original UIA element may be invalidated by it.
-        $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        $verificationRow = $activityExpander.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.PropertyCondition]::new(
                 [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
         $verificationToggle = $null
@@ -1817,7 +1817,7 @@ public static class CodevCommonDialog
     } while ([DateTime]::UtcNow -lt $verificationOutputDeadline)
     if ($null -eq $verificationOutput -or $verificationOutput.Contains('untrusted_tool_output', [StringComparison]::Ordinal)) {
         $verificationChildren = @()
-        $verificationRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        $verificationRow = $activityExpander.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.PropertyCondition]::new(
                 [System.Windows.Automation.AutomationElement]::NameProperty, 'Ran node --version'))
         try {
