@@ -591,9 +591,8 @@ public sealed class LiveLocalModelTests
         Directory.CreateDirectory(project);
         const string marker = "ACTIVITY_SMOKE_MARKER_76f2";
         await File.WriteAllTextAsync(Path.Combine(project, "README.md"), $"Fixture marker: {marker}\n");
-        await File.WriteAllTextAsync(Path.Combine(project, "game.js"), "const answer = 42;\n");
         MainViewModel? viewModel = null;
-        var approvalRequests = 0;
+        var fileReviewWasShown = false;
         try
         {
             viewModel = new MainViewModel(appData);
@@ -610,12 +609,12 @@ public sealed class LiveLocalModelTests
             conversation.NumPredict = 1200;
             conversation.ThinkEnabled = false;
             conversation.Temperature = 0;
-            viewModel.ApproveProjectCommandAsync = _ =>
+            viewModel.ReviewFileChangeAsync = (_, _, _, _, _, _, _) =>
             {
-                Interlocked.Increment(ref approvalRequests);
-                return Task.FromResult(ProjectCommandApprovalChoice.Cancel);
+                fileReviewWasShown = true;
+                return Task.FromResult(false);
             };
-            viewModel.Draft = $"Use the Codev tools in this exact order: (1) read_file README.md, (2) search_files for the exact text {marker}, (3) create_file activity-report.txt with exactly the text {marker}. Call each tool once and wait for its result before the next. Do not use any other tools or edit other files. After all three results, briefly report what you did.";
+            viewModel.Draft = $"Use the Codev tools in this exact order: (1) read_file README.md, (2) search_files for the exact text {marker}, (3) create_file activity-report.txt with exactly the text {marker}. Call each tool once and wait for its result before the next. After all three results, briefly report what you did.";
 
             var send = typeof(MainViewModel).GetMethod("SendDraftAsync", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(send);
@@ -633,7 +632,7 @@ public sealed class LiveLocalModelTests
             var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
             Assert.True(sawGeneration, $"The local Code task did not start. Transcript: {transcript}");
             Assert.False(viewModel.IsGenerating, $"The local Code task did not finish within six minutes. Transcript: {transcript}");
-            Assert.Equal(0, Volatile.Read(ref approvalRequests));
+            Assert.False(fileReviewWasShown, $"Auto mode opened a file review. Transcript: {transcript}");
             Assert.Equal(marker, (await File.ReadAllTextAsync(Path.Combine(project, "activity-report.txt"))).Trim());
 
             var assistantMessages = conversation.Messages.Where(message => message.Role == "assistant").ToArray();
