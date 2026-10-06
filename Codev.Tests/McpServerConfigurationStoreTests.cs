@@ -59,6 +59,34 @@ public sealed class McpServerConfigurationStoreTests : IDisposable
         Assert.Throws<ArgumentException>(() => McpServerConfigurationStore.NormalizeAndValidate(configuration));
     }
 
+    [Fact]
+    public void Stdio_transport_does_not_inherit_arbitrary_process_environment()
+    {
+        var allowedVariable = "CODEV_MCP_ALLOWED_" + Guid.NewGuid().ToString("N");
+        var unrelatedVariable = "CODEV_MCP_UNRELATED_" + Guid.NewGuid().ToString("N");
+        var previousAllowed = Environment.GetEnvironmentVariable(allowedVariable);
+        var previousUnrelated = Environment.GetEnvironmentVariable(unrelatedVariable);
+        Environment.SetEnvironmentVariable(allowedVariable, "mapped-test-value");
+        Environment.SetEnvironmentVariable(unrelatedVariable, "must-not-be-forwarded");
+        try
+        {
+            var server = new McpServerConfiguration("local", "Local", McpServerTransportKind.Stdio, true,
+                Command: "node", EnvironmentVariables: new Dictionary<string, string> { ["MCP_TOKEN"] = allowedVariable });
+
+            var options = McpCodeTaskSession.CreateStdioTransportOptions(server);
+
+            Assert.False(options.InheritEnvironmentVariables);
+            Assert.Equal("mapped-test-value", options.EnvironmentVariables!["MCP_TOKEN"]);
+            Assert.DoesNotContain(unrelatedVariable, options.EnvironmentVariables.Keys);
+            Assert.DoesNotContain("must-not-be-forwarded", options.EnvironmentVariables.Values);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(allowedVariable, previousAllowed);
+            Environment.SetEnvironmentVariable(unrelatedVariable, previousUnrelated);
+        }
+    }
+
     [Theory]
     [InlineData("Bad Header")]
     [InlineData("X:Injected")]

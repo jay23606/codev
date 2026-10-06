@@ -824,22 +824,7 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     {
         if (server.Transport == McpServerTransportKind.Stdio)
         {
-            var environment = StdioClientTransportOptions.GetDefaultEnvironmentVariables();
-            foreach (var (name, variableName) in server.EnvironmentVariables ?? new Dictionary<string, string>())
-            {
-                var value = Environment.GetEnvironmentVariable(variableName);
-                if (value is null) throw new InvalidOperationException($"Required environment variable '{variableName}' is not set.");
-                environment[name] = value;
-            }
-            return new McpBoundedStdioClientTransport(new StdioClientTransportOptions
-            {
-                Command = server.Command,
-                Arguments = server.Arguments?.ToArray() ?? [],
-                WorkingDirectory = string.IsNullOrWhiteSpace(server.WorkingDirectory) ? null : server.WorkingDirectory,
-                Name = "Codev MCP " + server.Id,
-                InheritEnvironmentVariables = false,
-                EnvironmentVariables = environment
-            }, NullLoggerFactory.Instance);
+            return new McpBoundedStdioClientTransport(CreateStdioTransportOptions(server), NullLoggerFactory.Instance);
         }
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -885,6 +870,31 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
             Timeout = Timeout.InfiniteTimeSpan
         };
         return new HttpClientTransport(options, httpClient, NullLoggerFactory.Instance, ownsHttpClient: true);
+    }
+
+    internal static StdioClientTransportOptions CreateStdioTransportOptions(McpServerConfiguration server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        if (server.Transport != McpServerTransportKind.Stdio)
+            throw new ArgumentException("Only stdio MCP servers have process transport options.", nameof(server));
+
+        var environment = StdioClientTransportOptions.GetDefaultEnvironmentVariables();
+        foreach (var (name, variableName) in server.EnvironmentVariables ?? new Dictionary<string, string>())
+        {
+            var value = Environment.GetEnvironmentVariable(variableName);
+            if (value is null) throw new InvalidOperationException($"Required environment variable '{variableName}' is not set.");
+            environment[name] = value;
+        }
+
+        return new StdioClientTransportOptions
+        {
+            Command = server.Command,
+            Arguments = server.Arguments?.ToArray() ?? [],
+            WorkingDirectory = string.IsNullOrWhiteSpace(server.WorkingDirectory) ? null : server.WorkingDirectory,
+            Name = "Codev MCP " + server.Id,
+            InheritEnvironmentVariables = false,
+            EnvironmentVariables = environment
+        };
     }
 
     private static string SafeLabel(string? value) => string.IsNullOrWhiteSpace(value) ? "MCP server" : Bound(value.Trim(), 80);
