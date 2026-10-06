@@ -2,6 +2,7 @@ using System.Text.Json;
 
 namespace Codev.Tests;
 
+[Collection(ShellProcessLifecycleCollection.Name)]
 public sealed class CodeTaskToolExecutorTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "Codev-agent-tests", Guid.NewGuid().ToString("N"));

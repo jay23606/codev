@@ -20,6 +20,7 @@ using System.Text.Json;
 
 namespace Codev.Avalonia.Tests;
 
+[Collection(ShellProcessLifecycleCollection.Name)]
 public sealed class MainWindowTests
 {
     [AvaloniaFact]

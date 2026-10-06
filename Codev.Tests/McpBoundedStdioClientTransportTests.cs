@@ -6,6 +6,7 @@ using ModelContextProtocol.Client;
 
 namespace Codev.Tests;
 
+[Collection(ShellProcessLifecycleCollection.Name)]
 public sealed class McpBoundedStdioClientTransportTests
 {
     [Fact]
