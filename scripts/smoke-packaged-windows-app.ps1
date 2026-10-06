@@ -1573,18 +1573,18 @@ public static class CodevCommonDialog
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, $activityName)
     $activityElements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $activityNameCondition)
-    $activityToggle = $null
+    $activityExpander = $null
     foreach ($candidate in $activityElements) {
-        $togglePattern = $null
-        if ($candidate.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$togglePattern)) {
-            $activityToggle = $candidate
+        $expandCollapsePattern = $null
+        if ($candidate.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) {
+            $activityExpander = $candidate
             break
         }
     }
-    if ($null -eq $activityToggle) { throw "The packaged activity summary '$activityName' was not exposed as a toggle." }
-    $activityTogglePattern = $null
-    if (-not $activityToggle.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$activityTogglePattern) -or
-        $activityTogglePattern.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+    if ($null -eq $activityExpander) { throw "The packaged activity summary '$activityName' was not exposed as an expandable group." }
+    $activityExpanderPattern = $null
+    if (-not $activityExpander.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$activityExpanderPattern) -or
+        $activityExpanderPattern.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) {
         throw 'The packaged multi-action activity summary did not start collapsed.'
     }
     $activityRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
@@ -1601,7 +1601,7 @@ public static class CodevCommonDialog
             throw "The packaged activity smoke tool round $($index + 1) was unexpected: $($request | ConvertTo-Json -Depth 8 -Compress)"
         }
     }
-    $activityTogglePattern.Toggle()
+    $activityExpanderPattern.Expand()
     Start-Sleep -Milliseconds 150
     $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran node --version')
     foreach ($rowName in $activityRows) {
