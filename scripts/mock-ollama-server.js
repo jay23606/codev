@@ -12,7 +12,8 @@ const activitySummary = args.includes("--activity-summary");
 const AUTO_COMMAND_PROMPT = autoDestructive
   ? "Run the packaged Auto destructive-command smoke."
   : "Run the packaged Auto mode command smoke.";
-const AUTO_DENY_PROMPT = "Run the packaged Auto exact-deny smoke.";
+const ASK_DENY_PROMPT = "Run the packaged exact-deny smoke in Ask mode.";
+const AUTO_DENY_PROMPT = "Run the packaged exact-deny smoke in Auto mode.";
 const ACTIVITY_SUMMARY_PROMPT = "Run the packaged multi-action activity-summary smoke.";
 function option(name) {
   const index = args.indexOf(name);
@@ -152,7 +153,9 @@ const server = http.createServer((request, response) => {
       writeJson({ model: MODEL, message: { role: "assistant", content: autoReply }, done: true });
       return;
     }
-    if (autoDestructive && entry.last_user_message === AUTO_DENY_PROMPT && entry.last_role === "user") {
+    if (autoDestructive &&
+        (entry.last_user_message === ASK_DENY_PROMPT || entry.last_user_message === AUTO_DENY_PROMPT) &&
+        entry.last_role === "user") {
       if (!entry.tool_names.includes("run_command")) {
         response.writeHead(400);
         response.end("The Auto exact-deny smoke did not expose run_command");
@@ -161,13 +164,18 @@ const server = http.createServer((request, response) => {
       callTool("run_command", { command: "Remove-Item -Recurse -Force signaling; git --version" });
       return;
     }
-    if (autoDestructive && entry.last_user_message === AUTO_DENY_PROMPT && entry.last_role === "tool") {
+    if (autoDestructive &&
+        (entry.last_user_message === ASK_DENY_PROMPT || entry.last_user_message === AUTO_DENY_PROMPT) &&
+        entry.last_role === "tool") {
       if (entry.last_tool_name !== "run_command") {
         response.writeHead(400);
         response.end("Auto exact-deny smoke returned an unexpected tool result");
         return;
       }
-      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged Auto exact-deny command passed." }, done: true });
+      const result = entry.last_user_message === ASK_DENY_PROMPT
+        ? "Packaged Ask exact-deny command passed."
+        : "Packaged Auto exact-deny command passed.";
+      writeJson({ model: MODEL, message: { role: "assistant", content: result }, done: true });
       return;
     }
     if (entry.stream !== true) {

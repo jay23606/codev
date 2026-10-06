@@ -1738,7 +1738,7 @@ public static class CodevCommonDialog
     $null = New-Item -ItemType Directory -Path $commandFixture
     Set-Content -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt') -Value 'disposable Auto deny fixture' -NoNewline
     Set-PermissionMode $window $modeButton 'Ask every time' 'Ask every time ▾' 'AskEveryTime' $autoProject
-    $denyPrompt = 'Run the packaged Auto exact-deny smoke.'
+    $denyPrompt = 'Run the packaged exact-deny smoke in Ask mode.'
     $autoComposer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait($denyPrompt)
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
@@ -1825,7 +1825,7 @@ public static class CodevCommonDialog
         throw "The Ask-mode Deny exact command action did not preserve the fixture and record the denied command result (markerExists=$(Test-Path -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt')), requests=$denyRequestDiagnostics, transcript='$($denyTranscript.Substring([Math]::Max(0, $denyTranscript.Length - 1800)))')."
     }
     Set-PermissionMode $window $modeButton 'Auto · approve unless denied' 'Auto ▾' 'Auto' $autoProject
-    $autoDeniedPrompt = 'Run the packaged Auto exact-deny smoke.'
+    $autoDeniedPrompt = 'Run the packaged exact-deny smoke in Auto mode.'
     $autoComposer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait($autoDeniedPrompt)
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
