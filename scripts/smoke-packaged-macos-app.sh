@@ -180,6 +180,20 @@ end tell
 APPLESCRIPT
 }
 
+read_selected_agent_profile() {
+  python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+if conversation is None:
+    raise SystemExit("The active macOS conversation disappeared during the Auto command smoke.")
+print(conversation.get("AgentProfileName") or "")
+PY
+}
+
 report_mode_button_state() {
   local automation_id="$1"
   osascript - "$app_pid" "$automation_id" <<'APPLESCRIPT'
@@ -516,34 +530,16 @@ send_mode_shortcut
 assert_mode true false 'Packaged macOS app entered Plan before the Auto Code task smoke.'
 send_mode_shortcut
 assert_mode false true 'Packaged macOS app entered Code task for the Auto command smoke.'
-selected_agent_profile="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    conversations = json.load(source)
-conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
-if conversation is None:
-    raise SystemExit("The active macOS conversation disappeared before the Auto command smoke.")
-print(conversation.get("AgentProfileName") or "")
-PY
-)"
+selected_agent_profile="$(read_selected_agent_profile)"
 if [[ "$selected_agent_profile" == "Plan" ]]; then
   echo 'The macOS smoke selected the read-only Plan agent; switching to Build before verifying Auto command execution.'
-  send_primary_agent_shortcut
-  for _ in {1..100}; do
-    selected_agent_profile="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    conversations = json.load(source)
-conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
-print((conversation or {}).get("AgentProfileName") or "")
-PY
-)"
-    [[ -z "$selected_agent_profile" ]] && break
-    sleep 0.1
+  for attempt in {1..5}; do
+    send_primary_agent_shortcut
+    for _ in {1..20}; do
+      selected_agent_profile="$(read_selected_agent_profile)"
+      [[ -z "$selected_agent_profile" ]] && break 2
+      sleep 0.1
+    done
   done
 fi
 if [[ -n "$selected_agent_profile" ]]; then
