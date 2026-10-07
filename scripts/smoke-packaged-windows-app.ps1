@@ -88,6 +88,40 @@ function Find-AppElementsWithRetry([int]$ProcessId, $Condition, [int]$TimeoutMil
     return
 }
 
+function Submit-PackagedComposerPrompt($Window, $Composer, [string]$Prompt) {
+    $valuePattern = $null
+    if ($null -eq $Composer -or
+        -not $Composer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        throw 'The packaged composer does not expose its editable text to UI Automation.'
+    }
+    if (-not [CodevCommonDialog]::ActivateWindow([IntPtr]$Window.Current.NativeWindowHandle)) {
+        throw 'Could not activate the packaged app before submitting a prompt.'
+    }
+    $Composer.SetFocus()
+    $focusDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $currentValue = [string]$valuePattern.Current.Value
+        if ($Composer.Current.HasKeyboardFocus -and [string]::IsNullOrEmpty($currentValue)) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $focusDeadline)
+    if (-not $Composer.Current.HasKeyboardFocus -or -not [string]::IsNullOrEmpty($currentValue)) {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        throw "The packaged composer was not ready for a prompt (composerFocused=$($Composer.Current.HasKeyboardFocus), currentValue='$currentValue', focusedId='$($focused.Current.AutomationId)', focusedName='$($focused.Current.Name)')."
+    }
+
+    [System.Windows.Forms.SendKeys]::SendWait($Prompt)
+    $entryDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $currentValue = [string]$valuePattern.Current.Value
+        if ($currentValue -eq $Prompt) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $entryDeadline)
+    if ($currentValue -ne $Prompt) {
+        throw "The packaged composer did not retain the submitted prompt (expected='$Prompt', actual='$currentValue')."
+    }
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+}
+
 function Wait-ForTopLevelWindow([string]$Name, [int]$TimeoutSeconds = 5) {
     $condition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
@@ -1632,9 +1666,7 @@ public static class CodevCommonDialog
     $null = New-Item -ItemType Directory -Path $commandFixture
     Set-Content -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt') -Value 'disposable Auto command fixture' -NoNewline
     $autoPrompt = 'Run the packaged Auto destructive-command smoke.'
-    $autoComposer.SetFocus()
-    [System.Windows.Forms.SendKeys]::SendWait($autoPrompt)
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Submit-PackagedComposerPrompt $window $autoComposer $autoPrompt
     $autoReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)
     $autoTranscript = ''
     do {
@@ -1654,7 +1686,30 @@ public static class CodevCommonDialog
         -not $autoTranscript.Contains('Packaged Auto destructive command round-trip passed.', [StringComparison]::Ordinal) -or
         (Test-Path -LiteralPath $commandFixture)) {
         Get-Content $mockStdoutPath, $mockStderrPath -ErrorAction SilentlyContinue
-        throw "The packaged Windows Auto destructive command did not complete without approval: $($autoTranscript.Substring([Math]::Max(0, $autoTranscript.Length - 1500)))"
+        $autoRequestDiagnostics = @()
+        if (Test-Path -LiteralPath $mockRequestLog -PathType Leaf) {
+            $autoRequestDiagnostics = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue |
+                Select-Object -Last 5 | ForEach-Object {
+                    try {
+                        $request = $_ | ConvertFrom-Json
+                        [pscustomobject]@{
+                            Model = $request.model
+                            LastRole = $request.last_role
+                            LastTool = $request.last_tool_name
+                            LastUserMessage = $request.last_user_message
+                            Tools = @($request.tool_names)
+                            KeepAlive = $request.keep_alive
+                        }
+                    }
+                    catch { "Could not parse request-log row: $($_.Exception.Message)" }
+                })
+        }
+        $autoFailureDetails = [pscustomobject]@{
+            RecentMockRequests = $autoRequestDiagnostics
+            WorkspaceFixtureStillExists = Test-Path -LiteralPath $commandFixture
+            TranscriptTail = $autoTranscript.Substring([Math]::Max(0, $autoTranscript.Length - 1500))
+        } | ConvertTo-Json -Depth 5 -Compress
+        throw "The packaged Windows Auto destructive command did not complete without approval. Diagnostics: $autoFailureDetails"
     }
     $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
     if ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) {
@@ -1684,9 +1739,7 @@ public static class CodevCommonDialog
     $activityPrompt = 'Run the packaged multi-action activity-summary smoke.'
     $activityComposer = Find-ByAutomationId $window 'ComposerTextBox'
     if ($null -eq $activityComposer) { throw 'The composer is missing for the packaged multi-action smoke.' }
-    $activityComposer.SetFocus()
-    [System.Windows.Forms.SendKeys]::SendWait($activityPrompt)
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Submit-PackagedComposerPrompt $window $activityComposer $activityPrompt
     $activityDeadline = [DateTime]::UtcNow.AddSeconds(60)
     $activityTranscript = ''
     do {
@@ -1897,9 +1950,7 @@ public static class CodevCommonDialog
     Set-Content -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt') -Value 'disposable Auto deny fixture' -NoNewline
     Set-PermissionMode $window $modeButton 'Ask every time' 'Ask every time ▾' 'AskEveryTime' $autoProject
     $denyPrompt = 'Run the packaged exact-deny smoke in Ask mode.'
-    $autoComposer.SetFocus()
-    [System.Windows.Forms.SendKeys]::SendWait($denyPrompt)
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Submit-PackagedComposerPrompt $window $autoComposer $denyPrompt
     $denyButtonCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -1984,9 +2035,7 @@ public static class CodevCommonDialog
     }
     Set-PermissionMode $window $modeButton 'Auto · approve unless denied' 'Auto ▾' 'Auto' $autoProject
     $autoDeniedPrompt = 'Run the packaged exact-deny smoke in Auto mode.'
-    $autoComposer.SetFocus()
-    [System.Windows.Forms.SendKeys]::SendWait($autoDeniedPrompt)
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Submit-PackagedComposerPrompt $window $autoComposer $autoDeniedPrompt
     $autoDeniedDeadline = [DateTime]::UtcNow.AddSeconds(25)
     $savedDenialText = $denialResultText
     $autoDeniedTranscript = ''
