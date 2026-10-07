@@ -200,12 +200,13 @@ public sealed class McpBoundedStdioClientTransportTests
         Directory.CreateDirectory(root);
         var processIdPath = Path.Combine(root, "server.pid");
         var safeProcessIdPath = processIdPath.Replace("'", "''", StringComparison.Ordinal);
-        var options = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        var isWindows = OperatingSystem.IsWindows();
+        var existingTimeoutProcessIds = isWindows ? GetRunningProcessIdsByName("timeout") : [];
+        var options = isWindows
             ? new StdioClientTransportOptions
             {
-                Command = "powershell.exe",
-                Arguments = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-                    $"$childStart = [System.Diagnostics.ProcessStartInfo]::new((Join-Path $env:windir 'System32\\timeout.exe'), '/t 30 /nobreak'); $childStart.UseShellExecute = $false; $childStart.CreateNoWindow = $true; $childStart.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden; $child = [System.Diagnostics.Process]::Start($childStart); Set-Content -NoNewline -LiteralPath '{safeProcessIdPath}' -Value \"$PID $($child.Id)\"; Start-Sleep -Seconds 30"],
+                Command = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+                Arguments = ["/D", "/C", BuildWindowsProcessTreeCommand()],
                 Name = "process-tree-lifecycle-test"
             }
             : new StdioClientTransportOptions
@@ -220,10 +221,13 @@ public sealed class McpBoundedStdioClientTransportTests
             var clientTransport = new McpBoundedStdioClientTransport(options);
             var session = await clientTransport.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(30));
             await using var lifetime = (IAsyncDisposable)session;
-            var processIds = await WaitForProcessIdsAsync(processIdPath, TimeSpan.FromSeconds(30));
+            var processIds = isWindows
+                ? await WaitForNewProcessIdsAsync(
+                    "timeout", existingTimeoutProcessIds, expectedCount: 2, timeout: TimeSpan.FromSeconds(30))
+                : await WaitForProcessIdsAsync(processIdPath, TimeSpan.FromSeconds(30));
             Assert.Equal(2, processIds.Length);
             Assert.All(processIds, processId => Assert.True(IsProcessRunning(processId),
-                "The fixture server and child should still be running before transport disposal."));
+                "Both timeout processes should still be running before transport disposal."));
 
             await lifetime.DisposeAsync();
 
@@ -255,6 +259,46 @@ public sealed class McpBoundedStdioClientTransportTests
             await Task.Delay(50);
         }
         throw new TimeoutException("The MCP fixture server did not write both process IDs.");
+    }
+
+    private static string BuildWindowsProcessTreeCommand()
+    {
+        var timeoutExecutable = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System), "timeout.exe");
+        return $"start \"\" /B \"{timeoutExecutable}\" /t 30 /nobreak >nul & " +
+            $"\"{timeoutExecutable}\" /t 30 /nobreak >nul";
+    }
+
+    private static HashSet<int> GetRunningProcessIdsByName(string processName)
+    {
+        var processIds = new HashSet<int>();
+        foreach (var process in Process.GetProcessesByName(processName))
+        {
+            using (process)
+            {
+                if (!process.HasExited) processIds.Add(process.Id);
+            }
+        }
+        return processIds;
+    }
+
+    private static async Task<int[]> WaitForNewProcessIdsAsync(
+        string processName,
+        IReadOnlySet<int> existingProcessIds,
+        int expectedCount,
+        TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var newProcessIds = GetRunningProcessIdsByName(processName)
+                .Where(processId => !existingProcessIds.Contains(processId))
+                .Take(expectedCount)
+                .ToArray();
+            if (newProcessIds.Length == expectedCount) return newProcessIds;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException($"The MCP fixture server did not start {expectedCount} {processName} processes.");
     }
 
     private static async Task WaitForProcessesExitAsync(IReadOnlyList<int> processIds, TimeSpan timeout)
