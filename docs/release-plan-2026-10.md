@@ -1,18 +1,18 @@
 # October staged release plan
 
-Status checked 2026-10-07. This is a proposed sequence for the next public Codev release and its early follow-up. It does not authorize merging PR #1, waiving release checks, or publishing a tag.
+Status checked 2026-10-07 against PR head `7473609`. This is the proposed sequence for the next public Codev release and its early follow-up. It does not authorize merging PR #1, waiving release checks, or publishing a tag.
 
 ## Release 1: early preview
 
 Publish the current Avalonia candidate as a clearly labeled early preview once PR #1 reaches `main` and every Q3 release check in `DESIGN.md` is either completed or has a written, release-specific waiver. Use the repository's existing `v*` tag workflow, which publishes self-contained desktop and CLI archives for Windows x64, Linux x64, macOS Apple silicon, and macOS Intel. The README's `/releases/latest/download/` links already point users to the newest tag, with Windows first.
 
-The current candidate at `d368ba4` has passing exact-head cross-platform CI [#37672451159](https://github.com/jay23606/codev/actions/runs/37672451159) and four-RID package evidence [#37672451176](https://github.com/jay23606/codev/actions/runs/37672451176). The self-contained native Windows packaged smoke also passed from the current application source in an isolated profile. The PR is open and has not been merged or tagged.
+The current candidate is `7473609`, which adds Windows packaged UI coverage for reading-width, font-family and font-size selection and restart persistence. Its exact-head cross-platform CI [#37673983558](https://github.com/jay23606/codev/actions/runs/37673983558) and four-RID package/interaction run [#37673983484](https://github.com/jay23606/codev/actions/runs/37673983484) are in progress. The full self-contained native Windows packaged smoke passed locally in an isolated profile. PR #1 remains open, and this candidate has not been merged or tagged.
 
-Before publishing, finish or explicitly waive the remaining Q3 checks. Known open areas include a clean-machine installation (this Windows host does not have Windows Sandbox), native macOS/Linux desktop interaction, screen-reader/accessibility coverage, and the broader manual security review. Do not describe hosted runner interaction as physical-keyboard or clean-machine validation. Put any accepted limitations in the release notes.
+Before publishing, finish or explicitly waive the remaining Q3 checks. The smoke checklist still contains many unchecked feature-specific manual cases, including native macOS/Linux desktop interaction, assistive-technology and 200% scaling checks, and manual workflows for project context, tools, permissions and recovery. A clean-machine installation is also open (this Windows host does not have Windows Sandbox). Do not describe hosted runner interaction as physical-keyboard or clean-machine validation. Put any accepted limitations in the release notes.
 
 ## Release 2: early stabilization
 
-Target the next release 3–5 days after Release 1, based on the latest `main`. During that interval, gather installation failures and actionable user reports, fix any release blockers first, and select small usability or reliability fixes for the follow-up. Re-run Windows/Linux/macOS CI, all four packaged desktop/CLI checks, and the Windows packaged smoke on the exact candidate commit. Update the release notes and verify the latest README download links resolve to all expected archives.
+Target the next release 3–5 days after Release 1, based on the latest `main`. Treat Release 1 as Day 0 and schedule Release 2 for Day 3–5; that gives early users time to try installation without leaving the follow-up open-ended. During that interval, gather installation failures and actionable user reports, fix any release blockers first, and select small usability or reliability fixes for the follow-up. Re-run Windows/Linux/macOS CI, all four packaged desktop/CLI checks, and the Windows packaged smoke on the exact candidate commit. Update the release notes and verify the latest README download links resolve to all expected archives.
 
 If testing finds a data-loss, unauthorized-action, startup-crash, or false-success defect, delay Release 2 until it is fixed and verified. If no release-blocking issue appears, publish the tested follow-up tag on schedule and carry remaining non-blocking Q3 limitations forward with clear notes.
 
