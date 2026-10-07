@@ -1703,12 +1703,18 @@ public static class CodevCommonDialog
     if (-not $autoProject.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "The Windows Auto command smoke did not use an isolated private workspace: '$autoProject'."
     }
-    $commandFixture = Join-Path $autoProject 'signaling'
+    $autoDestructiveCommand = 'Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short'
+    $commandRepository = Join-Path $autoProject 'space-invaders-game'
+    $commandFixture = Join-Path $commandRepository 'signaling'
     if (Test-Path -LiteralPath $commandFixture) {
         throw "The Windows Auto command fixture unexpectedly already exists: '$commandFixture'."
     }
     $null = New-Item -ItemType Directory -Path $commandFixture
     Set-Content -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt') -Value 'disposable Auto command fixture' -NoNewline
+    & git -C $commandRepository init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the disposable Git repository for the Auto smoke.' }
+    & git -C $commandRepository add signaling/smoke-marker.txt
+    if ($LASTEXITCODE -ne 0) { throw 'Could not stage the disposable Git marker for the Auto smoke.' }
     $autoPrompt = 'Run the packaged Auto destructive-command smoke.'
     Submit-PackagedComposerPrompt $window $autoComposer $autoPrompt
     $autoReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)
@@ -1725,8 +1731,7 @@ public static class CodevCommonDialog
         catch { }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $autoReplyDeadline)
-    if (-not $autoTranscript.Contains('git version', [StringComparison]::OrdinalIgnoreCase) -or
-        -not $autoTranscript.Contains('Remove-Item -Recurse -Force signaling; git --version', [StringComparison]::Ordinal) -or
+    if (-not $autoTranscript.Contains($autoDestructiveCommand, [StringComparison]::Ordinal) -or
         -not $autoTranscript.Contains('Packaged Auto destructive command round-trip passed.', [StringComparison]::Ordinal) -or
         (Test-Path -LiteralPath $commandFixture)) {
         Get-Content $mockStdoutPath, $mockStderrPath -ErrorAction SilentlyContinue
@@ -1992,6 +1997,8 @@ public static class CodevCommonDialog
     # Auto, and prove the same command is blocked without another prompt.
     $null = New-Item -ItemType Directory -Path $commandFixture
     Set-Content -LiteralPath (Join-Path $commandFixture 'smoke-marker.txt') -Value 'disposable Auto deny fixture' -NoNewline
+    & git -C $commandRepository add signaling/smoke-marker.txt
+    if ($LASTEXITCODE -ne 0) { throw 'Could not stage the disposable Git marker for the exact-deny smoke.' }
     Set-PermissionMode $window $modeButton 'Ask every time' 'Ask every time ▾' 'AskEveryTime' $autoProject
     $denyPrompt = 'Run the packaged exact-deny smoke in Ask mode.'
     Submit-PackagedComposerPrompt $window $autoComposer $denyPrompt
@@ -2041,7 +2048,7 @@ public static class CodevCommonDialog
                 [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
             })
             $savedDeny = $permissionEntry.Count -eq 1 -and @($permissionEntry[0].Rules | Where-Object {
-                [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and
+                [string]$_.Command -ceq $autoDestructiveCommand -and
                 ($_.Decision -eq 2 -or [string]$_.Decision -eq 'Deny')
             }).Count -eq 1
             if ($savedDeny) { break }
@@ -2108,7 +2115,7 @@ public static class CodevCommonDialog
         [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
     })
     $denyRulePersisted = $permissionEntry.Count -eq 1 -and @($permissionEntry[0].Rules | Where-Object {
-        [string]$_.Command -ceq 'Remove-Item -Recurse -Force signaling; git --version' -and
+        [string]$_.Command -ceq $autoDestructiveCommand -and
         ($_.Decision -eq 2 -or [string]$_.Decision -eq 'Deny')
     }).Count -eq 1
     if ($permissionEntry.Count -ne 1 -or [string]$permissionEntry[0].Mode -ne 'Auto' -or -not $denyRulePersisted) {
@@ -2124,7 +2131,7 @@ public static class CodevCommonDialog
         @($mockRequests | Where-Object { $_.keep_alive -ne '30m' }).Count -ne 0) {
         throw "The exact-deny model/tool request sequence was unexpected: $($mockRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
-    Write-Host 'Packaged Windows Auto mode ran an unlisted destructive command, saved an exact Deny in Ask mode, returned to Auto, and blocked the same command without approval or side effects.'
+    Write-Host 'Packaged Windows Auto mode ran the screenshot-matched deletion-plus-git-status command in a disposable repository, saved an exact Deny in Ask mode, returned to Auto, and blocked the same command without approval or side effects.'
 
 
     Test-AgentProfileEditorInPackagedApp $window $dataRoot

@@ -15,6 +15,7 @@ const AUTO_COMMAND_PROMPT = autoDestructive
 const ASK_DENY_PROMPT = "Run the packaged exact-deny smoke in Ask mode.";
 const AUTO_DENY_PROMPT = "Run the packaged exact-deny smoke in Auto mode.";
 const ACTIVITY_SUMMARY_PROMPT = "Run the packaged multi-action activity-summary smoke.";
+const AUTO_DESTRUCTIVE_COMMAND = "Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short";
 function option(name) {
   const index = args.indexOf(name);
   if (index < 0 || !args[index + 1]) throw new Error(`Missing ${name} argument.`);
@@ -72,6 +73,7 @@ const server = http.createServer((request, response) => {
       keep_alive: payload.keep_alive,
       last_role: lastMessage.role ?? null,
       last_tool_name: lastMessage.tool_name ?? null,
+      last_content: lastMessage.content ?? null,
       last_user_message: lastUserMessage?.content ?? null,
       tool_names: tools.map(toolName).filter(Boolean),
       tool_shapes: tools.slice(0, 8).map(tool => ({
@@ -135,7 +137,7 @@ const server = http.createServer((request, response) => {
       }
       writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
         { function: { name: autoCommandTool, arguments: { command: autoDestructive
-          ? "Remove-Item -Recurse -Force signaling; git --version"
+          ? AUTO_DESTRUCTIVE_COMMAND
           : "node --version" } } },
       ] }, done: true });
       return;
@@ -146,6 +148,19 @@ const server = http.createServer((request, response) => {
         response.writeHead(400);
         response.end("Auto smoke returned an unexpected tool result");
         return;
+      }
+      if (autoDestructive) {
+        let toolOutput;
+        try { toolOutput = JSON.parse(entry.last_content); }
+        catch { response.writeHead(400); response.end("Auto smoke returned malformed command output"); return; }
+        if (toolOutput?.type !== "untrusted_tool_output" ||
+            toolOutput.command !== AUTO_DESTRUCTIVE_COMMAND ||
+            !toolOutput.content.includes("Exit code: 0") ||
+            !toolOutput.content.includes("signaling/smoke-marker.txt")) {
+          response.writeHead(400);
+          response.end(`Auto smoke did not return the expected successful Git deletion status: ${JSON.stringify(toolOutput)}`);
+          return;
+        }
       }
       const autoReply = autoDestructive
         ? "Packaged Auto destructive command round-trip passed."
@@ -161,7 +176,7 @@ const server = http.createServer((request, response) => {
         response.end("The Auto exact-deny smoke did not expose run_command");
         return;
       }
-      callTool("run_command", { command: "Remove-Item -Recurse -Force signaling; git --version" });
+      callTool("run_command", { command: AUTO_DESTRUCTIVE_COMMAND });
       return;
     }
     if (autoDestructive &&
