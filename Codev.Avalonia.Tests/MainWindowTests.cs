@@ -1470,6 +1470,36 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Platform_search_shortcut_focuses_search_and_shift_enter_keeps_composer_draft_multiline()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            var composer = Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox"));
+            var search = Assert.IsType<TextBox>(window.FindControl<TextBox>("SearchTextBox"));
+            composer.Focus();
+            var primaryModifier = OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
+            window.KeyPress(Key.F, primaryModifier, PhysicalKey.F, "f");
+            Assert.True(search.IsFocused, "Command/Ctrl+F should focus conversation search.");
+
+            search.Text = "";
+            composer.Focus();
+            window.KeyTextInput("first line");
+            window.KeyPress(Key.Enter, RawInputModifiers.Shift, PhysicalKey.Enter, "\n");
+            window.KeyTextInput("second line");
+
+            Assert.Equal("first line\nsecond line", (composer.Text ?? "").Replace("\r\n", "\n", StringComparison.Ordinal));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Single_tool_output_has_no_redundant_outer_group_and_starts_collapsed()
     {
         var window = new MainWindow();
