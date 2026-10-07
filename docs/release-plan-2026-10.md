@@ -1,12 +1,12 @@
 # October staged release plan
 
-Status checked 2026-10-07 against PR head `7473609`. This is the proposed sequence for the next public Codev release and its early follow-up. It does not authorize merging PR #1, waiving release checks, or publishing a tag.
+Status checked 2026-10-07 against PR head `b7ce8ec`. This is the proposed sequence for the next public Codev release and its early follow-up. It does not authorize merging PR #1, waiving release checks, or publishing a tag.
 
 ## Release 1: early preview
 
 Publish the current Avalonia candidate as a clearly labeled early preview once PR #1 reaches `main` and every Q3 release check in `DESIGN.md` is either completed or has a written, release-specific waiver. Use the repository's existing `v*` tag workflow, which publishes self-contained desktop and CLI archives for Windows x64, Linux x64, macOS Apple silicon, and macOS Intel. The README's `/releases/latest/download/` links already point users to the newest tag, with Windows first.
 
-The current candidate is `7473609`, which adds Windows packaged UI coverage for reading-width, font-family and font-size selection and restart persistence. Its exact-head cross-platform CI [#37673983558](https://github.com/jay23606/codev/actions/runs/37673983558) and four-RID package/interaction run [#37673983484](https://github.com/jay23606/codev/actions/runs/37673983484) are in progress. The full self-contained native Windows packaged smoke passed locally in an isolated profile. PR #1 remains open, and this candidate has not been merged or tagged.
+The current candidate is PR head `b7ce8ec`; the app source remains the packaged build from `7473609`, with follow-up changes covering display-layout tests and reliable Linux credential-smoke setup. Exact-head Windows/Linux/macOS CI [#37676708333](https://github.com/jay23606/codev/actions/runs/37676708333) and all four packaged desktop/CLI previews [#37676708328](https://github.com/jay23606/codev/actions/runs/37676708328) passed, including the native Linux MCP OAuth Secret Service check. The full self-contained native Windows packaged smoke passed locally in an isolated profile. PR #1 is open with a clean merge state, and no release tag has been created.
 
 Before publishing, finish or explicitly waive the remaining Q3 checks. The smoke checklist still contains many unchecked feature-specific manual cases, including native macOS/Linux desktop interaction, assistive-technology and 200% scaling checks, and manual workflows for project context, tools, permissions and recovery. A clean-machine installation is also open (this Windows host does not have Windows Sandbox). Do not describe hosted runner interaction as physical-keyboard or clean-machine validation. Put any accepted limitations in the release notes.
 
