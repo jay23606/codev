@@ -1103,6 +1103,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Current-source real-model context-warning check (2026-10-07, PR app source `7473609`, local Windows / Qwen3.6-35B-A3B).** Ran `Live_local_default_context_warning_follows_a_real_completed_turn` with `CODEV_OLLAMA_LIVE_TESTS=1`. The real local response completed with Model default and reported input tokens; the UI model state showed the unknown-context warning, hid it while an unsent draft was present, restored it when the draft cleared, and hid it after choosing explicit 8K. The test passed in 8 seconds and used a temporary app-data root. It does not validate hosted-provider behavior or native visual interaction; those checklist portions remain open.
 
+**Current-source live Auto verification rerun (2026-10-07, PR app source `7473609`, local Windows / Qwen3.6-35B-A3B).** Ran `Live_auto_code_task_runs_verification_without_showing_command_approval` with `CODEV_OLLAMA_LIVE_TESTS=1` in a newly created, trusted temporary project. Qwen called `verify_command` exactly once with `dotnet --version`; it exited successfully, no file was edited, and the approval callback count stayed at zero. The outgoing request retained `keep_alive: 30m`. The test passed in 1 minute 6 seconds. This reconfirms the real local Auto verification path; it does not establish the complete permission-mode/manual UI workflow or hosted-model behavior, which remain open in the Q3 checklist.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
