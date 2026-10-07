@@ -1117,6 +1117,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Current-head parallel-agent isolation rerun (2026-10-07, PR source head `9a17ea5`).** `Live_orchestrator_starts_two_read_only_children_in_parallel_worktrees` passed locally on Windows/.NET 10 with Qwen3.6-35B-A3B in 1m38s. The Orchestrator launched two overlapping Ask-profile children in distinct managed worktrees, each returned its assigned fixture value, and the disposable parent repository remained clean. The test prompt prohibited child delegation and shell commands; this revalidates model-to-delegation and managed file/Git isolation, not shell confinement or the native UI stop/result/review/merge/recovery flow, which remains open in Q3.
 
+**Current-head live Auto/MCP policy rerun (2026-10-07, PR source head `84c7d70`).** `OllamaAutoPolicyIntegrationTests` passed 2/2 locally on Windows/.NET 10 with Qwen3.6-35B-A3B in 1m01s. The real model-selected verification command ran through Auto without invoking approval; the hostile MCP-metadata case either refused the injected instruction or used only the requested in-memory echo tool, verified the result stayed marked untrusted, and confirmed an exact saved Deny blocked the next call before server invocation. This is opt-in local-model evidence; the broader hosted-provider and native UI permission flows remain open in Q3.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
