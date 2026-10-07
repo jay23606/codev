@@ -319,6 +319,36 @@ public sealed class McpCodeTaskToolTests
             Assert.Contains("read MCP resource templates", ToolOutputSummary.Build(parsedTemplate.Outputs), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(2, Volatile.Read(ref resourceTemplateReads));
 
+            // Ask-mode cancellation must stop every MCP operation before the server handler runs.
+            await commandPermissions.SetModeAsync(workspace, ProjectCommandPermissionMode.AskEveryTime);
+            var askExecutor = new CodeTaskToolExecutor(new WorkspaceFileService(workspace), new Conversation(),
+                _ => Task.FromResult(false), _ => Task.FromResult(false),
+                mcpTools: session.Tools,
+                mcpCall: (mcpTool, args, token) => session.CallAsync(mcpTool.FunctionName, args, token),
+                mcpPermissionApproval: (mcpTool, _, _) =>
+                {
+                    var decision = permissions.Evaluate(workspace, commandPermissions.GetMode(workspace), mcpTool.ServerId,
+                        mcpTool.ToolName, mcpTool.PermissionFingerprint);
+                    if (decision == ProjectCommandPermissionDecision.Ask) promptCount++;
+                    return Task.FromResult(decision == ProjectCommandPermissionDecision.Ask
+                        ? CommandApprovalOutcome.Rejected
+                        : CommandApprovalOutcome.Denied);
+                });
+            var refusedTool = await askExecutor.ExecuteAsync(tool.FunctionName, arguments.RootElement);
+            Assert.Contains("MCP tool call rejected; the server was not called", refusedTool, StringComparison.Ordinal);
+            Assert.Equal(1, Volatile.Read(ref toolCalls));
+            var refusedPrompt = await askExecutor.ExecuteAsync(prompt.FunctionName, promptArguments.RootElement);
+            Assert.Contains("MCP tool call rejected; the server was not called", refusedPrompt, StringComparison.Ordinal);
+            Assert.Equal(3, Volatile.Read(ref promptCalls));
+            var refusedResource = await askExecutor.ExecuteAsync(resource.FunctionName, emptyArguments.RootElement);
+            Assert.Contains("MCP tool call rejected; the server was not called", refusedResource, StringComparison.Ordinal);
+            Assert.Equal(3, Volatile.Read(ref resourceReads));
+            var refusedTemplate = await askExecutor.ExecuteAsync(resourceTemplate.FunctionName, templateArguments.RootElement);
+            Assert.Contains("MCP tool call rejected; the server was not called", refusedTemplate, StringComparison.Ordinal);
+            Assert.Equal(2, Volatile.Read(ref resourceTemplateReads));
+            Assert.Equal(4, promptCount);
+
+            await commandPermissions.SetModeAsync(workspace, ProjectCommandPermissionMode.Auto);
             await permissions.SetRuleAsync(workspace, tool.ServerId, tool.ToolName, ProjectCommandPermissionDecision.Deny,
                 tool.PermissionFingerprint);
             var denied = await executor.ExecuteAsync(tool.FunctionName, arguments.RootElement);
