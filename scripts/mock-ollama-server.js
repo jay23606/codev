@@ -9,6 +9,7 @@ const REPLY = "Packaged chat round-trip passed.";
 const args = process.argv.slice(2);
 const autoDestructive = args.includes("--auto-destructive");
 const activitySummary = args.includes("--activity-summary");
+const mcpToolSmoke = args.includes("--mcp-tool");
 const AUTO_COMMAND_PROMPT = autoDestructive
   ? "Run the packaged Auto destructive-command smoke."
   : "Run the packaged Auto mode command smoke.";
@@ -16,6 +17,9 @@ const ASK_DENY_PROMPT = "Run the packaged exact-deny smoke in Ask mode.";
 const AUTO_DENY_PROMPT = "Run the packaged exact-deny smoke in Auto mode.";
 const ACTIVITY_SUMMARY_PROMPT = "Run the packaged multi-action activity-summary smoke.";
 const AUTO_DESTRUCTIVE_COMMAND = "Remove-Item -Recurse -Force space-invaders-game/signaling; git -C space-invaders-game status --short";
+const MCP_TOOL_PROMPT = "Run the packaged MCP tool smoke.";
+const MCP_TOOL_NAME_PREFIX = "mcp_smoke-mcp_echo_";
+const MCP_TOOL_MESSAGE = "packaged MCP marker";
 function option(name) {
   const index = args.indexOf(name);
   if (index < 0 || !args[index + 1]) throw new Error(`Missing ${name} argument.`);
@@ -96,6 +100,34 @@ const server = http.createServer((request, response) => {
     const callTool = (name, args) => writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
       { function: { name, arguments: args } },
     ] }, done: true });
+    if (mcpToolSmoke && entry.last_user_message === MCP_TOOL_PROMPT && entry.last_role === "user") {
+      const mcpToolName = entry.tool_names.find(name => name.startsWith(MCP_TOOL_NAME_PREFIX));
+      if (!mcpToolName) {
+        response.writeHead(400);
+        response.end(`The packaged MCP smoke did not discover its echo tool: ${JSON.stringify(entry.tool_names)}`);
+        return;
+      }
+      callTool(mcpToolName, { message: MCP_TOOL_MESSAGE });
+      return;
+    }
+    if (mcpToolSmoke && entry.last_user_message === MCP_TOOL_PROMPT && entry.last_role === "tool") {
+      if (!entry.last_tool_name?.startsWith(MCP_TOOL_NAME_PREFIX)) {
+        response.writeHead(400);
+        response.end(`The packaged MCP smoke returned an unexpected tool: ${entry.last_tool_name}`);
+        return;
+      }
+      let toolOutput;
+      try { toolOutput = JSON.parse(entry.last_content); }
+      catch { response.writeHead(400); response.end("The packaged MCP result was malformed."); return; }
+      if (toolOutput?.type !== "untrusted_tool_output" || toolOutput.source !== "MCP tool output" ||
+          toolOutput.activity !== "mcp_tool" || !toolOutput.content.includes(`MCP_SMOKE_ECHO:${MCP_TOOL_MESSAGE}`)) {
+        response.writeHead(400);
+        response.end(`The packaged MCP result was not bounded untrusted tool output: ${JSON.stringify(toolOutput)}`);
+        return;
+      }
+      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged MCP tool call passed." }, done: true });
+      return;
+    }
     if (activitySummary && entry.last_user_message === ACTIVITY_SUMMARY_PROMPT && entry.last_role === "user") {
       if (!entry.tool_names.includes("read_file")) {
         response.writeHead(400);

@@ -25,6 +25,8 @@ $stdoutPath = Join-Path $smokeRoot 'stdout.log'
 $stderrPath = Join-Path $smokeRoot 'stderr.log'
 $mockPortPath = Join-Path $smokeRoot 'mock-ollama.port'
 $mockRequestLog = Join-Path $smokeRoot 'mock-ollama-requests.jsonl'
+$mcpCallLogPath = Join-Path $smokeRoot 'mock-mcp-calls.jsonl'
+$mcpProcessLogPath = Join-Path $smokeRoot 'mock-mcp-processes.txt'
 $mockStdoutPath = Join-Path $smokeRoot 'mock-ollama.stdout.log'
 $mockStderrPath = Join-Path $smokeRoot 'mock-ollama.stderr.log'
 $previousDataRoot = $env:CODEV_DATA_ROOT
@@ -1167,8 +1169,20 @@ try {
     $null = New-Item -ItemType Directory -Path $settingsDirectory -Force
     $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
     $mockServerPath = Join-Path $PSScriptRoot 'mock-ollama-server.js'
+    $mcpServerPath = Join-Path $PSScriptRoot 'mock-mcp-stdio-server.js'
+    $mcpConfiguration = @([pscustomobject]@{
+        id = 'smoke-mcp'
+        name = 'Packaged smoke MCP'
+        transport = 'Stdio'
+        enabled = $true
+        command = $nodePath
+        arguments = @($mcpServerPath, '--call-log', $mcpCallLogPath, '--process-log', $mcpProcessLogPath)
+        workingDirectory = (Split-Path $PSScriptRoot -Parent)
+    })
+    ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6 |
+        Set-Content -LiteralPath (Join-Path $settingsDirectory 'mcp-servers.json') -Encoding utf8
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
-        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--mcp-tool', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
     $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
@@ -1819,7 +1833,7 @@ public static class CodevCommonDialog
         $conversationScrollPattern.Current.VerticallyScrollable) {
         $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
     }
-    $activityName = 'Read files, searched files, created a file, ran commands'
+    $activityName = 'Did other things, read files, searched files, created a file, ran commands'
     $activityIdCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander')
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
@@ -2133,6 +2147,66 @@ public static class CodevCommonDialog
     }
     Write-Host 'Packaged Windows Auto mode ran the screenshot-matched deletion-plus-git-status command in a disposable repository, saved an exact Deny in Ask mode, returned to Auto, and blocked the same command without approval or side effects.'
 
+    $mcpPrompt = 'Run the packaged MCP tool smoke.'
+    Submit-PackagedComposerPrompt $window $autoComposer $mcpPrompt
+    $mcpReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    $mcpTranscript = ''
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1 -and @($matches[0].Messages).Count -gt 0) {
+                $mcpTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($mcpTranscript.Contains('Packaged MCP tool call passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpReplyDeadline)
+    if (-not $mcpTranscript.Contains($mcpPrompt, [StringComparison]::Ordinal) -or
+        -not $mcpTranscript.Contains('Packaged MCP tool call passed.', [StringComparison]::Ordinal) -or
+        $modeButton.Current.Name -ne 'Auto ▾') {
+        $recentMcpRequests = @()
+        if (Test-Path -LiteralPath $mockRequestLog -PathType Leaf) {
+            $recentMcpRequests = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue |
+                Select-Object -Last 5 | ForEach-Object {
+                    try {
+                        $request = $_ | ConvertFrom-Json
+                        [pscustomobject]@{
+                            LastRole = $request.last_role
+                            LastTool = $request.last_tool_name
+                            LastUserMessage = $request.last_user_message
+                            Tools = @($request.tool_names | Where-Object { $_ -like 'mcp_smoke-mcp_echo_*' })
+                        }
+                    }
+                    catch { "Could not parse request-log row: $($_.Exception.Message)" }
+                })
+        }
+        throw "The packaged MCP tool call did not complete under Auto mode. Recent model requests: $($recentMcpRequests | ConvertTo-Json -Depth 5 -Compress); transcript tail: $($mcpTranscript.Substring([Math]::Max(0, $mcpTranscript.Length - 1500)))"
+    }
+    $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
+    if ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) {
+        throw 'The packaged MCP tool call displayed an inline approval panel while Auto was selected.'
+    }
+    $mcpCalls = @()
+    if (Test-Path -LiteralPath $mcpCallLogPath -PathType Leaf) {
+        $mcpCalls = @(Get-Content -LiteralPath $mcpCallLogPath | ForEach-Object { $_ | ConvertFrom-Json })
+    }
+    if ($mcpCalls.Count -ne 1 -or [string]$mcpCalls[0].name -ne 'echo' -or
+        [string]$mcpCalls[0].message -ne 'packaged MCP marker') {
+        throw "The packaged MCP server did not receive exactly the expected tool call: $($mcpCalls | ConvertTo-Json -Depth 5 -Compress)"
+    }
+    $mcpModelRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.last_user_message -eq $mcpPrompt })
+    if ($mcpModelRequests.Count -ne 2 -or
+        @($mcpModelRequests[0].tool_names | Where-Object { $_ -like 'mcp_smoke-mcp_echo_*' }).Count -ne 1 -or
+        $mcpModelRequests[0].last_role -ne 'user' -or
+        $mcpModelRequests[1].last_role -ne 'tool' -or
+        -not [string]$mcpModelRequests[1].last_content -or
+        $mcpModelRequests[1].keep_alive -ne '30m') {
+        throw "The packaged MCP discovery/tool-result request sequence was unexpected: $($mcpModelRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    Write-Host 'Packaged Windows MCP smoke discovered a configured stdio server from isolated user settings, called its echo tool in Auto mode, returned bounded untrusted tool output to the model, and completed without an approval panel.'
 
     Test-AgentProfileEditorInPackagedApp $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
@@ -2253,8 +2327,30 @@ finally {
     if ($null -ne $app) {
         $app.Refresh()
         if (-not $app.HasExited) {
-            $app.Kill($true)
-            $app.WaitForExit(5000)
+            if ($smokeSucceeded) {
+                $null = $app.CloseMainWindow()
+                if (-not $app.WaitForExit(10000)) {
+                    $app.Kill($true)
+                    $app.WaitForExit(5000)
+                    throw 'The packaged app did not shut down gracefully for the MCP process-cleanup check.'
+                }
+            }
+            else {
+                $app.Kill($true)
+                $app.WaitForExit(5000)
+            }
+        }
+        if ($smokeSucceeded -and (Test-Path -LiteralPath $mcpProcessLogPath -PathType Leaf)) {
+            $mcpProcessIds = @(Get-Content -LiteralPath $mcpProcessLogPath | ForEach-Object { [int]$_ } | Select-Object -Unique)
+            $mcpExitDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            do {
+                $runningMcpProcesses = @($mcpProcessIds | Where-Object { $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue) })
+                if ($runningMcpProcesses.Count -eq 0) { break }
+                Start-Sleep -Milliseconds 100
+            } while ([DateTime]::UtcNow -lt $mcpExitDeadline)
+            if ($runningMcpProcesses.Count -gt 0) {
+                throw "The packaged app left MCP stdio server process(es) running after graceful shutdown: $($runningMcpProcesses -join ', ')."
+            }
         }
     }
 

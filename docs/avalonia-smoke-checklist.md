@@ -348,6 +348,7 @@ Code + conversation rewind and broader Git review scopes beyond the implemented 
 
 ## MCP server diagnostics
 
+- [x] Partial packaged Windows stdio MCP path (Windows 11, 2026-10-07, .NET 10.0.401): the self-contained win-x64 app loaded one enabled server from an isolated user-level `mcp-servers.json`, discovered its tool in the local-model schema, called it in Auto mode without an approval panel, and returned its result as bounded untrusted output. Graceful app shutdown also terminated the spawned MCP process. The separate HTTP/SSE, prompt/resource/template, Ask/Deny, OAuth, timeout, and malformed-settings scenarios below remain open.
 - [ ] Configure one stdio server and one Streamable HTTP server with a harmless tool; verify both connect, discover the tool, and complete a Code task call. Configure an SSE-only server and verify Codev falls back to SSE after the Streamable HTTP probe.
 - [ ] Have a test server advertise a tool, a prompt with required and optional arguments, a text resource, and a parameterized resource template; verify each operation is discoverable, results are bounded and marked untrusted, and the activity summary/expanded details are readable.
 - [ ] In Ask mode, deny a tool, prompt, and resource read and verify none reaches the server. In Auto, verify each runs without another prompt; add an exact Deny rule and verify it blocks before server invocation.
