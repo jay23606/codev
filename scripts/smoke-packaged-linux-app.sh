@@ -352,7 +352,10 @@ xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+n
 for _ in {1..100}; do
   current_conversation_id="$(jq -r '.' "$active_path" 2>/dev/null || true)"
-  if [[ -n "$current_conversation_id" && "$current_conversation_id" != "$previous_conversation_id" ]]; then break; fi
+  if [[ -n "$current_conversation_id" && "$current_conversation_id" != "$previous_conversation_id" ]] && \
+     jq -e --arg id "$current_conversation_id" '.[] | select(.Id == $id)' "$conversations_path" >/dev/null 2>&1; then
+    break
+  fi
   if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the Linux Ctrl+N shortcut smoke.' >&2; exit 1; fi
   sleep 0.1
 done
