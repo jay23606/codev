@@ -259,6 +259,66 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
     throw 'Selecting Smoke QA in the packaged primary-agent picker did not persist to the active conversation.'
 }
 
+function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
+    $mcpButton = Find-ByAutomationId $Window 'McpServersButton'
+    if ($null -eq $mcpButton) { throw 'The MCP servers settings button is missing.' }
+    $invoke = $null
+    if (-not $mcpButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+        throw 'The MCP servers settings button cannot be opened through UI Automation.'
+    }
+    $invoke.Invoke()
+
+    $dialog = Wait-ForTopLevelWindow 'MCP servers' 10
+    if ($null -eq $dialog) { throw 'The MCP servers editor did not open.' }
+    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit)
+    $editor = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
+    if ($null -eq $editor) { throw 'The MCP servers editor did not expose its JSON field.' }
+    $editorValue = $null
+    if (-not $editor.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$editorValue)) {
+        throw 'The MCP servers JSON field does not expose its value to UI Automation.'
+    }
+    $configurationText = [string]$editorValue.Current.Value
+    if (-not $configurationText.Contains('Packaged smoke MCP', [StringComparison]::Ordinal) -or
+        -not $configurationText.Contains('smoke-mcp', [StringComparison]::Ordinal)) {
+        throw "The MCP servers editor did not load the isolated fixture configuration: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
+    }
+
+    $saveCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Save servers'))
+    $saveButton = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $saveCondition)
+    $saveInvoke = $null
+    if ($null -eq $saveButton -or -not $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
+        throw 'The MCP editor Save servers button is missing or cannot be activated.'
+    }
+    $saveInvoke.Invoke()
+    $closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $dialog = Wait-ForTopLevelWindow 'MCP servers' 1
+        if ($null -eq $dialog) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $closeDeadline)
+    if ($null -ne $dialog) { throw 'Saving the MCP server settings did not close the editor.' }
+
+    $configurationPath = Join-Path $DataRoot 'Codev\mcp-servers.json'
+    $savedConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
+    try {
+        if ($savedConfiguration.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
+            $savedConfiguration.RootElement.GetArrayLength() -ne 1 -or
+            $savedConfiguration.RootElement[0].GetProperty('name').GetString() -ne 'Packaged smoke MCP') {
+            throw 'The MCP server settings editor did not preserve the isolated server list as a JSON array.'
+        }
+    }
+    finally { $savedConfiguration.Dispose() }
+    Write-Host 'Packaged Windows MCP settings editor loaded and saved its isolated stdio server configuration.'
+}
+
 function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
     $moreButton = Find-ByAutomationId $Window 'MoreButton'
     if ($null -eq $moreButton) { throw 'The More menu button is missing for the agent-profile editor smoke.' }
@@ -1341,6 +1401,7 @@ public static class CodevCommonDialog
         $windowBounds.Right -gt $workingArea.Right -or $windowBounds.Bottom -gt $workingArea.Bottom) {
         throw "The packaged main window extends outside the monitor work area (window=$([int]$windowBounds.Left),$([int]$windowBounds.Top),$([int]$windowBounds.Width),$([int]$windowBounds.Height); workArea=$($workingArea.X),$($workingArea.Y),$($workingArea.Width),$($workingArea.Height))."
     }
+    Test-McpSettingsEditorInPackagedApp $window $dataRoot
 
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,

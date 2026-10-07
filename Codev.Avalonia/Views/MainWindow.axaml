@@ -167,7 +167,7 @@
                 <StackPanel Grid.Row="4" Spacing="1" Margin="0,0,0,8">
                     <Button Classes="nav" Content="☁  Connect hosted models…" Click="ConfigureCloudProvider_Click" ToolTip.Tip="Connect OpenAI or Anthropic using an API key; cloud requests require an explicit acknowledgement" />
                     <Button Classes="nav" Content="⚙  Settings…" Click="Settings_Click" ToolTip.Tip="Configure Ollama and local semantic indexes" />
-                    <Button Classes="nav" Content="🔌  MCP servers…" Click="McpServers_Click" ToolTip.Tip="Configure external MCP tools for Code tasks" />
+                    <Button Classes="nav" Content="🔌  MCP servers…" Click="McpServers_Click" ToolTip.Tip="Configure external MCP tools for Code tasks" AutomationProperties.AutomationId="McpServersButton" AutomationProperties.Name="MCP servers" />
                     <Button x:Name="ChatBackupsButton" AutomationProperties.AutomationId="ChatBackupsButton" Classes="nav" Content="⇧⇩  Chat backups…" ToolTip.Tip="Import or export conversation backups">
                         <Button.Flyout>
                             <MenuFlyout>
