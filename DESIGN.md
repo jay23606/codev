@@ -1107,6 +1107,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Current-source live Auto file-edit rerun (2026-10-07, PR app source `7473609`, local Windows / Qwen3.6-35B-A3B).** `Live_local_code_task_applies_a_file_edit_in_auto_without_showing_review` passed with `CODEV_OLLAMA_LIVE_TESTS=1` in 6 seconds. In a fresh trusted temporary project, the model's requested file edit was applied, a rollback checkpoint was saved, and the review callback was never invoked. This reconfirms the local Auto file-write path; it does not close native UI, hosted-provider, or broader Q3 manual checks. The dated checklist records the scope and earlier packaged Windows Auto evidence.
 
+**Exact-head cross-platform release preview (2026-10-07, PR head `cc75034`).** Windows/Linux/macOS CI [#37680057619](https://github.com/jay23606/codev/actions/runs/37680057619) passed, including portable tests, Avalonia headless UI on all three operating systems, native Windows/Linux/macOS credential-store checks, dependency auditing, and A9 benchmark validation. The packaged desktop/CLI preview [#37680057706](https://github.com/jay23606/codev/actions/runs/37680057706) passed win-x64, linux-x64, osx-arm64, and osx-x64, including packaged UI and local-model interaction checks. The public-release job was skipped because PR #1 remains open. These exact-head automated checks pass; clean-machine installation, native accessibility, and remaining manual Q3 workflows remain open.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.

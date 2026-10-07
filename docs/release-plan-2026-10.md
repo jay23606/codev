@@ -1,12 +1,12 @@
 # October staged release plan
 
-Status checked 2026-10-07 against PR head `e9a6339`. This is the proposed sequence for the next public Codev release and its early follow-up. It does not authorize merging PR #1, waiving release checks, or publishing a tag.
+Status checked 2026-10-07. This is the proposed sequence for the next public Codev release and its early follow-up. It does not authorize merging PR #1, waiving release checks, or publishing a tag.
 
 ## Release 1: early preview
 
 Publish the current Avalonia candidate as a clearly labeled early preview once PR #1 reaches `main` and every Q3 release check in `DESIGN.md` is either completed or has a written, release-specific waiver. Use the repository's existing `v*` tag workflow, which publishes self-contained desktop and CLI archives for Windows x64, Linux x64, macOS Apple silicon, and macOS Intel. The README's `/releases/latest/download/` links already point users to the newest tag, with Windows first.
 
-The current candidate is PR head `e9a6339`; the packaged app source remains `7473609`, with subsequent test, documentation, and CI setup changes. Exact-head Windows/Linux/macOS CI [#37678878955](https://github.com/jay23606/codev/actions/runs/37678878955) and all four packaged desktop/CLI previews [#37678878948](https://github.com/jay23606/codev/actions/runs/37678878948) passed. The full self-contained native Windows packaged smoke passed locally in an isolated profile, and current-source Qwen3.6 Auto verification and file-edit live tests passed on Windows. PR #1 is open with a clean merge state, and no release tag has been created.
+At PR head `cc75034`, the packaged app source remained `7473609`, with subsequent test and documentation updates. Exact-head Windows/Linux/macOS CI [#37680057619](https://github.com/jay23606/codev/actions/runs/37680057619) and all four packaged desktop/CLI previews [#37680057706](https://github.com/jay23606/codev/actions/runs/37680057706) passed. The full self-contained native Windows packaged smoke passed locally in an isolated profile, and current-source Qwen3.6 Auto verification and file-edit live tests passed on Windows. PR #1 was open with a clean merge state at that check, and no release tag had been created.
 
 Before publishing, finish or explicitly waive the remaining Q3 checks. The smoke checklist currently has 65 unchecked cases, including native macOS/Linux desktop interaction, assistive-technology and 200% scaling checks, and manual workflows for project context, tools, permissions and recovery. A clean-machine installation is also open (this Windows host does not have Windows Sandbox). Do not describe hosted runner interaction as physical-keyboard or clean-machine validation. Put any accepted limitations in the release notes.
 
