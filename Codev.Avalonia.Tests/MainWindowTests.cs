@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Automation;
@@ -639,6 +640,53 @@ public sealed class MainWindowTests
             Assert.Equal(viewModel.CodeTaskTooltip, AutomationProperties.GetHelpText(codeTaskModeButton));
             var responseStyle = Assert.Single(window.GetVisualDescendants().OfType<ComboBox>(), control => AutomationProperties.GetName(control) == "Response style");
             Assert.Equal("Response style", AutomationProperties.GetName(responseStyle));
+        }
+        finally
+        {
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Main_window_composer_and_mode_controls_remain_in_bounds_at_maximum_font_size()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        MainWindow? window = null;
+        try
+        {
+            viewModel.SetUiFontSize(32);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            Assert.Equal(32, window.FontSize);
+            var controls = new Control[]
+            {
+                Assert.IsType<TextBox>(window.FindControl<TextBox>("SearchTextBox")),
+                Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox")),
+                Assert.IsType<Button>(window.FindControl<Button>("ComposerSendButton")),
+                Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
+                    AutomationProperties.GetAutomationId(button) == "PlanModeButton"),
+                Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
+                    AutomationProperties.GetAutomationId(button) == "CodeTaskModeButton")
+            };
+
+            foreach (var control in controls)
+            {
+                Assert.True(control.IsVisible, $"{control.Name ?? control.GetType().Name} should remain visible at 32pt.");
+                Assert.True(control.Bounds.Width > 0 && control.Bounds.Height > 0,
+                    $"{control.Name ?? control.GetType().Name} should retain a usable layout size at 32pt.");
+                var position = global::Avalonia.VisualExtensions.TranslatePoint(control, new Point(0, 0), window);
+                Assert.NotNull(position);
+                Assert.True(position.Value.X >= -1 && position.Value.Y >= -1,
+                    $"{control.Name ?? control.GetType().Name} should not start outside the window at 32pt: {position}.");
+                Assert.True(position.Value.X + control.Bounds.Width <= window.ClientSize.Width + 1 &&
+                            position.Value.Y + control.Bounds.Height <= window.ClientSize.Height + 1,
+                    $"{control.Name ?? control.GetType().Name} should fit within the window at 32pt: {position}, {control.Bounds}, {window.ClientSize}.");
+            }
         }
         finally
         {
