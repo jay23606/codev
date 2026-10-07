@@ -394,6 +394,86 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Model_picker_restores_an_installed_selection_and_uses_a_nonblank_fallback()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+
+        HttpMessageHandler CreateModelHandler() => new TestHttpMessageHandler((request, _) =>
+        {
+            var response = request.RequestUri!.AbsolutePath switch
+            {
+                "/api/tags" => "{\"models\":[{\"name\":\"qwen3.6:35b-a3b\",\"capabilities\":[\"completion\"]},{\"name\":\"qwen3.8:27b\",\"capabilities\":[\"completion\"]}]}",
+                "/api/ps" => "{\"models\":[{\"name\":\"qwen3.6:35b-a3b\"},{\"name\":\"qwen3.8:27b\"}]}",
+                _ => "{}"
+            };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json")
+            });
+        });
+
+        try
+        {
+            viewModel = new MainViewModel(root, CreateModelHandler());
+            await viewModel.LoadModelsAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, viewModel.Models.Count);
+            Assert.All(viewModel.Models, model =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(model.Name));
+                Assert.False(string.IsNullOrWhiteSpace(model.DisplayName));
+                Assert.Equal("ollama", model.Provider);
+            });
+
+            var preferred = Assert.Single(viewModel.Models, model => model.Name == "qwen3.8:27b");
+            viewModel.SelectedModel = preferred;
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            viewModel = new MainViewModel(root, CreateModelHandler());
+            await viewModel.LoadModelsAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("qwen3.8:27b", viewModel.Model);
+            Assert.Equal("qwen3.8:27b", viewModel.SelectedModel?.Name);
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+            var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ModelPicker"));
+            Assert.True(picker.IsVisible);
+            Assert.Equal(2, picker.Items.Count);
+            Assert.All(picker.Items.Cast<ModelChoice>(), model =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(model.Name));
+                Assert.False(string.IsNullOrWhiteSpace(model.DisplayName));
+            });
+            Assert.Equal("qwen3.8:27b", Assert.IsType<ModelChoice>(picker.SelectedItem).Name);
+
+            window.Close();
+            window = null;
+            viewModel.Model = "removed-model";
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            viewModel = new MainViewModel(root, CreateModelHandler());
+            await viewModel.LoadModelsAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(viewModel.Models[0].Name, viewModel.Model);
+            Assert.Equal(viewModel.Models[0].Name, viewModel.SelectedModel?.Name);
+            Assert.All(viewModel.Models, model =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(model.Name));
+                Assert.False(string.IsNullOrWhiteSpace(model.DisplayName));
+            });
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Backup_round_trip_through_view_model_keeps_existing_history_and_drops_runtime_authority()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
