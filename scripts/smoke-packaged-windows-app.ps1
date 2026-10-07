@@ -2305,6 +2305,85 @@ public static class CodevCommonDialog
     }
     Write-Host 'Packaged Windows Auto mode ran the screenshot-matched deletion-plus-git-status command in a disposable repository, saved an exact Deny in Ask mode, returned to Auto, and blocked the same command without approval or side effects.'
 
+    # Exercise the packaged MCP Ask path against the configured stdio server.
+    # Denying this tool must save an exact rule without invoking the server, and
+    # the decision must leave the project's Ask mode intact.
+    Set-PermissionMode $window $modeButton 'Ask every time' 'Ask every time ▾' 'AskEveryTime' $autoProject
+    $mcpDenyPrompt = 'Run the packaged MCP Ask-denial smoke.'
+    Submit-PackagedComposerPrompt $window $autoComposer $mcpDenyPrompt
+    $mcpDenyButtonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Deny this operation'))
+    $mcpApprovalDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    $mcpDenyButton = $null
+    do {
+        $mcpDenyButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $mcpDenyButtonCondition)
+        if ($null -ne $mcpDenyButton) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpApprovalDeadline)
+    if ($null -eq $mcpDenyButton) {
+        $mcpDenyRequests = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue |
+            ForEach-Object { $_ | ConvertFrom-Json } | Select-Object -Last 4 | ConvertTo-Json -Depth 8 -Compress)
+        throw "Ask mode did not expose the packaged MCP denial action (footer='$($modeButton.Current.Name)', requests=$mcpDenyRequests)."
+    }
+    $mcpDenyInvoke = $null
+    if ($mcpDenyButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$mcpDenyInvoke)) {
+        $mcpDenyInvoke.Invoke()
+    }
+    else {
+        $mcpDenyButton.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    }
+    $mcpDenyTranscript = ''
+    $mcpDenyReplyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1) {
+                $mcpDenyTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($mcpDenyTranscript.Contains('Packaged MCP Ask denial passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpDenyReplyDeadline)
+    $mcpPermissionPath = Join-Path $dataRoot 'Codev\avalonia-mcp-permissions.json'
+    $savedMcpDeny = $false
+    if (Test-Path -LiteralPath $mcpPermissionPath -PathType Leaf) {
+        $savedMcpPermissions = @(Get-Content -LiteralPath $mcpPermissionPath -Raw | ConvertFrom-Json)
+        $mcpPermissionEntry = @($savedMcpPermissions | Where-Object {
+            [System.IO.Path]::GetFullPath([string]$_.ProjectPath).Equals($autoProject, [StringComparison]::OrdinalIgnoreCase)
+        })
+        $savedMcpDeny = $mcpPermissionEntry.Count -eq 1 -and @($mcpPermissionEntry[0].Rules | Where-Object {
+            [string]$_.ServerId -ceq 'smoke-mcp' -and [string]$_.ToolName -ceq 'deny_me' -and
+            ($_.Decision -eq 2 -or [string]$_.Decision -eq 'Deny')
+        }).Count -eq 1
+    }
+    $unexpectedMcpDenyButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $mcpDenyButtonCondition)
+    if (-not $mcpDenyTranscript.Contains($mcpDenyPrompt, [StringComparison]::Ordinal) -or
+        -not $mcpDenyTranscript.Contains('Packaged MCP Ask denial passed.', [StringComparison]::Ordinal) -or
+        $modeButton.Current.Name -ne 'Ask every time ▾' -or -not $savedMcpDeny -or
+        $null -ne $unexpectedMcpDenyButton) {
+        throw "The packaged MCP operation was not denied cleanly in Ask mode (footer='$($modeButton.Current.Name)', savedDeny=$savedMcpDeny, transcript='$($mcpDenyTranscript.Substring([Math]::Max(0, $mcpDenyTranscript.Length - 1600)))')."
+    }
+    $mcpDenyRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.last_user_message -eq $mcpDenyPrompt })
+    if ($mcpDenyRequests.Count -ne 2 -or $mcpDenyRequests[0].last_role -ne 'user' -or
+        @($mcpDenyRequests[0].tool_names | Where-Object { $_ -like 'mcp_smoke-mcp_deny_me_*' }).Count -ne 1 -or
+        $mcpDenyRequests[1].last_role -ne 'tool' -or
+        $mcpDenyRequests[1].last_tool_name -notlike 'mcp_smoke-mcp_deny_me_*' -or
+        -not [string]$mcpDenyRequests[1].last_content -or
+        $mcpDenyRequests[1].keep_alive -ne '30m') {
+        throw "The packaged MCP Ask-denial model/tool request sequence was unexpected: $($mcpDenyRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    Set-PermissionMode $window $modeButton 'Auto · approve unless denied' 'Auto ▾' 'Auto' $autoProject
+    Write-Host 'Packaged Windows MCP Ask mode displayed the inline denial action, saved an exact deny for the configured stdio server/tool, left Ask selected, and returned a denied result without invoking the server.'
+
     $mcpPrompt = 'Run the packaged MCP tool smoke.'
     Submit-PackagedComposerPrompt $window $autoComposer $mcpPrompt
     $mcpReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)

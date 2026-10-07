@@ -20,6 +20,9 @@ const AUTO_DESTRUCTIVE_COMMAND = "Remove-Item -Recurse -Force space-invaders-gam
 const MCP_TOOL_PROMPT = "Run the packaged MCP tool smoke.";
 const MCP_TOOL_NAME_PREFIX = "mcp_smoke-mcp_echo_";
 const MCP_TOOL_MESSAGE = "packaged MCP marker";
+const MCP_ASK_DENY_PROMPT = "Run the packaged MCP Ask-denial smoke.";
+const MCP_DENY_TOOL_NAME_PREFIX = "mcp_smoke-mcp_deny_me_";
+const MCP_DENY_TOOL_MESSAGE = "must not reach the server";
 function option(name) {
   const index = args.indexOf(name);
   if (index < 0 || !args[index + 1]) throw new Error(`Missing ${name} argument.`);
@@ -100,6 +103,38 @@ const server = http.createServer((request, response) => {
     const callTool = (name, args) => writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
       { function: { name, arguments: args } },
     ] }, done: true });
+    if (mcpToolSmoke && entry.last_user_message === MCP_ASK_DENY_PROMPT && entry.last_role === "user") {
+      const mcpToolName = entry.tool_names.find(name => name.startsWith(MCP_DENY_TOOL_NAME_PREFIX));
+      if (!mcpToolName) {
+        response.writeHead(400);
+        response.end(`The packaged MCP Ask-denial smoke did not discover its deny_me tool: ${JSON.stringify(entry.tool_names)}`);
+        return;
+      }
+      callTool(mcpToolName, { message: MCP_DENY_TOOL_MESSAGE });
+      return;
+    }
+    if (mcpToolSmoke && entry.last_user_message === MCP_ASK_DENY_PROMPT && entry.last_role === "tool") {
+      if (!entry.last_tool_name?.startsWith(MCP_DENY_TOOL_NAME_PREFIX)) {
+        response.writeHead(400);
+        response.end(`The packaged MCP Ask-denial smoke returned an unexpected tool: ${entry.last_tool_name}`);
+        return;
+      }
+      let toolOutput;
+      try { toolOutput = JSON.parse(entry.last_content); }
+      catch { toolOutput = entry.last_content; }
+      const expectedDenial = "Denied by a saved project MCP tool permission rule; the tool was not called.";
+      const denialWasReturned = typeof toolOutput === "string"
+        ? toolOutput === expectedDenial
+        : toolOutput?.type === "untrusted_tool_output" && toolOutput.source === "MCP tool output" &&
+          toolOutput.activity === "mcp_tool" && toolOutput.content.includes(expectedDenial);
+      if (!denialWasReturned) {
+        response.writeHead(400);
+        response.end(`The packaged MCP call was not denied before server invocation: ${JSON.stringify(toolOutput)}`);
+        return;
+      }
+      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged MCP Ask denial passed." }, done: true });
+      return;
+    }
     if (mcpToolSmoke && entry.last_user_message === MCP_TOOL_PROMPT && entry.last_role === "user") {
       const mcpToolName = entry.tool_names.find(name => name.startsWith(MCP_TOOL_NAME_PREFIX));
       if (!mcpToolName) {

@@ -44,16 +44,24 @@ process.stdin.on("data", chunk => {
       continue;
     }
     if (request.method === "tools/list") {
-      respond(request.id, { tools: [{
-        name: "echo",
-        description: "Return a deterministic text marker for the packaged Codev smoke.",
-        inputSchema: {
-          type: "object",
-          properties: { message: { type: "string", minLength: 1, maxLength: 100 } },
-          required: ["message"],
-          additionalProperties: false,
+      const messageSchema = {
+        type: "object",
+        properties: { message: { type: "string", minLength: 1, maxLength: 100 } },
+        required: ["message"],
+        additionalProperties: false,
+      };
+      respond(request.id, { tools: [
+        {
+          name: "echo",
+          description: "Return a deterministic text marker for the packaged Codev smoke.",
+          inputSchema: messageSchema,
         },
-      }] });
+        {
+          name: "deny_me",
+          description: "A fixture operation that must be denied before server invocation.",
+          inputSchema: messageSchema,
+        },
+      ] });
       continue;
     }
     if (request.method === "prompts/list") { respond(request.id, { prompts: [] }); continue; }
