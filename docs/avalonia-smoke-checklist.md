@@ -1,6 +1,7 @@
 # Avalonia UI smoke checklist
 
-- [ ] In the conversation header, confirm the model, conversation mode, and Code task controls remain visible and compact. Open **Options** and verify context size, primary agent, and response style are readable, operable, and retain their current values.
+- [x] In the conversation header, confirm the model, conversation mode, and Code task controls remain visible and compact. Open **Options** and verify context size, primary agent, and response style are readable, operable, and retain their current values. **Windows 11 packaged native run (2026-10-07, PR head `492ec41`):** Release win-x64 app passed the full UI Automation smoke, including Options popover controls, profile selection, Auto-mode command/Deny, sidebar, search, collapsed activity and native backup dialogs. The host has development tools, so clean-machine installation remains unchecked; macOS/Linux native interaction remains unchecked.
+- [ ] On native macOS and Linux desktop builds, confirm the compact header and open **Options**; verify context size, primary agent, and response style are keyboard accessible and retain their current values.
 
 Use this checklist for the Avalonia desktop app across its supported operating systems. Use a disposable conversation and local Ollama for local checks. Hosted-provider checks require valid API credentials and may incur provider charges; use a disposable chat and never include project data unless separately opted in. For package-upgrade tests, use a disposable operating-system account or VM; verify that builds honor `CODEV_DATA_ROOT` before relying on it, since older tags may ignore it and write to the normal user profile.
 
