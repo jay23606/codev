@@ -201,7 +201,7 @@ public sealed class McpBoundedStdioClientTransportTests
         var processIdPath = Path.Combine(root, "server.pid");
         var safeProcessIdPath = processIdPath.Replace("'", "''", StringComparison.Ordinal);
         var isWindows = OperatingSystem.IsWindows();
-        var existingTimeoutProcessIds = isWindows ? GetRunningProcessIdsByName("timeout") : [];
+        var existingPingProcessIds = isWindows ? GetRunningProcessIdsByName("ping") : [];
         var options = isWindows
             ? new StdioClientTransportOptions
             {
@@ -223,11 +223,11 @@ public sealed class McpBoundedStdioClientTransportTests
             await using var lifetime = (IAsyncDisposable)session;
             var processIds = isWindows
                 ? await WaitForNewProcessIdsAsync(
-                    "timeout", existingTimeoutProcessIds, expectedCount: 2, timeout: TimeSpan.FromSeconds(30))
+                    "ping", existingPingProcessIds, expectedCount: 2, timeout: TimeSpan.FromSeconds(30))
                 : await WaitForProcessIdsAsync(processIdPath, TimeSpan.FromSeconds(30));
             Assert.Equal(2, processIds.Length);
             Assert.All(processIds, processId => Assert.True(IsProcessRunning(processId),
-                "Both timeout processes should still be running before transport disposal."));
+                "Both ping processes should still be running before transport disposal."));
 
             await lifetime.DisposeAsync();
 
@@ -263,10 +263,10 @@ public sealed class McpBoundedStdioClientTransportTests
 
     private static string BuildWindowsProcessTreeCommand()
     {
-        var timeoutExecutable = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.System), "timeout.exe");
-        return $"start \"\" /B \"{timeoutExecutable}\" /t 30 /nobreak >nul & " +
-            $"\"{timeoutExecutable}\" /t 30 /nobreak >nul";
+        var pingExecutable = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System), "ping.exe");
+        return $"start \"\" /B \"{pingExecutable}\" -n 31 127.0.0.1 >nul & " +
+            $"\"{pingExecutable}\" -n 31 127.0.0.1 >nul";
     }
 
     private static HashSet<int> GetRunningProcessIdsByName(string processName)
@@ -298,7 +298,7 @@ public sealed class McpBoundedStdioClientTransportTests
             if (newProcessIds.Length == expectedCount) return newProcessIds;
             await Task.Delay(50);
         }
-        throw new TimeoutException($"The MCP fixture server did not start {expectedCount} {processName} processes.");
+        throw new TimeoutException($"The MCP fixture server did not start {expectedCount} {processName}.exe processes.");
     }
 
     private static async Task WaitForProcessesExitAsync(IReadOnlyList<int> processIds, TimeSpan timeout)
