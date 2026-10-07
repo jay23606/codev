@@ -25,6 +25,61 @@ namespace Codev.Avalonia.Tests;
 public sealed class MainWindowTests
 {
     [AvaloniaFact]
+    public async Task Child_session_rows_show_running_state_collapse_and_reopen_the_child()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var parent = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            parent.Title = "Orchestrator parent fixture";
+            var child = new Conversation
+            {
+                Title = "Parallel child fixture",
+                ParentConversationId = parent.Id,
+                IsChildTaskRunning = true
+            };
+            var conversations = Assert.IsType<System.Collections.ObjectModel.ObservableCollection<Conversation>>(
+                typeof(MainViewModel).GetField("_conversations", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel));
+            conversations.Add(child);
+            typeof(MainViewModel).GetMethod("RebuildLists", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(viewModel, null);
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var expander = Assert.Single(window.GetVisualDescendants().OfType<Expander>(), item =>
+                item.DataContext is Conversation conversation && conversation.Id == parent.Id);
+            Assert.True(expander.IsVisible);
+            Assert.True(expander.IsExpanded);
+            Assert.Equal("Child sessions · 1 · 1 running", expander.Header?.ToString());
+
+            var childRow = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Parallel child fixture · running");
+            Assert.True(childRow.IsVisible);
+            await Dispatcher.UIThread.InvokeAsync(() => expander.IsExpanded = false);
+            window.UpdateLayout();
+            Assert.False(childRow.IsEffectivelyVisible);
+
+            await Dispatcher.UIThread.InvokeAsync(() => expander.IsExpanded = true);
+            window.UpdateLayout();
+            Assert.True(childRow.IsEffectivelyVisible);
+            Assert.Equal(child.Id, Assert.IsType<Conversation>(childRow.CommandParameter).Id);
+            Assert.NotNull(childRow.Command);
+            await Dispatcher.UIThread.InvokeAsync(() => childRow.Command!.Execute(childRow.CommandParameter));
+            Assert.Equal(child.Id, viewModel.ActiveConversation?.Id);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Sidebar_conversation_sections_toggle_and_persist_expanded_state()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

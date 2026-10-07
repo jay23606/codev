@@ -1076,6 +1076,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Current-branch pre-release secret and dependency scan (2026-10-07, source and docs head `4047c66`).** The repository's `GitSecretPatternScanner` ran against all added lines in `origin/main...HEAD` and reported 11 matches. Review of sanitized source lines classified them as environment-backed token/client-secret references and synthetic test fixtures (including a private-key fixture); no literal credential value was present. `scripts/audit-nuget-vulnerabilities.ps1` passed for all six project roots, including transitive packages. These point-in-time scans do not replace the open manual security review of project trust, command execution, MCP/OAuth, and untrusted project content.
 
+**Child-session sidebar UI regression (2026-10-07, .NET 10.0.401, working tree based on `cb71c52`).** Added a MainWindow headless test that seeds a running child under its parent and verifies the child-count/running label, collapse/reveal visibility, and selected child command parameter. The focused regression passed 1/1; the full Avalonia Release suite passed 57 tests with 12 opt-in live tests skipped. This validates sidebar presentation and selection plumbing, not packaged Orchestrator startup, stop controls, or review/merge/recovery windows; those Q3 checks remain open.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
