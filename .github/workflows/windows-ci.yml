@@ -68,11 +68,12 @@ jobs:
           sudo sed -i \
             -e 's#mirror+file:/etc/apt/apt-mirrors.txt#https://archive.ubuntu.com/ubuntu/#g' \
             -e 's#http://azure.archive.ubuntu.com/ubuntu/#https://archive.ubuntu.com/ubuntu/#g' \
-            -e 's/^Components:.*/Components: main/' \
+            -e 's/^Components:.*/Components: main universe/' \
             /etc/apt/sources.list.d/ubuntu.sources
           packages=()
           command -v dbus-run-session >/dev/null || packages+=(dbus-daemon)
           command -v gnome-keyring-daemon >/dev/null || packages+=(gnome-keyring)
+          command -v xvfb-run >/dev/null || packages+=(xvfb xauth)
           if ((${#packages[@]})); then
             timeout --signal=TERM --kill-after=5s 180s sudo apt-get \
               -o Acquire::Retries=2 \
@@ -91,7 +92,7 @@ jobs:
           chmod 700 "$keyring_home" "$runtime_dir"
           HOME="$keyring_home" XDG_RUNTIME_DIR="$runtime_dir" dbus-run-session -- bash -euo pipefail -c '
             od -An -N32 -tx1 /dev/urandom | tr -d "[:space:]" | gnome-keyring-daemon --daemonize --unlock --components=secrets >/dev/null
-            CODEV_TEST_NATIVE_MCP_OAUTH_VAULT=1 dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
+            CODEV_TEST_NATIVE_MCP_OAUTH_VAULT=1 xvfb-run -a dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-build --no-restore --filter "FullyQualifiedName~OAuth_http_mcp_server_rejects_issuer_or_state_mismatch_and_matching_login_persists_refresh_tokens" --logger "console;verbosity=minimal"
           '
 
       - name: Run native macOS MCP OAuth Keychain smoke
