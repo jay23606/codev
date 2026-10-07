@@ -2410,11 +2410,23 @@ public sealed class MainWindowTests
             using var arguments = JsonDocument.Parse("""{"query":"codev"}""");
             var tool = new McpCodeTaskTool("mcp_github_search_0123456789abcdef", "github", "GitHub", "search",
                 "Search repositories.", schema.RootElement.Clone(), null!);
+            var prompt = new McpCodeTaskTool("mcp_github_review_subject_0123456789abcdef", "github", "GitHub", "review_subject",
+                "Review one subject.", schema.RootElement.Clone(), null!, Operation: McpCodeTaskOperationKind.Prompt);
+            var resource = new McpCodeTaskTool("mcp_github_notes_0123456789abcdef", "github", "GitHub", "notes",
+                "Read shared notes.", schema.RootElement.Clone(), null!, Operation: McpCodeTaskOperationKind.Resource);
+            var resourceTemplate = new McpCodeTaskTool("mcp_github_item_by_id_0123456789abcdef", "github", "GitHub", "item_by_id",
+                "Read one item.", schema.RootElement.Clone(), null!, Operation: McpCodeTaskOperationKind.ResourceTemplate);
             var approve = typeof(MainViewModel).GetMethod("ApproveMcpToolWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var calls = 0;
             var executor = new CodeTaskToolExecutor(new WorkspaceFileService(project), conversation,
                 _ => Task.FromResult(false), _ => Task.FromResult(false),
-                mcpTools: new Dictionary<string, McpCodeTaskTool> { [tool.FunctionName] = tool },
+                mcpTools: new Dictionary<string, McpCodeTaskTool>
+                {
+                    [tool.FunctionName] = tool,
+                    [prompt.FunctionName] = prompt,
+                    [resource.FunctionName] = resource,
+                    [resourceTemplate.FunctionName] = resourceTemplate
+                },
                 mcpPermissionApproval: (candidate, candidateArguments, profileApproved) =>
                     (Task<CommandApprovalOutcome>)approve.Invoke(viewModel,
                         [conversation, candidate, candidateArguments, profileApproved])!,
@@ -2447,6 +2459,29 @@ public sealed class MainWindowTests
             var permissionRegistry = ProjectMcpToolPermissionRegistry.Load(Path.Combine(root, "Codev", "avalonia-mcp-permissions.json"));
             Assert.Equal(ProjectCommandPermissionDecision.Ask,
                 permissionRegistry.Evaluate(project, ProjectCommandPermissionMode.AskEveryTime, tool.ServerId, tool.ToolName));
+
+            foreach (var operation in new[] { prompt, resource, resourceTemplate })
+            {
+                var deniedRequest = executor.ExecuteAsync(operation.FunctionName, arguments.RootElement.Clone());
+                await Dispatcher.UIThread.InvokeAsync(() => { });
+                Assert.True(window.FindControl<Border>("InlineApprovalPanel")!.IsVisible);
+                content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
+                Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text =>
+                    text.Text?.Contains($"Review MCP {operation.Operation.DisplayName()} call: GitHub · {operation.ToolName}", StringComparison.Ordinal) == true);
+                Assert.Contains(content.GetVisualDescendants().OfType<TextBox>(), box => box.Text == arguments.RootElement.GetRawText());
+                var deny = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Deny this operation");
+                await Dispatcher.UIThread.InvokeAsync(() => deny.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+
+                var deniedResult = await deniedRequest.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Contains("Denied by a saved project MCP tool permission rule", deniedResult, StringComparison.Ordinal);
+                Assert.Equal(1, calls);
+                Assert.False(window.FindControl<Border>("InlineApprovalPanel")!.IsVisible);
+                permissionRegistry = ProjectMcpToolPermissionRegistry.Load(Path.Combine(root, "Codev", "avalonia-mcp-permissions.json"));
+                Assert.Equal(ProjectCommandPermissionDecision.Deny,
+                    permissionRegistry.Evaluate(project, ProjectCommandPermissionMode.AskEveryTime,
+                        operation.ServerId, operation.ToolName, operation.PermissionFingerprint));
+                Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, viewModel.ProjectCommandPermissionMode);
+            }
         }
         finally
         {
