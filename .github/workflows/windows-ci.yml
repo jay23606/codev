@@ -60,8 +60,16 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring xvfb
+          timeout --signal=TERM --kill-after=5s 180s sudo apt-get \
+            -o Acquire::Retries=1 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            update
+          timeout --signal=TERM --kill-after=5s 180s sudo apt-get \
+            -o Acquire::Retries=1 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            install --yes --no-install-recommends dbus-x11 gnome-keyring xvfb
           keyring_home="$(mktemp -d)"
           runtime_dir="$(mktemp -d)"
           chmod 700 "$keyring_home" "$runtime_dir"
