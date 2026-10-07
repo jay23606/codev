@@ -184,6 +184,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     [
     ];
 
+    internal Codev.GitChildWorktreeManager ChildWorktreeManager => _childWorktrees;
+
     public MainViewModel(string? localDataRoot = null, HttpMessageHandler? httpMessageHandler = null)
     {
         Messages.CollectionChanged += (_, _) => RefreshConversationFindResults();

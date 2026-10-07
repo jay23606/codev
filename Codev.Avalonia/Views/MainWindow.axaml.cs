@@ -2922,8 +2922,7 @@ public partial class MainWindow : Window
         var summary = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
         header.Children.Add(summary);
         var activeConversation = viewModel.ActiveConversation;
-        var childWorktreeManager = new Codev.GitChildWorktreeManager(
-            Codev.CodevDataPaths.LocalDataRoot);
+        var childWorktreeManager = viewModel.ChildWorktreeManager;
         Codev.Conversation[] childChoices = activeConversation is null ? [] : activeConversation.ParentConversationId is not null
             ? new[] { activeConversation }
             : activeConversation.ChildConversations.ToArray();

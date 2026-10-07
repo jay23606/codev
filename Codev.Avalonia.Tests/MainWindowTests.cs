@@ -15,6 +15,7 @@ using Codev;
 using Codev.Avalonia.ViewModels;
 using Codev.Avalonia.Views;
 using System.Net;
+using System.Diagnostics;
 using System.Text;
 using System.Reflection;
 using System.Text.Json;
@@ -75,6 +76,124 @@ public sealed class MainWindowTests
         {
             window?.Close();
             if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Git_status_reviews_child_changes_blocks_dirty_merge_and_recovers_missing_checkout()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var repository = Path.Combine(root, "project");
+        Directory.CreateDirectory(repository);
+        string? childWorktree = null;
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        Window? statusDialog = null;
+        try
+        {
+            await RunGitForChildUiAsync(repository, "init", "--initial-branch=main");
+            await RunGitForChildUiAsync(repository, "config", "user.name", "Codev UI fixture");
+            await RunGitForChildUiAsync(repository, "config", "user.email", "codev-ui-fixture@example.invalid");
+            await File.WriteAllTextAsync(Path.Combine(repository, "baseline.txt"), "parent baseline\n");
+            await RunGitForChildUiAsync(repository, "add", "--", "baseline.txt");
+            await RunGitForChildUiAsync(repository, "commit", "-m", "initial fixture");
+
+            viewModel = new MainViewModel(root);
+            viewModel.SetProjectFolder(repository);
+            await viewModel.TrustProjectFolderAsync(repository);
+            var parent = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            Assert.True(await viewModel.CreateIsolatedChildSessionAsync(parent));
+            var child = Assert.Single(parent.ChildConversations);
+            childWorktree = Assert.IsType<string>(child.ProjectPath);
+            var changedFile = Path.Combine(childWorktree, "child-review-fixture.txt");
+            await File.WriteAllTextAsync(changedFile, "reviewed child change\n");
+            viewModel.SelectConversationCommand.Execute(parent);
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+            var projectActions = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Project actions…");
+            var projectMenu = Assert.IsType<MenuFlyout>(projectActions.Flyout);
+            projectMenu.ShowAt(projectActions);
+            window.UpdateLayout();
+            var gitStatusItem = Assert.Single(projectMenu.Items.OfType<MenuItem>(), item =>
+                item.Header?.ToString() == "Git status and changes…");
+            Assert.True(gitStatusItem.IsEnabled);
+            await Dispatcher.UIThread.InvokeAsync(() => gitStatusItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)));
+            statusDialog = await WaitForOwnedWindowAsync(window!, dialog => dialog.Title?.StartsWith("Git status ·", StringComparison.Ordinal) == true);
+
+            var reviewChild = Assert.Single(statusDialog!.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Review child diff…");
+            Assert.True(reviewChild.IsEnabled);
+            await Dispatcher.UIThread.InvokeAsync(() => reviewChild.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            var dirtyReview = await WaitForOwnedWindowAsync(statusDialog!, dialog => dialog.Title == "Review child worktree");
+            Assert.Contains(dirtyReview.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains("uncommitted changes", StringComparison.Ordinal) == true);
+            var dirtyMerge = Assert.Single(dirtyReview.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Merge into current branch");
+            Assert.False(dirtyMerge.IsEnabled);
+            var closeDirtyReview = Assert.Single(dirtyReview.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Close");
+            await Dispatcher.UIThread.InvokeAsync(() => closeDirtyReview.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+
+            await RunGitForChildUiAsync(childWorktree, "add", "--", "child-review-fixture.txt");
+            await RunGitForChildUiAsync(childWorktree, "commit", "-m", "child review fixture");
+            await Dispatcher.UIThread.InvokeAsync(() => reviewChild.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            var committedReview = await WaitForOwnedWindowAsync(statusDialog!, dialog => dialog.Title == "Review child worktree");
+            var reviewedDiff = Assert.Single(committedReview.GetVisualDescendants().OfType<TextBox>());
+            Assert.Contains("child-review-fixture.txt", reviewedDiff.Text, StringComparison.Ordinal);
+            Assert.Contains("reviewed child change", reviewedDiff.Text, StringComparison.Ordinal);
+            var merge = Assert.Single(committedReview.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Merge into current branch");
+            Assert.True(merge.IsEnabled);
+            await Dispatcher.UIThread.InvokeAsync(() => merge.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            var confirmation = await WaitForOwnedWindowAsync(committedReview, dialog => dialog.Title == "Merge child worktree?");
+            var confirmationText = confirmation.GetVisualDescendants().OfType<TextBlock>();
+            Assert.Contains(confirmationText, text => text.Text?.Contains("local merge commit", StringComparison.OrdinalIgnoreCase) == true);
+            Assert.Contains(confirmationText, text => text.Text?.Contains("does not push", StringComparison.OrdinalIgnoreCase) == true);
+            var confirm = Assert.Single(confirmation.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Confirm");
+            await Dispatcher.UIThread.InvokeAsync(() => confirm.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await WaitForOwnedWindowClosedAsync(committedReview);
+            Assert.Equal("reviewed child change", (await File.ReadAllTextAsync(Path.Combine(repository, "child-review-fixture.txt"))).Trim());
+
+            var normalizedRoot = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+            var normalizedWorktree = Path.GetFullPath(childWorktree);
+            Assert.StartsWith(normalizedRoot, normalizedWorktree, StringComparison.OrdinalIgnoreCase);
+            await RunGitForChildUiAsync(repository, "worktree", "remove", "--force", normalizedWorktree);
+            Assert.False(Directory.Exists(normalizedWorktree));
+
+            var childPicker = Assert.Single(statusDialog.GetVisualDescendants().OfType<ComboBox>(), picker =>
+                picker.Items.OfType<object>().Any(item => item.GetType().Name == "ChildWorktreeChoice"));
+            var recoverChild = Assert.Single(statusDialog.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Recover child worktree…");
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                childPicker.SelectedIndex = -1;
+                childPicker.SelectedIndex = 0;
+            });
+            Assert.True(recoverChild.IsEnabled);
+            await Dispatcher.UIThread.InvokeAsync(() => recoverChild.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            var recoveredInfo = await WaitForOwnedWindowAsync(statusDialog!, dialog => dialog.Title == "Child worktree recovered");
+            Assert.Contains(recoveredInfo.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains("restored from its saved branch", StringComparison.Ordinal) == true);
+            var closeRecoveredInfo = Assert.Single(recoveredInfo.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Close");
+            await Dispatcher.UIThread.InvokeAsync(() => closeRecoveredInfo.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            Assert.True(Directory.Exists(childWorktree));
+            Assert.Equal(childWorktree, child.ProjectPath);
+            Assert.Equal("reviewed child change", (await File.ReadAllTextAsync(Path.Combine(childWorktree, "child-review-fixture.txt"))).Trim());
+        }
+        finally
+        {
+            statusDialog?.Close();
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            if (childWorktree is not null && Directory.Exists(childWorktree))
+                await RunGitForChildUiAsync(repository, "worktree", "remove", "--force", Path.GetFullPath(childWorktree));
+            if (Directory.Exists(repository)) await RunGitForChildUiAsync(repository, "worktree", "prune");
             await DeleteAutoModeTestDirectoryAsync(root);
         }
     }
@@ -1491,6 +1610,52 @@ public sealed class MainWindowTests
         if (persistence is not null) await persistence.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    private static async Task RunGitForChildUiAsync(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git for the child-worktree UI fixture.");
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var output = await outputTask;
+        var error = await errorTask;
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed ({process.ExitCode}): {error}\n{output}");
+    }
+
+    private static async Task<Window> WaitForOwnedWindowAsync(Window owner, Func<Window, bool> predicate)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            var match = await Dispatcher.UIThread.InvokeAsync(() => owner.OwnedWindows.FirstOrDefault(predicate));
+            if (match is not null) return match;
+            await Task.Delay(10);
+        }
+        throw new TimeoutException($"An owned window was not opened by '{owner.Title}' within five seconds.");
+    }
+
+    private static async Task WaitForOwnedWindowClosedAsync(Window window)
+    {
+        var owner = window.Owner as Window ?? throw new InvalidOperationException("The dialog has no window owner.");
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            var isClosed = await Dispatcher.UIThread.InvokeAsync(() => !owner.OwnedWindows.Contains(window));
+            if (isClosed) return;
+            await Task.Delay(10);
+        }
+        throw new TimeoutException($"Window '{window.Title}' did not close within five seconds.");
+    }
+
     private static async Task DeleteAutoModeTestDirectoryAsync(string path)
     {
         var fullPath = Path.GetFullPath(path);
@@ -1506,12 +1671,31 @@ public sealed class MainWindowTests
                 Directory.Delete(fullPath, recursive: true);
                 return;
             }
-            catch (IOException) when (attempt < 19)
+            catch (Exception ex) when (attempt < 19 && ex is IOException or UnauthorizedAccessException)
             {
+                NormalizeAttributesForDeletion(fullPath);
                 await Task.Delay(50);
             }
         }
         if (Directory.Exists(fullPath)) throw new IOException($"Could not clean up the isolated Auto-mode test directory: {fullPath}");
+    }
+
+    private static void NormalizeAttributesForDeletion(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+            return;
+        }
+        if (!Directory.Exists(path)) return;
+        foreach (var file in Directory.EnumerateFiles(path)) File.SetAttributes(file, FileAttributes.Normal);
+        foreach (var directory in Directory.EnumerateDirectories(path))
+        {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0)
+                NormalizeAttributesForDeletion(directory);
+            File.SetAttributes(directory, FileAttributes.Normal);
+        }
+        File.SetAttributes(path, FileAttributes.Normal);
     }
 
     [AvaloniaFact]
