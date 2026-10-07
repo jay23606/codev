@@ -767,6 +767,59 @@ PY
 
 echo 'macOS packaged Code task read, searched, created a file, and verified a command in one Auto turn.'
 
+# Verify the macOS primary-modifier shortcut creates and activates a fresh chat.
+previous_conversation_id="$(python3 - "$active_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    print(json.load(source))
+PY
+)"
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 0.3
+    keystroke "n" using {command down}
+  end tell
+end run
+APPLESCRIPT
+current_conversation_id=''
+for _ in {1..100}; do
+  current_conversation_id="$(python3 - "$active_path" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        print(json.load(source))
+except (OSError, json.JSONDecodeError):
+    pass
+PY
+)"
+  if [[ -n "$current_conversation_id" && "$current_conversation_id" != "$previous_conversation_id" ]]; then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the macOS Command+N shortcut smoke.' >&2; exit 1; fi
+  sleep 0.1
+done
+if [[ -z "$current_conversation_id" || "$current_conversation_id" == "$previous_conversation_id" ]] || \
+   ! python3 - "$conversations_path" "$current_conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+raise SystemExit(0 if any(item.get("Id") == sys.argv[2] for item in conversations) else 1)
+PY
+then
+  cat "$log_path" >&2
+  echo 'macOS Command+N did not create and activate a persisted conversation.' >&2
+  exit 1
+fi
+echo 'macOS packaged app used Command+N to create and activate a persisted conversation.'
+
 cat "$log_path" >&2
 python3 - "$conversations_path" "$conversation_id" <<'PY' >&2
 import json

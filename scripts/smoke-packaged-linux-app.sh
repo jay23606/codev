@@ -346,5 +346,23 @@ PY
 
 echo 'Linux packaged Code task read, searched, created a file, and verified a command in one Auto turn.'
 
+# Verify the platform primary-modifier shortcut creates and activates a fresh chat.
+previous_conversation_id="$(jq -r '.' "$active_path")"
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+n
+for _ in {1..100}; do
+  current_conversation_id="$(jq -r '.' "$active_path" 2>/dev/null || true)"
+  if [[ -n "$current_conversation_id" && "$current_conversation_id" != "$previous_conversation_id" ]]; then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the Linux Ctrl+N shortcut smoke.' >&2; exit 1; fi
+  sleep 0.1
+done
+if [[ -z "$current_conversation_id" || "$current_conversation_id" == "$previous_conversation_id" ]] || \
+   ! jq -e --arg id "$current_conversation_id" '.[] | select(.Id == $id)' "$conversations_path" >/dev/null 2>&1; then
+  cat "$log_path" >&2
+  echo 'Linux Ctrl+N did not create and activate a persisted conversation.' >&2
+  exit 1
+fi
+echo 'Linux packaged app used Ctrl+N to create and activate a persisted conversation.'
+
 cat "$log_path" >&2
 jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Model, Messages: .Messages[-4:]}' "$conversations_path" >&2
