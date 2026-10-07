@@ -1483,8 +1483,12 @@ public sealed class MainWindowTests
             var composer = Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox"));
             var search = Assert.IsType<TextBox>(window.FindControl<TextBox>("SearchTextBox"));
             composer.Focus();
-            var primaryModifier = OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
-            window.KeyPress(Key.F, primaryModifier, PhysicalKey.F, "f");
+            window.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Key = Key.F,
+                KeyModifiers = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control
+            });
             Assert.True(search.IsFocused, "Command/Ctrl+F should focus conversation search.");
 
             search.Text = "";
