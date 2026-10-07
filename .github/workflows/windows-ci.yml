@@ -60,6 +60,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
+          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/#https://archive.ubuntu.com/ubuntu/#g' /etc/apt/sources.list.d/ubuntu.sources
           timeout --signal=TERM --kill-after=5s 180s sudo apt-get \
             -o Acquire::Retries=1 \
             -o Acquire::http::Timeout=20 \
