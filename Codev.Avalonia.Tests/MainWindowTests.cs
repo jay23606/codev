@@ -1470,9 +1470,11 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void Platform_search_shortcut_focuses_search_and_shift_enter_keeps_composer_draft_multiline()
+    public async Task Platform_search_shortcut_focuses_search_and_shift_enter_keeps_composer_draft_multiline()
     {
-        var window = new MainWindow();
+        var root = Path.Combine(Path.GetTempPath(), "Codev-keyboard-shortcuts", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        var window = new MainWindow { DataContext = viewModel };
         try
         {
             window.Show();
@@ -1496,6 +1498,8 @@ public sealed class MainWindowTests
         finally
         {
             window.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
         }
     }
 
