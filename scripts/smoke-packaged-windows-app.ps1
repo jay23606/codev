@@ -39,6 +39,55 @@ function Find-ByAutomationId($Element, [string]$AutomationId) {
     return $Element.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Find-AllWithComRetry($Element, $Scope, $Condition, [int]$TimeoutMilliseconds = 3000) {
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        try {
+            $result = $Element.FindAll($Scope, $Condition)
+            Write-Output -NoEnumerate $result
+            return
+        }
+        catch {
+            $exception = $_.Exception
+            while ($null -ne $exception -and $exception -isnot [System.Runtime.InteropServices.COMException]) {
+                $exception = $exception.InnerException
+            }
+            if ($null -eq $exception) { throw }
+            Start-Sleep -Milliseconds 75
+        }
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Windows UI Automation could not enumerate a temporarily unavailable element tree.'
+}
+
+function Find-AppElementsWithRetry([int]$ProcessId, $Condition, [int]$TimeoutMilliseconds = 3000) {
+    $windowCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Window)
+    $windows = Find-AllWithComRetry -Element ([System.Windows.Automation.AutomationElement]::RootElement) `
+        -Scope ([System.Windows.Automation.TreeScope]::Children) -Condition $windowCondition
+    $matches = [System.Collections.Generic.List[System.Windows.Automation.AutomationElement]]::new()
+    foreach ($window in $windows) {
+        try {
+            if ($window.Current.ProcessId -ne $ProcessId) { continue }
+            $elements = Find-AllWithComRetry -Element $window `
+                -Scope ([System.Windows.Automation.TreeScope]::Descendants) -Condition $Condition `
+                -TimeoutMilliseconds $TimeoutMilliseconds
+            for ($index = 0; $index -lt $elements.Count; $index++) {
+                $matches.Add($elements.Item($index))
+            }
+        }
+        catch {
+            $exception = $_.Exception
+            while ($null -ne $exception -and $exception -isnot [System.Runtime.InteropServices.COMException]) {
+                $exception = $exception.InnerException
+            }
+            if ($null -eq $exception) { throw }
+        }
+    }
+    Write-Output -NoEnumerate ($matches.ToArray())
+    return
+}
+
 function Wait-ForTopLevelWindow([string]$Name, [int]$TimeoutSeconds = 5) {
     $condition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
@@ -106,13 +155,19 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
 
     $candidate = $null
     $elements = $null
+    $profileItemCondition = [System.Windows.Automation.OrCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::ListItem),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::DataItem))
     $pickerDeadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        $elements = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition)
+        $elements = Find-AppElementsWithRetry -ProcessId $Window.Current.ProcessId `
+            -Condition $profileItemCondition -TimeoutMilliseconds 1000
         for ($index = 0; $index -lt $elements.Count; $index++) {
-            $element = $elements.Item($index)
+            $element = $elements[$index]
             $name = [string]$element.Current.Name
             if ($name -notin @('Smoke QA', 'Smoke QA agent') -and -not $name.StartsWith('Smoke QA · ', [StringComparison]::Ordinal)) { continue }
             $selectionItem = $null
@@ -126,7 +181,7 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
     if ($null -eq $candidate) {
         $visibleItems = @()
         for ($index = 0; $index -lt $elements.Count; $index++) {
-            $element = $elements.Item($index)
+            $element = $elements[$index]
             if ($element.Current.ControlType -in @([System.Windows.Automation.ControlType]::ListItem, [System.Windows.Automation.ControlType]::DataItem)) {
                 $visibleItems += [string]$element.Current.Name
             }
@@ -303,17 +358,27 @@ function Test-ConversationModeShortcut($Window, [string]$DataRoot) {
     }
 
     $codeTaskButton = $null
-    foreach ($label in @('Code task unavailable', 'Enable Code task', 'Code task on')) {
-        $codeTaskButton = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.AndCondition]::new(
-                [System.Windows.Automation.PropertyCondition]::new(
-                    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-                    [System.Windows.Automation.ControlType]::Button),
+    $codeTaskButtonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.OrCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty,
+                'Code task unavailable'),
+            [System.Windows.Automation.OrCondition]::new(
                 [System.Windows.Automation.PropertyCondition]::new(
                     [System.Windows.Automation.AutomationElement]::NameProperty,
-                    $label)))
-        if ($null -ne $codeTaskButton) { break }
-    }
+                    'Enable Code task'),
+                [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::NameProperty,
+                    'Code task on'))))
+    $codeTaskButtonDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        $codeTaskButton = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $codeTaskButtonCondition)
+        if ($null -ne $codeTaskButton -and $codeTaskButton.Current.Name -ne 'Code task unavailable') { break }
+        Start-Sleep -Milliseconds 150
+    } while ([DateTime]::UtcNow -lt $codeTaskButtonDeadline)
     if ($null -eq $codeTaskButton) { throw 'The Code task mode control is missing during mode-cycle smoke.' }
     if ($codeTaskButton.Current.Name -eq 'Code task unavailable') {
         $composer.SetFocus()
@@ -602,10 +667,10 @@ function Find-ConversationMenuItem($Window, [string]$Title, [string]$MenuName) {
             $MenuName))
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
-        $items = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants, $menuCondition)
+        $items = Find-AppElementsWithRetry -ProcessId $Window.Current.ProcessId -Condition $menuCondition `
+            -TimeoutMilliseconds 1000
         for ($index = 0; $index -lt $items.Count; $index++) {
-            $item = $items.Item($index)
+            $item = $items[$index]
             try {
                 $current = $item.Current
                 $bounds = $current.BoundingRectangle
@@ -646,14 +711,14 @@ function Test-PinnedConversationSearchArchiveRestore($Window, [string]$DataRoot)
     $moreInvoke.Invoke()
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     $pinItem = $null
+    $pinMenuItemCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::MenuItem)
     do {
-        $menuItems = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.PropertyCondition]::new(
-                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-                [System.Windows.Automation.ControlType]::MenuItem))
+        $menuItems = Find-AppElementsWithRetry -ProcessId $Window.Current.ProcessId `
+            -Condition $pinMenuItemCondition -TimeoutMilliseconds 1000
         for ($index = 0; $index -lt $menuItems.Count; $index++) {
-            $candidate = $menuItems.Item($index)
+            $candidate = $menuItems[$index]
             try {
                 $current = $candidate.Current
                 $bounds = $current.BoundingRectangle
@@ -1357,9 +1422,15 @@ public static class CodevCommonDialog
     [System.Windows.Forms.SendKeys]::SendWait('codev-shift-enter-first')
     [System.Windows.Forms.SendKeys]::SendWait('+{ENTER}')
     [System.Windows.Forms.SendKeys]::SendWait('codev-shift-enter-second')
-    $newlineDraft = ([string]$composerValue.Current.Value).Replace("`r`n", "`n")
-    if (-not $newlineDraft.Contains("codev-shift-enter-first`ncodev-shift-enter-second", [StringComparison]::Ordinal)) {
-        throw 'Shift+Enter did not preserve both draft lines in the composer.'
+    $expectedNewlineDraft = "codev-shift-enter-first`ncodev-shift-enter-second"
+    $newlineDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $newlineDraft = ([string]$composerValue.Current.Value).Replace("`r`n", "`n")
+        if ($newlineDraft.Contains($expectedNewlineDraft, [StringComparison]::Ordinal)) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $newlineDeadline)
+    if (-not $newlineDraft.Contains($expectedNewlineDraft, [StringComparison]::Ordinal)) {
+        throw "Shift+Enter did not preserve both draft lines in the composer. Value: '$newlineDraft'"
     }
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}')
@@ -1443,13 +1514,11 @@ public static class CodevCommonDialog
     $menuItemCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::MenuItem)
-    # Avalonia Flyout popups are separate native top-level windows, so search
-    # from the desktop root instead of assuming they remain children of Codev.
-    $menuItems = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants, $menuItemCondition)
+    # Avalonia Flyout popups are separate top-level windows owned by Codev.
+    $menuItems = Find-AppElementsWithRetry -ProcessId $Window.Current.ProcessId -Condition $menuItemCondition
     $menuItemNames = @()
     for ($index = 0; $index -lt $menuItems.Count; $index++) {
-        $menuItemNames += $menuItems.Item($index).Current.Name
+        $menuItemNames += $menuItems[$index].Current.Name
     }
 
     $expectedModes = @(
