@@ -10,6 +10,8 @@ The latest exact-head candidate is PR code head `1adfa95`. Windows/Linux/macOS C
 
 The current latest public release is `v2026.10.01-3196395` (two releases are listed). The four README `/releases/latest/download/` desktop links are present in that release and each returned HTTP 200 when checked on 2026-10-07. The next tagged release will move those stable links to the new Avalonia candidate automatically.
 
+The release-page copy is drafted in [`docs/release-notes-draft-2026-10.md`](release-notes-draft-2026-10.md). It corrects the current release description's stale claim that Avalonia lacks Code tasks, Git, and hosted providers, and clearly states Auto-mode command access and the manual validation still open. Review it against the final candidate before publishing.
+
 The full self-contained native Windows packaged smoke passed locally in an isolated profile, and current-source Qwen3.6 Auto verification, file-edit, and parallel-child live tests passed on Windows. The exact candidate's cross-platform CI and four-target package checks now pass. PR #1 remains open; no release tag has been created.
 
 Before publishing, finish or explicitly waive the remaining Q3 checks. The smoke checklist currently has 65 unchecked cases, including native macOS/Linux desktop interaction, assistive-technology and 200% scaling checks, and manual workflows for project context, tools, permissions and recovery. A clean-machine installation is also open (this Windows host does not have Windows Sandbox). Do not describe hosted runner interaction as physical-keyboard or clean-machine validation. Put any accepted limitations in the release notes.
