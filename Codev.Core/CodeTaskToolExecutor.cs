@@ -32,10 +32,12 @@ public sealed class CodeTaskToolExecutor(
     BackgroundCommandManager? backgroundCommands = null,
     Func<string, CancellationToken, Task<string>>? afterFileWrite = null,
     Func<string, CancellationToken, Task<IReadOnlyList<SemanticSearchResult>>>? semanticSearch = null,
-    string? permissionProjectPath = null)
+    string? permissionProjectPath = null,
+    ShellCommandSpec? backgroundShell = null)
 {
     private readonly string _permissionProjectPath = string.IsNullOrWhiteSpace(permissionProjectPath)
         ? files.Root : Path.GetFullPath(permissionProjectPath);
+    private readonly ShellCommandSpec _backgroundShell = backgroundShell ?? ShellCommandResolver.ResolveCurrent();
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> ToolArgumentLimits =
         new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
         {
@@ -532,7 +534,7 @@ public sealed class CodeTaskToolExecutor(
         if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
             return "Rejected: command must contain 1–4,000 characters.";
         if (RepairBudgetExhausted) return RepairLimitMessage;
-        var shell = ShellCommandResolver.ResolveCurrent();
+        var shell = _backgroundShell;
         var proposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
             ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command),
             ProfileApprovalSatisfied: profileApprovalSatisfied, IsBackground: true,

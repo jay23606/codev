@@ -533,9 +533,11 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
         var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
         var approvalDialogShown = false;
         await using var manager = new BackgroundCommandManager();
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
             _ => Task.FromResult(false), _ => Task.FromResult(false),
             backgroundCommands: manager,
+            backgroundShell: shell,
             permissionApproval: async proposal =>
             {
                 var result = await approvalPolicy.ApproveAsync(proposal, requestApproval: _ =>
@@ -546,7 +548,6 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
                 return result.Outcome;
             });
 
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
         var result = await ExecuteAsync(executor, "start_background_command", JsonSerializer.Serialize(new { command }));
 
         Assert.Contains("Started background command", result, StringComparison.Ordinal);
@@ -832,10 +833,10 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     public async Task Approved_background_command_starts_and_can_be_read_and_stopped()
     {
         await using var manager = new BackgroundCommandManager();
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
         var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
             _ => Task.FromResult(false), _ => Task.FromResult(true),
-            backgroundCommands: manager);
+            backgroundCommands: manager, backgroundShell: shell);
 
         var result = await ExecuteAsync(executor, "start_background_command", JsonSerializer.Serialize(new { command }));
         var snapshot = Assert.Single(manager.List(_conversation.Id));

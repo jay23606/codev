@@ -83,9 +83,9 @@ public sealed class BackgroundCommandManagerTests
     {
         await using var manager = new BackgroundCommandManager();
         var owner = Guid.NewGuid();
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
 
-        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), shell);
         Assert.Equal("Running", started.Status);
         Assert.True(await manager.StopAsync(owner, started.Id));
 
@@ -104,8 +104,8 @@ public sealed class BackgroundCommandManagerTests
             if (Interlocked.Increment(ref killAttempts) > 1) process.Kill(entireProcessTree: true);
         }, TimeSpan.FromSeconds(5));
         var owner = Guid.NewGuid();
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
-        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
+        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), shell);
 
         var error = await Assert.ThrowsAsync<IOException>(() => manager.StopAsync(owner, started.Id));
 
@@ -121,9 +121,9 @@ public sealed class BackgroundCommandManagerTests
         await using var manager = new BackgroundCommandManager();
         var owner = Guid.NewGuid();
         manager.Changed += (_, _) => throw new InvalidOperationException("broken UI observer");
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
 
-        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), shell);
 
         Assert.Equal("Running", started.Status);
         Assert.True(await manager.StopAsync(owner, started.Id));
@@ -135,8 +135,8 @@ public sealed class BackgroundCommandManagerTests
     {
         var manager = new BackgroundCommandManager();
         var owner = Guid.NewGuid();
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
-        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
+        var started = await manager.StartAsync(owner, command, Path.GetTempPath(), shell);
 
         await manager.DisposeAsync();
 
@@ -150,11 +150,11 @@ public sealed class BackgroundCommandManagerTests
         await using var manager = new BackgroundCommandManager();
         using var cancellation = new CancellationTokenSource();
         var owner = Guid.NewGuid();
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.StartAsync(owner,
-            OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30", Path.GetTempPath(),
-            ShellCommandResolver.ResolveCurrent(), cancellation.Token));
+            command, Path.GetTempPath(), shell, cancellation.Token));
 
         Assert.Empty(manager.List(owner));
     }
@@ -164,14 +164,14 @@ public sealed class BackgroundCommandManagerTests
     {
         await using var manager = new BackgroundCommandManager();
         var owner = Guid.NewGuid();
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
         try
         {
             for (var i = 0; i < BackgroundCommandManager.MaxRunningPerConversation; i++)
-                await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+                await manager.StartAsync(owner, command, Path.GetTempPath(), shell);
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent()));
+                manager.StartAsync(owner, command, Path.GetTempPath(), shell));
             Assert.Contains("At most 3 background commands", exception.Message, StringComparison.Ordinal);
         }
         finally { await manager.StopConversationAsync(owner); }
@@ -182,9 +182,7 @@ public sealed class BackgroundCommandManagerTests
     {
         await using var manager = new BackgroundCommandManager();
         var owner = Guid.NewGuid();
-        var command = OperatingSystem.IsWindows()
-            ? "while ($true) { Start-Sleep -Milliseconds 1000 }"
-            : "while :; do sleep 1; done";
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
         using var stoppingReached = new ManualResetEventSlim();
         using var resumeShutdown = new ManualResetEventSlim();
         manager.Changed += (_, _) =>
@@ -194,14 +192,14 @@ public sealed class BackgroundCommandManagerTests
             resumeShutdown.Wait(TimeSpan.FromSeconds(10));
         };
         for (var i = 0; i < BackgroundCommandManager.MaxRunningPerConversation; i++)
-            await manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent());
+            await manager.StartAsync(owner, command, Path.GetTempPath(), shell);
 
         var shutdown = Task.Run(() => manager.StopConversationAsync(owner));
         try
         {
             Assert.True(stoppingReached.Wait(TimeSpan.FromSeconds(10)), "Shutdown did not enter the stopping state.");
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                manager.StartAsync(owner, command, Path.GetTempPath(), ShellCommandResolver.ResolveCurrent()));
+                manager.StartAsync(owner, command, Path.GetTempPath(), shell));
             Assert.Contains("At most 3 background commands", error.Message, StringComparison.Ordinal);
         }
         finally

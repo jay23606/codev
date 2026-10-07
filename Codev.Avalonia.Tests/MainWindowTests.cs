@@ -1736,8 +1736,8 @@ public sealed class MainWindowTests
             .GetField("_persistGate", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(viewModel)!;
         var owner = viewModel.ActiveConversation!.Id;
-        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 30" : "sleep 30";
-        var started = await backgroundCommands.StartAsync(owner, command, root, ShellCommandResolver.ResolveCurrent());
+        var (command, shell) = ShellProcessLifecycleCollection.CreateLongRunningCommand();
+        var started = await backgroundCommands.StartAsync(owner, command, root, shell);
         var closedStatus = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         window.Closed += (_, _) => closedStatus.TrySetResult(backgroundCommands.Read(owner, started.Id)?.Status);
         var persistGateHeld = false;
