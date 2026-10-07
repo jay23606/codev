@@ -857,7 +857,17 @@ function Invoke-MoreSubmenuItem($Window, [string]$SectionName, [string]$ItemName
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($null -eq $item) { throw "The '$SectionName' submenu did not expose '$ItemName'." }
-    Invoke-AccessibleMenuItem $item
+    $itemBounds = $item.Current.BoundingRectangle
+    if ($itemBounds.IsEmpty -or $itemBounds.Width -le 0 -or $itemBounds.Height -le 0) {
+        throw "The '$SectionName' submenu item '$ItemName' has no clickable screen bounds."
+    }
+    # Avalonia's native MenuFlyout items have intermittently accepted focus plus
+    # Enter without raising Click (the persisted setting then remains unchanged).
+    # Use the visible UIA bounds so this smoke exercises the same pointer action
+    # as a user and verifies the real persisted setting below.
+    [CodevCommonDialog]::ClickAt(
+        [int]($itemBounds.Left + $itemBounds.Width / 2),
+        [int]($itemBounds.Top + $itemBounds.Height / 2))
 }
 
 function Wait-ForUiSetting([string]$SettingsPath, [string]$PropertyName, [string]$ExpectedValue) {
