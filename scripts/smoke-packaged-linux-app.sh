@@ -172,10 +172,28 @@ if ! jq -e --arg id "$conversation_id" \
 fi
 
 before_chat_count="$(jq --arg id "$conversation_id" '[.[] | select(.Id == $id) | .Messages[]] | length' "$conversations_path")"
-chat_prompt='Smoke-test packaged chat on Linux.'
+chat_first_line='Smoke-test packaged chat on Linux.'
+chat_second_line='Shift+Enter keeps this second line in the draft.'
+chat_prompt=$'Smoke-test packaged chat on Linux.\nShift+Enter keeps this second line in the draft.'
 xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+l
-xdotool type --clearmodifiers --delay 1 "$chat_prompt"
+xdotool type --clearmodifiers --delay 1 "$chat_first_line"
+xdotool key --clearmodifiers shift+Return
+xdotool type --clearmodifiers --delay 1 "$chat_second_line"
+
+for _ in {1..50}; do
+  if jq -e --arg id "$conversation_id" --arg draft "$chat_prompt" \
+    '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited while persisting the Linux Shift+Enter draft.' >&2; exit 1; fi
+  sleep 0.1
+done
+if ! jq -e --arg id "$conversation_id" --arg draft "$chat_prompt" \
+  '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
+  jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Draft}' "$conversations_path" >&2 || true
+  echo 'Linux Shift+Enter did not preserve the composer as a two-line draft.' >&2
+  exit 1
+fi
+echo 'Linux packaged app inserted a newline with Shift+Enter and persisted both draft lines.'
 xdotool key --clearmodifiers Return
 
 for _ in {1..150}; do

@@ -469,22 +469,28 @@ if conversation is None:
 print(len(conversation.get("Messages", [])))
 PY
 )"
-chat_prompt='Smoke-test packaged chat on macOS.'
-osascript - "$app_pid" "$chat_prompt" <<'APPLESCRIPT'
+chat_first_line='Smoke-test packaged chat on macOS.'
+chat_second_line='Shift+Enter keeps this second line in the draft.'
+chat_prompt=$'Smoke-test packaged chat on macOS.\nShift+Enter keeps this second line in the draft.'
+osascript - "$app_pid" "$chat_first_line" "$chat_second_line" <<'APPLESCRIPT'
 on run argv
   set targetPid to item 1 of argv as integer
-  set promptText to item 2 of argv
+  set firstLine to item 2 of argv
+  set secondLine to item 3 of argv
   tell application "System Events"
     set targetProcess to first process whose unix id is targetPid
     set frontmost of targetProcess to true
     delay 0.25
     key code 37 using {command down}
     delay 0.5
-    keystroke promptText
+    keystroke firstLine
+    key code 36 using {shift down}
+    keystroke secondLine
   end tell
 end run
 APPLESCRIPT
-await_saved_draft "$chat_prompt" "the mock chat prompt"
+await_saved_draft "$chat_prompt" "the two-line mock chat prompt after Shift+Enter"
+echo 'macOS packaged app inserted a newline with Shift+Enter and persisted both draft lines.'
 osascript - "$app_pid" <<'APPLESCRIPT'
 on run argv
   set targetPid to item 1 of argv as integer
