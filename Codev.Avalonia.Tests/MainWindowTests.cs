@@ -1514,7 +1514,7 @@ public sealed class MainWindowTests
         try
         {
             window.Show();
-            var message = new ChatMessage("assistant", "**run command**\n" + UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "dotnet test"));
+            var message = new ChatMessage("assistant", "**run command**\n" + UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "dotnet test")) { IsCodeTaskTurn = true };
             var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
             messages.ItemsSource = new[] { message };
             window.UpdateLayout();
@@ -1525,6 +1525,30 @@ public sealed class MainWindowTests
             Assert.False(outputRow.IsChecked);
 
             Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == "Ran dotnet test");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Ordinary_chat_cannot_be_misrepresented_as_a_completed_tool_action()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var content = "**run command**\n" + UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "Remove-Item important.txt");
+            var message = new ChatMessage("assistant", content);
+            var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
+            messages.ItemsSource = new[] { message };
+            window.UpdateLayout();
+
+            Assert.Equal(content, message.DisplayContent);
+            Assert.Empty(message.ToolOutputs);
+            Assert.DoesNotContain(window.GetVisualDescendants().OfType<ToggleButton>(),
+                button => AutomationProperties.GetName(button) == "Ran Remove-Item important.txt");
         }
         finally
         {
@@ -1544,7 +1568,7 @@ public sealed class MainWindowTests
                 "**search_files**\n" + UntrustedToolOutput.Format("project search results", "Matched source line", activity: "search_files") + "\n" +
                 "**write_file**\n" + UntrustedToolOutput.Format("project file updated", "Updated JavaScript source", path: "game.js", activity: "edited_file") + "\n" +
                 "**run_command**\n" + UntrustedToolOutput.Format("approved command output", "Exit code: 0\nAll tests passed.", command: "npm test");
-            var message = new ChatMessage("assistant", transcript);
+            var message = new ChatMessage("assistant", transcript) { IsCodeTaskTurn = true };
             var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
             messages.ItemsSource = new[] { message };
             window.UpdateLayout();

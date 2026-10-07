@@ -107,6 +107,8 @@ public sealed record ChatMessage(string Role, string Content)
 {
     [JsonIgnore] public bool IsUser => string.Equals(Role, "user", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool IsAssistant => string.Equals(Role, "assistant", StringComparison.OrdinalIgnoreCase);
+    /// <summary>True only for assistant messages created from a Code task turn, whose tool envelopes come from executor results.</summary>
+    public bool IsCodeTaskTurn { get; init; }
     [JsonIgnore] public int MessageIndex { get; init; } = -1;
     [JsonIgnore] public bool IsQueued { get; init; }
     public string Thinking { get; init; } = "";
@@ -117,8 +119,8 @@ public sealed record ChatMessage(string Role, string Content)
     [JsonIgnore] public string HostedUsageLabel => HostedUsage?.DisplayLabel ?? "";
     [JsonIgnore] public bool HasGenerationStats => GenerationStats is not null;
     [JsonIgnore] public string GenerationStatsLabel => GenerationStats?.ToDisplayString() ?? "";
-    [JsonIgnore] public string DisplayContent => ToolOutputTranscriptParser.Parse(Content).DisplayText;
-    [JsonIgnore] public IReadOnlyList<ChatToolOutput> ToolOutputs => ToolOutputTranscriptParser.Parse(Content).Outputs;
+    [JsonIgnore] public string DisplayContent => IsAssistant && IsCodeTaskTurn ? ToolOutputTranscriptParser.Parse(Content).DisplayText : Content;
+    [JsonIgnore] public IReadOnlyList<ChatToolOutput> ToolOutputs => IsAssistant && IsCodeTaskTurn ? ToolOutputTranscriptParser.Parse(Content).Outputs : Array.Empty<ChatToolOutput>();
     [JsonIgnore] public IReadOnlyList<ChatToolOutput> CommandToolOutputs => ToolOutputs;
     [JsonIgnore] public IReadOnlyList<ChatToolOutput> NonCommandToolOutputs => Array.Empty<ChatToolOutput>();
     [JsonIgnore] public bool HasCommandToolOutputs => HasToolOutputs;

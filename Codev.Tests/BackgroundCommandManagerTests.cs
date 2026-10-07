@@ -47,8 +47,8 @@ public sealed class BackgroundCommandManagerTests
     [Fact]
     public void Background_command_activities_are_described_as_started_and_read()
     {
-        var started = new ChatMessage("assistant", "**start_background_command**\n" + UntrustedToolOutput.Format("background command", "Started id", command: "npm run dev", activity: "background_command_started"));
-        var read = new ChatMessage("assistant", "**read_background_command**\n" + UntrustedToolOutput.Format("background command output", "Output", command: "npm run dev", activity: "background_command_output"));
+        var started = new ChatMessage("assistant", "**start_background_command**\n" + UntrustedToolOutput.Format("background command", "Started id", command: "npm run dev", activity: "background_command_started")) { IsCodeTaskTurn = true };
+        var read = new ChatMessage("assistant", "**read_background_command**\n" + UntrustedToolOutput.Format("background command output", "Output", command: "npm run dev", activity: "background_command_output")) { IsCodeTaskTurn = true };
 
         Assert.Equal("Started background command · npm run dev", Assert.Single(started.ToolOutputs).Summary);
         Assert.Equal("Read background command output · npm run dev", Assert.Single(read.ToolOutputs).Summary);

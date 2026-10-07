@@ -33,6 +33,28 @@ public sealed class ToolOutputTranscriptParserTests
     }
 
     [Fact]
+    public void Only_code_task_assistant_messages_collapse_tool_output_envelopes()
+    {
+        var envelope = UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "dotnet test");
+        var content = "**run command**\n" + envelope;
+        var ordinaryChat = new ChatMessage("assistant", content);
+        var userMessage = new ChatMessage("user", content) { IsCodeTaskTurn = true };
+        var codeTask = ordinaryChat with { IsCodeTaskTurn = true };
+
+        Assert.Equal(content, ordinaryChat.DisplayContent);
+        Assert.Empty(ordinaryChat.ToolOutputs);
+        Assert.Equal(content, userMessage.DisplayContent);
+        Assert.Empty(userMessage.ToolOutputs);
+        Assert.Empty(codeTask.DisplayContent);
+        Assert.Equal("Ran dotnet test", Assert.Single(codeTask.ToolOutputs).Summary);
+
+        var restored = JsonSerializer.Deserialize<ChatMessage>(JsonSerializer.Serialize(codeTask, JsonSerializerOptions.Web), JsonSerializerOptions.Web);
+        Assert.NotNull(restored);
+        Assert.True(restored.IsCodeTaskTurn);
+        Assert.Equal("Ran dotnet test", Assert.Single(restored.ToolOutputs).Summary);
+    }
+
+    [Fact]
     public void Truncating_a_tool_envelope_keeps_it_valid_and_collapsible()
     {
         var envelope = UntrustedToolOutput.Format("approved command output", new string('x', 20_000));
@@ -80,7 +102,7 @@ public sealed class ToolOutputTranscriptParserTests
     {
         var command = UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "git status --short");
         var file = UntrustedToolOutput.Format("project file", "contents", path: "README.md", activity: "read_file");
-        var message = new ChatMessage("assistant", "**run command**\n" + command + "\n**read_file**\n" + file);
+        var message = new ChatMessage("assistant", "**run command**\n" + command + "\n**read_file**\n" + file) { IsCodeTaskTurn = true };
 
         Assert.Equal("Ran commands, read files", message.CommandToolOutputsHeader);
         Assert.True(message.HasCommandToolOutputs);
@@ -98,7 +120,7 @@ public sealed class ToolOutputTranscriptParserTests
         var webSearch = UntrustedToolOutput.Format("web search results", "result", activity: "web_search");
         var transcript = "**create_file**\n" + created + "\n**write_file**\n" + edited + "\n**run_command**\n" + command + "\n**search_files**\n" + search + "\n**web_search**\n" + webSearch;
 
-        var message = new ChatMessage("assistant", transcript);
+        var message = new ChatMessage("assistant", transcript) { IsCodeTaskTurn = true };
 
         Assert.Equal("Created a file, edited a file, ran commands, searched files, searched the web", message.CommandToolOutputsHeader);
         Assert.Equal(new[] { "Created file · index.html", "Edited file · game.js", "Ran npm test", "Searched files", "Searched the web" },
@@ -110,7 +132,7 @@ public sealed class ToolOutputTranscriptParserTests
     {
         var mcp = UntrustedToolOutput.Format("MCP tool output", "result", command: "GitHub/search", activity: "mcp_tool");
         var command = UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "dotnet test");
-        var message = new ChatMessage("assistant", "**mcp call**\n" + mcp + "\n**run command**\n" + command);
+        var message = new ChatMessage("assistant", "**mcp call**\n" + mcp + "\n**run command**\n" + command) { IsCodeTaskTurn = true };
 
         Assert.Equal("Used MCP tools, ran commands", message.CommandToolOutputsHeader);
         Assert.Equal("Used MCP tool · GitHub/search", message.CommandToolOutputs[0].Summary);
@@ -122,7 +144,7 @@ public sealed class ToolOutputTranscriptParserTests
         var webSearch = UntrustedToolOutput.Format("web search results", "result", activity: "web_search");
         var futureAction = UntrustedToolOutput.Format("workspace action", "done", activity: "export_conversation");
         var command = UntrustedToolOutput.Format("command output", "Exit code: 0", command: "npm test");
-        var message = new ChatMessage("assistant", "**web_search**\n" + webSearch + "\n**export**\n" + futureAction + "\n**run_command**\n" + command);
+        var message = new ChatMessage("assistant", "**web_search**\n" + webSearch + "\n**export**\n" + futureAction + "\n**run_command**\n" + command) { IsCodeTaskTurn = true };
 
         Assert.Equal("Searched the web, did other things, ran commands", message.CommandToolOutputsHeader);
         Assert.Equal("Searched the web", message.CommandToolOutputs[0].Summary);
@@ -134,7 +156,7 @@ public sealed class ToolOutputTranscriptParserTests
         var edited = UntrustedToolOutput.Format("project file updated", "updated", "game.js", activity: "edited_file");
         var command = UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "npm test");
         var webSearch = UntrustedToolOutput.Format("web search results", "result", activity: "web_search");
-        var message = new ChatMessage("assistant", "**write_file**\n" + edited + "\n**run_command**\n" + command + "\n**web_search**\n" + webSearch);
+        var message = new ChatMessage("assistant", "**write_file**\n" + edited + "\n**run_command**\n" + command + "\n**web_search**\n" + webSearch) { IsCodeTaskTurn = true };
 
         Assert.Equal("Edited a file, ran commands, searched the web", message.CommandToolOutputsHeader);
     }

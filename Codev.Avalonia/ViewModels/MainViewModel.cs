@@ -2021,7 +2021,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
         var userMessage = new Codev.ChatMessage("user", task) { MessageIndex = 0, IsQueued = true };
         var assistantIndex = 1;
-        var placeholder = new Codev.ChatMessage("assistant", $"Starting in an isolated Git worktree. {ChildWorktreeBoundaryNotice}");
+        var placeholder = new Codev.ChatMessage("assistant", $"Starting in an isolated Git worktree. {ChildWorktreeBoundaryNotice}") { IsCodeTaskTurn = true };
         child.Messages.Add(userMessage);
         child.Messages.Add(placeholder);
         child.PendingTurns ??= [];
@@ -2818,7 +2818,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         else if (conversation.Messages.Count == 0) conversation.Title = titleText.Length > 48 ? titleText[..48].TrimEnd() + "…" : titleText;
         var userMessage = new Codev.ChatMessage("user", sentText) { MessageIndex = conversation.Messages.Count, IsQueued = true };
         conversation.Messages.Add(userMessage);
-        conversation.Messages.Add(new Codev.ChatMessage("assistant", ""));
+        conversation.Messages.Add(new Codev.ChatMessage("assistant", "") { IsCodeTaskTurn = conversation.IsCodeTask });
         conversation.Draft = "";
         conversation.UpdatedAt = DateTimeOffset.Now;
         Draft = "";
@@ -2856,7 +2856,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         _requestQueue.Enqueue(turn);
         ((RelayCommand)SummarizeConversationUpToCommand).NotifyCanExecuteChanged();
         ((RelayCommand)SummarizeConversationFromCommand).NotifyCanExecuteChanged();
-        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", QueuedMessageStatus(waitsForSavedTurn));
+        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = QueuedMessageStatus(waitsForSavedTurn) };
         if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
         OnPropertyChanged(nameof(QueueStatusLabel));
         OnPropertyChanged(nameof(HasQueuedTurns));
@@ -3329,7 +3329,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                     };
                     if (assistantIndex >= scratch.Messages.Count)
                         throw new InvalidOperationException("The Code task transcript is no longer available for an isolated attempt.");
-                    scratch.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "");
+                    scratch.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "") { IsCodeTaskTurn = true };
                     var attemptFiles = new Codev.WorkspaceFileService(workspace.WorkspacePath, turn.ContextExclusions);
                     var executor = await RunCodeTaskTurnAsync(scratch, assistantIndex, attemptMessages, attemptFiles,
                         turn with { BestOfNAttempts = 1 }, new System.Text.StringBuilder(), token,
@@ -3861,7 +3861,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             conversation.Messages[userMessageIndex] = conversation.Messages[userMessageIndex] with { IsQueued = false };
         conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
         conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == assistantIndex);
-        conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "");
+        conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = "" };
         if (ReferenceEquals(ActiveConversation, conversation)) Messages[assistantIndex] = conversation.Messages[assistantIndex];
         IsGenerating = true;
         Persist();
@@ -4141,7 +4141,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             var assistantIndex = item.Turn.AssistantIndex;
             if (assistantIndex < item.Conversation.Messages.Count &&
                 item.Conversation.Messages[assistantIndex].Content == "Queued locally · waiting for the current response")
-                item.Conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", SavedQueueMessageStatus);
+                item.Conversation.Messages[assistantIndex] = item.Conversation.Messages[assistantIndex] with { Content = SavedQueueMessageStatus };
         }
         foreach (var conversation in _conversations)
         {
@@ -4222,7 +4222,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         while (_requestQueue.TryDequeue(out var turn))
         {
             if (!ReferenceEquals(turn.Conversation, conversation)) { retained.Enqueue(turn); continue; }
-            conversation.Messages[turn.Turn.AssistantIndex] = new Codev.ChatMessage("assistant", "Queued request canceled before it was sent.");
+            conversation.Messages[turn.Turn.AssistantIndex] = conversation.Messages[turn.Turn.AssistantIndex] with { Content = "Queued request canceled before it was sent." };
             conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == turn.Turn.AssistantIndex);
             conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
         }
@@ -4293,7 +4293,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 conversation.PendingRequestCount = Math.Max(0, conversation.PendingRequestCount - 1);
                 conversation.PendingTurns?.RemoveAll(item => item.AssistantIndex == assistantIndex);
                 conversation.Messages[message.MessageIndex] = message with { IsQueued = false };
-                conversation.Messages[assistantIndex] = new Codev.ChatMessage("assistant", "Queued prompt removed.");
+                conversation.Messages[assistantIndex] = conversation.Messages[assistantIndex] with { Content = "Queued prompt removed." };
                 if (ReferenceEquals(ActiveConversation, conversation))
                 {
                     Messages[message.MessageIndex] = conversation.Messages[message.MessageIndex];
