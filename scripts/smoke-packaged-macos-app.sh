@@ -175,6 +175,19 @@ tell application "System Events"
   set targetProcess to first process whose unix id is ${app_pid}
   set frontmost of targetProcess to true
   tell targetProcess
+    set optionsButton to missing value
+    set windowContents to entire contents of window 1
+    repeat with currentElement in windowContents
+      try
+        if (name of currentElement as text) is "Conversation options" then
+          set optionsButton to currentElement
+          exit repeat
+        end if
+      end try
+    end repeat
+    if optionsButton is missing value then error "Could not find the conversation options button."
+    click optionsButton
+    delay 0.25
     set profilePicker to missing value
     set windowContents to entire contents of window 1
     repeat with currentElement in windowContents
@@ -191,6 +204,7 @@ tell application "System Events"
   delay 0.25
   key code 115
   key code 36
+  key code 53
 end tell
 APPLESCRIPT
 }

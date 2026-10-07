@@ -1,5 +1,7 @@
 # Avalonia UI smoke checklist
 
+- [ ] In the conversation header, confirm the model, conversation mode, and Code task controls remain visible and compact. Open **Options** and verify context size, primary agent, and response style are readable, operable, and retain their current values.
+
 Use this checklist for the Avalonia desktop app across its supported operating systems. Use a disposable conversation and local Ollama for local checks. Hosted-provider checks require valid API credentials and may incur provider charges; use a disposable chat and never include project data unless separately opted in. For package-upgrade tests, use a disposable operating-system account or VM; verify that builds honor `CODEV_DATA_ROOT` before relying on it, since older tags may ignore it and write to the normal user profile.
 
 - [x] Exact-head packaged cross-platform preview (2026-10-07, PR source head `f6a64ff`, CI [#37650470722](https://github.com/jay23606/codev/actions/runs/37650470722), preview [#37650470898](https://github.com/jay23606/codev/actions/runs/37650470898)): all Windows/Linux/macOS CI jobs and all four packaged desktop/CLI targets passed, including packaged Auto/local-model interaction checks on Windows, Linux, Apple silicon macOS, and Intel macOS. GitHub release publishing was skipped because the PR remains open. Clean-machine installation, native screen-reader/scaling checks, and manual platform/security review remain unchecked.

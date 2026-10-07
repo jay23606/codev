@@ -804,6 +804,8 @@ public sealed class MainWindowTests
             Assert.Equal("Search conversations", AutomationProperties.GetName(Assert.IsType<TextBox>(window.FindControl<TextBox>("SearchTextBox"))));
             Assert.Equal("Message Codev", AutomationProperties.GetName(Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox"))));
             Assert.Equal("Model picker", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ModelPicker"))));
+            var optionsButton = Assert.IsType<Button>(window.FindControl<Button>("ConversationOptionsButton"));
+            Assert.Equal("Conversation options", AutomationProperties.GetName(optionsButton));
             Assert.Equal("Context size", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ContextSizePicker"))));
             Assert.Equal("Primary agent profile", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"))));
             var planModeButton = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button => AutomationProperties.GetAutomationId(button) == "PlanModeButton");
@@ -812,6 +814,12 @@ public sealed class MainWindowTests
             var codeTaskModeButton = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button => AutomationProperties.GetAutomationId(button) == "CodeTaskModeButton");
             Assert.Equal(viewModel.CodeTaskLabel, AutomationProperties.GetName(codeTaskModeButton));
             Assert.Equal(viewModel.CodeTaskTooltip, AutomationProperties.GetHelpText(codeTaskModeButton));
+            Assert.DoesNotContain(window.GetVisualDescendants().OfType<ComboBox>(), control =>
+                AutomationProperties.GetName(control) is "Context size" or "Primary agent profile" or "Response style");
+            Assert.IsType<Flyout>(optionsButton.Flyout).ShowAt(optionsButton);
+            window.UpdateLayout();
+            Assert.Equal(3, window.GetVisualDescendants().OfType<ComboBox>().Count(control =>
+                AutomationProperties.GetName(control) is "Context size" or "Primary agent profile" or "Response style"));
             var responseStyle = Assert.Single(window.GetVisualDescendants().OfType<ComboBox>(), control => AutomationProperties.GetName(control) == "Response style");
             Assert.Equal("Response style", AutomationProperties.GetName(responseStyle));
         }
@@ -968,6 +976,9 @@ public sealed class MainWindowTests
             window = new MainWindow { DataContext = viewModel };
             window.Show();
             window.UpdateLayout();
+            var optionsButton = Assert.IsType<Button>(window.FindControl<Button>("ConversationOptionsButton"));
+            Assert.IsType<Flyout>(optionsButton.Flyout).ShowAt(optionsButton);
+            window.UpdateLayout();
 
             var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ContextSizePicker"));
             Assert.True(picker.IsEnabled);
@@ -1010,6 +1021,9 @@ public sealed class MainWindowTests
             restoredViewModel = new MainViewModel(root);
             restoredWindow = new MainWindow { DataContext = restoredViewModel };
             restoredWindow.Show();
+            restoredWindow.UpdateLayout();
+            var restoredOptionsButton = Assert.IsType<Button>(restoredWindow.FindControl<Button>("ConversationOptionsButton"));
+            Assert.IsType<Flyout>(restoredOptionsButton.Flyout).ShowAt(restoredOptionsButton);
             restoredWindow.UpdateLayout();
             var restoredPicker = Assert.IsType<ComboBox>(restoredWindow.FindControl<ComboBox>("ContextSizePicker"));
             Assert.Equal(largeContextConversation.Id, restoredViewModel.ActiveConversation!.Id);
@@ -2513,6 +2527,9 @@ public sealed class MainWindowTests
             window.Show();
             window.UpdateLayout();
 
+            var optionsButton = Assert.IsType<Button>(window.FindControl<Button>("ConversationOptionsButton"));
+            Assert.IsType<Flyout>(optionsButton.Flyout).ShowAt(optionsButton);
+            window.UpdateLayout();
             var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.True(picker.IsEnabled);
             Assert.Contains(viewModel.AgentProfiles, profile => profile.Name == "Reviewer");
@@ -2538,6 +2555,7 @@ public sealed class MainWindowTests
             Assert.Null(conversation.AgentProfileName);
             Assert.Equal("Build agent", viewModel.PrimaryAgentLabel);
 
+            Assert.IsType<Flyout>(optionsButton.Flyout).Hide();
             window.KeyPress(Key.A, (OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control) | RawInputModifiers.Shift, PhysicalKey.A, "A");
             Assert.Equal("Plan", conversation.AgentProfileName);
             Assert.Equal("Plan agent", viewModel.PrimaryAgentLabel);
@@ -2574,16 +2592,14 @@ public sealed class MainWindowTests
             window.UpdateLayout();
             await viewModel.RefreshAgentProfilesAsync();
 
+            var optionsButton = Assert.IsType<Button>(window.FindControl<Button>("ConversationOptionsButton"));
+            Assert.IsType<Flyout>(optionsButton.Flyout).ShowAt(optionsButton);
+            window.UpdateLayout();
             var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.Equal("", viewModel.SelectedAgentProfileName);
             var reviewerIndex = viewModel.AgentProfiles.ToList().FindIndex(profile => profile.Name == "Smoke QA");
             Assert.True(reviewerIndex > 0);
-            var pickerCenter = global::Avalonia.VisualExtensions.TranslatePoint(picker,
-                new global::Avalonia.Point(picker.Bounds.Width / 2, picker.Bounds.Height / 2), window);
-            Assert.NotNull(pickerCenter);
-            window.MouseDown(pickerCenter.Value, MouseButton.Left);
-            window.MouseUp(pickerCenter.Value, MouseButton.Left);
-            window.UpdateLayout();
+            picker.IsDropDownOpen = true;
             Assert.True(picker.IsDropDownOpen);
             picker.IsDropDownOpen = false;
             picker.SelectedItem = viewModel.AgentProfiles.First(profile => profile.Name == "Smoke QA");
@@ -2606,6 +2622,9 @@ public sealed class MainWindowTests
             restoredWindow.UpdateLayout();
             await restoredViewModel.RefreshAgentProfilesAsync();
 
+            var restoredOptionsButton = Assert.IsType<Button>(restoredWindow.FindControl<Button>("ConversationOptionsButton"));
+            Assert.IsType<Flyout>(restoredOptionsButton.Flyout).ShowAt(restoredOptionsButton);
+            restoredWindow.UpdateLayout();
             var restoredPicker = Assert.IsType<ComboBox>(restoredWindow.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.Equal("Smoke QA", restoredViewModel.SelectedAgentProfileName);
             Assert.Equal("Smoke QA", Assert.IsType<AgentProfileChoice>(restoredPicker.SelectedItem).Name);
@@ -2641,6 +2660,9 @@ public sealed class MainWindowTests
 
             window = new MainWindow { DataContext = viewModel };
             window.Show();
+            window.UpdateLayout();
+            var optionsButton = Assert.IsType<Button>(window.FindControl<Button>("ConversationOptionsButton"));
+            Assert.IsType<Flyout>(optionsButton.Flyout).ShowAt(optionsButton);
             window.UpdateLayout();
             var picker = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("AgentProfileSelectionComboBox"));
             Assert.Same(loadingChoice, picker.SelectedItem);

@@ -131,6 +131,7 @@ The **foundation milestone** is complete. Avalonia now implements a substantial 
 
 ### 5. Everyday assistant usability
 
+- [x] Keep the conversation header compact: model, conversation mode, and Code task stay visible; context size, primary agent, and response style live together in a labeled Options popover.
 - [x] Markdown headings, emphasis, lists, quotes, inline code, safe clickable HTTP(S) links, fenced code blocks with Copy and lightweight syntax coloring for common languages, scrollable tables, and message-level Copy available while a response is running.
 - [x] Read-only Plan mode, stop generation while keeping partial response, visible agent-tool status, continue from an explicitly stopped answer, retry/edit-resend, and branch from an earlier message. Richer plans remain.
 - [x] Shortcuts include Ctrl+N new conversation, Ctrl+F search, Ctrl+L focus composer, Ctrl+, settings, F2 rename, Esc stop, and F1 help. Adjustable chat/composer text size is available in Settings. Accessible focus order and broader shortcut customization remain.

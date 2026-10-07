@@ -169,6 +169,21 @@ function Test-NewConversationShortcut($Window, [string]$DataRoot) {
 $script:AgentProfileSmokeConversationId = $null
 
 function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$ConversationId) {
+    $optionsCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Conversation options'))
+    $optionsButton = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $optionsCondition)
+    $optionsInvoke = $null
+    if ($null -eq $optionsButton -or -not $optionsButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$optionsInvoke)) {
+        throw 'The conversation options button is missing or cannot be opened in Code task mode.'
+    }
+    $optionsInvoke.Invoke()
+    Start-Sleep -Milliseconds 200
+
     $pickerCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -223,6 +238,7 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
         throw "The expanded agent profile picker did not expose the Smoke QA selection. Visible profile items: $($visibleItems -join ', ')"
     }
     $candidate.Select()
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
 
     $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -1379,11 +1395,39 @@ public static class CodevCommonDialog
             $visitedTabNames[$focused.Current.Name] = $true
         }
     }
-    foreach ($requiredTabName in @('Search conversations', 'Message Codev', 'Response style')) {
+    foreach ($requiredTabName in @('Search conversations', 'Message Codev', 'Conversation options')) {
         if (-not $visitedTabNames.ContainsKey($requiredTabName)) {
             throw "Tab traversal did not reach the accessible control '$requiredTabName'."
         }
     }
+
+    $optionsButtonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Conversation options'))
+    $optionsButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $optionsButtonCondition)
+    $optionsInvoke = $null
+    if ($null -eq $optionsButton -or -not $optionsButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$optionsInvoke)) {
+        throw 'The conversation options button is missing or cannot be opened by UI Automation.'
+    }
+    $optionsInvoke.Invoke()
+    Start-Sleep -Milliseconds 200
+    foreach ($selectorName in @('Context size', 'Primary agent profile', 'Response style')) {
+        $selectorCondition = [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::ComboBox),
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty,
+                $selectorName))
+        if ($null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $selectorCondition)) {
+            throw "The conversation options panel did not expose '$selectorName' to UI Automation."
+        }
+    }
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
 
     # Exercise the shortcuts against the packaged native window, not only the
     # Avalonia headless event handler. The app runs against an isolated profile.

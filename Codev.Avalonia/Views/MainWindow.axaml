@@ -203,7 +203,7 @@
 
         <Grid Grid.Column="1" RowDefinitions="62,Auto,*,Auto,Auto">
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="30,0">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="5">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="5">
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="{Binding ConversationTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                         <TextBlock Text="{Binding MessageCountLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" />
@@ -217,30 +217,44 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <TextBlock Grid.Column="1" Width="225" IsVisible="{Binding IsModelPickerPlaceholderVisible}" Text="{Binding ModelPickerPlaceholder}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="The model selector appears when at least one model is available." />
-                    <ComboBox x:Name="ContextSizePicker" Grid.Column="2" Width="96" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" IsEnabled="{Binding IsLocalModel}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context for local Ollama models; hosted providers control their context windows." AutomationProperties.Name="Context size">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ContextSizeChoice">
-                                <TextBlock Text="{Binding DisplayName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <Button Grid.Column="3" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" AutomationProperties.Name="{Binding PlanModeLabel}" AutomationProperties.HelpText="{Binding ConversationModeCycleTooltip}" AutomationProperties.AutomationId="PlanModeButton" />
-                    <Button Grid.Column="4" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" AutomationProperties.Name="{Binding CodeTaskLabel}" AutomationProperties.HelpText="{Binding CodeTaskTooltip}" AutomationProperties.AutomationId="CodeTaskModeButton" />
-                    <ComboBox x:Name="AgentProfileSelectionComboBox" Grid.Column="5" Width="124" ItemsSource="{Binding AgentProfiles}" SelectedItem="{Binding SelectedAgentProfileChoice, Mode=TwoWay}" IsEnabled="{Binding IsCodeTask}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="{Binding PrimaryAgentTooltip}" AutomationProperties.Name="Primary agent profile">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:AgentProfileChoice">
-                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <ComboBox Grid.Column="6" Width="105" ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" VerticalAlignment="Center" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions." AutomationProperties.Name="Response style">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:OutputStyleChoice">
-                                <TextBlock Text="{Binding DisplayName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <Button x:Name="MoreButton" Grid.Column="7" Classes="soft" Content="More" ToolTip.Tip="Conversation and model actions">
+                    <Button Grid.Column="2" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" AutomationProperties.Name="{Binding PlanModeLabel}" AutomationProperties.HelpText="{Binding ConversationModeCycleTooltip}" AutomationProperties.AutomationId="PlanModeButton" />
+                    <Button Grid.Column="3" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" AutomationProperties.Name="{Binding CodeTaskLabel}" AutomationProperties.HelpText="{Binding CodeTaskTooltip}" AutomationProperties.AutomationId="CodeTaskModeButton" />
+                    <Button x:Name="ConversationOptionsButton" Grid.Column="4" Classes="soft" Content="Options" ToolTip.Tip="Context size, primary agent, and response style" AutomationProperties.Name="Conversation options">
+                        <Button.Flyout>
+                            <Flyout>
+                                <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Width="280">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="Conversation options" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,3" />
+                                        <TextBlock Text="Context size" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" />
+                                        <ComboBox x:Name="ContextSizePicker" ItemsSource="{Binding ContextSizes}" SelectedValue="{Binding ContextSize, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" IsEnabled="{Binding IsLocalModel}" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Per-conversation context for local Ollama models; hosted providers control their context windows." AutomationProperties.Name="Context size">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:ContextSizeChoice">
+                                                    <TextBlock Text="{Binding DisplayName}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <TextBlock Text="Primary agent" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" Margin="0,4,0,0" />
+                                        <ComboBox x:Name="AgentProfileSelectionComboBox" ItemsSource="{Binding AgentProfiles}" SelectedItem="{Binding SelectedAgentProfileChoice, Mode=TwoWay}" IsEnabled="{Binding IsCodeTask}" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="{Binding PrimaryAgentTooltip}" AutomationProperties.Name="Primary agent profile">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:AgentProfileChoice">
+                                                    <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <TextBlock Text="Response style" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" Margin="0,4,0,0" />
+                                        <ComboBox ItemsSource="{Binding OutputStyles}" SelectedValue="{Binding OutputStyle, Mode=TwoWay}" SelectedValueBinding="{Binding Value}" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource FieldBorderBrush}" ToolTip.Tip="Choose how detailed replies should be. Does not change tools or permissions." AutomationProperties.Name="Response style">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:OutputStyleChoice">
+                                                    <TextBlock Text="{Binding DisplayName}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    <Button x:Name="MoreButton" Grid.Column="5" Classes="soft" Content="More" ToolTip.Tip="Conversation and model actions">
                         <Button.Flyout>
                             <MenuFlyout>
                                 <MenuItem Header="Find in this conversation…" Click="OpenConversationFind_Click" />
