@@ -4363,8 +4363,6 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             childCancellation.Cancel();
         if (active.ParentConversationId is null)
             CancelParallelChildren(active.Id);
-        if (_generationCancellation is null)
-            foreach (var cancellation in _parallelChildCancellation.Values.ToArray()) cancellation.Cancel();
     }
 
     public async Task SaveFileChangesAsync()

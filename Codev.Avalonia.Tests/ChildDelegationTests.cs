@@ -8,6 +8,129 @@ namespace Codev.Avalonia.Tests;
 public sealed class ChildDelegationTests
 {
     [AvaloniaFact]
+    public async Task Stopping_a_parent_cancels_only_its_running_children()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-child-cancellation-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var viewModel = new MainViewModel(Path.Combine(root, "app-data"));
+        try
+        {
+            var parent = Assert.IsType<Codev.Conversation>(viewModel.ActiveConversation);
+            var otherParent = new Codev.Conversation { Title = "Other parent" };
+            var firstChild = new Codev.Conversation { Title = "First child", ParentConversationId = parent.Id };
+            var secondChild = new Codev.Conversation { Title = "Second child", ParentConversationId = parent.Id };
+            var unrelatedChild = new Codev.Conversation { Title = "Unrelated child", ParentConversationId = otherParent.Id };
+            var conversationsField = typeof(MainViewModel).GetField("_conversations", BindingFlags.Instance | BindingFlags.NonPublic);
+            var conversations = Assert.IsAssignableFrom<ICollection<Codev.Conversation>>(conversationsField?.GetValue(viewModel));
+            conversations.Add(otherParent);
+            conversations.Add(firstChild);
+            conversations.Add(secondChild);
+            conversations.Add(unrelatedChild);
+
+            var runningChildrenField = typeof(MainViewModel).GetField("_runningParallelChildren", BindingFlags.Instance | BindingFlags.NonPublic);
+            var runningChildren = Assert.IsType<HashSet<Guid>>(runningChildrenField?.GetValue(viewModel));
+            runningChildren.UnionWith([firstChild.Id, secondChild.Id, unrelatedChild.Id]);
+
+            var cancellationField = typeof(MainViewModel).GetField("_parallelChildCancellation", BindingFlags.Instance | BindingFlags.NonPublic);
+            var cancellations = Assert.IsType<Dictionary<Guid, CancellationTokenSource>>(cancellationField?.GetValue(viewModel));
+            using var firstCancellation = new CancellationTokenSource();
+            using var secondCancellation = new CancellationTokenSource();
+            using var unrelatedCancellation = new CancellationTokenSource();
+            cancellations[firstChild.Id] = firstCancellation;
+            cancellations[secondChild.Id] = secondCancellation;
+            cancellations[unrelatedChild.Id] = unrelatedCancellation;
+
+            using var parentCancellation = new CancellationTokenSource();
+            typeof(MainViewModel).GetField("_generationCancellation", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(viewModel, parentCancellation);
+            typeof(MainViewModel).GetProperty(nameof(MainViewModel.IsGenerating))!
+                .SetValue(viewModel, true);
+
+            Assert.True(viewModel.StopGenerationCommand.CanExecute(null));
+            viewModel.StopGenerationCommand.Execute(null);
+
+            Assert.True(parentCancellation.IsCancellationRequested);
+            Assert.True(firstCancellation.IsCancellationRequested);
+            Assert.True(secondCancellation.IsCancellationRequested);
+            Assert.False(unrelatedCancellation.IsCancellationRequested);
+        }
+        finally
+        {
+            await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            foreach (var fieldName in new[] { "_persistenceTask", "_settingsPersistenceTask", "_activeConversationPersistenceTask",
+                         "_savedCloudApiKeysRestoreTask", "_managedWorkspacePermissionDefaultsTask", "_modelLoadTask" })
+                if (typeof(MainViewModel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) is Task pendingTask)
+                    await pendingTask;
+            await DeleteTemporaryDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Stopping_a_selected_parallel_child_does_not_cancel_its_sibling()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-child-cancellation-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var viewModel = new MainViewModel(Path.Combine(root, "app-data"));
+        try
+        {
+            var parent = Assert.IsType<Codev.Conversation>(viewModel.ActiveConversation);
+            var selectedChild = new Codev.Conversation { Title = "Selected child", ParentConversationId = parent.Id };
+            var siblingChild = new Codev.Conversation { Title = "Sibling child", ParentConversationId = parent.Id };
+            var conversationsField = typeof(MainViewModel).GetField("_conversations", BindingFlags.Instance | BindingFlags.NonPublic);
+            var conversations = Assert.IsAssignableFrom<ICollection<Codev.Conversation>>(conversationsField?.GetValue(viewModel));
+            conversations.Add(selectedChild);
+            conversations.Add(siblingChild);
+
+            var runningChildrenField = typeof(MainViewModel).GetField("_runningParallelChildren", BindingFlags.Instance | BindingFlags.NonPublic);
+            var runningChildren = Assert.IsType<HashSet<Guid>>(runningChildrenField?.GetValue(viewModel));
+            runningChildren.Add(selectedChild.Id);
+            runningChildren.Add(siblingChild.Id);
+
+            var cancellationField = typeof(MainViewModel).GetField("_parallelChildCancellation", BindingFlags.Instance | BindingFlags.NonPublic);
+            var cancellations = Assert.IsType<Dictionary<Guid, CancellationTokenSource>>(cancellationField?.GetValue(viewModel));
+            using var selectedCancellation = new CancellationTokenSource();
+            using var siblingCancellation = new CancellationTokenSource();
+            cancellations[selectedChild.Id] = selectedCancellation;
+            cancellations[siblingChild.Id] = siblingCancellation;
+
+            viewModel.SelectConversationCommand.Execute(selectedChild);
+            typeof(MainViewModel).GetProperty(nameof(MainViewModel.IsGenerating))!
+                .SetValue(viewModel, true);
+
+            Assert.True(viewModel.StopGenerationCommand.CanExecute(null));
+            viewModel.StopGenerationCommand.Execute(null);
+
+            Assert.True(selectedCancellation.IsCancellationRequested);
+            Assert.False(siblingCancellation.IsCancellationRequested);
+        }
+        finally
+        {
+            await viewModel.StopBackgroundCommandsAndShutdownAsync();
+            foreach (var fieldName in new[] { "_persistenceTask", "_settingsPersistenceTask", "_activeConversationPersistenceTask",
+                         "_savedCloudApiKeysRestoreTask", "_managedWorkspacePermissionDefaultsTask", "_modelLoadTask" })
+                if (typeof(MainViewModel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) is Task pendingTask)
+                    await pendingTask;
+            await DeleteTemporaryDirectoryAsync(root);
+        }
+    }
+
+    private static async Task DeleteTemporaryDirectoryAsync(string path)
+    {
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 29)
+            {
+                await Task.Delay(100);
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Current_root_generation_can_create_an_isolated_child_while_manual_creation_stays_blocked()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-child-delegation-tests", Guid.NewGuid().ToString("N"));
