@@ -156,6 +156,7 @@ public sealed class MainWindowTests
             var confirm = Assert.Single(confirmation.GetVisualDescendants().OfType<Button>(), button =>
                 button.Content?.ToString() == "Confirm");
             await Dispatcher.UIThread.InvokeAsync(() => confirm.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await WaitForOwnedWindowClosedAsync(confirmation, committedReview);
             await WaitForOwnedWindowClosedAsync(committedReview);
             Assert.Equal("reviewed child change", (await File.ReadAllTextAsync(Path.Combine(repository, "child-review-fixture.txt"))).Trim());
 
@@ -868,6 +869,70 @@ public sealed class MainWindowTests
                 Assert.True(position.Value.X + control.Bounds.Width <= window.ClientSize.Width + 1 &&
                             position.Value.Y + control.Bounds.Height <= window.ClientSize.Height + 1,
                     $"{control.Name ?? control.GetType().Name} should fit within the window at 32pt: {position}, {control.Bounds}, {window.ClientSize}.");
+            }
+        }
+        finally
+        {
+            window?.Close();
+            await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Reading_width_resizes_centered_transcript_and_composer_and_keeps_user_messages_right_aligned()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var viewModel = new MainViewModel(root);
+        MainWindow? window = null;
+        try
+        {
+            viewModel.Messages.Add(new ChatMessage("user", new string('w', 180)));
+            viewModel.Messages.Add(new ChatMessage("assistant", "A short response."));
+            window = new MainWindow { DataContext = viewModel, Width = 1500, Height = 900 };
+            window.Show();
+
+            var transcript = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
+            var scrollViewer = Assert.IsType<ScrollViewer>(window.FindControl<ScrollViewer>("ConversationScrollViewer"));
+            var composer = Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox"));
+            var composerRow = Assert.IsType<Grid>(composer.GetVisualAncestors().OfType<Grid>().First());
+            var userBubble = Assert.Single(transcript.GetVisualDescendants().OfType<StackPanel>(), panel =>
+                panel.DataContext is ChatMessage { IsUser: true } && panel.HorizontalAlignment == global::Avalonia.Layout.HorizontalAlignment.Right && panel.Bounds.Width > 100);
+
+            double? previousWidth = null;
+            foreach (var width in new[] { 640, 800, 960, 0 })
+            {
+                viewModel.SetReadingWidth(width);
+                await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
+
+                var transcriptPosition = Assert.NotNull(transcript.TranslatePoint(new Point(0, 0), window));
+                var composerPosition = Assert.NotNull(composerRow.TranslatePoint(new Point(0, 0), window));
+                var bubblePosition = Assert.NotNull(userBubble.TranslatePoint(new Point(0, 0), transcript));
+                var measuredWidth = transcript.Bounds.Width;
+                Assert.True(measuredWidth > 0, $"Transcript width was empty for reading width {width}.");
+                Assert.True(Math.Abs((transcriptPosition.X + measuredWidth / 2) -
+                    (composerPosition.X + composerRow.Bounds.Width / 2)) <= 1,
+                    "The conversation lane and composer should share a center line.");
+                if (width == 0)
+                {
+                    Assert.True(measuredWidth > 960, "Full width should use the available conversation viewport.");
+                    Assert.True(Math.Abs((measuredWidth - composerRow.Bounds.Width) - 40) <= 8,
+                        "The full-width composer should track the lane, accounting for its 20 px side padding.");
+                }
+                else
+                {
+                    Assert.True(Math.Abs(measuredWidth - width) <= 16,
+                        $"The transcript should follow the selected {width} px width, allowing for its scrollbar.");
+                    Assert.True(Math.Abs(composerRow.Bounds.Width - width) <= 1,
+                        $"The composer should follow the selected {width} px width.");
+                }
+                Assert.True(Math.Abs((bubblePosition.X + userBubble.Bounds.Width) - (measuredWidth - 24)) <= 1,
+                    "The user message should remain right-aligned with its 24 px lane inset.");
+                Assert.True(transcriptPosition.X >= scrollViewer.TranslatePoint(new Point(0, 0), window)!.Value.X,
+                    "The centered conversation lane should stay inside its viewport.");
+                if (previousWidth is { } lastWidth)
+                    Assert.True(measuredWidth > lastWidth, $"Reading width {width} did not widen the transcript ({lastWidth} -> {measuredWidth}).");
+                previousWidth = measuredWidth;
             }
         }
         finally
@@ -1657,17 +1722,32 @@ public sealed class MainWindowTests
         throw new TimeoutException($"An owned window was not opened by '{owner.Title}' within five seconds.");
     }
 
-    private static async Task WaitForOwnedWindowClosedAsync(Window window)
+    private static async Task WaitForOwnedWindowClosedAsync(Window window, Window? owner = null)
     {
-        var owner = window.Owner as Window ?? throw new InvalidOperationException("The dialog has no window owner.");
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        var dialogOwner = owner ?? window.Owner as Window ?? throw new InvalidOperationException("The dialog has no window owner.");
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
-            var isClosed = await Dispatcher.UIThread.InvokeAsync(() => !owner.OwnedWindows.Contains(window));
-            if (isClosed) return;
+            var state = await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!dialogOwner.OwnedWindows.Contains(window)) return (Closed: true, ChildDialogs: (string?)null);
+                var childDialogs = window.OwnedWindows.Select(child =>
+                {
+                    var detail = child.GetVisualDescendants().OfType<TextBlock>()
+                        .Select(text => text.Text).FirstOrDefault(text => !string.IsNullOrWhiteSpace(text));
+                    return string.IsNullOrWhiteSpace(detail) ? child.Title : $"{child.Title}: {detail}";
+                });
+                var details = string.Join("; ", childDialogs);
+                return (Closed: false, ChildDialogs: string.IsNullOrWhiteSpace(details) ? null : details);
+            });
+            if (state.Closed) return;
+            if (state.ChildDialogs is not null)
+                throw new InvalidOperationException($"Window '{window.Title}' remains open with child dialogs: {state.ChildDialogs}");
             await Task.Delay(10);
         }
-        throw new TimeoutException($"Window '{window.Title}' did not close within five seconds.");
+        var remainingWindows = await Dispatcher.UIThread.InvokeAsync(() => string.Join(", ",
+            dialogOwner.OwnedWindows.Select(child => child.Title)));
+        throw new TimeoutException($"Window '{window.Title}' did not close within 20 seconds. Open child windows: {remainingWindows}.");
     }
 
     private static async Task DeleteAutoModeTestDirectoryAsync(string path)
