@@ -58,7 +58,7 @@ public sealed class ChildDelegationTests
         {
             await viewModel.StopBackgroundCommandsAndShutdownAsync();
             foreach (var fieldName in new[] { "_persistenceTask", "_settingsPersistenceTask", "_activeConversationPersistenceTask",
-                         "_savedCloudApiKeysRestoreTask", "_managedWorkspacePermissionDefaultsTask", "_modelLoadTask" })
+                         "_managedWorkspacePermissionDefaultsTask", "_modelLoadTask" })
                 if (typeof(MainViewModel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) is Task pendingTask)
                     await pendingTask;
             await DeleteTemporaryDirectoryAsync(root);
@@ -107,7 +107,7 @@ public sealed class ChildDelegationTests
         {
             await viewModel.StopBackgroundCommandsAndShutdownAsync();
             foreach (var fieldName in new[] { "_persistenceTask", "_settingsPersistenceTask", "_activeConversationPersistenceTask",
-                         "_savedCloudApiKeysRestoreTask", "_managedWorkspacePermissionDefaultsTask", "_modelLoadTask" })
+                         "_managedWorkspacePermissionDefaultsTask", "_modelLoadTask" })
                 if (typeof(MainViewModel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) is Task pendingTask)
                     await pendingTask;
             await DeleteTemporaryDirectoryAsync(root);
