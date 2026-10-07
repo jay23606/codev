@@ -202,11 +202,13 @@ public sealed class McpBoundedStdioClientTransportTests
         var safeProcessIdPath = processIdPath.Replace("'", "''", StringComparison.Ordinal);
         var isWindows = OperatingSystem.IsWindows();
         var existingPingProcessIds = isWindows ? GetRunningProcessIdsByName("ping") : [];
+        var windowsProcessTreeScriptPath = Path.Combine(root, "mcp-process-tree.cmd");
+        if (isWindows)
+            await File.WriteAllTextAsync(windowsProcessTreeScriptPath, BuildWindowsProcessTreeScript());
         var options = isWindows
             ? new StdioClientTransportOptions
             {
-                Command = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
-                Arguments = ["/D", "/C", BuildWindowsProcessTreeCommand()],
+                Command = windowsProcessTreeScriptPath,
                 Name = "process-tree-lifecycle-test"
             }
             : new StdioClientTransportOptions
@@ -261,12 +263,12 @@ public sealed class McpBoundedStdioClientTransportTests
         throw new TimeoutException("The MCP fixture server did not write both process IDs.");
     }
 
-    private static string BuildWindowsProcessTreeCommand()
+    private static string BuildWindowsProcessTreeScript()
     {
         var pingExecutable = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.System), "ping.exe");
-        return $"start \"\" /B \"{pingExecutable}\" -n 31 127.0.0.1 >nul & " +
-            $"\"{pingExecutable}\" -n 31 127.0.0.1 >nul";
+        return $"@echo off\r\nstart \"\" /B \"{pingExecutable}\" -n 31 127.0.0.1 >nul\r\n" +
+            $"\"{pingExecutable}\" -n 31 127.0.0.1 >nul\r\n";
     }
 
     private static HashSet<int> GetRunningProcessIdsByName(string processName)
