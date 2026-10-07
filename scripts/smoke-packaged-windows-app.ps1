@@ -809,6 +809,93 @@ function Invoke-AccessibleMenuItem($Item) {
     }
 }
 
+function Invoke-MoreSubmenuItem($Window, [string]$SectionName, [string]$ItemName) {
+    $moreButton = Find-ByAutomationId $Window 'MoreButton'
+    $moreInvoke = $null
+    if ($null -eq $moreButton -or -not $moreButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$moreInvoke)) {
+        throw 'The More menu button is unavailable for the display-preference smoke.'
+    }
+    $moreInvoke.Invoke()
+    $menuCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::MenuItem)
+
+    $section = $null
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $items = Find-AppElementsWithRetry -ProcessId $Window.Current.ProcessId -Condition $menuCondition -TimeoutMilliseconds 500
+        for ($index = 0; $index -lt $items.Count; $index++) {
+            try {
+                if ($items[$index].Current.Name -eq $SectionName -and -not $items[$index].Current.IsOffscreen) {
+                    $section = $items[$index]
+                    break
+                }
+            }
+            catch { }
+        }
+        if ($null -ne $section) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $section) { throw "The More menu did not expose the '$SectionName' submenu." }
+    $section.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+
+    $item = $null
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $items = Find-AppElementsWithRetry -ProcessId $Window.Current.ProcessId -Condition $menuCondition -TimeoutMilliseconds 500
+        for ($index = 0; $index -lt $items.Count; $index++) {
+            try {
+                if ($items[$index].Current.Name -eq $ItemName -and -not $items[$index].Current.IsOffscreen) {
+                    $item = $items[$index]
+                    break
+                }
+            }
+            catch { }
+        }
+        if ($null -ne $item) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($null -eq $item) { throw "The '$SectionName' submenu did not expose '$ItemName'." }
+    Invoke-AccessibleMenuItem $item
+}
+
+function Wait-ForUiSetting([string]$SettingsPath, [string]$PropertyName, [string]$ExpectedValue) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $actualValue = '<missing>'
+    do {
+        try {
+            $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+            $actualValue = [string]$settings.$PropertyName
+            if ($actualValue -eq $ExpectedValue) { return }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 75
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Selecting the display preference did not persist $PropertyName='$ExpectedValue' (actual='$actualValue')."
+}
+
+function Test-DisplayPreferencesInPackagedApp($Window, [string]$DataRoot) {
+    $settingsPath = Join-Path $DataRoot 'Codev\avalonia-settings.json'
+    $readingWidths = @(
+        @{ Name = 'Compact · 640 px'; Value = '640' },
+        @{ Name = 'Standard · 800 px'; Value = '800' },
+        @{ Name = 'Wide · 960 px'; Value = '960' },
+        @{ Name = 'Full width'; Value = '0' })
+    foreach ($choice in $readingWidths) {
+        Invoke-MoreSubmenuItem $Window 'Reading width' $choice.Name
+        Wait-ForUiSetting $settingsPath 'ReadingWidth' $choice.Value
+    }
+    # Keep a non-default value through the existing app-restart check below.
+    Invoke-MoreSubmenuItem $Window 'Reading width' 'Wide · 960 px'
+    Wait-ForUiSetting $settingsPath 'ReadingWidth' '960'
+    Invoke-MoreSubmenuItem $Window 'Font family' 'Consolas'
+    Wait-ForUiSetting $settingsPath 'FontFamily' 'Consolas'
+    Invoke-MoreSubmenuItem $Window 'Font size' '18'
+    Wait-ForUiSetting $settingsPath 'FontSize' '18'
+    Write-Host 'Packaged Windows More menu changed every reading width, font family, and font size; non-default settings are ready for restart-persistence verification.'
+}
+
 function Test-PinnedConversationSearchArchiveRestore($Window, [string]$DataRoot) {
     $activePath = Join-Path $DataRoot 'Codev\avalonia-active-conversation.json'
     $conversationPath = Join-Path $DataRoot 'Codev\avalonia-conversations.json'
@@ -1688,6 +1775,7 @@ public static class CodevCommonDialog
     Start-Sleep -Milliseconds 150
     Set-PermissionMode $window $modeButton 'Ask every time' 'Ask every time ▾' 'AskEveryTime'
     Set-PermissionMode $window $modeButton 'Auto · approve unless denied' 'Auto ▾' 'Auto'
+    Test-DisplayPreferencesInPackagedApp $window $dataRoot
 
     if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(10000)) {
         throw 'The packaged app did not close cleanly after changing the permission mode.'
@@ -1712,9 +1800,18 @@ public static class CodevCommonDialog
     $settingsPath = Join-Path $dataRoot 'Codev\avalonia-settings.json'
     $savedSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
     if ($null -eq $modeButton -or $modeButton.Current.Name -ne 'Auto ▾' -or
-        [string]$savedSettings.DefaultProjectCommandPermissionMode -ne 'Auto') {
-        throw "The fresh app process did not restore Auto mode (label='$($modeButton.Current.Name)', setting='$($savedSettings.DefaultProjectCommandPermissionMode)')."
+        [string]$savedSettings.DefaultProjectCommandPermissionMode -ne 'Auto' -or
+        [int]$savedSettings.ReadingWidth -ne 960 -or [string]$savedSettings.FontFamily -ne 'Consolas' -or
+        [int]$savedSettings.FontSize -ne 18) {
+        throw "The fresh app process did not restore Auto and display preferences (mode='$($modeButton.Current.Name)', savedMode='$($savedSettings.DefaultProjectCommandPermissionMode)', width='$($savedSettings.ReadingWidth)', font='$($savedSettings.FontFamily)', size='$($savedSettings.FontSize)')."
     }
+    Write-Host 'The packaged app restored the selected 960 px reading width, Consolas font, and 18 px text size after restart.'
+    Invoke-MoreSubmenuItem $window 'Reading width' 'Standard · 800 px'
+    Wait-ForUiSetting $settingsPath 'ReadingWidth' '800'
+    Invoke-MoreSubmenuItem $window 'Font family' 'Inter'
+    Wait-ForUiSetting $settingsPath 'FontFamily' 'Inter'
+    Invoke-MoreSubmenuItem $window 'Font size' '14 · Default'
+    Wait-ForUiSetting $settingsPath 'FontSize' '14'
     $renamedRowCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -2380,7 +2477,7 @@ public static class CodevCommonDialog
         }
     }
     $smokeSucceeded = $true
-    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $keyboardFocusableAppButtonCount named, keyboard-focusable app button(s), successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart, and a collapsed multi-action activity summary that expands to readable rows. Auto/Ask changes survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
+    Write-Host "Packaged Codev window opened inside the monitor work area with $($edits.Count) named editable text control(s), $($comboBoxes.Count) named selectors, $keyboardFocusableAppButtonCount named, keyboard-focusable app button(s), successful Tab traversal, F1/Escape shortcut-reference use, Enter/Shift+Enter composer behavior, Ctrl+N conversation creation, Ctrl+Shift+M mode cycle ($modeCycleResult), Ctrl+F/Ctrl+L focus, /status without a model request, native reusable-profile edit/save, persisted sidebar rename/pin/search/archive/restore/permanent-delete actions including rename restoration after restart, and a collapsed multi-action activity summary that expands to readable rows. Auto/Ask changes and display preferences survived restart; native Save/Open dialogs round-tripped the conversation backup in an isolated profile."
     if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected in Code task mode, edited and saved through the native profile editor, and remained selected across app restarts.' }
     if ($null -ne $script:AgentProfileSmokeConversationId) { Write-Host 'The Smoke QA profile was selected through the native Code task picker and persisted across app restarts.' }
 }
