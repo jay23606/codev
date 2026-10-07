@@ -153,11 +153,11 @@ jobs:
 
       - name: Install Linux keyboard interaction helper
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends xdotool at-spi2-core python3-pyatspi
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends xdotool
 
       - name: Smoke-test packaged Linux modes, Auto command, and local chat under Xvfb
         if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a bash ./scripts/smoke-packaged-linux-app.sh ./artifacts/publish/linux-x64/Codev.Avalonia
+        run: xvfb-run -a bash ./scripts/smoke-packaged-linux-app.sh ./artifacts/publish/linux-x64/Codev.Avalonia
 
       - name: Smoke-test packaged Linux headless CLI with loopback Ollama
         if: runner.os == 'Linux'

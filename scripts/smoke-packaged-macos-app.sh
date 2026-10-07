@@ -274,65 +274,6 @@ assert_mode_button_state() {
   echo "macOS accessibility state passed for $automation_id: $state"
 }
 
-report_sidebar_search_focus() {
-  osascript - "$app_pid" <<'APPLESCRIPT'
-on run argv
-  set targetPid to item 1 of argv as integer
-  tell application "System Events"
-    set targetProcess to first process whose unix id is targetPid
-    tell targetProcess
-      set windowContents to entire contents of window 1
-      repeat with currentElement in windowContents
-        try
-          if (name of currentElement as text) is "Search conversations" then
-            try
-              set elementRole to value of attribute "AXRole" of currentElement as text
-            on error
-              set elementRole to "missing"
-            end try
-            try
-              set isFocused to value of attribute "AXFocused" of currentElement as text
-            on error
-              set isFocused to "missing"
-            end try
-            return "name=Search conversations, role=" & elementRole & ", focused=" & isFocused
-          end if
-        end try
-      end repeat
-      return "Search conversations was not found in the macOS accessibility tree."
-    end tell
-  end tell
-end run
-APPLESCRIPT
-}
-
-assert_sidebar_search_focus() {
-  osascript - "$app_pid" <<'APPLESCRIPT'
-on run argv
-  set targetPid to item 1 of argv as integer
-  tell application "System Events"
-    set targetProcess to first process whose unix id is targetPid
-    set frontmost of targetProcess to true
-    delay 0.25
-    key code 3 using {command down}
-  end tell
-end run
-APPLESCRIPT
-  local state
-  for _ in {1..20}; do
-    state="$(report_sidebar_search_focus)"
-    if [[ "$state" == *"name=Search conversations,"* && "$state" == *"focused=true"* ]]; then
-      echo "macOS packaged app Command+F focused sidebar search: $state"
-      return
-    fi
-    sleep 0.1
-  done
-  echo "macOS packaged app Command+F did not focus sidebar search: $state" >&2
-  exit 1
-}
-
-assert_sidebar_search_focus
-
 send_mode_shortcut
 assert_mode true false 'Packaged macOS app switched Chat → Plan with Command+Shift+M.'
 assert_mode_button_state PlanModeButton 'Plan mode' 'switches Plan to Chat'
@@ -430,6 +371,57 @@ PY
   echo "The macOS composer did not persist $description before the smoke submitted it." >&2
   return 1
 }
+
+# Prove Command+F transfers typing away from the composer in the packaged
+# window. The cross-platform Avalonia regression separately asserts that the
+# destination is SearchTextBox.
+search_focus_sentinel='Composer focus sentinel for Command+F.'
+search_focus_probe='CODEV_SEARCH_SHORTCUT_PROBE'
+osascript - "$app_pid" "$search_focus_sentinel" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set sentinel to item 2 of argv
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 0.25
+    key code 37 using {command down}
+    keystroke sentinel
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "$search_focus_sentinel" "the composer sentinel before the Command+F check"
+osascript - "$app_pid" "$search_focus_probe" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set probe to item 2 of argv
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 3 using {command down}
+    delay 0.25
+    keystroke probe
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "$search_focus_sentinel" "an unchanged composer draft after Command+F"
+echo 'macOS packaged app Command+F routed typing away from the composer without altering its draft.'
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 3 using {command down}
+    key code 0 using {command down}
+    key code 51
+    key code 37 using {command down}
+    key code 0 using {command down}
+    key code 51
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "" "the cleared composer after the Command+F check"
 
 # /status is handled locally and exercises the composer/send path without a model request.
 before_message_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'

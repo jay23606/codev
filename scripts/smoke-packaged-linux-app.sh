@@ -132,61 +132,39 @@ xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+shift+m
 assert_mode false false 'Linux packaged app switched local Code task → Chat.'
 
-# Confirm Ctrl+F moves actual keyboard focus to the named sidebar search field,
-# rather than merely sending a key into the packaged window.
+# Confirm Ctrl+F routes subsequent typing away from the composer. The headless
+# Avalonia regression separately asserts that the target is SearchTextBox.
+search_focus_sentinel='Composer focus sentinel for Ctrl+F.'
+search_focus_probe='CODEV_SEARCH_SHORTCUT_PROBE'
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+l
+xdotool type --clearmodifiers --delay 1 "$search_focus_sentinel"
+for _ in {1..50}; do
+  if jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
+    '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then break; fi
+  sleep 0.1
+done
+if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
+  '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
+  echo 'Linux packaged app did not save the composer sentinel before the Ctrl+F check.' >&2
+  exit 1
+fi
 xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+f
-python3 - "$app_pid" <<'PY'
-import sys
-import time
-
-import pyatspi
-
-deadline = time.monotonic() + 10
-seen = []
-
-def descendants(node):
-    try:
-        count = node.childCount
-    except Exception:
-        return
-    for index in range(count):
-        try:
-            child = node.getChildAtIndex(index)
-        except Exception:
-            continue
-        yield child
-        yield from descendants(child)
-
-while time.monotonic() < deadline:
-    seen.clear()
-    try:
-        desktop = pyatspi.Registry.getDesktop(0)
-        nodes = [desktop]
-        while nodes:
-            node = nodes.pop()
-            try:
-                name = node.name or ""
-                role = node.getRoleName()
-                focused = node.getState().contains(pyatspi.STATE_FOCUSED)
-                if name == "Search conversations":
-                    seen.append((role, focused))
-                    if focused:
-                        print(f"Linux packaged app Ctrl+F focused the accessible {role} named Search conversations.")
-                        raise SystemExit(0)
-            except SystemExit:
-                raise
-            except Exception:
-                pass
-            nodes.extend(descendants(node))
-    except SystemExit:
-        raise
-    except Exception:
-        pass
-    time.sleep(0.1)
-
-raise SystemExit(f"Linux packaged app Ctrl+F did not focus the Search conversations accessibility element; observed {seen!r}.")
-PY
+xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
+if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
+  '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
+  jq --arg id "$conversation_id" '.[] | select(.Id == $id) | {Draft}' "$conversations_path" >&2 || true
+  echo 'Linux Ctrl+F left keyboard input in the composer instead of moving it to conversation search.' >&2
+  exit 1
+fi
+echo 'Linux packaged app Ctrl+F routed typing away from the composer without altering its draft.'
+xdotool key --clearmodifiers ctrl+f ctrl+a BackSpace
+xdotool key --clearmodifiers ctrl+l ctrl+a BackSpace
+for _ in {1..50}; do
+  if jq -e --arg id "$conversation_id" '.[] | select(.Id == $id) | .Draft == ""' "$conversations_path" >/dev/null 2>&1; then break; fi
+  sleep 0.1
+done
 
 # /status is handled locally and exercises the composer/send path without a model request.
 before_message_count="$(jq --arg id "$conversation_id" '[.[] | select(.Id == $id) | .Messages[]] | length' "$conversations_path")"
