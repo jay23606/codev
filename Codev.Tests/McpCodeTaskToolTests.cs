@@ -171,6 +171,7 @@ public sealed class McpCodeTaskToolTests
         var clientToServer = new Pipe();
         var serverToClient = new Pipe();
         var toolCalls = 0;
+        var promptCalls = 0;
         var resourceReads = 0;
         var resourceTemplateReads = 0;
         await using var server = McpServer.Create(
@@ -187,7 +188,11 @@ public sealed class McpCodeTaskToolTests
                 ],
                 PromptCollection =
                 [
-                    McpServerPrompt.Create((string subject) => $"Review {subject} for correctness.",
+                    McpServerPrompt.Create((string subject) =>
+                    {
+                        Interlocked.Increment(ref promptCalls);
+                        return $"Review {subject} for correctness.";
+                    },
                         new() { Name = "review_subject", Description = "Review one subject." })
                 ],
                 ResourceCollection =
@@ -324,6 +329,11 @@ public sealed class McpCodeTaskToolTests
             var deniedResource = await executor.ExecuteAsync(resource.FunctionName, emptyArguments.RootElement);
             Assert.Contains("Denied by a saved project MCP tool permission rule", deniedResource, StringComparison.Ordinal);
             Assert.Equal(3, Volatile.Read(ref resourceReads));
+            await permissions.SetRuleAsync(workspace, prompt.ServerId, "prompt " + prompt.Name,
+                ProjectCommandPermissionDecision.Deny, session.Tools[prompt.FunctionName].PermissionFingerprint);
+            var deniedPrompt = await executor.ExecuteAsync(prompt.FunctionName, promptArguments.RootElement);
+            Assert.Contains("Denied by a saved project MCP tool permission rule", deniedPrompt, StringComparison.Ordinal);
+            Assert.Equal(3, Volatile.Read(ref promptCalls));
             await permissions.SetRuleAsync(workspace, resourceTemplate.ServerId, "resource template " + resourceTemplate.Name,
                 ProjectCommandPermissionDecision.Deny, session.Tools[resourceTemplate.FunctionName].PermissionFingerprint);
             var deniedTemplate = await executor.ExecuteAsync(resourceTemplate.FunctionName, templateArguments.RootElement);
