@@ -2243,8 +2243,10 @@ public static class CodevCommonDialog
             $activityOutputDiagnostics = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                     [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
                     $current = $_.Current
-                    if ($current.Name -match 'Advisory|instruction-risk|ACTIVITY_SOURCE_MARKER|Created file|ToolOutput') {
-                        "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen)"
+                    if ($current.Name -match 'Advisory|instruction-risk|ACTIVITY_SOURCE_MARKER|Created file|ToolOutput' -or
+                        $current.AutomationId -match 'ToolOutput' -or
+                        $current.ControlType -in @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document)) {
+                        "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' class='$($current.ClassName)' offscreen=$($current.IsOffscreen)"
                     }
                 } | Where-Object { $_ } | Select-Object -First 30)
         }
