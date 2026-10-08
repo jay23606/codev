@@ -12,6 +12,7 @@ const activitySummary = args.includes("--activity-summary");
 const cargoActivity = args.includes("--cargo-activity");
 const mcpToolSmoke = args.includes("--mcp-tool");
 const mcpHttpSmoke = args.includes("--mcp-http");
+const mcpActivitySmoke = args.includes("--mcp-activity");
 const AUTO_COMMAND_PROMPT = autoDestructive
   ? "Run the packaged Auto destructive-command smoke."
   : "Run the packaged Auto mode command smoke.";
@@ -29,6 +30,10 @@ const MCP_DENY_TOOL_MESSAGE = "must not reach the server";
 const MCP_HTTP_PROMPT = "Run the packaged MCP Streamable HTTP smoke.";
 const MCP_HTTP_TOOL_NAME_PREFIX = "mcp_smoke-http_echo_";
 const MCP_HTTP_TOOL_MESSAGE = "packaged HTTP marker";
+const MCP_ACTIVITY_PROMPT = "Run the packaged MCP activity detail smoke.";
+const MCP_ACTIVITY_PROMPT_NAME_PREFIX = "mcp_smoke-mcp_prompt_release_review_";
+const MCP_ACTIVITY_RESOURCE_NAME_PREFIX = "mcp_smoke-mcp_resource_";
+const MCP_ACTIVITY_TEMPLATE_NAME_PREFIX = "mcp_smoke-mcp_resource-template_";
 function option(name) {
   const index = args.indexOf(name);
   if (index < 0 || !args[index + 1]) throw new Error(`Missing ${name} argument.`);
@@ -109,6 +114,54 @@ const server = http.createServer((request, response) => {
     const callTool = (name, args) => writeJson({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [
       { function: { name, arguments: args } },
     ] }, done: true });
+    const requireMcpActivityResult = (prefix, marker, source, activity) => {
+      if (!entry.last_tool_name?.startsWith(prefix)) {
+        response.writeHead(400);
+        response.end(`The packaged MCP activity returned an unexpected operation: ${entry.last_tool_name}`);
+        return false;
+      }
+      let output;
+      try { output = JSON.parse(entry.last_content); }
+      catch { response.writeHead(400); response.end("The packaged MCP activity result was malformed."); return false; }
+      if (output?.type !== "untrusted_tool_output" || output.source !== source ||
+          output.activity !== activity || !output.content.includes(marker)) {
+        response.writeHead(400);
+        response.end(`The packaged MCP activity result was not correctly marked untrusted: ${JSON.stringify(output)}`);
+        return false;
+      }
+      return true;
+    };
+    if (mcpActivitySmoke && entry.last_user_message === MCP_ACTIVITY_PROMPT && entry.last_role === "user") {
+      const required = [MCP_ACTIVITY_PROMPT_NAME_PREFIX, MCP_ACTIVITY_RESOURCE_NAME_PREFIX, MCP_ACTIVITY_TEMPLATE_NAME_PREFIX];
+      const missing = required.filter(prefix => !entry.tool_names.some(name => name.startsWith(prefix)));
+      if (missing.length > 0) {
+        response.writeHead(400);
+        response.end(`The packaged MCP activity smoke did not discover all prompt/resource/template operations: ${JSON.stringify(entry.tool_names)}`);
+        return;
+      }
+      callTool(entry.tool_names.find(name => name.startsWith(MCP_ACTIVITY_PROMPT_NAME_PREFIX)), {});
+      return;
+    }
+    if (mcpActivitySmoke && entry.last_user_message === MCP_ACTIVITY_PROMPT && entry.last_role === "tool") {
+      if (entry.last_tool_name?.startsWith(MCP_ACTIVITY_PROMPT_NAME_PREFIX)) {
+        if (!requireMcpActivityResult(MCP_ACTIVITY_PROMPT_NAME_PREFIX, "MCP_SMOKE_PROMPT_BODY", "MCP prompt output", "mcp_prompt")) return;
+        callTool(entry.tool_names.find(name => name.startsWith(MCP_ACTIVITY_RESOURCE_NAME_PREFIX)), {});
+        return;
+      }
+      if (entry.last_tool_name?.startsWith(MCP_ACTIVITY_RESOURCE_NAME_PREFIX)) {
+        if (!requireMcpActivityResult(MCP_ACTIVITY_RESOURCE_NAME_PREFIX, "MCP_SMOKE_RESOURCE_BODY", "MCP resource output", "mcp_resource")) return;
+        callTool(entry.tool_names.find(name => name.startsWith(MCP_ACTIVITY_TEMPLATE_NAME_PREFIX)), { id: "42" });
+        return;
+      }
+      if (entry.last_tool_name?.startsWith(MCP_ACTIVITY_TEMPLATE_NAME_PREFIX)) {
+        if (!requireMcpActivityResult(MCP_ACTIVITY_TEMPLATE_NAME_PREFIX, "MCP_SMOKE_TEMPLATE_BODY", "MCP resource template output", "mcp_resource_template")) return;
+        writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged MCP activity details passed." }, done: true });
+        return;
+      }
+      response.writeHead(400);
+      response.end(`The packaged MCP activity returned an unexpected operation: ${entry.last_tool_name}`);
+      return;
+    }
     if (mcpToolSmoke && entry.last_user_message === MCP_ASK_DENY_PROMPT && entry.last_role === "user") {
       const mcpToolName = entry.tool_names.find(name => name.startsWith(MCP_DENY_TOOL_NAME_PREFIX));
       if (!mcpToolName) {

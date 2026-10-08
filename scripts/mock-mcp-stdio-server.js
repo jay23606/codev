@@ -34,7 +34,11 @@ process.stdin.on("data", chunk => {
     if (request.method === "initialize") {
       respond(request.id, {
         protocolVersion: request.params?.protocolVersion ?? "2025-03-26",
-        capabilities: { tools: { listChanged: false } },
+        capabilities: {
+          tools: { listChanged: false },
+          prompts: { listChanged: false },
+          resources: { listChanged: false, subscribe: false },
+        },
         serverInfo: { name: "codev-packaged-smoke", version: "1.0.0" },
       });
       continue;
@@ -64,9 +68,44 @@ process.stdin.on("data", chunk => {
       ] });
       continue;
     }
-    if (request.method === "prompts/list") { respond(request.id, { prompts: [] }); continue; }
-    if (request.method === "resources/list") { respond(request.id, { resources: [] }); continue; }
-    if (request.method === "resources/templates/list") { respond(request.id, { resourceTemplates: [] }); continue; }
+    if (request.method === "prompts/list") {
+      respond(request.id, { prompts: [{ name: "release_review", description: "Review release notes for risks." }] });
+      continue;
+    }
+    if (request.method === "prompts/get") {
+      if (request.params?.name !== "release_review") {
+        respondError(request.id, -32602, "Unknown prompt.");
+        continue;
+      }
+      fs.appendFileSync(callLogPath, `${JSON.stringify({ operation: "prompt", name: request.params.name })}\n`, "utf8");
+      respond(request.id, { description: "Packaged prompt activity fixture.", messages: [
+        { role: "user", content: { type: "text", text: "MCP_SMOKE_PROMPT_BODY: release review marker" } },
+      ] });
+      continue;
+    }
+    if (request.method === "resources/list") {
+      respond(request.id, { resources: [{ uri: "codev://release-notes", name: "release-notes", mimeType: "text/plain" }] });
+      continue;
+    }
+    if (request.method === "resources/read") {
+      const uri = request.params?.uri;
+      const text = uri === "codev://release-notes"
+        ? "MCP_SMOKE_RESOURCE_BODY: release notes marker"
+        : uri === "v://i/42" ? "MCP_SMOKE_TEMPLATE_BODY: issue 42 marker" : null;
+      if (text === null) {
+        respondError(request.id, -32602, "Unknown resource.");
+        continue;
+      }
+      fs.appendFileSync(callLogPath, `${JSON.stringify({ operation: "resource", uri })}\n`, "utf8");
+      respond(request.id, { contents: [{ uri, mimeType: "text/plain", text }] });
+      continue;
+    }
+    if (request.method === "resources/templates/list") {
+      respond(request.id, { resourceTemplates: [{
+        uriTemplate: "v://i/{id}", name: "issue", description: "Read an issue by ID.", mimeType: "text/plain",
+      }] });
+      continue;
+    }
     if (request.method === "tools/call") {
       const message = request.params?.arguments?.message;
       fs.appendFileSync(callLogPath, `${JSON.stringify({ name: request.params?.name, message })}\n`, "utf8");
