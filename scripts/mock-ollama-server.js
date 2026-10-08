@@ -10,6 +10,7 @@ const args = process.argv.slice(2);
 const autoDestructive = args.includes("--auto-destructive");
 const activitySummary = args.includes("--activity-summary");
 const mcpToolSmoke = args.includes("--mcp-tool");
+const mcpHttpSmoke = args.includes("--mcp-http");
 const AUTO_COMMAND_PROMPT = autoDestructive
   ? "Run the packaged Auto destructive-command smoke."
   : "Run the packaged Auto mode command smoke.";
@@ -23,6 +24,9 @@ const MCP_TOOL_MESSAGE = "packaged MCP marker";
 const MCP_ASK_DENY_PROMPT = "Run the packaged MCP Ask-denial smoke.";
 const MCP_DENY_TOOL_NAME_PREFIX = "mcp_smoke-mcp_deny_me_";
 const MCP_DENY_TOOL_MESSAGE = "must not reach the server";
+const MCP_HTTP_PROMPT = "Run the packaged MCP Streamable HTTP smoke.";
+const MCP_HTTP_TOOL_NAME_PREFIX = "mcp_smoke-http_echo_";
+const MCP_HTTP_TOOL_MESSAGE = "packaged HTTP marker";
 function option(name) {
   const index = args.indexOf(name);
   if (index < 0 || !args[index + 1]) throw new Error(`Missing ${name} argument.`);
@@ -161,6 +165,34 @@ const server = http.createServer((request, response) => {
         return;
       }
       writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged MCP tool call passed." }, done: true });
+      return;
+    }
+    if (mcpHttpSmoke && entry.last_user_message === MCP_HTTP_PROMPT && entry.last_role === "user") {
+      const mcpToolName = entry.tool_names.find(name => name.startsWith(MCP_HTTP_TOOL_NAME_PREFIX));
+      if (!mcpToolName) {
+        response.writeHead(400);
+        response.end(`The packaged MCP Streamable HTTP smoke did not discover its echo tool: ${JSON.stringify(entry.tool_names)}`);
+        return;
+      }
+      callTool(mcpToolName, { message: MCP_HTTP_TOOL_MESSAGE });
+      return;
+    }
+    if (mcpHttpSmoke && entry.last_user_message === MCP_HTTP_PROMPT && entry.last_role === "tool") {
+      if (!entry.last_tool_name?.startsWith(MCP_HTTP_TOOL_NAME_PREFIX)) {
+        response.writeHead(400);
+        response.end(`The packaged Streamable HTTP MCP smoke returned an unexpected tool: ${entry.last_tool_name}`);
+        return;
+      }
+      let toolOutput;
+      try { toolOutput = JSON.parse(entry.last_content); }
+      catch { response.writeHead(400); response.end("The packaged Streamable HTTP MCP result was malformed."); return; }
+      if (toolOutput?.type !== "untrusted_tool_output" || toolOutput.source !== "MCP tool output" ||
+          toolOutput.activity !== "mcp_tool" || !toolOutput.content.includes(`MCP_HTTP_SMOKE_ECHO:${MCP_HTTP_TOOL_MESSAGE}`)) {
+        response.writeHead(400);
+        response.end(`The packaged Streamable HTTP MCP result was not bounded untrusted tool output: ${JSON.stringify(toolOutput)}`);
+        return;
+      }
+      writeJson({ model: MODEL, message: { role: "assistant", content: "Packaged MCP Streamable HTTP call passed." }, done: true });
       return;
     }
     if (activitySummary && entry.last_user_message === ACTIVITY_SUMMARY_PROMPT && entry.last_role === "user") {

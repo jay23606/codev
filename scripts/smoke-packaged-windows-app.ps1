@@ -27,12 +27,17 @@ $mockPortPath = Join-Path $smokeRoot 'mock-ollama.port'
 $mockRequestLog = Join-Path $smokeRoot 'mock-ollama-requests.jsonl'
 $mcpCallLogPath = Join-Path $smokeRoot 'mock-mcp-calls.jsonl'
 $mcpProcessLogPath = Join-Path $smokeRoot 'mock-mcp-processes.txt'
+$mcpHttpPortPath = Join-Path $smokeRoot 'mock-mcp-http.port'
+$mcpHttpCallLogPath = Join-Path $smokeRoot 'mock-mcp-http-calls.jsonl'
+$mcpHttpStdoutPath = Join-Path $smokeRoot 'mock-mcp-http.stdout.log'
+$mcpHttpStderrPath = Join-Path $smokeRoot 'mock-mcp-http.stderr.log'
 $mockStdoutPath = Join-Path $smokeRoot 'mock-ollama.stdout.log'
 $mockStderrPath = Join-Path $smokeRoot 'mock-ollama.stderr.log'
 $previousDataRoot = $env:CODEV_DATA_ROOT
 $smokeSucceeded = $false
 $app = $null
 $mockServer = $null
+$mcpHttpServer = $null
 
 function Find-ByAutomationId($Element, [string]$AutomationId) {
     $condition = [System.Windows.Automation.PropertyCondition]::new(
@@ -281,7 +286,9 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
     }
     $configurationText = [string]$editorValue.Current.Value
     if (-not $configurationText.Contains('Packaged smoke MCP', [StringComparison]::Ordinal) -or
-        -not $configurationText.Contains('smoke-mcp', [StringComparison]::Ordinal)) {
+        -not $configurationText.Contains('smoke-mcp', [StringComparison]::Ordinal) -or
+        -not $configurationText.Contains('Packaged smoke HTTP MCP', [StringComparison]::Ordinal) -or
+        -not $configurationText.Contains('smoke-http', [StringComparison]::Ordinal)) {
         throw "The MCP servers editor did not load the isolated fixture configuration: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
     }
 
@@ -310,13 +317,22 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
     $savedConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
     try {
         if ($savedConfiguration.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
-            $savedConfiguration.RootElement.GetArrayLength() -ne 1 -or
-            $savedConfiguration.RootElement[0].GetProperty('name').GetString() -ne 'Packaged smoke MCP') {
-            throw 'The MCP server settings editor did not preserve the isolated server list as a JSON array.'
+            $savedConfiguration.RootElement.GetArrayLength() -ne 2) {
+            throw 'The MCP server settings editor did not preserve both isolated server entries as a JSON array.'
+        }
+        $savedStdio = @($savedConfiguration.RootElement.EnumerateArray() | Where-Object {
+            $_.GetProperty('id').GetString() -eq 'smoke-mcp' -and $_.GetProperty('transport').GetString() -eq 'Stdio'
+        })
+        $savedHttp = @($savedConfiguration.RootElement.EnumerateArray() | Where-Object {
+            $_.GetProperty('id').GetString() -eq 'smoke-http' -and $_.GetProperty('transport').GetString() -eq 'Http' -and
+            $_.GetProperty('url').GetString().StartsWith('http://127.0.0.1:', [StringComparison]::Ordinal)
+        })
+        if ($savedStdio.Count -ne 1 -or $savedHttp.Count -ne 1) {
+            throw 'The MCP server settings editor changed the stdio or loopback HTTP transport configuration.'
         }
     }
     finally { $savedConfiguration.Dispose() }
-    Write-Host 'Packaged Windows MCP settings editor loaded and saved its isolated stdio server configuration.'
+    Write-Host 'Packaged Windows MCP settings editor loaded and saved isolated stdio and loopback HTTP server configurations.'
 }
 
 function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
@@ -1327,19 +1343,47 @@ try {
     $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
     $mockServerPath = Join-Path $PSScriptRoot 'mock-ollama-server.js'
     $mcpServerPath = Join-Path $PSScriptRoot 'mock-mcp-stdio-server.js'
-    $mcpConfiguration = @([pscustomobject]@{
-        id = 'smoke-mcp'
-        name = 'Packaged smoke MCP'
-        transport = 'Stdio'
-        enabled = $true
-        command = $nodePath
-        arguments = @($mcpServerPath, '--call-log', $mcpCallLogPath, '--process-log', $mcpProcessLogPath)
-        workingDirectory = (Split-Path $PSScriptRoot -Parent)
-    })
+    $mcpHttpServerPath = Join-Path $PSScriptRoot 'mock-mcp-http-server.js'
+    $mcpHttpServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
+        -ArgumentList @($mcpHttpServerPath, '--port-file', $mcpHttpPortPath, '--call-log', $mcpHttpCallLogPath) `
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput $mcpHttpStdoutPath -RedirectStandardError $mcpHttpStderrPath
+    $mcpHttpDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    while ([DateTime]::UtcNow -lt $mcpHttpDeadline -and -not (Test-Path -LiteralPath $mcpHttpPortPath -PathType Leaf)) {
+        $mcpHttpServer.Refresh()
+        if ($mcpHttpServer.HasExited) {
+            Get-Content $mcpHttpStdoutPath, $mcpHttpStderrPath -ErrorAction SilentlyContinue
+            throw "The loopback MCP HTTP fixture exited during startup (exit $($mcpHttpServer.ExitCode))."
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path -LiteralPath $mcpHttpPortPath -PathType Leaf)) {
+        throw 'The loopback MCP HTTP fixture did not report its port within 20 seconds.'
+    }
+    $mcpHttpPort = [int](Get-Content -LiteralPath $mcpHttpPortPath -Raw)
+    if ($mcpHttpPort -lt 1 -or $mcpHttpPort -gt 65535) { throw "The MCP HTTP fixture reported an invalid port: $mcpHttpPort." }
+    $mcpConfiguration = @(
+        [pscustomobject]@{
+            id = 'smoke-mcp'
+            name = 'Packaged smoke MCP'
+            transport = 'Stdio'
+            enabled = $true
+            command = $nodePath
+            arguments = @($mcpServerPath, '--call-log', $mcpCallLogPath, '--process-log', $mcpProcessLogPath)
+            workingDirectory = (Split-Path $PSScriptRoot -Parent)
+        },
+        [pscustomobject]@{
+            id = 'smoke-http'
+            name = 'Packaged smoke HTTP MCP'
+            transport = 'Http'
+            enabled = $true
+            url = "http://127.0.0.1:$mcpHttpPort/mcp"
+            oauthEnabled = $false
+        }
+    )
     ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6 |
         Set-Content -LiteralPath (Join-Path $settingsDirectory 'mcp-servers.json') -Encoding utf8
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
-        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--mcp-tool', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--mcp-tool', '--mcp-http', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
     $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
@@ -2455,6 +2499,51 @@ public static class CodevCommonDialog
     }
     Write-Host 'Packaged Windows MCP smoke discovered a configured stdio server from isolated user settings, called its echo tool in Auto mode, returned bounded untrusted tool output to the model, and completed without an approval panel.'
 
+    $mcpHttpPrompt = 'Run the packaged MCP Streamable HTTP smoke.'
+    Submit-PackagedComposerPrompt $window $autoComposer $mcpHttpPrompt
+    $mcpHttpReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    $mcpHttpTranscript = ''
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1 -and @($matches[0].Messages).Count -gt 0) {
+                $mcpHttpTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($mcpHttpTranscript.Contains('Packaged MCP Streamable HTTP call passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpHttpReplyDeadline)
+    if (-not $mcpHttpTranscript.Contains($mcpHttpPrompt, [StringComparison]::Ordinal) -or
+        -not $mcpHttpTranscript.Contains('Packaged MCP Streamable HTTP call passed.', [StringComparison]::Ordinal) -or
+        $modeButton.Current.Name -ne 'Auto ▾') {
+        throw "The packaged Streamable HTTP MCP tool call did not complete under Auto mode; transcript tail: $($mcpHttpTranscript.Substring([Math]::Max(0, $mcpHttpTranscript.Length - 1500)))"
+    }
+    $inlineApprovalPanel = Find-ByAutomationId $window 'InlineApprovalPanel'
+    if ($null -ne $inlineApprovalPanel -and $inlineApprovalPanel.Current.IsVisible) {
+        throw 'The packaged Streamable HTTP MCP tool call displayed an inline approval panel while Auto was selected.'
+    }
+    $mcpHttpCalls = @()
+    if (Test-Path -LiteralPath $mcpHttpCallLogPath -PathType Leaf) {
+        $mcpHttpCalls = @(Get-Content -LiteralPath $mcpHttpCallLogPath | ForEach-Object { $_ | ConvertFrom-Json })
+    }
+    if ($mcpHttpCalls.Count -ne 1 -or [string]$mcpHttpCalls[0].name -ne 'echo' -or
+        [string]$mcpHttpCalls[0].message -ne 'packaged HTTP marker') {
+        throw "The packaged Streamable HTTP MCP server did not receive exactly the expected tool call: $($mcpHttpCalls | ConvertTo-Json -Depth 5 -Compress)"
+    }
+    $mcpHttpModelRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.last_user_message -eq $mcpHttpPrompt })
+    if ($mcpHttpModelRequests.Count -ne 2 -or
+        @($mcpHttpModelRequests[0].tool_names | Where-Object { $_ -like 'mcp_smoke-http_echo_*' }).Count -ne 1 -or
+        $mcpHttpModelRequests[0].last_role -ne 'user' -or
+        $mcpHttpModelRequests[1].last_role -ne 'tool' -or
+        $mcpHttpModelRequests[1].last_tool_name -notlike 'mcp_smoke-http_echo_*' -or
+        $mcpHttpModelRequests[1].keep_alive -ne '30m') {
+        throw "The packaged Streamable HTTP MCP discovery/tool-result model request sequence was unexpected: $($mcpHttpModelRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    Write-Host 'Packaged Windows MCP smoke discovered a configured Streamable HTTP server from isolated user settings, called its echo tool in Auto mode, returned bounded untrusted tool output to the model, and completed without an approval panel.'
+
     Test-AgentProfileEditorInPackagedApp $window $dataRoot
     if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
         Test-NewConversationShortcut $window $dataRoot
@@ -2616,6 +2705,14 @@ finally {
         if (-not $mockServer.HasExited) {
             $mockServer.Kill($true)
             $mockServer.WaitForExit(5000)
+        }
+    }
+
+    if ($null -ne $mcpHttpServer) {
+        $mcpHttpServer.Refresh()
+        if (-not $mcpHttpServer.HasExited) {
+            $mcpHttpServer.Kill($true)
+            $mcpHttpServer.WaitForExit(5000)
         }
     }
 
