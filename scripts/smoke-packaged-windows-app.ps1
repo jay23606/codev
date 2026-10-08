@@ -443,7 +443,41 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
         }
     }
     finally { $finalConfiguration.Dispose() }
-    Write-Host 'Packaged Windows MCP settings editor recovered malformed JSON, invalidly typed entries, duplicate IDs, and an oversized file without replacing the source before a valid save.'
+
+    [System.IO.File]::Delete($configurationPath)
+    [System.IO.Directory]::CreateDirectory($configurationPath) | Out-Null
+    $mcpButton = Find-ByAutomationId $Window 'McpServersButton'
+    $mcpInvoke = $null
+    if ($null -eq $mcpButton -or -not $mcpButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$mcpInvoke)) {
+        throw 'The MCP servers settings button is missing for the unreadable-path smoke.'
+    }
+    $mcpInvoke.Invoke()
+    $warning = Wait-ForTopLevelWindow 'MCP configuration unavailable' 10
+    if ($null -eq $warning) { throw 'A conflicting directory at the MCP settings path did not show a recovery warning.' }
+    $warningMessage = Find-ByAutomationId $warning 'McpConfigurationUnavailableMessage'
+    $warningPath = Find-ByAutomationId $warning 'McpConfigurationUnavailablePath'
+    if ($null -eq $warningMessage -or
+        -not $warningMessage.Current.Name.Contains('Check its file permissions', [StringComparison]::Ordinal) -or
+        -not $warningMessage.Current.Name.Contains('move or rename', [StringComparison]::Ordinal)) {
+        throw 'The unreadable MCP path warning did not explain how to resolve or replace the item.'
+    }
+    $warningPathValue = $null
+    if ($null -eq $warningPath -or -not $warningPath.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$warningPathValue) -or
+        [string]$warningPathValue.Current.Value -ne $configurationPath) {
+        throw 'The unreadable MCP path warning did not expose the conflicting settings path.'
+    }
+    $warningClose = $warning.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Close')))
+    $warningCloseInvoke = $null
+    if ($null -eq $warningClose -or -not $warningClose.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$warningCloseInvoke)) {
+        throw 'The unreadable MCP path recovery warning has no accessible Close action.'
+    }
+    $warningCloseInvoke.Invoke()
+    [System.IO.Directory]::Delete($configurationPath)
+    [System.IO.File]::WriteAllText($configurationPath, $ExpectedRepairJson, [System.Text.UTF8Encoding]::new($false))
+    Write-Host 'Packaged Windows MCP settings UI covered malformed JSON, invalidly typed entries, duplicate IDs, oversized files, and a conflicting directory path.'
 }
 
 function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {

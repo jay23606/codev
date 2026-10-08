@@ -63,6 +63,7 @@ public sealed class McpServerConfigurationStore(string path)
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (Directory.Exists(_path)) throw new IOException("The MCP server configuration path is a directory.");
             if (_servers is not null) return _servers.Select(Clone).ToArray();
             if (!File.Exists(_path)) return _servers = [];
             if (new FileInfo(_path).Length > MaxFileBytes) throw new InvalidDataException("The MCP server configuration exceeds the size limit.");
@@ -99,6 +100,7 @@ public sealed class McpServerConfigurationStore(string path)
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (Directory.Exists(_path)) throw new IOException("The MCP server configuration path is a directory.");
             if (!File.Exists(_path)) return "[]";
             if (new FileInfo(_path).Length > MaxFileBytes)
                 throw new InvalidDataException("The MCP server configuration exceeds the size limit and cannot be opened for repair.");

@@ -479,6 +479,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public string UserSkillsFolder => UserSkillsPath;
     private static IReadOnlyList<string> CompatibleUserSkillFolders => Codev.ProjectSkillCatalog.GetCompatibleUserSkillDirectories();
     public string UserAgentProfilesFolder => UserAgentProfilesPath;
+    public string McpServerSettingsPath => McpServerConfigurationPath;
     public async Task<IReadOnlyList<Codev.McpServerConfiguration>> GetMcpServerConfigurationsAsync(CancellationToken cancellationToken = default) =>
         await _mcpServerConfigurations.LoadAsync(cancellationToken);
     public async Task<(string Json, string? LoadError)> GetMcpServerConfigurationEditorStateAsync(CancellationToken cancellationToken = default)

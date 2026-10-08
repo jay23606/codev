@@ -1045,7 +1045,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            await ShowMcpConfigurationUnavailableAsync(ex);
+            await ShowMcpConfigurationUnavailableAsync(ex, viewModel);
             return;
         }
         var editor = new TextBox
@@ -1115,19 +1115,38 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
     }
 
-    private async Task ShowMcpConfigurationUnavailableAsync(Exception ex)
+    private async Task ShowMcpConfigurationUnavailableAsync(Exception ex, ViewModels.MainViewModel viewModel)
     {
+        var explanation = new TextBlock
+        {
+            Text = $"Codev could not read the saved MCP settings ({ex.GetType().Name}) and left the existing item unchanged. Check its file permissions. If you want to replace it, close this dialog, move or rename the item shown below, then reopen MCP settings.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        };
+        global::Avalonia.Automation.AutomationProperties.SetAutomationId(explanation, "McpConfigurationUnavailableMessage");
+        var path = new TextBox
+        {
+            Text = viewModel.McpServerSettingsPath,
+            IsReadOnly = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MinHeight = 56,
+            Foreground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#F2F2F2")),
+            Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#171717"))
+        };
+        global::Avalonia.Automation.AutomationProperties.SetAutomationId(path, "McpConfigurationUnavailablePath");
+        var close = new Button { Content = "Close", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right };
         var warning = new Window
         {
-            Title = "MCP configuration unavailable", Width = 440, SizeToContent = SizeToContent.Height,
+            Title = "MCP configuration unavailable", Width = 560, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
             {
-                new TextBlock { Text = $"Codev could not open the MCP server file ({ex.GetType().Name}). The file was left unchanged.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
-                new Button { Content = "Close", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right }
+                explanation,
+                new TextBlock { Text = "MCP settings file", FontWeight = global::Avalonia.Media.FontWeight.SemiBold },
+                path,
+                close
             } }
         };
-        ((Button)((StackPanel)warning.Content!).Children[1]).Click += (_, _) => warning.Close();
+        close.Click += (_, _) => warning.Close();
         await warning.ShowDialog(this);
     }
 
