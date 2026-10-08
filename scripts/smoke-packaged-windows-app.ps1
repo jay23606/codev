@@ -422,7 +422,28 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
         }
     }
     finally { $finalConfiguration.Dispose() }
-    Write-Host 'Packaged Windows MCP settings editor recovered malformed JSON, invalidly typed entries, and duplicate IDs without replacing the source before a valid save.'
+
+    $oversized = ' ' * (1MB + 1)
+    [System.IO.File]::WriteAllText($configurationPath, $oversized, [System.Text.UTF8Encoding]::new($false))
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    if ([string]$controls.Editor.Current.Value -ne '[]' -or
+        -not $controls.Status.Current.Name.Contains('larger than the 1 MiB editor limit', [StringComparison]::Ordinal) -or
+        -not $controls.Status.Current.Name.Contains('original file remains unchanged', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not explain its bounded replacement path for an oversized source file.'
+    }
+    if ((Get-Item -LiteralPath $configurationPath).Length -ne (1MB + 1)) {
+        throw 'Opening an oversized MCP settings file changed the source before an explicit valid save.'
+    }
+    Save-McpSettingsEditorInPackagedApp $dialog $controls.Editor $ExpectedRepairJson
+    $finalConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
+    try {
+        if ($finalConfiguration.RootElement.GetArrayLength() -ne 2) {
+            throw 'Saving a valid MCP replacement did not recover the oversized source file.'
+        }
+    }
+    finally { $finalConfiguration.Dispose() }
+    Write-Host 'Packaged Windows MCP settings editor recovered malformed JSON, invalidly typed entries, duplicate IDs, and an oversized file without replacing the source before a valid save.'
 }
 
 function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {

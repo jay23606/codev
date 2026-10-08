@@ -2036,6 +2036,29 @@ public sealed class MainWindowTests
             Assert.Null(afterDuplicateRepair.LoadError);
             using var repairedDocument = JsonDocument.Parse(afterDuplicateRepair.Json);
             Assert.Equal(1, repairedDocument.RootElement.GetArrayLength());
+
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+            var oversized = new string(' ', Codev.McpServerConfigurationStore.MaxFileBytes + 1);
+            await File.WriteAllTextAsync(configPath, oversized);
+            var oversizedEditor = new MainViewModel(root);
+            viewModel = oversizedEditor;
+
+            var oversizedState = await oversizedEditor.GetMcpServerConfigurationEditorStateAsync();
+
+            Assert.Equal("[]", oversizedState.Json);
+            Assert.Contains("larger than the 1 MiB editor limit", oversizedState.LoadError, StringComparison.Ordinal);
+            Assert.Contains("original file remains unchanged", oversizedState.LoadError, StringComparison.Ordinal);
+            Assert.Equal(oversized, await File.ReadAllTextAsync(configPath));
+            await oversizedEditor.SaveMcpServerConfigurationsAsync([
+                new McpServerConfiguration("docs", "Docs", McpServerTransportKind.Http, Enabled: false,
+                    Url: "https://example.test/mcp")
+            ]);
+            var afterOversizedRepair = await oversizedEditor.GetMcpServerConfigurationEditorStateAsync();
+            Assert.Null(afterOversizedRepair.LoadError);
+            using var recoveredDocument = JsonDocument.Parse(afterOversizedRepair.Json);
+            Assert.Equal("docs", recoveredDocument.RootElement[0].GetProperty("id").GetString());
+            Assert.True(new FileInfo(configPath).Length < Codev.McpServerConfigurationStore.MaxFileBytes);
         }
         finally
         {

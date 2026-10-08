@@ -483,7 +483,15 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         await _mcpServerConfigurations.LoadAsync(cancellationToken);
     public async Task<(string Json, string? LoadError)> GetMcpServerConfigurationEditorStateAsync(CancellationToken cancellationToken = default)
     {
-        var rawJson = await _mcpServerConfigurations.ReadRawJsonForRepairAsync(cancellationToken);
+        string rawJson;
+        try
+        {
+            rawJson = await _mcpServerConfigurations.ReadRawJsonForRepairAsync(cancellationToken);
+        }
+        catch (InvalidDataException)
+        {
+            return ("[]", $"The saved MCP configuration is larger than the {Codev.McpServerConfigurationStore.MaxFileBytes / 1024 / 1024} MiB editor limit and was not loaded. An empty replacement is shown; the original file remains unchanged until you save a valid configuration.");
+        }
         var serializerOptions = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
         {
             WriteIndented = true,
