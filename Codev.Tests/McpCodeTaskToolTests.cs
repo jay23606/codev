@@ -429,6 +429,59 @@ public sealed class McpCodeTaskToolTests
     }
 
     [Fact]
+    public async Task Http_mcp_uses_streamable_http_to_discover_and_call_a_tool()
+    {
+        using var portReservation = new TcpListener(IPAddress.Loopback, 0);
+        portReservation.Start();
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+        portReservation.Stop();
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
+        builder.Services.AddMcpServer()
+            .WithHttpTransport(options =>
+            {
+                options.Stateless = true;
+#pragma warning disable MCP9004
+                options.EnableLegacySse = false;
+#pragma warning restore MCP9004
+            })
+            .WithTools<StreamableHttpTestTools>();
+        var app = builder.Build();
+        app.MapMcp("/mcp");
+        await app.StartAsync();
+
+        try
+        {
+            await using var session = await McpCodeTaskSession.ConnectAsync([
+                new McpServerConfiguration("streamable-http", "Streamable HTTP test", McpServerTransportKind.Http,
+                    Enabled: true, Url: $"http://127.0.0.1:{port}/mcp", OAuthEnabled: false)
+            ]);
+
+            var tool = Assert.Single(session.Tools.Values, candidate => candidate.Operation == McpCodeTaskOperationKind.Tool);
+            using var arguments = JsonDocument.Parse("""{"message":"hello"}""");
+            var result = await session.CallAsync(tool.FunctionName, arguments.RootElement);
+
+            Assert.Equal("echo", tool.ToolName);
+            Assert.Contains("Echo from Streamable HTTP: hello", result, StringComparison.Ordinal);
+            Assert.Contains("connected; 1 tool(s), 0 prompt(s), 0 resource(s), and 0 resource template(s) available",
+                Assert.Single(session.ConnectionLog), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [McpServerToolType]
+    private sealed class StreamableHttpTestTools
+    {
+        [McpServerTool]
+        public static string Echo(string message) => "Echo from Streamable HTTP: " + message;
+    }
+
+    [Fact]
     public async Task Http_auto_detect_falls_back_to_a_legacy_sse_server_and_calls_its_tool()
     {
         using var portReservation = new TcpListener(IPAddress.Loopback, 0);
