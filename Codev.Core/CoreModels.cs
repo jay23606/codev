@@ -153,6 +153,7 @@ public sealed record ChatToolOutput(string Header, string Content, string? Comma
         "mcp_prompt" => $"Used MCP prompt · {Command ?? Header}",
         "mcp_resource" => $"Read MCP resource · {Command ?? Header}",
         "mcp_resource_template" => $"Read MCP resource template · {Command ?? Header}",
+        "mcp_connection" => Header,
         "loaded_skill" => $"Loaded skill · {Path ?? Header}",
         _ => Header
     };
@@ -181,6 +182,7 @@ public static class ToolOutputSummary
                 "mcp_prompt" => "used MCP prompts",
                 "mcp_resource" => "read MCP resources",
                 "mcp_resource_template" => "read MCP resource templates",
+                "mcp_connection" => "checked MCP connections",
                 "loaded_skill" => "loaded skills",
                 "search_web" or "web_search" => "searched the web",
                 _ => "did other things"

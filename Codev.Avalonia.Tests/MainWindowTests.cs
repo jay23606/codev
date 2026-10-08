@@ -2065,6 +2065,52 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Multiple_mcp_connection_diagnostics_start_collapsed_and_expand_with_server_names_and_status()
+    {
+        var transcript = "**MCP connection**\n" + UntrustedToolOutput.Format("Disabled server", "Disabled server: disabled.", activity: "mcp_connection") + "\n" +
+                         "**MCP connection**\n" + UntrustedToolOutput.Format("Invalid server", "Invalid server: invalid configuration (ArgumentException).", activity: "mcp_connection") + "\n" +
+                         "**MCP connection**\n" + UntrustedToolOutput.Format("Unavailable server", "Unavailable server: connection failed (HttpRequestException). Check its command, URL, environment mappings, and server logs.",
+                             activity: "mcp_connection");
+        var message = new ChatMessage("assistant", transcript) { IsCodeTaskTurn = true };
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
+            messages.ItemsSource = new[] { message };
+            window.UpdateLayout();
+
+            var group = Assert.Single(window.GetVisualDescendants().OfType<Expander>(),
+                expander => expander.Header?.ToString() == "Checked MCP connections");
+            Assert.False(group.IsExpanded);
+            Assert.Equal(string.Empty, message.DisplayContent);
+
+            group.IsExpanded = true;
+            window.UpdateLayout();
+            var outputList = Assert.IsType<ItemsControl>(group.Content);
+            var rows = outputList.GetVisualDescendants().OfType<ToggleButton>().ToArray();
+            Assert.Equal(3, rows.Length);
+            Assert.Equal(new[]
+            {
+                "MCP connection · Disabled server",
+                "MCP connection · Invalid server",
+                "MCP connection · Unavailable server"
+            }, rows.Select(button => AutomationProperties.GetName(button)));
+
+            foreach (var row in rows) row.IsChecked = true;
+            window.UpdateLayout();
+            var details = outputList.GetVisualDescendants().OfType<TextBox>().Select(text => text.Text ?? "").ToArray();
+            Assert.Contains(details, text => text.Contains("disabled.", StringComparison.Ordinal));
+            Assert.Contains(details, text => text.Contains("invalid configuration", StringComparison.Ordinal));
+            Assert.Contains(details, text => text.Contains("connection failed", StringComparison.Ordinal));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Long_transcript_realizes_only_the_visible_message_templates()
     {
         var window = new MainWindow { Width = 900, Height = 650 };

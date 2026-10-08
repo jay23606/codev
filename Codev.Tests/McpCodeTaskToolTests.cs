@@ -160,9 +160,55 @@ public sealed class McpCodeTaskToolTests
 
         Assert.Empty(parsed.DisplayText);
         var diagnostic = Assert.Single(parsed.Outputs);
-        Assert.Equal("MCP connection · MCP connection diagnostics", diagnostic.Header);
+        Assert.Equal("MCP connection · Demo server", diagnostic.Header);
         Assert.Contains("Demo server: disabled.", diagnostic.Content, StringComparison.Ordinal);
         Assert.Equal("mcp_connection", diagnostic.Activity);
+    }
+
+    [Fact]
+    public async Task Disabled_invalid_and_unavailable_server_diagnostics_do_not_expose_header_values()
+    {
+        var environmentName = "CODEV_MCP_TEST_AUTH_" + Guid.NewGuid().ToString("N");
+        const string secretMarker = "mcp-diagnostic-secret-marker";
+        var previousEnvironmentValue = Environment.GetEnvironmentVariable(environmentName);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+
+        try
+        {
+            Environment.SetEnvironmentVariable(environmentName, secretMarker);
+            await using var session = await McpCodeTaskSession.ConnectAsync([
+                new McpServerConfiguration("disabled", "Disabled server", McpServerTransportKind.Stdio, Enabled: false, Command: "unused"),
+                new McpServerConfiguration("invalid", "Invalid server", McpServerTransportKind.Http, Enabled: true,
+                    Url: "not a URI", OAuthEnabled: false),
+                new McpServerConfiguration("unavailable", "Unavailable server", McpServerTransportKind.Http, Enabled: true,
+                    Url: $"http://127.0.0.1:{port}/mcp",
+                    HeaderEnvironmentVariables: new Dictionary<string, string> { ["X-Smoke-Auth"] = environmentName },
+                    OAuthEnabled: false)
+            ]);
+
+            var transcript = session.ToConnectionTranscript();
+            var parsed = ToolOutputTranscriptParser.Parse(transcript);
+            Assert.Empty(parsed.DisplayText);
+            Assert.Equal(3, parsed.Outputs.Count);
+            Assert.Equal(new[]
+            {
+                "MCP connection · Disabled server",
+                "MCP connection · Invalid server",
+                "MCP connection · Unavailable server"
+            }, parsed.Outputs.Select(output => output.Header));
+            Assert.Contains("Disabled server: disabled.", parsed.Outputs[0].Content, StringComparison.Ordinal);
+            Assert.Contains("Invalid server: invalid configuration", parsed.Outputs[1].Content, StringComparison.Ordinal);
+            Assert.Contains("Unavailable server: connection failed", parsed.Outputs[2].Content, StringComparison.Ordinal);
+            Assert.All(parsed.Outputs, output => Assert.Equal("mcp_connection", output.Activity));
+            Assert.DoesNotContain(secretMarker, transcript, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(environmentName, previousEnvironmentValue);
+        }
     }
 
     [Fact]

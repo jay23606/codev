@@ -124,8 +124,13 @@ public sealed class McpCodeTaskSession : IAsyncDisposable
     public IReadOnlyDictionary<string, McpCodeTaskResourceTemplate> ResourceTemplates => _resourceTemplates;
     public IReadOnlyList<string> ConnectionLog => _connectionLog;
     public string ToConnectionTranscript() => string.Join(Environment.NewLine + Environment.NewLine,
-        _connectionLog.Select(line => "**MCP connection**" + Environment.NewLine +
-            UntrustedToolOutput.Format("MCP connection diagnostics", line, activity: "mcp_connection")));
+        _connectionLog.Select(line =>
+        {
+            var separator = line.IndexOf(':');
+            var serverName = separator > 0 ? SafeLabel(line[..separator]) : "MCP server";
+            return "**MCP connection**" + Environment.NewLine +
+                UntrustedToolOutput.Format(serverName, line, activity: "mcp_connection");
+        }));
 
     public static Task<McpCodeTaskSession> ConnectAsync(IEnumerable<McpServerConfiguration> configurations,
         Action<string>? status = null, CancellationToken cancellationToken = default, IMcpOAuthTokenVault? oauthTokenVault = null,
