@@ -33,7 +33,10 @@ $mcpHttpStdoutPath = Join-Path $smokeRoot 'mock-mcp-http.stdout.log'
 $mcpHttpStderrPath = Join-Path $smokeRoot 'mock-mcp-http.stderr.log'
 $mockStdoutPath = Join-Path $smokeRoot 'mock-ollama.stdout.log'
 $mockStderrPath = Join-Path $smokeRoot 'mock-ollama.stderr.log'
+$cargoShimDirectory = Join-Path $smokeRoot 'command-shims'
+$cargoShimLogPath = Join-Path $smokeRoot 'cargo-shim-arguments.txt'
 $previousDataRoot = $env:CODEV_DATA_ROOT
+$previousPath = $env:PATH
 $smokeSucceeded = $false
 $app = $null
 $mockServer = $null
@@ -1349,6 +1352,14 @@ function Invoke-BackupDialogButton($Dialog, [string]$Name) {
 
 try {
     $env:CODEV_DATA_ROOT = $dataRoot
+    $null = New-Item -ItemType Directory -Path $cargoShimDirectory -Force
+    @(
+        '@echo off'
+        ('>>"{0}" echo %*' -f $cargoShimLogPath)
+        'echo CODEV_CARGO_SHIM_OK %*'
+        'exit /b 0'
+    ) | Set-Content -LiteralPath (Join-Path $cargoShimDirectory 'cargo.cmd') -Encoding ascii
+    $env:PATH = "$cargoShimDirectory;$previousPath"
     $agentProfileDirectory = Join-Path $dataRoot 'Codev\agents'
     $null = New-Item -ItemType Directory -Path $agentProfileDirectory -Force
     $settingsDirectory = Join-Path $dataRoot 'Codev'
@@ -2103,6 +2114,10 @@ public static class CodevCommonDialog
         $activityRequests[0].tool_names -notcontains 'read_file') {
         throw "The packaged activity smoke did not begin with the expected read_file request: $($activityRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
+    if (-not (Test-Path -LiteralPath $cargoShimLogPath -PathType Leaf) -or
+        (Get-Content -LiteralPath $cargoShimLogPath -Raw).Trim() -ne 'check --manifest-path space-invaders-game/signaling/Cargo.toml') {
+        throw 'The Auto verification smoke did not execute the exact Cargo command through the isolated shim.'
+    }
     for ($index = 0; $index -lt $expectedActivityTools.Count; $index++) {
         $request = $activityRequests[$index + 1]
         if ($request.last_role -ne 'tool' -or $request.last_tool_name -ne $expectedActivityTools[$index] -or
@@ -2132,7 +2147,7 @@ public static class CodevCommonDialog
             throw "The conversation did not scroll to the expanded activity rows (vertical=$activityScrollPosition)."
         }
     }
-    $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran node --version')
+    $activityRows = @('Read file · activity-source.txt', 'Searched files', 'Created file · activity-result.txt', 'Ran cargo check --manifest-path space-invaders-game/signaling/Cargo.toml')
     $activityRowsDeadline = [DateTime]::UtcNow.AddSeconds(5)
     $missingActivityRows = @()
     do {
@@ -2745,6 +2760,7 @@ finally {
     else {
         $env:CODEV_DATA_ROOT = $previousDataRoot
     }
+    $env:PATH = $previousPath
 
     if ($smokeSucceeded) {
         $resolvedSmokeRoot = [System.IO.Path]::GetFullPath($smokeRoot)

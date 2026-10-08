@@ -18,7 +18,7 @@ const expectedArguments = [
   { relative_path: "activity-source.txt" },
   { query: "ACTIVITY_SOURCE_MARKER" },
   { relative_path: "activity-result.txt", content: "ACTIVITY_SOURCE_MARKER" },
-  { command: "node --version" },
+  { command: "cargo check --manifest-path space-invaders-game/signaling/Cargo.toml" },
 ];
 
 function post(port, payload) {

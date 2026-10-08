@@ -208,7 +208,7 @@ const server = http.createServer((request, response) => {
       const nextTool = {
         read_file: ["search_files", { query: "ACTIVITY_SOURCE_MARKER" }],
         search_files: ["create_file", { relative_path: "activity-result.txt", content: "ACTIVITY_SOURCE_MARKER" }],
-        create_file: ["verify_command", { command: "node --version" }],
+        create_file: ["verify_command", { command: "cargo check --manifest-path space-invaders-game/signaling/Cargo.toml" }],
       }[entry.last_tool_name];
       if (nextTool) {
         if (!entry.tool_names.includes(nextTool[0])) {
