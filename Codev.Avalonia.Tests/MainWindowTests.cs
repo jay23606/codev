@@ -252,7 +252,7 @@ public sealed class MainWindowTests
             var reloadedPinned = Assert.Single(reloadedViewModel.PinnedConversations);
             Assert.Equal(pinnedConversationId, reloadedPinned.Id);
             Assert.Equal("Pinned sidebar fixture", reloadedPinned.Title);
-            Assert.Empty(reloadedViewModel.RecentConversations.Where(conversation => conversation.Id == pinnedConversationId));
+            Assert.DoesNotContain(reloadedViewModel.RecentConversations, conversation => conversation.Id == pinnedConversationId);
         }
         finally
         {
