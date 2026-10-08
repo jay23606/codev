@@ -382,7 +382,8 @@ public sealed class MainWindowTests
             Assert.False(viewModel.HasModels);
             Assert.False(modelPicker.IsVisible);
             Assert.True(placeholder.IsVisible);
-            Assert.Equal("No local chat models installed", placeholder.Text);
+            Assert.True(string.Equals("No local chat models installed", placeholder.Text, StringComparison.Ordinal),
+                $"Placeholder='{placeholder.Text}', ConnectionStatus='{viewModel.ConnectionStatus}', model-tag requests={requestCount}.");
             Assert.Contains("Ollama connected · no chat-capable models installed", viewModel.ConnectionStatus, StringComparison.Ordinal);
 
             Assert.True(await viewModel.SetOllamaEndpointAsync("http://127.0.0.1:11435"));
