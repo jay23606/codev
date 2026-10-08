@@ -163,10 +163,14 @@ public static class ToolOutputSummary
 {
     public static string Build(IReadOnlyList<ChatToolOutput> outputs)
     {
+        var actionOutputs = outputs.Where(output => output.Activity != "mcp_connection").ToArray();
+        if (actionOutputs.Length == 0)
+            return outputs.Any(output => output.Activity == "mcp_connection") ? "Checked MCP connections" : "Ran tools";
+
         var activities = new List<string>();
-        var createdFileCount = outputs.Count(output => output.Activity == "created_file");
-        var editedFileCount = outputs.Count(output => output.Activity is "edited_file" or "applied_patch");
-        foreach (var output in outputs)
+        var createdFileCount = actionOutputs.Count(output => output.Activity == "created_file");
+        var editedFileCount = actionOutputs.Count(output => output.Activity is "edited_file" or "applied_patch");
+        foreach (var output in actionOutputs)
         {
             var activity = output.Activity switch
             {
@@ -182,7 +186,6 @@ public static class ToolOutputSummary
                 "mcp_prompt" => "used MCP prompts",
                 "mcp_resource" => "read MCP resources",
                 "mcp_resource_template" => "read MCP resource templates",
-                "mcp_connection" => "checked MCP connections",
                 "loaded_skill" => "loaded skills",
                 "search_web" or "web_search" => "searched the web",
                 _ => "did other things"

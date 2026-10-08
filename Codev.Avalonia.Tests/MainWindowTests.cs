@@ -2111,6 +2111,35 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Mcp_connection_diagnostics_do_not_pollute_the_summary_of_user_requested_actions()
+    {
+        var transcript = "**MCP connection**\n" + UntrustedToolOutput.Format("Docs server", "Docs server: connected; 1 tool available.", activity: "mcp_connection") + "\n" +
+                         "**run_command**\n" + UntrustedToolOutput.Format("approved command output", "Exit code: 0", command: "dotnet test");
+        var message = new ChatMessage("assistant", transcript) { IsCodeTaskTurn = true };
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
+            messages.ItemsSource = new[] { message };
+            window.UpdateLayout();
+
+            var group = Assert.Single(window.GetVisualDescendants().OfType<Expander>(),
+                expander => expander.Header?.ToString() == "Ran commands");
+            Assert.False(group.IsExpanded);
+            group.IsExpanded = true;
+            window.UpdateLayout();
+            var rowNames = window.GetVisualDescendants().OfType<ToggleButton>()
+                .Select(AutomationProperties.GetName).ToArray();
+            Assert.Contains("Ran dotnet test", rowNames);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Long_transcript_realizes_only_the_visible_message_templates()
     {
         var window = new MainWindow { Width = 900, Height = 650 };

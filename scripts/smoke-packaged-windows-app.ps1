@@ -2052,7 +2052,7 @@ public static class CodevCommonDialog
         $conversationScrollPattern.Current.VerticallyScrollable) {
         $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
     }
-    $activityName = 'Did other things, read files, searched files, created a file, ran commands'
+    $activityName = 'Read files, searched files, created a file, ran commands'
     $activityIdCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander')
     $activityNameCondition = [System.Windows.Automation.PropertyCondition]::new(
