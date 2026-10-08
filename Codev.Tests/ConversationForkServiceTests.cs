@@ -16,6 +16,12 @@ public sealed class ConversationForkServiceTests : IDisposable
         var source = new Conversation
         {
             Id = sourceId,
+            ParentConversationId = Guid.NewGuid(),
+            DelegatedFromMessageIndex = 1,
+            DelegatedAgentName = "Debug",
+            DelegatedResultReported = true,
+            ChildWorktreeBranch = "codev/child-source",
+            ChildWorktreeStartCommit = "0123456789abcdef",
             Title = "Fix project",
             Draft = "continue this thought",
             Model = "qwen-coder:latest",
@@ -31,6 +37,12 @@ public sealed class ConversationForkServiceTests : IDisposable
         var fork = await ConversationForkService.CreateForkAsync(source, checkpointRoot);
 
         Assert.NotEqual(source.Id, fork.Id);
+        Assert.Null(fork.ParentConversationId);
+        Assert.Null(fork.DelegatedFromMessageIndex);
+        Assert.Null(fork.DelegatedAgentName);
+        Assert.False(fork.DelegatedResultReported);
+        Assert.Null(fork.ChildWorktreeBranch);
+        Assert.Null(fork.ChildWorktreeStartCommit);
         Assert.Equal("Fix project · fork", fork.Title);
         Assert.Equal(source.Draft, fork.Draft);
         Assert.Equal(source.Model, fork.Model);
@@ -46,6 +58,7 @@ public sealed class ConversationForkServiceTests : IDisposable
         await File.WriteAllTextAsync(forkCheckpoint, "fork changed");
         Assert.Equal("original file contents", await File.ReadAllTextAsync(checkpoint));
     }
+
 
     [Fact]
     public async Task Fork_refuses_checkpoint_path_outside_source_and_cleans_partial_copy()
@@ -71,6 +84,62 @@ public sealed class ConversationForkServiceTests : IDisposable
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => ConversationForkService.CreateForkAsync(source, checkpointRoot));
 
         Assert.Single(Directory.GetDirectories(checkpointRoot));
+    }
+
+    [Fact]
+    public async Task Side_chat_keeps_history_through_selected_prompt_and_drops_pending_queue()
+    {
+        var source = new Conversation
+        {
+            Title = "Long task",
+            Messages =
+            [
+                new("user", "first prompt"),
+                new("assistant", "first answer"),
+                new("user", "branch from here"),
+                new("assistant", "later answer")
+            ],
+            CompactionSummary = "Summary of the first turn.",
+            CompactionThroughMessageCount = 2,
+            PendingTurns = [new PersistedQueuedTurn(3, "model", 4096, false, false, null, [], [], DateTimeOffset.UtcNow)]
+        };
+
+        var sideChat = await ConversationForkService.CreateSideChatAsync(source, 2, Path.Combine(_root, "checkpoints"));
+
+        Assert.NotEqual(source.Id, sideChat.Id);
+        Assert.StartsWith("Side chat · branch from here", sideChat.Title, StringComparison.Ordinal);
+        Assert.Equal("branch from here", sideChat.Draft);
+        Assert.Equal(["first prompt", "first answer"], sideChat.Messages.Select(message => message.Content));
+        Assert.Equal([0, 1], sideChat.Messages.Select(message => message.MessageIndex));
+        Assert.Empty(sideChat.PendingTurns);
+        Assert.Equal(0, sideChat.PendingRequestCount);
+        Assert.Empty(sideChat.CompactionSummary);
+        Assert.Equal(0, sideChat.CompactionThroughMessageCount);
+        Assert.Equal(4, source.Messages.Count);
+    }
+
+    [Fact]
+    public async Task Side_chat_keeps_compaction_when_its_entire_range_precedes_the_branch_point()
+    {
+        var source = new Conversation
+        {
+            Messages =
+            [
+                new("user", "first prompt"), new("assistant", "first answer"),
+                new("user", "second prompt"), new("assistant", "second answer"),
+                new("user", "branch from here"), new("assistant", "later answer")
+            ],
+            CompactionSummary = "Summary of the first turn.",
+            CompactionThroughMessageCount = 2
+        };
+
+        var sideChat = await ConversationForkService.CreateSideChatAsync(source, 4, Path.Combine(_root, "checkpoints"));
+
+        Assert.Equal("Summary of the first turn.", sideChat.CompactionSummary);
+        Assert.Equal(2, sideChat.CompactionThroughMessageCount);
+        Assert.Contains("Summary of the first turn.", ConversationCompactionService.BuildPromptHistory(sideChat, sideChat.Messages)[0].Content);
+        Assert.Equal(["first prompt", "first answer", "second prompt", "second answer"],
+            sideChat.Messages.Select(message => message.Content));
     }
 
     public void Dispose()

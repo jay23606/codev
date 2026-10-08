@@ -1,4 +1,5 @@
 using Codev;
+using System.Diagnostics;
 
 public sealed class ShellCommandResolverTests
 {
@@ -11,6 +12,9 @@ public sealed class ShellCommandResolverTests
         Assert.Equal("PowerShell", shell.DisplayName);
         Assert.Equal("powershell.exe", shell.Executable);
         Assert.Equal(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "Write-Output ok"], start.ArgumentList);
+        Assert.False(start.UseShellExecute);
+        Assert.True(start.CreateNoWindow);
+        Assert.Equal(ProcessWindowStyle.Hidden, start.WindowStyle);
     }
 
     [Fact]

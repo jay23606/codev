@@ -5,8 +5,40 @@ public sealed class ConversationPersistenceTests
     [Fact]
     public void Message_index_is_runtime_only_and_is_not_serialized()
     {
-        var json = System.Text.Json.JsonSerializer.Serialize(new ChatMessage("user", "hello") { MessageIndex = 3 });
+        var json = System.Text.Json.JsonSerializer.Serialize(new ChatMessage("user", "hello") { MessageIndex = 3, IsQueued = true });
         Assert.DoesNotContain("MessageIndex", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IsQueued", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Child_running_indicator_is_runtime_only_and_is_reflected_in_sidebar_labels()
+    {
+        var running = new Conversation { Title = "Independent task", IsChildTaskRunning = true };
+        var waiting = new Conversation { Title = "Another task" };
+        var parent = new Conversation { ChildConversations = [running, waiting] };
+
+        Assert.Equal("Independent task · running", running.ChildConversationLabel);
+        Assert.Equal("Child sessions · 2 · 1 running", parent.ChildConversationsLabel);
+        var json = System.Text.Json.JsonSerializer.Serialize(parent);
+        Assert.DoesNotContain("IsChildTaskRunning", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ChildConversationLabel", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void File_change_turn_provenance_round_trips_and_older_records_remain_unlinked()
+    {
+        var linked = new FileChangeRecord("src/app.cs", null, DateTimeOffset.UnixEpoch, "Create",
+            PreviousFileExisted: false, TurnUserMessageIndex: 6, ResultFileExisted: true,
+            ResultSha256: FileSnapshot.ComputeSha256("created"));
+        var json = System.Text.Json.JsonSerializer.Serialize(linked);
+        var restored = System.Text.Json.JsonSerializer.Deserialize<FileChangeRecord>(json);
+        var olderJson = """{"RelativePath":"src/old.cs","CheckpointPath":null,"ChangedAt":"1970-01-01T00:00:00+00:00","Kind":"Create","PreviousFileExisted":false}""";
+        var older = System.Text.Json.JsonSerializer.Deserialize<FileChangeRecord>(olderJson);
+
+        Assert.Equal(6, restored!.TurnUserMessageIndex);
+        Assert.True(restored.ResultFileExisted);
+        Assert.Equal(FileSnapshot.ComputeSha256("created"), restored.ResultSha256);
+        Assert.Null(older!.TurnUserMessageIndex);
     }
 
     [Fact]
@@ -14,16 +46,26 @@ public sealed class ConversationPersistenceTests
     {
         var turn = new PersistedQueuedTurn(1, "gpt-5.6", 8192, false, false, null,
             ["src/a.cs"], ["private"], DateTimeOffset.UnixEpoch, OutputStyle: ConversationOutputStyles.CodeOnly, ThinkEnabled: true,
-            TopP: 0.8, TopK: 40, PresencePenalty: 0.2, RepeatPenalty: 1.1, NumPredict: 4096);
+            BestOfNAttempts: 3,
+            TopP: 0.8, TopK: 40, PresencePenalty: 0.2, RepeatPenalty: 1.1, NumPredict: 4096, AgentProfileName: "Debug");
         turn = turn with { OpenAiReasoningEffort = "high", OpenAiVerbosity = "low", OpenAiReasoningMode = "pro" };
         var source = new Conversation
         {
+            ParentConversationId = Guid.NewGuid(),
+            DelegatedFromMessageIndex = 1,
+            DelegatedAgentName = "Debug",
+            DelegatedResultReported = true,
+            ChildWorktreeBranch = "codev/child-a1",
+            ChildWorktreeStartCommit = "0123456789abcdef",
+            ChildConversationsExpanded = false,
             Title = "Snapshot",
             Draft = "unsent prompt",
             Model = "gpt-5.6",
             Provider = CloudModelProviders.OpenAI,
             IsPlanMode = false,
             IsCodeTask = true,
+            AgentProfileName = "Code Reviewer",
+            QueueEnabled = false,
             ThinkEnabled = true,
             Temperature = 0.25,
             TopP = 0.8,
@@ -31,6 +73,8 @@ public sealed class ConversationPersistenceTests
             PresencePenalty = 0.2,
             RepeatPenalty = 1.1,
             NumPredict = 4096,
+            FileChangesPrunedThroughMessageIndex = 12,
+            FileChangesPrunedUnlinked = true,
             OpenAiReasoningEffort = "HIGH",
             OpenAiVerbosity = "low",
             OpenAiReasoningMode = "pro",
@@ -38,6 +82,8 @@ public sealed class ConversationPersistenceTests
             AllowHostedCodeTask = true,
             IncludeProjectContextForHosted = true,
             IncludeRepoMap = true,
+            EnableSemanticSearch = true,
+            BestOfNAttempts = 3,
             LastPromptTokens = 321,
             LastPromptOutputTokens = 123,
             LastPromptContext = 4096,
@@ -65,9 +111,19 @@ public sealed class ConversationPersistenceTests
         source.PendingTurns[0] = turn with { Model = "gpt-5.5" };
 
         Assert.Equal("Snapshot", snapshot.Title);
+        Assert.Equal(source.ParentConversationId, snapshot.ParentConversationId);
+        Assert.Equal(1, snapshot.DelegatedFromMessageIndex);
+        Assert.Equal("Debug", snapshot.DelegatedAgentName);
+        Assert.True(snapshot.DelegatedResultReported);
+        Assert.Equal("codev/child-a1", snapshot.ChildWorktreeBranch);
+        Assert.Equal("0123456789abcdef", snapshot.ChildWorktreeStartCommit);
+        Assert.False(snapshot.ChildConversationsExpanded);
+        Assert.Empty(snapshot.ChildConversations);
         Assert.Equal(CloudModelProviders.OpenAI, snapshot.Provider);
         Assert.False(snapshot.IsPlanMode);
         Assert.True(snapshot.IsCodeTask);
+        Assert.Equal("Code Reviewer", snapshot.AgentProfileName);
+        Assert.False(snapshot.QueueEnabled);
         Assert.True(snapshot.ThinkEnabled);
         Assert.Equal(0.25, snapshot.Temperature);
         Assert.Equal(0.8, snapshot.TopP);
@@ -78,10 +134,14 @@ public sealed class ConversationPersistenceTests
         Assert.Equal("high", snapshot.OpenAiReasoningEffort);
         Assert.Equal("low", snapshot.OpenAiVerbosity);
         Assert.Equal("pro", snapshot.OpenAiReasoningMode);
+        Assert.Equal(12, snapshot.FileChangesPrunedThroughMessageIndex);
+        Assert.True(snapshot.FileChangesPrunedUnlinked);
         Assert.Equal(ConversationOutputStyles.Explanatory, snapshot.OutputStyle);
         Assert.True(snapshot.IncludeProjectContextForHosted);
         Assert.True(snapshot.AllowHostedCodeTask);
         Assert.True(snapshot.IncludeRepoMap);
+        Assert.True(snapshot.EnableSemanticSearch);
+        Assert.Equal(3, snapshot.BestOfNAttempts);
         Assert.Equal(321, snapshot.LastPromptTokens);
         Assert.Equal(123, snapshot.LastPromptOutputTokens);
         Assert.Equal(CloudModelProviders.OpenAI, snapshot.LastPromptProvider);
@@ -107,5 +167,7 @@ public sealed class ConversationPersistenceTests
         Assert.Equal("high", snapshot.PendingTurns[0].OpenAiReasoningEffort);
         Assert.Equal("low", snapshot.PendingTurns[0].OpenAiVerbosity);
         Assert.Equal("pro", snapshot.PendingTurns[0].OpenAiReasoningMode);
+        Assert.Equal("Debug", snapshot.PendingTurns[0].AgentProfileName);
+        Assert.Equal(3, snapshot.PendingTurns[0].BestOfNAttempts);
     }
 }

@@ -3,6 +3,33 @@ namespace Codev.Tests;
 public sealed class OllamaModelSelectionTests
 {
     [Fact]
+    public void Filters_embedding_only_models_but_keeps_models_that_support_completion()
+    {
+        var models = OllamaModelSelection.FilterChatCapableModels(
+        [
+            ("nomic-embed-text:latest", (IReadOnlyCollection<string>)["embedding"]),
+            ("qwen3.6:35b-a3b", (IReadOnlyCollection<string>)["completion", "tools", "thinking"]),
+            ("hybrid-model", (IReadOnlyCollection<string>)["embedding", "completion"]),
+            ("legacy-model", null)
+        ]);
+
+        Assert.Equal(["qwen3.6:35b-a3b", "hybrid-model", "legacy-model"], models);
+    }
+
+    [Fact]
+    public void Filters_embedding_models_without_reordering_or_duplicating_chat_tags()
+    {
+        var models = OllamaModelSelection.FilterChatCapableModels(
+        [
+            ("qwen3.6:latest", (IReadOnlyCollection<string>)["completion"]),
+            ("nomic-embed-text", (IReadOnlyCollection<string>)["embedding"]),
+            ("qwen3.6:latest", (IReadOnlyCollection<string>)["completion"])
+        ]);
+
+        Assert.Equal(["qwen3.6:latest"], models);
+    }
+
+    [Fact]
     public void Resolves_a_saved_alias_to_the_actual_installed_latest_tag()
     {
         var resolved = OllamaModelSelection.ResolveInstalledTag("qwen3-coder-next-q2-24k", ["qwen3.8:27b", "qwen3-coder-next-q2-24k:latest"]);

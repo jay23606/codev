@@ -17,12 +17,16 @@ public sealed record GitRepositoryStatus(string Root, string Branch, string? Ups
 
 public sealed record GitStagedReview(string TreeId, string Diff);
 public sealed record GitWorkingTreeReview(string Branch, IReadOnlyList<string> Files, string Diff, bool Truncated);
+public sealed record GitUnstagedDiscardEntry(GitFileStatus File, string DisplayedDiff);
+public sealed record GitUnstagedDiscardPreview(IReadOnlyList<GitFileStatus> RepositoryFiles, IReadOnlyList<GitUnstagedDiscardEntry> Changes);
 
 /// <summary>Reads Git state and switches only between existing local branches on a clean worktree.</summary>
 public sealed class GitRepositoryService
 {
+    private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(30);
     public const int MaxReviewDiffCharacters = 40_000;
     public const int MaxReviewFiles = 40;
+    public const int MaxBulkDiscardFiles = 40;
     private readonly string _workingDirectory;
 
     public GitRepositoryService(string workingDirectory) => _workingDirectory = Path.GetFullPath(workingDirectory);
@@ -124,20 +128,20 @@ public sealed class GitRepositoryService
         if (current.Staged != " ")
         {
             output.AppendLine("STAGED CHANGES");
-            output.AppendLine(await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken, maxCharacters));
+            output.AppendLine(await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--", LiteralPathspec(current.Path)], cancellationToken, maxCharacters));
         }
         if (current.WorkingTree == "?")
         {
             output.AppendLine("UNTRACKED FILE");
             var boundedOutput = maxCharacters == int.MaxValue ? int.MaxValue : maxCharacters + 1;
-            var diff = await RunGitAsync(["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", current.Path], cancellationToken, boundedOutput);
+            var diff = await RunGitAsync(["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", "/dev/null", current.Path], cancellationToken, boundedOutput);
             if (diff.ExitCode is not 0 and not 1) EnsureSuccess(diff, "Git could not read this untracked file.");
             output.AppendLine(diff.Output);
         }
         else if (current.WorkingTree != " ")
         {
             output.AppendLine("UNSTAGED CHANGES");
-            output.AppendLine(await ReadDiffAsync(["diff", "--no-ext-diff", "--no-color", "--", current.Path], cancellationToken, maxCharacters));
+            output.AppendLine(await ReadDiffAsync(["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--", LiteralPathspec(current.Path)], cancellationToken, maxCharacters));
         }
         var value = output.ToString().TrimEnd();
         return value.Length > maxCharacters ? value[..maxCharacters] + "\n[diff excerpt truncated]" : value;
@@ -187,7 +191,7 @@ public sealed class GitRepositoryService
         EnsureSuccess(filesResult, "Git could not list the files changed by this commit.");
         var allFiles = filesResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var files = allFiles.Take(maxFiles).ToArray();
-        var diffArguments = new List<string> { "show", "--format=", "--no-ext-diff", "--no-color", "--no-renames", "--unified=3", hash, "--" };
+        var diffArguments = new List<string> { "show", "--format=", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--unified=3", hash, "--" };
         diffArguments.AddRange(files.Select(path => ":(literal)" + path));
         var diffResult = await RunGitAsync(diffArguments, cancellationToken, maxCharacters + 1);
         EnsureSuccess(diffResult, "Git could not read this commit's diff.");
@@ -222,7 +226,7 @@ public sealed class GitRepositoryService
         EnsureSuccess(filesResult, "Git could not list changes from this branch.");
         var allFiles = filesResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var files = allFiles.Take(maxFiles).ToArray();
-        var diffArguments = new List<string> { "diff", "--no-ext-diff", "--no-color", "--no-renames", "--unified=3", range, "--" };
+        var diffArguments = new List<string> { "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--unified=3", range, "--" };
         diffArguments.AddRange(files.Select(path => ":(literal)" + path));
         var diffResult = await RunGitAsync(diffArguments, cancellationToken, maxCharacters + 1);
         EnsureSuccess(diffResult, "Git could not read changes from this branch.");
@@ -239,7 +243,7 @@ public sealed class GitRepositoryService
     }
 
     public async Task<string> GetStagedDiffAsync(CancellationToken cancellationToken = default) =>
-        await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-color"], cancellationToken);
+        await ReadDiffAsync(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color"], cancellationToken);
 
     public async Task<GitStagedReview> GetStagedReviewAsync(CancellationToken cancellationToken = default)
     {
@@ -265,16 +269,155 @@ public sealed class GitRepositoryService
     public async Task StageFileAsync(string path, CancellationToken cancellationToken = default)
     {
         await EnsureChangedPathAsync(path, cancellationToken);
-        var result = await RunGitAsync(["add", "--", path], cancellationToken);
+        var result = await RunGitAsync(["add", "--", LiteralPathspec(path)], cancellationToken);
         EnsureSuccess(result, "Git could not stage this file.");
+    }
+
+    public async Task StageAllAsync(CancellationToken cancellationToken = default)
+    {
+        var status = await GetStatusAsync(cancellationToken);
+        if (!status.HasChanges) return;
+        var result = await RunGitAsync(["add", "--all", "--", ":/"], cancellationToken);
+        EnsureSuccess(result, "Git could not stage all project changes.");
+    }
+
+    public async Task UnstageAllAsync(CancellationToken cancellationToken = default)
+    {
+        var status = await GetStatusAsync(cancellationToken);
+        if (!status.Files.Any(file => file.Staged != " ")) return;
+        var result = await RunGitAsync(["restore", "--staged", "--", ":/"], cancellationToken);
+        EnsureSuccess(result, "Git could not unstage all project changes.");
     }
 
     public async Task UnstageFileAsync(string path, CancellationToken cancellationToken = default)
     {
         var file = await EnsureChangedPathAsync(path, cancellationToken);
         if (file.Staged == " ") throw new InvalidOperationException("This file has no staged changes.");
-        var result = await RunGitAsync(["restore", "--staged", "--", path], cancellationToken);
+        var result = await RunGitAsync(["restore", "--staged", "--", LiteralPathspec(path)], cancellationToken);
         EnsureSuccess(result, "Git could not unstage this file.");
+    }
+
+    /// <summary>Captures a bounded review of every unstaged path, including untracked files, before a bulk discard.</summary>
+    public async Task<GitUnstagedDiscardPreview> GetUnstagedDiscardPreviewAsync(CancellationToken cancellationToken = default)
+    {
+        var status = await GetStatusAsync(cancellationToken);
+        var changes = status.Files.Where(file => file.WorkingTree != " ").ToArray();
+        if (changes.Length == 0) throw new InvalidOperationException("There are no unstaged changes to discard.");
+        if (changes.Length > MaxBulkDiscardFiles)
+            throw new InvalidOperationException($"Discard all is limited to {MaxBulkDiscardFiles} unstaged paths so every change can be reviewed. Revert individual files instead.");
+
+        var entries = new List<GitUnstagedDiscardEntry>(changes.Length);
+        var totalCharacters = 0;
+        foreach (var file in changes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureBulkRevertSupported(file);
+            var diff = await GetFileDiffAsync(file, MaxReviewDiffCharacters - totalCharacters, cancellationToken);
+            totalCharacters += diff.Length;
+            if (diff.Contains("[diff excerpt truncated]", StringComparison.Ordinal) || totalCharacters > MaxReviewDiffCharacters)
+                throw new InvalidOperationException($"Discard all is limited to {MaxReviewDiffCharacters:N0} characters of reviewed diffs. Revert individual files instead.");
+            entries.Add(new GitUnstagedDiscardEntry(file, diff));
+        }
+        return new GitUnstagedDiscardPreview(status.Files.ToArray(), entries);
+    }
+
+    /// <summary>Applies a reviewed bulk discard only if the complete Git status and every displayed diff are unchanged.</summary>
+    public async Task RevertAllUnstagedAsync(GitUnstagedDiscardPreview preview, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        var status = await GetStatusAsync(cancellationToken);
+        if (!status.Files.SequenceEqual(preview.RepositoryFiles))
+            throw new InvalidOperationException("Git status changed after the discard preview. Refresh and review the updated changes.");
+        foreach (var entry in preview.Changes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureBulkRevertSupported(entry.File);
+            var current = status.Files.FirstOrDefault(file => string.Equals(file.Path, entry.File.Path, StringComparison.Ordinal));
+            if (current is null || !string.Equals(await GetFileDiffAsync(current, cancellationToken), entry.DisplayedDiff, StringComparison.Ordinal))
+                throw new InvalidOperationException($"The diff for {entry.File.DisplayPath} changed after review. Refresh and review the updated changes.");
+        }
+
+        var reverted = 0;
+        foreach (var entry in preview.Changes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await RevertFileAsync(entry.File.Path, entry.DisplayedDiff, cancellationToken);
+                reverted++;
+            }
+            catch (Exception ex) when (reverted > 0 && ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException($"Discard stopped after {reverted} of {preview.Changes.Count} files. Refresh Git status; completed paths were reverted. {ex.Message}", ex);
+            }
+        }
+    }
+
+    /// <summary>Discards the complete unstaged diff for one file after verifying the displayed diff is still current.</summary>
+    public async Task RevertFileAsync(string path, string displayedDiff, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(displayedDiff);
+        var file = await EnsureChangedPathAsync(path, cancellationToken);
+        if (file.WorkingTree == " ") throw new InvalidOperationException("This file has no unstaged changes to revert.");
+        if (file.OriginalPath is not null || IsUnmergedState(file.State))
+            throw new InvalidOperationException("Whole-file revert is unavailable for renames and unresolved merge conflicts. Resolve those changes manually.");
+
+        var currentDiff = await GetFileDiffAsync(file, cancellationToken);
+        if (!string.Equals(displayedDiff, currentDiff, StringComparison.Ordinal))
+            throw new InvalidOperationException("The file diff changed after it was displayed. Refresh Git status and review the file again.");
+
+        var result = file.WorkingTree == "?"
+            ? await RunGitAsync(["clean", "-f", "--", LiteralPathspec(file.Path)], cancellationToken)
+            : await RunGitAsync(["restore", "--worktree", "--", LiteralPathspec(file.Path)], cancellationToken);
+        EnsureSuccess(result, file.WorkingTree == "?"
+            ? "Git could not remove this untracked file."
+            : "Git could not discard this file's unstaged changes.");
+    }
+
+    private static void EnsureBulkRevertSupported(GitFileStatus file)
+    {
+        if (file.OriginalPath is not null || IsUnmergedState(file.State))
+            throw new InvalidOperationException($"Discard all cannot include renamed or unresolved paths ({file.DisplayPath}). Resolve or revert that path individually first.");
+    }
+
+    private static bool IsUnmergedState(string state) => state is "DD" or "AU" or "UD" or "UA" or "DU" or "AA" or "UU" || state.Contains('U');
+
+    public async Task ApplyHunkAsync(string path, string displayedDiff, int selectionStart, int selectionLength,
+        GitDiffHunkAction action, CancellationToken cancellationToken = default)
+    {
+        var file = await EnsureChangedPathAsync(path, cancellationToken);
+        if (file.WorkingTree == "?") throw new InvalidOperationException("Hunk actions are unavailable for untracked files; stage or discard the whole file instead.");
+
+        var currentDiff = await GetFileDiffAsync(file, cancellationToken);
+        if (!string.Equals(displayedDiff, currentDiff, StringComparison.Ordinal))
+            throw new InvalidOperationException("The file diff changed after it was displayed. Refresh Git status and select the hunk again.");
+        if (!GitDiffHunkSelector.TrySelect(currentDiff, selectionStart, selectionLength, out var selection) || selection is null)
+            throw new InvalidOperationException("Select text inside exactly one textual diff hunk.");
+
+        var validAction = action switch
+        {
+            GitDiffHunkAction.Stage => selection.Section == GitDiffHunkSection.Unstaged && file.WorkingTree != " ",
+            GitDiffHunkAction.Unstage => selection.Section == GitDiffHunkSection.Staged && file.Staged != " ",
+            GitDiffHunkAction.Revert => selection.Section == GitDiffHunkSection.Unstaged && file.WorkingTree != " ",
+            _ => false
+        };
+        if (!validAction) throw new InvalidOperationException("That hunk is not available for the selected Git action.");
+
+        var arguments = action switch
+        {
+            GitDiffHunkAction.Stage => new[] { "apply", "--cached", "--whitespace=nowarn" },
+            GitDiffHunkAction.Unstage => new[] { "apply", "--reverse", "--cached", "--whitespace=nowarn" },
+            GitDiffHunkAction.Revert => new[] { "apply", "--reverse", "--whitespace=nowarn" },
+            _ => throw new ArgumentOutOfRangeException(nameof(action))
+        };
+        var result = await RunGitAsync(arguments, cancellationToken, standardInput: selection.Patch);
+        EnsureSuccess(result, action switch
+        {
+            GitDiffHunkAction.Stage => "Git could not stage this hunk.",
+            GitDiffHunkAction.Unstage => "Git could not unstage this hunk.",
+            GitDiffHunkAction.Revert => "Git could not revert this hunk.",
+            _ => "Git could not apply this hunk action."
+        });
     }
 
     public async Task CommitAsync(string message, GitStagedReview? expectedReview = null, CancellationToken cancellationToken = default)
@@ -314,7 +457,8 @@ public sealed class GitRepositoryService
         return result.Output.Trim();
     }
 
-    private async Task<GitCommandResult> RunGitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, int maxOutputCharacters = int.MaxValue)
+    private async Task<GitCommandResult> RunGitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken,
+        int maxOutputCharacters = int.MaxValue, string? standardInput = null)
     {
         using var process = new Process
         {
@@ -326,11 +470,14 @@ public sealed class GitRepositoryService
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = standardInput is not null,
                 StandardOutputEncoding = System.Text.Encoding.UTF8,
                 StandardErrorEncoding = System.Text.Encoding.UTF8
             }
         };
         process.StartInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("core.fsmonitor=false");
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         try
         {
@@ -343,14 +490,20 @@ public sealed class GitRepositoryService
 
         var outputTask = ReadOutputAsync(process.StandardOutput, maxOutputCharacters, cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        if (standardInput is not null)
+        {
+            await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken);
+            await process.StandardInput.FlushAsync(cancellationToken);
+            process.StandardInput.Close();
+        }
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        timeout.CancelAfter(GitCommandTimeout);
         try { await process.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
             if (cancellationToken.IsCancellationRequested) throw;
-            throw new TimeoutException("The Git command took longer than 10 seconds.");
+            throw new TimeoutException($"The Git command took longer than {GitCommandTimeout.TotalSeconds:0} seconds.");
         }
         return new GitCommandResult(process.ExitCode, await outputTask, await errorTask);
     }
@@ -380,6 +533,8 @@ public sealed class GitRepositoryService
     {
         if (result.ExitCode != 0) throw new InvalidOperationException($"{message}\n{result.Error.Trim()}");
     }
+
+    private static string LiteralPathspec(string path) => ":(literal)" + path;
 
     private sealed record GitCommandResult(int ExitCode, string Output, string Error);
 }

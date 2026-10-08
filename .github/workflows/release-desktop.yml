@@ -1,0 +1,325 @@
+name: Release desktop preview
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Test and publish Codev ${{ matrix.rid }} preview
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore test projects
+        run: dotnet restore Codev.Tests/Codev.Tests.csproj
+
+      - name: Restore Avalonia UI tests on Windows
+        if: matrix.os == 'windows-latest'
+        run: dotnet restore Codev.Avalonia.Tests/Codev.Avalonia.Tests.csproj
+
+      - name: Restore headless CLI
+        run: dotnet restore Codev.Cli/Codev.Cli.csproj
+
+      - name: Run portable tests
+        if: matrix.rid != 'osx-x64' && matrix.rid != 'osx-arm64'
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
+
+      - name: Run portable tests with hang diagnostics on Apple Silicon
+        if: matrix.rid == 'osx-arm64'
+        timeout-minutes: 8
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 3m --blame-hang-dump-type none --logger "console;verbosity=normal"
+
+      - name: Run portable tests with hang diagnostics on macOS Intel
+        if: matrix.rid == 'osx-x64'
+        timeout-minutes: 8
+        run: dotnet test Codev.Tests/Codev.Tests.csproj --configuration Release --no-restore --blame-hang-timeout 3m --blame-hang-dump-type none --logger "console;verbosity=normal"
+
+      - name: Run Avalonia headless UI tests on Windows
+        if: matrix.os == 'windows-latest'
+        run: dotnet test Codev.Avalonia.Tests/Codev.Avalonia.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=minimal"
+
+      - name: Publish self-contained Avalonia app
+        run: dotnet publish Codev.Avalonia/Codev.Avalonia.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish/${{ matrix.rid }}
+
+      - name: Publish self-contained headless CLI
+        run: dotnet publish Codev.Cli/Codev.Cli.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish-cli/${{ matrix.rid }}
+
+      - name: Set up Node for packaged desktop mock server
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Validate packaged multi-action Ollama mock
+        run: node scripts/test-mock-ollama-activity.js
+
+      - name: Smoke-test upgrade from latest public Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-windows-upgrade.ps1 -CurrentAppPath "$PWD/artifacts/publish/win-x64/Codev.Avalonia.exe"
+
+      - name: Smoke-test packaged Windows UI with UI Automation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-packaged-windows-app.ps1
+
+      - name: Smoke-test packaged Windows data survives portable app removal
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-packaged-windows-data-survival.ps1
+
+      - name: Smoke-test packaged Windows headless CLI with loopback Ollama
+        if: runner.os == 'Windows'
+        run: node scripts/smoke-packaged-cli.js ./artifacts/publish-cli/win-x64/Codev.Cli.exe
+
+      - name: Launch Avalonia under the macOS window server
+        if: runner.os == 'macOS'
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import sys
+
+          log_path = "/tmp/codev-avalonia-smoke.log"
+          with open(log_path, "w") as log:
+              app = subprocess.Popen(["./artifacts/publish/${{ matrix.rid }}/Codev.Avalonia"], stdout=log, stderr=subprocess.STDOUT)
+              try:
+                  app.wait(timeout=15)
+              except subprocess.TimeoutExpired:
+                  app.terminate()
+                  try:
+                      app.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      app.kill()
+                      app.wait()
+              else:
+                  log.flush()
+                  with open(log_path, encoding="utf-8") as output:
+                      sys.stderr.write(output.read())
+                  raise SystemExit(f"Avalonia exited before the 15-second macOS launch smoke (exit {app.returncode}).")
+          print("Avalonia remained running for the macOS launch smoke.")
+          PY
+
+      - name: Smoke-test packaged macOS modes, Auto command, and local chat under the window server
+        if: runner.os == 'macOS'
+        run: bash ./scripts/smoke-packaged-macos-app.sh ./artifacts/publish/${{ matrix.rid }}/Codev.Avalonia
+
+      - name: Smoke-test packaged macOS headless CLI with loopback Ollama
+        if: runner.os == 'macOS'
+        run: node scripts/smoke-packaged-cli.js ./artifacts/publish-cli/${{ matrix.rid }}/Codev.Cli
+
+      - name: Launch Avalonia under a virtual Linux display
+        if: runner.os == 'Linux'
+        run: |
+          log_path="/tmp/codev-avalonia-linux-smoke.log"
+          set +e
+          xvfb-run -a timeout --signal=TERM --kill-after=5s 15s ./artifacts/publish/linux-x64/Codev.Avalonia >"$log_path" 2>&1
+          status=$?
+          if [ "$status" -eq 124 ]; then
+            echo "Avalonia remained running for the 15-second Linux launch smoke."
+          else
+            cat "$log_path"
+            echo "Avalonia exited before the Linux launch smoke completed (exit $status)." >&2
+            exit 1
+          fi
+
+      - name: Install Linux keyboard interaction helper
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/#https://archive.ubuntu.com/ubuntu/#g' /etc/apt/apt-mirrors.txt
+          fi
+          sudo sed -i \
+            -e 's#mirror+file:/etc/apt/apt-mirrors.txt#https://archive.ubuntu.com/ubuntu/#g' \
+            -e 's#http://azure.archive.ubuntu.com/ubuntu/#https://archive.ubuntu.com/ubuntu/#g' \
+            -e 's/^Components:.*/Components: main universe/' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          timeout --signal=TERM --kill-after=5s 420s sudo apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::Languages=none \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            update
+          timeout --signal=TERM --kill-after=5s 420s sudo apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            install --yes --no-install-recommends xdotool
+
+      - name: Smoke-test packaged Linux modes, Auto command, and local chat under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run -a bash ./scripts/smoke-packaged-linux-app.sh ./artifacts/publish/linux-x64/Codev.Avalonia
+
+      - name: Smoke-test packaged Linux headless CLI with loopback Ollama
+        if: runner.os == 'Linux'
+        run: node scripts/smoke-packaged-cli.js ./artifacts/publish-cli/linux-x64/Codev.Cli
+
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          @'
+          Codev Avalonia preview for Windows (x64)
+
+          Extract this ZIP to a folder and run Codev.Avalonia.exe. This package includes the .NET runtime.
+          Ollama is optional when using hosted models; install Ollama separately to use local models.
+          Conversations and settings are stored in your Windows user profile.
+          '@ | Set-Content -Path artifacts/publish/win-x64/README.txt -Encoding utf8
+          Get-ChildItem artifacts/publish/win-x64 -Filter *.pdb | Remove-Item -Force
+          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/Codev-Avalonia-preview-win-x64.zip -CompressionLevel Optimal
+
+      - name: Package Windows CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          @'
+          Codev headless CLI preview for Windows (x64)
+
+          Run Codev.Cli.exe --help for usage. By default, Code task runs are read-only.
+          --allow-edits enables file edits; --allow-commands enables shell commands that run unsandboxed with your account permissions.
+          OpenAI uses a key already saved by Codev in the Windows Credential Manager. Ollama must be installed separately for local models.
+          This package includes the .NET runtime.
+          '@ | Set-Content -Path artifacts/publish-cli/win-x64/README.txt -Encoding utf8
+          Get-ChildItem artifacts/publish-cli/win-x64 -Filter *.pdb | Remove-Item -Force
+          Compress-Archive -Path artifacts/publish-cli/win-x64/* -DestinationPath artifacts/Codev-CLI-preview-win-x64.zip -CompressionLevel Optimal
+
+      - name: Package Linux app
+        if: runner.os == 'Linux'
+        run: |
+          cat > artifacts/publish/linux-x64/README.txt <<'EOF'
+          Codev Avalonia preview for Linux (x64)
+
+          Extract this archive and run ./Codev.Avalonia from a desktop session.
+          This package includes the .NET runtime. Ollama is optional for hosted models.
+          Hosted API key storage needs Secret Service available in the desktop session.
+          EOF
+          find artifacts/publish/linux-x64 -name '*.pdb' -delete
+          mkdir -p artifacts
+          (cd artifacts/publish/linux-x64 && zip -r "$GITHUB_WORKSPACE/artifacts/Codev-Avalonia-preview-linux-x64.zip" .)
+
+      - name: Package Linux CLI
+        if: runner.os == 'Linux'
+        run: |
+          cat > artifacts/publish-cli/linux-x64/README.txt <<'EOF'
+          Codev headless CLI preview for Linux (x64)
+
+          Run ./Codev.Cli --help for usage. Runs are read-only by default.
+          --allow-edits enables file edits; --allow-commands enables shell commands that run unsandboxed with your account permissions.
+          OpenAI uses a key saved by Codev in Secret Service. Local models need Ollama installed separately.
+          This package includes the .NET runtime.
+          EOF
+          find artifacts/publish-cli/linux-x64 -name '*.pdb' -delete
+          (cd artifacts/publish-cli/linux-x64 && zip -r "$GITHUB_WORKSPACE/artifacts/Codev-CLI-preview-linux-x64.zip" .)
+
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          cat > artifacts/publish/${{ matrix.rid }}/README.txt <<'EOF'
+          Codev Avalonia preview for macOS (${{ matrix.rid }})
+
+          Extract this archive and run ./Codev.Avalonia from Terminal in the extracted folder.
+          This package includes the .NET runtime. Ollama is optional for hosted models.
+          Hosted API key storage needs macOS Keychain access.
+          This preview is not code-signed or notarized; macOS Gatekeeper may require manual approval.
+          EOF
+          find artifacts/publish/${{ matrix.rid }} -name '*.pdb' -delete
+          (cd artifacts/publish/${{ matrix.rid }} && zip -r "$GITHUB_WORKSPACE/artifacts/Codev-Avalonia-preview-${{ matrix.rid }}.zip" .)
+
+      - name: Package macOS CLI
+        if: runner.os == 'macOS'
+        run: |
+          cat > artifacts/publish-cli/${{ matrix.rid }}/README.txt <<'EOF'
+          Codev headless CLI preview for macOS (${{ matrix.rid }})
+
+          Run ./Codev.Cli --help for usage. Runs are read-only by default.
+          --allow-edits enables file edits; --allow-commands enables shell commands that run unsandboxed with your account permissions.
+          OpenAI uses a key saved by Codev in macOS Keychain. Local models need Ollama installed separately.
+          This package includes the .NET runtime. The preview is not code-signed or notarized; macOS Gatekeeper may require manual approval.
+          EOF
+          find artifacts/publish-cli/${{ matrix.rid }} -name '*.pdb' -delete
+          (cd artifacts/publish-cli/${{ matrix.rid }} && zip -r "$GITHUB_WORKSPACE/artifacts/Codev-CLI-preview-${{ matrix.rid }}.zip" .)
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: Codev-${{ matrix.rid }}
+          path: |
+            artifacts/Codev-Avalonia-preview-*.zip
+            artifacts/Codev-CLI-preview-*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require the release tag to point to main history
+        shell: bash
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Refusing to publish a release from a commit outside main history: $GITHUB_SHA" >&2
+            exit 1
+          fi
+
+      - name: Download release archives
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: Codev ${{ github.ref_name }}
+          body_path: docs/release-notes.md
+          generate_release_notes: true
+          files: |
+            artifacts/Codev-Avalonia-preview-win-x64.zip
+            artifacts/Codev-Avalonia-preview-linux-x64.zip
+            artifacts/Codev-Avalonia-preview-osx-arm64.zip
+            artifacts/Codev-Avalonia-preview-osx-x64.zip
+            artifacts/Codev-CLI-preview-win-x64.zip
+            artifacts/Codev-CLI-preview-linux-x64.zip
+            artifacts/Codev-CLI-preview-osx-arm64.zip
+            artifacts/Codev-CLI-preview-osx-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

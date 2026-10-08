@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Codev.Avalonia;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Globalization;
@@ -20,24 +21,91 @@ public partial class MainWindow : Window
     private Codev.ProjectFileMention? _activeFileMention;
     private CancellationTokenSource? _fileMentionSearch;
     private CancellationTokenSource? _slashCommandSearch;
+    private TaskCompletionSource<bool>? _pendingFileApproval;
+    private TaskCompletionSource<Codev.ProjectCommandApprovalChoice>? _pendingCommandApproval;
+    private TaskCompletionSource<Codev.ProjectCommandApprovalChoice>? _pendingMcpApproval;
+    private TaskCompletionSource<bool>? _pendingProfileToolApproval;
+    private Window? _keyboardShortcutsWindow;
+    private bool _shutdownStarted;
+    private bool _closeAfterShutdown;
+    private readonly IConversationBackupPicker? _conversationBackupPicker;
 
-    public MainWindow()
+    public MainWindow() : this(null) { }
+
+    public MainWindow(IConversationBackupPicker? conversationBackupPicker)
     {
+        _conversationBackupPicker = conversationBackupPicker;
         InitializeComponent();
+        AddHandler(InputElement.KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         ComposerTextBox.AddHandler(InputElement.KeyDownEvent, Composer_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         DragDrop.SetAllowDrop(ComposerTextBox, true);
         DragDrop.AddDragOverHandler(ComposerTextBox, Composer_DragOver);
         DragDrop.AddDropHandler(ComposerTextBox, Composer_Drop);
-        Closed += (_, _) => { _fileMentionSearch?.Cancel(); _slashCommandSearch?.Cancel(); };
+        Closing += MainWindow_Closing;
+        Closed += (_, _) =>
+        {
+            _fileMentionSearch?.Cancel();
+            _slashCommandSearch?.Cancel();
+            ClearInlineApproval();
+        };
         DataContextChanged += (_, _) => ObserveMessages();
         DataContextChanged += (_, _) => ConfigureAgentInteractions();
         ObserveMessages();
         ConfigureAgentInteractions();
-        Opened += (_, _) => ScheduleScrollToLatest();
-        Closed += async (_, _) =>
+        Opened += (_, _) =>
         {
-            if (DataContext is ViewModels.MainViewModel viewModel) await viewModel.SavePendingDraftAsync();
+            FitInsideCurrentScreenWorkArea();
+            ScheduleScrollToLatest();
         };
+    }
+
+    private void FitInsideCurrentScreenWorkArea()
+    {
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null || screen.WorkingArea.Width <= 0 || screen.WorkingArea.Height <= 0) return;
+
+        var scale = screen.Scaling > 0 ? screen.Scaling : 1;
+        var workArea = screen.WorkingArea;
+        var maximumWidth = workArea.Width / scale - 48;
+        var maximumHeight = workArea.Height / scale - 48;
+        if (maximumWidth >= MinWidth) Width = Math.Min(Width, maximumWidth);
+        if (maximumHeight >= MinHeight) Height = Math.Min(Height, maximumHeight);
+
+        var outerWidth = (int)Math.Ceiling(Width * scale) + 16;
+        var outerHeight = (int)Math.Ceiling(Height * scale) + 40;
+        Position = new PixelPoint(
+            workArea.X + Math.Max(0, (workArea.Width - outerWidth) / 2),
+            workArea.Y + Math.Max(0, (workArea.Height - outerHeight) / 2));
+    }
+
+    private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_closeAfterShutdown) return;
+        e.Cancel = true;
+        if (_shutdownStarted) return;
+        _shutdownStarted = true;
+        _ = FinishShutdownBeforeClosingAsync();
+    }
+
+    private async Task FinishShutdownBeforeClosingAsync()
+    {
+        try
+        {
+            if (DataContext is ViewModels.MainViewModel viewModel)
+            {
+                try { await viewModel.SavePendingDraftAsync(); }
+                finally { await viewModel.StopBackgroundCommandsAndShutdownAsync(); }
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Codev shutdown cleanup failed: {ex}");
+        }
+        finally
+        {
+            _closeAfterShutdown = true;
+            Dispatcher.UIThread.Post(() => Close());
+        }
     }
 
     private void ObserveMessages()
@@ -95,6 +163,43 @@ public partial class MainWindow : Window
         actions.Children.Add(add);
         dialog.Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children = { new TextBlock { Text = "Checklist text is task guidance only; it does not grant file or command permissions.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap }, input, actions } };
         if (await dialog.ShowDialog<bool>(this)) viewModel.AddTaskChecklistItem(input.Text ?? "");
+    }
+
+    private void TaskChecklist_Click(object? sender, RoutedEventArgs e) => TaskChecklistPopup.IsOpen = true;
+
+    private async void EditPromptMenu_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || (sender as MenuItem)?.Tag is not Codev.ChatMessage message) return;
+        if (message.IsQueued) await viewModel.EditQueuedMessageAsync(message.MessageIndex);
+        else if (viewModel.EditPromptCommand.CanExecute(message.MessageIndex)) viewModel.EditPromptCommand.Execute(message.MessageIndex);
+    }
+
+    private async void OpenSideChat_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && (sender as MenuItem)?.Tag is Codev.ChatMessage message)
+            await viewModel.OpenSideChatFromMessageAsync(message);
+    }
+
+    private void TurnOffQueuing_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel) viewModel.SetQueueEnabled(false);
+    }
+
+    private void TurnOnQueuing_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel) viewModel.SetQueueEnabled(true);
+    }
+
+    private void PrioritizeQueuedMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && (sender as Button)?.Tag is Codev.ChatMessage message)
+            viewModel.PrioritizeQueuedMessage(message);
+    }
+
+    private void CancelQueuedMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && (sender as Button)?.Tag is Codev.ChatMessage message)
+            viewModel.CancelQueuedMessage(message);
     }
 
     private void TaskChecklistStatus_Click(object? sender, RoutedEventArgs e)
@@ -187,212 +292,481 @@ public partial class MainWindow : Window
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
         viewModel.ReviewFileChangeAsync = ReviewAgentFileChangeAsync;
-        viewModel.ConfirmConversationRewindAsync = ConfirmConversationRewindAsync;
+        viewModel.ChooseConversationRewindAsync = ChooseConversationRewindAsync;
+        viewModel.ReviewAndRestoreCodeBeforeRewindAsync = ReviewAndRestoreCodeBeforeRewindAsync;
         viewModel.EditConversationPromptAsync = EditConversationPromptAsync;
         viewModel.ShowCompactionProposalAsync = ShowCompactionProposalAsync;
         viewModel.ApproveProjectCommandAsync = ApproveAgentCommandAsync;
+        viewModel.ApproveMcpToolAsync = ApproveAgentMcpToolAsync;
+        viewModel.ConfirmAgentProfileToolAsync = ConfirmAgentProfileToolAsync;
         viewModel.ConfirmRepeatedToolCallAsync = ConfirmRepeatedToolCallAsync;
         viewModel.ConfirmHostedCodeTaskConsentAsync = ConfirmHostedCodeTaskConsentAsync;
     }
 
-    private Task<bool> ConfirmHostedCodeTaskConsentAsync() => ConfirmGitActionAsync(this, "Allow OpenAI Code task?",
-        "For this conversation, Codev may send your prompts and tool or command results to the OpenAI API. OpenAI API usage may incur separate charges. If no folder is attached, Codev will create a private workspace. Sharing an attached project's files and instructions is a separate choice. File changes still require your review, and commands still follow project approval.");
-
-    private async Task<bool> ConfirmConversationRewindAsync(int messageIndex)
+    private void TogglePinnedConversations_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation ||
-            messageIndex < 0 || messageIndex >= conversation.Messages.Count) return false;
-        var prompt = conversation.Messages[messageIndex].Content;
-        var excerpt = prompt.Length > 220 ? prompt[..220] + "…" : prompt;
-        return await ConfirmGitActionAsync(this, "Rewind conversation only?",
-            $"Restore the conversation to before this prompt and put it back in the composer? This removes this prompt and every later message.\n\n{excerpt}\n\nProject files will be left unchanged. Review them separately in Files history.");
+        if (DataContext is ViewModels.MainViewModel viewModel) viewModel.TogglePinnedConversationsExpanded();
     }
 
-    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources)
+    private void ToggleRecentConversations_Click(object? sender, RoutedEventArgs e)
     {
-        var layout = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto"), RowSpacing = 12 };
-        var content = new StackPanel { Spacing = 12 };
-        content.Children.Add(new TextBlock
+        if (DataContext is ViewModels.MainViewModel viewModel) viewModel.ToggleRecentConversationsExpanded();
+    }
+
+    private async void ProjectCommandMode_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || sender is not MenuItem { Tag: string modeName } ||
+            !Enum.TryParse<Codev.ProjectCommandPermissionMode>(modeName, ignoreCase: true, out var mode) || !Enum.IsDefined(mode)) return;
+        await viewModel.SetProjectCommandPermissionModeAsync(mode);
+    }
+
+    private void BestOfNAttempts_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel && sender is MenuItem { Tag: string value } &&
+            int.TryParse(value, out var attempts))
+            viewModel.SetBestOfNAttemptsForNextTurn(attempts);
+    }
+
+    private async Task<bool> ReviewAgentFileChangeAsync(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources, string approvalReason)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            Text = isNewFile
-                ? $"The model proposes creating {relativePath}. Review the complete file before approving."
-                : proposedPatch is not null
-                    ? $"The model proposes a patch to {relativePath}. Review the patch and complete resulting file before approving; Codev will save a local checkpoint first."
-                    : $"The model proposes replacing {relativePath}. Review both versions before approving; Codev will save a local checkpoint first.",
-            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+            ClearInlineApproval();
+            _pendingFileApproval = tcs;
+            InlineApprovalContent.Content = BuildFileApprovalContent(relativePath, before, after, isNewFile, proposedPatch, contextSources, approvalReason);
+            InlineApprovalPanel.IsVisible = true;
         });
-        content.Children.Add(new TextBlock
+        return await tcs.Task;
+    }
+
+    private Control BuildFileApprovalContent(string relativePath, string before, string after, bool isNewFile, string? proposedPatch, IReadOnlyList<string>? contextSources, string approvalReason)
+    {
+        var panel = new StackPanel { Spacing = 7 };
+        panel.Children.Add(new TextBlock
         {
-            Text = "Project files can contain instructions aimed at the model. Treat them as untrusted data and review this exact proposal against your request before approving.",
-            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+            Text = isNewFile ? $"Review proposed new file: {relativePath}" : proposedPatch is not null ? $"Review proposed patch: {relativePath}" : $"Review proposed file change: {relativePath}",
+            FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+            FontSize = 14
         });
-        if (contextSources is { Count: > 0 })
-            content.Children.Add(new TextBlock
+        var warnings = Codev.InstructionFollowingContentDetector.Detect(after);
+        if (warnings.Count > 0)
+            panel.Children.Add(new TextBlock
             {
-                Text = "Project or command output shown to the model this task:\n" + string.Join("\n", contextSources),
+                Text = "Advisory: proposed content resembles " + string.Join(", ", warnings) + ". This check does not determine whether approval is required.",
                 TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-                FontSize = 11,
                 Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
             });
-        var proposalWarnings = Codev.InstructionFollowingContentDetector.Detect(after);
-        if (proposalWarnings.Count > 0)
-            content.Children.Add(new TextBlock
-            {
-                Text = "POTENTIAL INSTRUCTION FOLLOWING: proposed content resembles " + string.Join(", ", proposalWarnings) + ". This heuristic can flag normal code or documentation; review the exact change against your request.",
-                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
-                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
-            });
-        var panes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*") };
-        var oldPane = new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 6, 0) };
-        var newPane = new StackPanel { Spacing = 5, Margin = new Thickness(6, 0, 0, 0) };
-        oldPane.Children.Add(new TextBlock { Text = isNewFile ? "CURRENT · new file" : "CURRENT", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
-        newPane.Children.Add(new TextBlock { Text = proposedPatch is null ? "PROPOSED" : "RESULTING FILE", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
-        TextBox ReviewBox(string content) => new()
+        panel.Children.Add(new TextBlock { Text = approvalReason, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+        if (contextSources is { Count: > 0 })
+            panel.Children.Add(new TextBlock { Text = "Untrusted context: " + string.Join(" · ", contextSources), FontSize = 10, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+
+        var isDark = Application.Current?.ActualThemeVariant == global::Avalonia.Styling.ThemeVariant.Dark;
+        var reviewBackground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#242424" : "#FFFFFF"));
+        var reviewForeground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#ECECEC" : "#262522"));
+        var panes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 8, Height = 220 };
+        TextBox ReadOnlyBox(string content) => new()
         {
             Text = content,
             IsReadOnly = true,
             AcceptsReturn = true,
             TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
             FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
-            FontSize = 12,
-            MinHeight = 460,
-            MinWidth = 430,
-            Background = this.FindResource("ComposerBrush") as global::Avalonia.Media.IBrush,
-            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+            FontSize = 11,
+            Background = reviewBackground,
+            Foreground = reviewForeground,
+            CaretBrush = reviewForeground,
+            BorderBrush = this.FindResource("FieldBorderBrush") as global::Avalonia.Media.IBrush,
+            IsTabStop = false
         };
-        oldPane.Children.Add(new ScrollViewer { Content = ReviewBox(before), HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Height = 490 });
-        newPane.Children.Add(new ScrollViewer { Content = ReviewBox(after), HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Height = 490 });
-        Grid.SetColumn(newPane, 1);
-        panes.Children.Add(oldPane);
-        panes.Children.Add(newPane);
-        content.Children.Add(panes);
+        Control Pane(string title, string content)
+        {
+            var box = new StackPanel { Spacing = 3 };
+            box.Children.Add(new TextBlock { Text = title, FontSize = 10, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+            box.Children.Add(new ScrollViewer { Content = ReadOnlyBox(content), HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto });
+            return box;
+        }
+        panes.Children.Add(Pane(isNewFile ? "CURRENT · new file" : "CURRENT", before));
+        var proposed = Pane(proposedPatch is null ? "PROPOSED" : "RESULTING FILE", after);
+        Grid.SetColumn(proposed, 1);
+        panes.Children.Add(proposed);
+        var details = new StackPanel { Spacing = 7 };
+        details.Children.Add(panes);
         if (proposedPatch is not null)
         {
-            var patchBox = new TextBox
+            var patch = ReadOnlyBox(proposedPatch);
+            details.Children.Add(new Expander
             {
-                Text = proposedPatch,
-                IsReadOnly = true,
-                AcceptsReturn = true,
-                TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
-                FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
-                FontSize = 12,
-                MinHeight = 100,
-                MaxHeight = 180,
-                Background = this.FindResource("ComposerBrush") as global::Avalonia.Media.IBrush,
-                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
-            };
-            content.Children.Add(new StackPanel
-            {
-                Spacing = 5,
-                Children = { new TextBlock { Text = "PROPOSED PATCH", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush }, new ScrollViewer { Content = patchBox, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto } }
+                Header = "Proposed patch",
+                IsExpanded = false,
+                Content = new ScrollViewer { Content = patch, MaxHeight = 140, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto }
             });
         }
+        panel.Children.Add(new Expander { Header = "Show current and proposed files", IsExpanded = false, Content = details });
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
-        var dialog = new Window
-        {
-            Title = proposedPatch is not null ? "Review patch" : isNewFile ? "Review new project file" : "Review project change",
-            Width = 1000,
-            Height = 760,
-            MinWidth = 740,
-            MinHeight = 500,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = layout
-        };
-        var reject = new Button { Content = "Keep unchanged" };
-        var approve = new Button { Content = isNewFile ? "Approve & create" : "Approve & apply" };
-        reject.Click += (_, _) => dialog.Close(false);
-        approve.Click += (_, _) => dialog.Close(true);
-        buttons.Children.Add(reject);
-        buttons.Children.Add(approve);
-        layout.Children.Add(new ScrollViewer
-        {
-            Content = content,
-            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
-        });
-        layout.Children.Add(buttons);
-        Grid.SetRow(buttons, 2);
-        return await dialog.ShowDialog<bool>(this);
+        var keep = new Button { Content = "Keep unchanged", Classes = { "soft" } };
+        var apply = new Button { Content = isNewFile ? "Approve & create" : "Approve & apply", Classes = { "soft" } };
+        keep.Click += (_, _) => CompleteFileApproval(false);
+        apply.Click += (_, _) => CompleteFileApproval(true);
+        buttons.Children.Add(keep);
+        buttons.Children.Add(apply);
+        panel.Children.Add(buttons);
+        return panel;
     }
 
     private async Task<Codev.ProjectCommandApprovalChoice> ApproveAgentCommandAsync(Codev.CodeTaskCommandProposal proposal)
     {
-        var command = proposal.Command;
-        var projectPath = proposal.ProjectPath;
-        var shellName = proposal.ShellName;
-        var isVerification = proposal.IsVerification;
-        var contextSources = proposal.ContextSources;
-        var matchingUntrustedSource = proposal.MatchingUntrustedSource;
-        var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
-        var proposalWarnings = Codev.InstructionFollowingContentDetector.Detect(command);
-        layout.Children.Add(new TextBlock
+        var tcs = new TaskCompletionSource<Codev.ProjectCommandApprovalChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            Text = $"Project files and command output may contain instructions aimed at the model, and the proposed command may reflect them. Review this exact command against your request. It runs through {shellName} with your account permissions and can access files and services available to your account; Codev cannot sandbox it to the project folder.",
-            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+            ClearInlineApproval();
+            _pendingCommandApproval = tcs;
+            InlineApprovalContent.Content = BuildCommandApprovalContent(proposal);
+            InlineApprovalPanel.IsVisible = true;
         });
-        if (!string.IsNullOrWhiteSpace(matchingUntrustedSource))
-            layout.Children.Add(new TextBlock
-            {
-                Text = $"POTENTIAL INSTRUCTION FOLLOWING: this exact command appears in untrusted output from {matchingUntrustedSource}. Text appearing in a project file does not make a command safe or relevant to your request.",
-                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
-                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
-            });
-        if (proposalWarnings.Count > 0)
-            layout.Children.Add(new TextBlock
-            {
-                Text = "POTENTIAL INSTRUCTION FOLLOWING: command text resembles " + string.Join(", ", proposalWarnings) + ". This heuristic can flag ordinary commands; decide whether it matches your request before approving.",
-                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
-                Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
-            });
-        if (contextSources is { Count: > 0 })
-            layout.Children.Add(new TextBlock
-            {
-                Text = "Project or command output shown to the model this task:\n" + string.Join("\n", contextSources),
-                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-                FontSize = 11,
-                Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
-            });
-        layout.Children.Add(new TextBlock { Text = "Working directory: " + projectPath, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
-        layout.Children.Add(new TextBox
+        return await tcs.Task;
+    }
+
+    private async Task<Codev.ProjectCommandApprovalChoice> ApproveAgentMcpToolAsync(Codev.McpCodeTaskTool tool, System.Text.Json.JsonElement arguments)
+    {
+        var tcs = new TaskCompletionSource<Codev.ProjectCommandApprovalChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            Text = command, IsReadOnly = true, AcceptsReturn = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-            MinHeight = 220, FontFamily = new global::Avalonia.Media.FontFamily("Consolas"), Background = this.FindResource("ComposerBrush") as global::Avalonia.Media.IBrush,
-            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+            ClearInlineApproval();
+            _pendingMcpApproval = tcs;
+            var panel = new StackPanel { Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = $"Review MCP {tool.Operation.DisplayName()} call: {tool.ServerName} · {tool.ToolName}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
+            panel.Children.Add(new TextBlock { Text = tool.Description, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
+            var viewModel = DataContext as ViewModels.MainViewModel;
+            if (viewModel is { CanPersistMcpToolPermissions: false } && !string.IsNullOrWhiteSpace(viewModel.McpToolPermissionLoadError))
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "Saved MCP permissions are unavailable. This call needs approval, and Allow + run cannot save a persistent rule. " + viewModel.McpToolPermissionLoadError,
+                    TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                    FontWeight = global::Avalonia.Media.FontWeight.SemiBold
+                });
+            var args = new TextBox
+            {
+                Text = arguments.GetRawText(), IsReadOnly = true, AcceptsReturn = true,
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MinHeight = 70, MaxHeight = 180,
+                FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+                Foreground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#F2F2F2")),
+                Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#242424"))
+            };
+            panel.Children.Add(args);
+            panel.Children.Add(new TextBlock { Text = "The MCP server and its results are external and untrusted. Review the arguments before allowing this operation.", FontSize = 10, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+            var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+            void Add(string label, Codev.ProjectCommandApprovalChoice choice)
+            {
+                var button = new Button
+                {
+                    Content = label,
+                    Classes = { "soft" },
+                    IsEnabled = label != "Allow + run" || viewModel?.CanPersistMcpToolPermissions != false
+                };
+                if (label == "Allow + run" && viewModel?.CanPersistMcpToolPermissions == false)
+                    ToolTip.SetTip(button, "Saved MCP permissions are unavailable; this rule cannot be stored. Run once remains available.");
+                button.Click += (_, _) => CompleteMcpApproval(choice);
+                buttons.Children.Add(button);
+            }
+            Add("Cancel", Codev.ProjectCommandApprovalChoice.Cancel);
+            Add("Deny this operation", Codev.ProjectCommandApprovalChoice.DenyExactCommand);
+            Add("Allow + run", Codev.ProjectCommandApprovalChoice.AllowExactCommand);
+            Add("Run once", Codev.ProjectCommandApprovalChoice.RunOnce);
+            panel.Children.Add(buttons);
+            InlineApprovalContent.Content = panel;
+            InlineApprovalPanel.IsVisible = true;
+        });
+        return await tcs.Task;
+    }
+
+    private async Task<bool> ConfirmAgentProfileToolAsync(Codev.AgentProfile profile, string toolName, System.Text.Json.JsonElement arguments)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            ClearInlineApproval();
+            _pendingProfileToolApproval = tcs;
+            var panel = new StackPanel { Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = $"Agent profile · {profile.Name} asks before {toolName.Replace('_', ' ')}", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
+            panel.Children.Add(new TextBlock { Text = profile.Description, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush });
+            panel.Children.Add(new TextBlock { Text = "Review the tool arguments. Approval applies to this call only; project permissions still apply.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
+            panel.Children.Add(new ScrollViewer
+            {
+                Content = new TextBox
+                {
+                    Text = arguments.GetRawText(), IsReadOnly = true, AcceptsReturn = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                    MinHeight = 80, MaxHeight = 200, FontFamily = new global::Avalonia.Media.FontFamily("Cascadia Code"),
+                    Foreground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#F2F2F2")),
+                    Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#242424"))
+                }, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+            });
+            var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+            var cancel = new Button { Content = "Cancel", Classes = { "soft" } };
+            var allow = new Button { Content = "Allow once", Classes = { "soft" } };
+            cancel.Click += (_, _) => CompleteProfileToolApproval(false);
+            allow.Click += (_, _) => CompleteProfileToolApproval(true);
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(allow);
+            panel.Children.Add(buttons);
+            InlineApprovalContent.Content = panel;
+            InlineApprovalPanel.IsVisible = true;
+        });
+        return await tcs.Task;
+    }
+
+    private Control BuildCommandApprovalContent(Codev.CodeTaskCommandProposal proposal)
+    {
+        var isDark = Application.Current?.ActualThemeVariant == global::Avalonia.Styling.ThemeVariant.Dark;
+        var reviewBackground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#242424" : "#FFFFFF"));
+        var reviewForeground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#F2F2F2" : "#202020"));
+        var secondaryForeground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#C8C8C8" : "#55534F"));
+        var panel = new StackPanel { Spacing = 7 };
+        var permissionMode = (DataContext as ViewModels.MainViewModel)?.GetProjectCommandPermissionMode(proposal.ProjectPath)
+            ?? Codev.ProjectCommandPermissionMode.AskEveryTime;
+        panel.Children.Add(new TextBlock { Text = proposal.IsBackground ? "Review background command" : proposal.IsVerification ? "Review verification command" : "Review project command", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, FontSize = 14 });
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"Runs through {proposal.ShellName} with your account permissions; Codev cannot sandbox it to the project folder. Verify the exact command against your request.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = secondaryForeground
+        });
+        if (!string.IsNullOrWhiteSpace(proposal.MatchingUntrustedSource))
+        {
+            var warningForeground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#FFD166" : "#8A4B00"));
+            var warningBackground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#352A12" : "#FFF4D6"));
+            var warning = new StackPanel { Spacing = 3 };
+            warning.Children.Add(new TextBlock
+            {
+                Text = "POTENTIAL INSTRUCTION FOLLOWING",
+                FontWeight = global::Avalonia.Media.FontWeight.Bold,
+                Foreground = warningForeground
+            });
+            warning.Children.Add(new TextBlock
+            {
+                Text = $"This command matches instructions in untrusted output from {proposal.MatchingUntrustedSource}. Check it against your request before running it.",
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                Foreground = warningForeground
+            });
+            panel.Children.Add(new Border
+            {
+                Background = warningBackground,
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(10, 7),
+                Child = warning
+            });
+        }
+        if (proposal.ContextSources is { Count: > 0 } contextSources)
+        {
+            var sourcesBox = new TextBox
+            {
+                Text = string.Join(Environment.NewLine, contextSources),
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                MinHeight = 54,
+                MaxHeight = 120,
+                FontSize = 10,
+                Background = reviewBackground,
+                Foreground = reviewForeground,
+                CaretBrush = reviewForeground,
+                BorderBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#555555" : "#B8B5AF"))
+            };
+            global::Avalonia.Automation.AutomationProperties.SetName(sourcesBox, "Untrusted context sources");
+            panel.Children.Add(new Expander
+            {
+                Header = $"Show untrusted context sources ({contextSources.Count})",
+                IsExpanded = false,
+                Content = new ScrollViewer
+                {
+                    Content = sourcesBox,
+                    MaxHeight = 130,
+                    VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+                }
+            });
+        }
+        panel.Children.Add(new TextBlock { Text = "Working directory: " + proposal.ProjectPath, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 10, Foreground = secondaryForeground });
+        var command = new TextBox
+        {
+            Text = proposal.Command,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            MinHeight = 76,
+            MaxHeight = 150,
+            Padding = new Thickness(10, 8),
+            FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+            Background = reviewBackground,
+            Foreground = reviewForeground,
+            CaretBrush = reviewForeground,
+            BorderBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#555555" : "#B8B5AF"))
+        };
+        panel.Children.Add(command);
+        if (proposal.IsBackground)
+            panel.Children.Add(new TextBlock { Text = "This process can keep running after the response and may open a network port. Stop it from the Background commands list or close Codev. Output is captured with a size limit.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Foreground = secondaryForeground });
+        panel.Children.Add(new TextBlock
+        {
+            Text = permissionMode == Codev.ProjectCommandPermissionMode.Auto
+                ? "Auto normally runs commands without approval unless an exact saved deny rule blocks them."
+                : !Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(proposal.Command)
+                    ? $"This workspace is in {permissionMode switch { Codev.ProjectCommandPermissionMode.Allowlist => "Allowlist", Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only", _ => "Ask-every-time" }} mode. An exact allow rule cannot be saved for Git or Codev app-data commands."
+                    : permissionMode == Codev.ProjectCommandPermissionMode.Allowlist
+                        ? "This workspace is in Allowlist mode. This command is not on the allowlist; allowing it adds this exact command to the project."
+                        : permissionMode == Codev.ProjectCommandPermissionMode.ReadOnly
+                            ? "This workspace is in Read-only mode. This command is not a recognized read-only inspection, so it needs approval."
+                            : "This workspace is in Ask-every-time mode. Allowing it saves an exact project rule without changing the selected mode.",
+            FontSize = 10,
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Foreground = secondaryForeground
         });
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        void Add(string label, Codev.ProjectCommandApprovalChoice choice, bool enabled = true)
+        {
+            var button = new Button { Content = label, Classes = { "soft" }, IsEnabled = enabled };
+            button.Click += (_, _) => CompleteCommandApproval(choice);
+            buttons.Children.Add(button);
+        }
+        Add("Cancel", Codev.ProjectCommandApprovalChoice.Cancel);
+        Add("Deny exact command", Codev.ProjectCommandApprovalChoice.DenyExactCommand);
+        var canRemember = Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(proposal.Command);
+        Add(canRemember ? "Allow exact command + run" : "Protected · no saved allow", Codev.ProjectCommandApprovalChoice.AllowExactCommand, canRemember);
+        Add(proposal.IsVerification ? "Run once & verify" : "Run once", Codev.ProjectCommandApprovalChoice.RunOnce);
+        panel.Children.Add(buttons);
+        return panel;
+    }
+
+    private void CompleteFileApproval(bool approve)
+    {
+        var pending = _pendingFileApproval;
+        _pendingFileApproval = null;
+        InlineApprovalPanel.IsVisible = false;
+        InlineApprovalContent.Content = null;
+        pending?.TrySetResult(approve);
+    }
+
+    private void CompleteCommandApproval(Codev.ProjectCommandApprovalChoice choice)
+    {
+        var pending = _pendingCommandApproval;
+        _pendingCommandApproval = null;
+        InlineApprovalPanel.IsVisible = false;
+        InlineApprovalContent.Content = null;
+        pending?.TrySetResult(choice);
+    }
+
+    private void CompleteMcpApproval(Codev.ProjectCommandApprovalChoice choice)
+    {
+        var pending = _pendingMcpApproval;
+        _pendingMcpApproval = null;
+        InlineApprovalPanel.IsVisible = false;
+        InlineApprovalContent.Content = null;
+        pending?.TrySetResult(choice);
+    }
+
+    private void CompleteProfileToolApproval(bool approve)
+    {
+        var pending = _pendingProfileToolApproval;
+        _pendingProfileToolApproval = null;
+        InlineApprovalPanel.IsVisible = false;
+        InlineApprovalContent.Content = null;
+        pending?.TrySetResult(approve);
+    }
+
+    private void ClearInlineApproval()
+    {
+        _pendingFileApproval?.TrySetResult(false);
+        _pendingFileApproval = null;
+        _pendingCommandApproval?.TrySetResult(Codev.ProjectCommandApprovalChoice.Cancel);
+        _pendingCommandApproval = null;
+        _pendingMcpApproval?.TrySetResult(Codev.ProjectCommandApprovalChoice.Cancel);
+        _pendingMcpApproval = null;
+        _pendingProfileToolApproval?.TrySetResult(false);
+        _pendingProfileToolApproval = null;
+        InlineApprovalContent.Content = null;
+        InlineApprovalPanel.IsVisible = false;
+    }
+
+    private Task<bool> ConfirmHostedCodeTaskConsentAsync() => ConfirmGitActionAsync(this, "Allow OpenAI Code task?",
+        "For this conversation, Codev may send your prompts and tool or command results to the OpenAI API. OpenAI API usage may incur separate charges. If no folder is attached, Codev will create a private workspace. Sharing an attached project's files and instructions is a separate choice. File changes still require your review, and commands still follow project approval.");
+
+    private async Task<Codev.ConversationRewindChoice> ChooseConversationRewindAsync(int messageIndex)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation is not { } conversation ||
+            messageIndex < 0 || messageIndex >= conversation.Messages.Count) return Codev.ConversationRewindChoice.Cancel;
+        var prompt = conversation.Messages[messageIndex].Content;
+        var excerpt = prompt.Length > 220 ? prompt[..220] + "…" : prompt;
+        var hardLinkNotice = Codev.FileHardLinkInspector.IsSupportedPlatform
+            ? " Hard-linked files are detected and refused."
+            : " Hard-link checks are unavailable on this platform, so rewind cannot replace existing files.";
+        var layout = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
         layout.Children.Add(new TextBlock
         {
-            Text = "Saved allow/deny rules apply only to this exact command in this project. Choosing Allow exact command switches to allowlist mode. In Read-only mode, a conservative classifier handles simple inspections directly with bounded file APIs, without launching a shell; verification and everything else still require approval. Commands are not sandboxed.",
-            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-            FontSize = 11,
-            Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
+            Text = $"Choose what to rewind before this prompt. {excerpt}\n\nRewinding the conversation removes this prompt and all later messages, then puts this prompt back in the composer. Code rewind only covers Codev-managed file changes; shell and external edits are not included.{hardLinkNotice}",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
-        var dialog = new Window { Title = isVerification ? "Approve verification command" : "Approve project command", Width = 900, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
-        var reject = new Button { Content = "Cancel" };
-        var deny = new Button { Content = "Deny exact command" };
-        var canRememberAllow = Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(command);
-        var rememberAllow = new Button
+        var dialog = new Window
         {
-            Content = canRememberAllow ? "Allow exact command + run" : "Protected · ask every time",
-            IsEnabled = canRememberAllow
+            Title = "Rewind",
+            Width = 560,
+            SizeToContent = SizeToContent.Height,
+            MinHeight = 220,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = layout
         };
-        if (!canRememberAllow)
-            ToolTip.SetTip(rememberAllow, "Commands invoking Git or referencing .git metadata or Codev app data always require approval.");
-        var approve = new Button { Content = isVerification ? "Run once & verify" : "Run once" };
-        reject.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.Cancel);
-        deny.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.DenyExactCommand);
-        rememberAllow.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.AllowExactCommand);
-        approve.Click += (_, _) => dialog.Close(Codev.ProjectCommandApprovalChoice.RunOnce);
-        buttons.Children.Add(reject);
-        buttons.Children.Add(deny);
-        buttons.Children.Add(rememberAllow);
-        buttons.Children.Add(approve);
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        Button Choice(string label, Codev.ConversationRewindChoice choice)
+        {
+            var button = new Button { Content = label, Classes = { "soft" } };
+            button.Click += (_, _) => dialog.Close(choice);
+            return button;
+        }
+        var cancel = new Button { Content = "Cancel" };
+        cancel.Click += (_, _) => dialog.Close(Codev.ConversationRewindChoice.Cancel);
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(Choice("Conversation only", Codev.ConversationRewindChoice.ConversationOnly));
+        buttons.Children.Add(Choice("Code only", Codev.ConversationRewindChoice.CodeOnly));
+        buttons.Children.Add(Choice("Code + conversation", Codev.ConversationRewindChoice.CodeAndConversation));
         layout.Children.Add(buttons);
-        return await dialog.ShowDialog<Codev.ProjectCommandApprovalChoice>(this);
+        return await dialog.ShowDialog<Codev.ConversationRewindChoice>(this);
+    }
+
+    private async Task<Codev.CodeRewindReviewResult> ReviewAndRestoreCodeBeforeRewindAsync(Codev.Conversation conversation, int messageIndex)
+    {
+        if (conversation.ProjectPath is not { } projectPath)
+        {
+            await ShowGitInfoAsync("Code rewind unavailable", "This conversation has no project workspace to restore.");
+            return Codev.CodeRewindReviewResult.Cancelled;
+        }
+
+        try
+        {
+            var files = new Codev.WorkspaceFileService(projectPath);
+            var plan = await Codev.ConversationCodeRewindService.BuildPlanAsync(conversation, messageIndex, files);
+            if (plan.Files.Count == 0)
+            {
+                await ShowGitInfoAsync("No recorded code changes", "There are no Codev-managed file changes after this prompt to restore. Files changed by commands or outside Codev are not covered.");
+                return Codev.CodeRewindReviewResult.NoChanges;
+            }
+
+            foreach (var item in plan.Files)
+            {
+                if (!await ReviewFileRestoreAsync(item.RelativePath,
+                        item.ExpectedCurrentContent ?? "[The file does not currently exist]",
+                        item.RestoreContent ?? "[The file will be absent after rewind]",
+                        item.RestoreFileExisted, item.ExpectedCurrentFileExisted))
+                    return Codev.CodeRewindReviewResult.Cancelled;
+            }
+
+            await Codev.ConversationCodeRewindService.ApplyPlanAsync(conversation, plan, files);
+            await ((ViewModels.MainViewModel)DataContext!).SaveFileChangesAsync();
+            await ShowGitInfoAsync("Code restored", $"Restored {plan.Files.Count} file(s) to the state before the selected prompt. Rollback checkpoints were saved in Files history.");
+            return Codev.CodeRewindReviewResult.Restored;
+        }
+        catch (Exception ex)
+        {
+            await ShowGitInfoAsync("Could not rewind code", ex.Message);
+            return Codev.CodeRewindReviewResult.Cancelled;
+        }
     }
 
     private async Task<bool> ConfirmRepeatedToolCallAsync(string toolName)
@@ -427,7 +801,12 @@ public partial class MainWindow : Window
     private async void Settings_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        viewModel.RefreshSemanticIndexStatus();
         var endpoint = new TextBox { Text = viewModel.OllamaEndpointDisplay, MinWidth = 380 };
+        var embeddingModel = new TextBox { Text = viewModel.EmbeddingModel, MinWidth = 220 };
+        var semanticStatus = new TextBlock { Text = viewModel.SemanticIndexStatus, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var buildSemanticIndex = new Button { Content = "Build / update current project index", IsEnabled = viewModel.CanBuildSemanticIndex };
+        var deleteSemanticIndex = new Button { Content = "Delete current project index", IsEnabled = viewModel.HasSemanticIndexForProject };
         var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
         var save = new Button { Content = "Save and reconnect", MinWidth = 150 };
         var close = new Button { Content = "Close", MinWidth = 80 };
@@ -448,12 +827,33 @@ public partial class MainWindow : Window
                     new TextBlock { Text = "Ollama server URL" },
                     endpoint,
                     new TextBlock { Text = "Default: http://127.0.0.1:11434. A non-local server receives prompts and any project context you choose to include. Credentials in the URL are not supported.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxWidth = 440 },
+                    new Separator(),
+                    new TextBlock { Text = "Local semantic search · Ollama embeddings model" },
+                    embeddingModel,
+                    new TextBlock { Text = "Indexes the attached project only when you click Build. The directory must be trusted. Source text and vectors stay on this machine. Uses an installed model such as nomic-embed-text; downloads are never automatic. Rebuild after project changes; updates process only changed chunks. Turn on Use semantic search in a conversation's Code task menu to use the index. Retrieved excerpts enter hosted requests only when workspace sharing is enabled.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MaxWidth = 550 },
+                    new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 8, Children = { buildSemanticIndex, deleteSemanticIndex } },
+                    semanticStatus,
                     status,
                     buttons
                 }
             }
         };
         close.Click += (_, _) => dialog.Close();
+        embeddingModel.TextChanged += (_, _) => viewModel.EmbeddingModel = embeddingModel.Text ?? "";
+        buildSemanticIndex.Click += async (_, _) =>
+        {
+            buildSemanticIndex.IsEnabled = deleteSemanticIndex.IsEnabled = false;
+            await viewModel.UpdateSemanticIndexAsync();
+            semanticStatus.Text = viewModel.SemanticIndexStatus;
+            deleteSemanticIndex.IsEnabled = viewModel.HasSemanticIndexForProject;
+            buildSemanticIndex.IsEnabled = viewModel.CanBuildSemanticIndex;
+        };
+        deleteSemanticIndex.Click += (_, _) =>
+        {
+            viewModel.DeleteSemanticIndexForProject();
+            semanticStatus.Text = viewModel.SemanticIndexStatus;
+            deleteSemanticIndex.IsEnabled = viewModel.HasSemanticIndexForProject;
+        };
         save.Click += async (_, _) =>
         {
             if (!Codev.OllamaEndpoint.TryParse(endpoint.Text, out var parsed, out var error))
@@ -493,12 +893,21 @@ public partial class MainWindow : Window
     private async void ConfigureCloudProvider_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        await viewModel.WaitForSavedCloudApiKeysAsync();
         var provider = new ComboBox { ItemsSource = new[] { "OpenAI", "Anthropic" }, SelectedIndex = 0, MinWidth = 180 };
         var apiKey = new TextBox { MinWidth = 360, PasswordChar = '•', Watermark = "Paste a key to replace the saved one (or leave blank)" };
+        var apiKeyLabel = new TextBlock { Text = "API key · leave blank to reuse the saved key" };
+        var replaceSavedKey = new Button { Content = "Replace saved key…", MinWidth = 140, Classes = { "soft" }, IsVisible = false };
+        var replacementRequested = false;
         var acknowledgement = new CheckBox
         {
             Content = "I understand that prompts and conversation history go to this provider under its data policies, and API use may incur separate charges. Project files stay local unless I separately opt in below.",
             IsChecked = viewModel.CloudRequestsEnabled,
+            MaxWidth = 390
+        };
+        var autoConnect = new CheckBox
+        {
+            IsChecked = viewModel.AutoConnectProvider is not null,
             MaxWidth = 390
         };
         var includeProjectContext = new CheckBox
@@ -511,12 +920,29 @@ public partial class MainWindow : Window
         void ShowSavedKeyStatus()
         {
             var selectedProvider = provider.SelectedItem?.ToString() == "Anthropic" ? Codev.CloudModelProviders.Anthropic : Codev.CloudModelProviders.OpenAI;
-            status.Text = viewModel.HasSavedCloudApiKey(selectedProvider)
-                ? $"A saved {selectedProvider} key is available from the OS credential store. Leave the key field blank, acknowledge hosted requests, and choose Connect and load models."
+            var hasSavedKey = viewModel.HasSavedCloudApiKey(selectedProvider);
+            status.Text = hasSavedKey
+                ? $"Saved {selectedProvider} API key found. Leave the key field blank; Codev will reuse it. You only need to enable hosted requests for this session."
                 : "No saved key is available. Enter a key to save it after successful model discovery.";
+            apiKeyLabel.IsVisible = !hasSavedKey || replacementRequested;
+            apiKey.IsVisible = !hasSavedKey || replacementRequested;
+            replaceSavedKey.IsVisible = hasSavedKey && !replacementRequested;
+            acknowledgement.Content = hasSavedKey
+                ? "Enable hosted requests using my saved key (prompts/history go to the provider; API charges may apply)"
+                : "I understand that prompts and conversation history go to this provider under its data policies, and API use may incur separate charges. Project files stay local unless I separately opt in below.";
+            autoConnect.Content = hasSavedKey
+                ? $"Reconnect {selectedProvider} automatically on startup using the saved key"
+                : "Reconnect this provider automatically on startup after saving a key";
+            autoConnect.IsChecked = viewModel.AutoConnectProvider?.Equals(selectedProvider, StringComparison.OrdinalIgnoreCase) == true;
         }
-        provider.SelectionChanged += (_, _) => ShowSavedKeyStatus();
+        provider.SelectionChanged += (_, _) => { replacementRequested = false; ShowSavedKeyStatus(); };
         ShowSavedKeyStatus();
+        replaceSavedKey.Click += (_, _) =>
+        {
+            replacementRequested = true;
+            ShowSavedKeyStatus();
+            apiKey.Focus();
+        };
         var connect = new Button { Content = "Connect and load models", MinWidth = 170 };
         var forget = new Button { Content = "Remove saved key", MinWidth = 130 };
         var disable = new Button { Content = "Disable this session", MinWidth = 140 };
@@ -543,15 +969,17 @@ public partial class MainWindow : Window
                 {
                     new TextBlock { Text = "Choose a provider" },
                     provider,
-                    new TextBlock { Text = "API key · saved in the OS credential store after a successful connection" },
+                    apiKeyLabel,
                     apiKey,
+                    replaceSavedKey,
                     new TextBlock
                     {
-                        Text = "Leave the field blank to use the provider's environment variable first, then its saved key. Typed keys are saved after model discovery succeeds using Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are never written to Codev settings, chats, or backups.",
+                        Text = "Leave the field blank to reuse a saved key. A newly entered key is saved immediately using Windows Credential Manager, macOS Keychain, or Linux Secret Service, even if model discovery later fails. Keys are never written to Codev settings, chats, or backups.",
                         TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
                         MaxWidth = 600
                     },
                     acknowledgement,
+                    autoConnect,
                     includeProjectContext,
                     status,
                     buttons
@@ -562,9 +990,11 @@ public partial class MainWindow : Window
         {
             var providerId = provider.SelectedItem?.ToString() == "Anthropic" ? Codev.CloudModelProviders.Anthropic : Codev.CloudModelProviders.OpenAI;
             var connected = await viewModel.ConnectCloudProviderAsync(providerId, apiKey.Text, acknowledgement.IsChecked == true);
+            ShowSavedKeyStatus();
             status.Text = viewModel.ConnectionStatus;
             if (connected)
             {
+                viewModel.SetAutoConnectProvider(autoConnect.IsChecked == true ? providerId : null);
                 viewModel.IncludeProjectContextForHosted = includeProjectContext.IsChecked == true;
                 dialog.Close();
             }
@@ -575,9 +1005,123 @@ public partial class MainWindow : Window
             var providerId = provider.SelectedItem?.ToString() == "Anthropic" ? Codev.CloudModelProviders.Anthropic : Codev.CloudModelProviders.OpenAI;
             await viewModel.RemoveStoredCloudApiKeyAsync(providerId);
             apiKey.Text = "";
+            replacementRequested = false;
+            ShowSavedKeyStatus();
             status.Text = viewModel.ConnectionStatus;
         };
         cancel.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(this);
+    }
+
+    private async void OpenAgentProfiles_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        await OpenCommandFolderAsync(viewModel.UserAgentProfilesFolder, viewModel);
+    }
+
+    private async void ManageAgentProfiles_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        IReadOnlyList<Codev.AgentProfileDocument> documents;
+        try { documents = await viewModel.GetUserAgentProfileDocumentsAsync(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            viewModel.ReportContextActionStatus($"User agent profiles could not be opened ({ex.GetType().Name}): {ex.Message}");
+            return;
+        }
+        var editor = new AgentProfileEditorWindow(viewModel, documents,
+            () => OpenCommandFolderAsync(viewModel.UserAgentProfilesFolder, viewModel));
+        await editor.ShowDialog(this);
+    }
+
+    private async void McpServers_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        IReadOnlyList<Codev.McpServerConfiguration> servers;
+        try { servers = await viewModel.GetMcpServerConfigurationsAsync(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException)
+        {
+            var warning = new Window
+            {
+                Title = "MCP configuration unavailable", Width = 440, SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
+                {
+                    new TextBlock { Text = $"Codev could not load the MCP server file ({ex.GetType().Name}). The file was left unchanged.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                    new Button { Content = "Close", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right }
+                } }
+            };
+            ((Button)((StackPanel)warning.Content!).Children[1]).Click += (_, _) => warning.Close();
+            await warning.ShowDialog(this);
+            return;
+        }
+        var editor = new TextBox
+        {
+            Text = System.Text.Json.JsonSerializer.Serialize(servers, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+            {
+                WriteIndented = true,
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+            }),
+            AcceptsReturn = true, TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+            FontFamily = new global::Avalonia.Media.FontFamily("Cascadia Code"), FontSize = 12,
+            MinHeight = 320, MaxHeight = 540, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Stretch,
+            Foreground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#F2F2F2")),
+            Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#171717"))
+        };
+        var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var close = new Button { Content = "Close", Classes = { "soft" } };
+        var save = new Button { Content = "Save servers", Classes = { "soft" } };
+        var forgetSignIns = new Button { Content = "Forget saved OAuth sign-ins", Classes = { "soft" } };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { forgetSignIns, close, save } };
+        var dialog = new Window
+        {
+            Title = "MCP servers", Width = 760, Height = 680, MinWidth = 560, MinHeight = 480,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(18), Spacing = 10,
+                Children =
+                {
+                    new TextBlock { Text = "External tools for Code tasks", FontSize = 15, FontWeight = global::Avalonia.Media.FontWeight.SemiBold },
+                    new TextBlock { Text = "Edit the server list as JSON. Use transport Stdio with command/arguments, or Http with a URL. Credentials are referenced by environment variable name and are never stored here. HTTP servers use OAuth by default; set OAuthEnabled to false for header-only authentication. OAuthClientId, OAuthClientSecretEnvironmentVariable, and OAuthScopes are optional. Sign-in opens your system browser when the server requests authorization, and tokens stay in the OS credential vault. Optional StartupTimeoutMs, CatalogTimeoutMs, and ExecutionTimeoutMs are bounded per-server limits. Servers connect on the next Code task.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                    new ScrollViewer { Content = editor, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto },
+                    status, buttons
+                }
+            }
+        };
+        close.Click += (_, _) => dialog.Close();
+        forgetSignIns.Click += async (_, _) =>
+        {
+            try
+            {
+                var count = await viewModel.ForgetMcpOAuthSignInsAsync();
+                status.Text = count == 0
+                    ? "No saved OAuth sign-ins were found for configured HTTP servers."
+                    : $"Forgot {count} saved sign-in(s). The servers may ask you to sign in again.";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+            {
+                status.Text = $"Could not forget saved sign-ins ({ex.GetType().Name}).";
+            }
+        };
+        save.Click += async (_, _) =>
+        {
+            try
+            {
+                var parsed = System.Text.Json.JsonSerializer.Deserialize<List<Codev.McpServerConfiguration>>(editor.Text ?? "[]",
+                    new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+                    {
+                        PropertyNameCaseInsensitive = true,
+                        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+                    }) ?? [];
+                await viewModel.SaveMcpServerConfigurationsAsync(parsed);
+                dialog.Close();
+            }
+            catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException or InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                status.Text = $"Could not save MCP servers ({ex.GetType().Name}): {ex.Message}";
+            }
+        };
         await dialog.ShowDialog(this);
     }
 
@@ -585,6 +1129,18 @@ public partial class MainWindow : Window
     {
         if (sender is MenuItem { Tag: string value } && int.TryParse(value, out var width) && DataContext is ViewModels.MainViewModel viewModel)
             viewModel.SetReadingWidth(width);
+    }
+
+    private void FontFamily_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string family } && DataContext is ViewModels.MainViewModel viewModel)
+            viewModel.SetUiFontFamily(family);
+    }
+
+    private void FontSize_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string value } && int.TryParse(value, out var size) && DataContext is ViewModels.MainViewModel viewModel)
+            viewModel.SetUiFontSize(size);
     }
 
     private async Task<string?> EditConversationPromptAsync(int messageIndex, string original)
@@ -1230,12 +1786,13 @@ public partial class MainWindow : Window
             FileMentionPopup.IsOpen = false;
             _activeFileMention = null;
             var slashSearch = _slashCommandSearch = new CancellationTokenSource();
+            var slashSearchToken = slashSearch.Token;
             var slashCaretIndex = ComposerTextBox.CaretIndex;
             try
             {
-                await Task.Delay(100, slashSearch.Token);
-                var commands = await viewModel.GetSlashCommandSuggestionsAsync(text, slashCaretIndex, slashSearch.Token);
-                if (slashSearch.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) ||
+                await Task.Delay(100, slashSearchToken);
+                var commands = await viewModel.GetSlashCommandSuggestionsAsync(text, slashCaretIndex, slashSearchToken);
+                if (slashSearchToken.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) ||
                     ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != slashCaretIndex) return;
                 SlashCommandListBox.ItemsSource = commands;
                 SlashCommandListBox.SelectedIndex = -1;
@@ -1255,12 +1812,13 @@ public partial class MainWindow : Window
         }
 
         var search = _fileMentionSearch = new CancellationTokenSource();
+        var searchToken = search.Token;
         var caretIndex = ComposerTextBox.CaretIndex;
         try
         {
-            await Task.Delay(120, search.Token);
-            var suggestions = await Task.Run(() => viewModel.GetProjectFileSuggestions(mention.Prefix), search.Token);
-            if (search.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) || ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != caretIndex) return;
+            await Task.Delay(120, searchToken);
+            var suggestions = await Task.Run(() => viewModel.GetProjectFileSuggestions(mention.Prefix), searchToken);
+            if (searchToken.IsCancellationRequested || !ReferenceEquals(DataContext, viewModel) || ComposerTextBox.Text != text || ComposerTextBox.CaretIndex != caretIndex) return;
             FileMentionListBox.ItemsSource = suggestions;
             FileMentionListBox.SelectedIndex = -1;
             _activeFileMention = suggestions.Count > 0 ? mention : null;
@@ -1373,6 +1931,12 @@ public partial class MainWindow : Window
                 ComposerTextBox.Text = "";
                 if (await viewModel.ReviewUncommittedChangesAsync(securityFocused: command.Action == Codev.SlashCommandAction.SecurityReviewWorkingTree) is { } review)
                     await ShowReadOnlyReviewAsync(review, this);
+                break;
+            case Codev.SlashCommandAction.ReviewLastTurn:
+                viewModel.Draft = "";
+                ComposerTextBox.Text = "";
+                if (await viewModel.ReviewUncommittedChangesAsync(lastTurn: true) is { } lastTurnReview)
+                    await ShowReadOnlyReviewAsync(lastTurnReview, this);
                 break;
             case Codev.SlashCommandAction.ReviewCommit:
             case Codev.SlashCommandAction.SecurityReviewCommit:
@@ -1511,7 +2075,7 @@ public partial class MainWindow : Window
         });
         content.Children.Add(new TextBlock
         {
-            Text = "Saved prompt templates from the WPF app also appear as /template-… commands (SAVED) and insert into the composer for review. Manage those templates in the WPF app or migrate them to Markdown files here.",
+            Text = "Prompt templates imported from older Codev versions also appear as /template-… commands (SAVED) and insert into the composer for review. Manage templates in Settings or migrate them to Markdown command files.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
         });
@@ -1565,7 +2129,7 @@ public partial class MainWindow : Window
         var content = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
         content.Children.Add(new TextBlock
         {
-            Text = "A skill is a folder containing SKILL.md. It appears as /skill-name with its description in the menu. Selecting it loads the prompt into the composer for review; it is never sent automatically. Skills are manually invoked only, and Codev does not run scripts from skill folders or let the model trigger them.",
+            Text = "A skill is a folder containing SKILL.md. It appears as /skill-name with its description in the menu. Selecting it loads the prompt into the composer for review; it is never sent automatically. In Code tasks, the model can request a skill through its restricted loader tool. Codev does not run scripts from skill folders.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
         content.Children.Add(new Border
@@ -1583,13 +2147,19 @@ public partial class MainWindow : Window
         });
         content.Children.Add(new TextBlock { Text = "User skills · available in all conversations", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
         content.Children.Add(new TextBox { Text = viewModel.UserSkillsFolder, IsReadOnly = true, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, MinHeight = 44 });
+        content.Children.Add(new TextBlock
+        {
+            Text = "Also discovers shared skills in ~/.config/opencode/skills, ~/.claude/skills, and ~/.agents/skills. XDG_CONFIG_HOME and OPENCODE_CONFIG_DIR are respected for OpenCode.",
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+            Classes = { "muted" }
+        });
         var openUser = new Button { Content = "Open user skills folder", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Left };
         openUser.Click += async (_, _) => await OpenCommandFolderAsync(viewModel.UserSkillsFolder, viewModel);
         content.Children.Add(openUser);
         content.Children.Add(new TextBlock { Text = "Project skills · trusted project only", FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Margin = new Thickness(0, 5, 0, 0) });
         content.Children.Add(new TextBox
         {
-            Text = projectFolder ?? (viewModel.HasProject ? "Trust this project to enable its .codev/skills folder." : "Attach and trust a project to use project skills."),
+            Text = projectFolder ?? (viewModel.HasProject ? "Trust this project to enable .codev/skills, .opencode/skills, .claude/skills, and .agents/skills." : "Attach and trust a project to use project skills."),
             IsReadOnly = true,
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             MinHeight = 44
@@ -1790,6 +2360,7 @@ public partial class MainWindow : Window
             var start = new ProcessStartInfo(opener) { UseShellExecute = false };
             start.ArgumentList.Add(path);
             Process.Start(start);
+            viewModel.ReportContextActionStatus($"Opened folder · {path}");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -1978,7 +2549,7 @@ public partial class MainWindow : Window
         var parentIsRoot = string.Equals(parent, Path.GetPathRoot(parent), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         var status = new TextBlock
         {
-            Text = "This folder is untrusted. Chat and read-only browsing remain available. Codev will only include files you explicitly select until you trust this folder. Trust is stored locally. Avalonia chat currently does not load project instructions, skills, commands, hooks, or MCP settings.",
+            Text = "This folder is untrusted. Chat and read-only browsing remain available, and you can explicitly select files. Until you trust it, Codev keeps automatic project context and project guidance off and Code task unavailable. Trust is stored locally. Trusted folders can provide applicable AGENTS.md guidance and .codev skills and commands; project hooks and MCP settings are not used.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
             MaxWidth = 510
         };
@@ -2028,29 +2599,97 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ProjectFormatters_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel || !viewModel.IsProjectTrusted ||
+            viewModel.ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath) return;
+        string text;
+        try { text = await Codev.ProjectFormatterCatalog.ReadConfigurationTextAsync(projectPath, isTrusted: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            viewModel.ReportContextActionStatus($"Could not read formatter configuration ({ex.GetType().Name}).");
+            return;
+        }
+
+        var editor = new TextBox
+        {
+            Text = text,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+            FontFamily = new global::Avalonia.Media.FontFamily("monospace"),
+            FontSize = 12,
+            MinHeight = 260,
+            Watermark = Codev.ProjectFormatterCatalog.EmptyConfiguration
+        };
+        var status = new TextBlock { Text = "Formatters are disabled until configured. A formatter runs only after an accepted file change and still follows this project's command permission mode.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 11 };
+        var save = new Button { Content = "Validate and save", Classes = { "soft" } };
+        var close = new Button { Content = "Close", Classes = { "soft" } };
+        var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { save, close } };
+        var layout = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto"), RowSpacing = 9 };
+        layout.Children.Add(new TextBlock { Text = "Trusted project formatter configuration · .codev/formatters.json", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        Grid.SetRow(editor, 1);
+        layout.Children.Add(editor);
+        Grid.SetRow(status, 2);
+        layout.Children.Add(status);
+        Grid.SetRow(buttons, 3);
+        layout.Children.Add(buttons);
+        var dialog = new Window
+        {
+            Title = "Project formatters",
+            Width = 760,
+            Height = Math.Min(540, Math.Max(400, Bounds.Height - 80)),
+            MinWidth = 560,
+            MinHeight = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = layout
+        };
+        close.Click += (_, _) => dialog.Close();
+        save.Click += async (_, _) =>
+        {
+            if (!Codev.ProjectFormatterCatalog.ValidateJson(editor.Text ?? "", out _, out var error))
+            {
+                status.Text = error;
+                return;
+            }
+            try
+            {
+                await Codev.ProjectFormatterCatalog.SaveAsync(projectPath, editor.Text ?? "", viewModel.IsProjectTrusted);
+                status.Text = "Formatter configuration saved. Formatters remain governed by this project's permission mode.";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            {
+                status.Text = $"Could not save formatter configuration ({ex.GetType().Name}).";
+            }
+        };
+        await dialog.ShowDialog(this);
+    }
+
     private async void ProjectCommandPermissions_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || viewModel.ActiveConversation?.ProjectPath is not { Length: > 0 } projectPath) return;
 
-        var layout = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
-        layout.Children.Add(new TextBlock
+        var availableHeight = Math.Clamp(Bounds.Height - 48, 320, 560);
+        var header = new StackPanel { Spacing = 10 };
+        header.Children.Add(new TextBlock
         {
-            Text = "Command rules are saved locally for this exact project folder, outside the project. Deny rules always block their exact command. Allowlist mode runs exact saved allows without asking, except Git or protected app-data commands, which always ask. Read-only mode skips approval only for a small set of simple inspection commands using project-relative paths; compound commands, redirects, wrappers, absolute paths and symlinks still ask. Ask every time is the default.",
+            Text = "Command rules are saved locally for this exact project folder, outside the project. Auto approves all shell commands—including destructive commands and Git writes—and calls configured MCP tools without approval, unless an exact saved project deny rule blocks that command or MCP server/tool. Shell commands run with your account permissions and are not sandboxed to this folder; MCP tools may affect external services. To save a shell deny rule, use Ask every time, choose Deny exact command, then switch back to Auto. In Ask-every-time and Allowlist modes, commands still follow their normal approval policy. Simple read-only inspections in Read-only mode use bounded .NET file APIs instead of a shell. New private Codev workspaces start in Auto; attached project folders default to Ask every time.",
             TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
         });
         var mode = new ComboBox
         {
-            ItemsSource = new[] { "Ask every time", "Allow exact saved commands", "Read-only commands" },
+            ItemsSource = new[] { "Ask every time", "Auto · approve unless denied", "Allow exact saved commands", "Read-only commands" },
             SelectedIndex = viewModel.ProjectCommandPermissionMode switch
             {
-                Codev.ProjectCommandPermissionMode.Allowlist => 1,
-                Codev.ProjectCommandPermissionMode.ReadOnly => 2,
+                Codev.ProjectCommandPermissionMode.Auto => 1,
+                Codev.ProjectCommandPermissionMode.Allowlist => 2,
+                Codev.ProjectCommandPermissionMode.ReadOnly => 3,
                 _ => 0
             },
             IsEnabled = viewModel.CanPersistProjectCommandPermissions
         };
-        layout.Children.Add(new TextBlock { Text = "Approval mode", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
-        layout.Children.Add(mode);
+        header.Children.Add(new TextBlock { Text = "Approval mode", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        header.Children.Add(mode);
         var notice = new TextBlock
         {
             Text = viewModel.ProjectCommandPermissionStoreNotice,
@@ -2058,13 +2697,22 @@ public partial class MainWindow : Window
             FontSize = 11,
             Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush
         };
-        layout.Children.Add(notice);
-        layout.Children.Add(new TextBlock { Text = "Saved exact command rules", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        header.Children.Add(notice);
+        header.Children.Add(new TextBlock { Text = "Saved exact command rules", FontWeight = global::Avalonia.Media.FontWeight.SemiBold });
+        var layout = new Grid
+        {
+            Margin = new Thickness(20),
+            RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto"),
+            RowSpacing = 8
+        };
+        layout.Children.Add(header);
         var rules = new StackPanel { Spacing = 6 };
         var noRules = new TextBlock { Text = "No saved command rules for this project.", Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
-        var scroll = new ScrollViewer { Content = rules, MaxHeight = 300, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+        var scroll = new ScrollViewer { Content = rules, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+        Grid.SetRow(scroll, 1);
         layout.Children.Add(scroll);
         var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 11 };
+        Grid.SetRow(status, 2);
         layout.Children.Add(status);
 
         void RefreshRules()
@@ -2108,43 +2756,43 @@ public partial class MainWindow : Window
             {
                 var selectedMode = mode.SelectedIndex switch
                 {
-                    1 => Codev.ProjectCommandPermissionMode.Allowlist,
-                    2 => Codev.ProjectCommandPermissionMode.ReadOnly,
+                    1 => Codev.ProjectCommandPermissionMode.Auto,
+                    2 => Codev.ProjectCommandPermissionMode.Allowlist,
+                    3 => Codev.ProjectCommandPermissionMode.ReadOnly,
                     _ => Codev.ProjectCommandPermissionMode.AskEveryTime
                 };
                 await viewModel.SetProjectCommandPermissionModeAsync(selectedMode);
-                status.Text = selectedMode switch
-                {
-                    Codev.ProjectCommandPermissionMode.Allowlist => "Allowlist mode is on. Unlisted commands still require approval.",
-                    Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only mode is on. Only recognized inspection commands skip approval.",
-                    _ => "Commands will ask every time. Saved denials remain active."
-                };
+                status.Text = "Permission mode saved.";
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
                 status.Text = $"Could not save the mode ({ex.GetType().Name}).";
                 mode.SelectedIndex = viewModel.ProjectCommandPermissionMode switch
                 {
-                    Codev.ProjectCommandPermissionMode.Allowlist => 1,
-                    Codev.ProjectCommandPermissionMode.ReadOnly => 2,
+                    Codev.ProjectCommandPermissionMode.Auto => 1,
+                    Codev.ProjectCommandPermissionMode.Allowlist => 2,
+                    Codev.ProjectCommandPermissionMode.ReadOnly => 3,
                     _ => 0
                 };
             }
         };
 
         var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right };
+        Grid.SetRow(close, 3);
+        close.Margin = new Thickness(0, 4, 0, 0);
+        layout.Children.Add(close);
         var dialog = new Window
         {
             Title = "Command permissions · " + Path.GetFileName(projectPath),
             Width = 700,
-            Height = 560,
+            Height = availableHeight,
+            MaxHeight = availableHeight,
             MinWidth = 560,
-            MinHeight = 420,
+            MinHeight = Math.Min(360, availableHeight),
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = layout
         };
         close.Click += (_, _) => dialog.Close();
-        layout.Children.Add(close);
         await dialog.ShowDialog(this);
     }
 
@@ -2152,6 +2800,7 @@ public partial class MainWindow : Window
     {
         if (DataContext is not ViewModels.MainViewModel viewModel || !viewModel.CanReviewFileChanges || viewModel.ActiveConversation is not { } conversation) return;
         var entries = conversation.FileChanges.OrderByDescending(change => change.ChangedAt).ToArray();
+        var historyNotice = Codev.ConversationFileChangeHistoryService.GetStatusMessage(conversation);
         var list = new ListBox();
         foreach (var change in entries)
         {
@@ -2183,7 +2832,7 @@ public partial class MainWindow : Window
                 RowDefinitions = new RowDefinitions("Auto,*,Auto"),
                 Children =
                 {
-                    new TextBlock { Text = $"{entries.Length} change record(s) across {entries.Select(change => change.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()} file(s). Newest first. Restores show the complete replacement and save the current file as a new checkpoint.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10), Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush },
+                    new TextBlock { Text = $"{entries.Length} change record(s) across {entries.Select(change => change.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()} file(s). Newest first. Restores show the complete replacement and save the current file as a new checkpoint." + (historyNotice is null ? "" : "\n" + historyNotice), TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10), Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush },
                     list,
                     buttons
                 }
@@ -2224,8 +2873,10 @@ public partial class MainWindow : Window
 
             var rollback = await files.RestoreFileStateAsync(change.RelativePath, conversation.Id, change.PreviousFileExisted,
                 change.CheckpointPath, current?.Sha256);
-            conversation.FileChanges.Remove(change);
-            conversation.FileChanges.Add(new Codev.FileChangeRecord(change.RelativePath, rollback, DateTimeOffset.Now, "Restore", currentExists));
+            var restoredExists = File.Exists(files.ResolvePath(change.RelativePath));
+            var restored = restoredExists ? await files.ReadFileSnapshotAsync(change.RelativePath) : null;
+            Codev.ConversationFileChangeHistoryService.Record(conversation, new Codev.FileChangeRecord(change.RelativePath, rollback, DateTimeOffset.Now, "Restore", currentExists,
+                ResultFileExisted: restoredExists, ResultSha256: restored?.Sha256));
             await viewModel.SaveFileChangesAsync();
             await ShowGitInfoAsync("File restored", $"Restored {change.RelativePath}. A checkpoint of the replaced version is available in this history.");
         }
@@ -2313,12 +2964,31 @@ public partial class MainWindow : Window
         var switchBranch = new Button { Content = "Switch…", Classes = { "soft" } };
         var createBranch = new Button { Content = "New branch…", Classes = { "soft" } };
         var refresh = new Button { Content = "Refresh", Classes = { "soft" } };
+        var discardAll = new Button { Content = "Discard all unstaged…", Classes = { "soft" }, IsEnabled = false };
+        ToolTip.SetTip(discardAll, "Preview and discard all unstaged and untracked changes; staged changes are preserved");
         branchRow.Children.Add(switchBranch);
         branchRow.Children.Add(createBranch);
         branchRow.Children.Add(refresh);
+        branchRow.Children.Add(discardAll);
         header.Children.Add(branchRow);
         var summary = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
         header.Children.Add(summary);
+        var activeConversation = viewModel.ActiveConversation;
+        var childWorktreeManager = viewModel.ChildWorktreeManager;
+        Codev.Conversation[] childChoices = activeConversation is null ? [] : activeConversation.ParentConversationId is not null
+            ? new[] { activeConversation }
+            : activeConversation.ChildConversations.ToArray();
+        childChoices = childChoices.Where(child => child.ChildWorktreeBranch is not null && child.ChildWorktreeStartCommit is not null).ToArray();
+        var childReviewRow = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 8, IsVisible = childChoices.Length > 0 };
+        childReviewRow.Children.Add(new TextBlock { Text = "Child worktree", VerticalAlignment = global::Avalonia.Layout.VerticalAlignment.Center });
+        var childPicker = new ComboBox { MinWidth = 280, ItemsSource = childChoices.Select(child => new ChildWorktreeChoice(child)).ToArray() };
+        childPicker.SelectedIndex = childChoices.Length > 0 ? 0 : -1;
+        var reviewChild = new Button { Content = "Review child diff…", Classes = { "soft" }, IsEnabled = childChoices.Length > 0 };
+        var recoverChild = new Button { Content = "Recover child worktree…", Classes = { "soft" }, IsEnabled = false };
+        childReviewRow.Children.Add(childPicker);
+        childReviewRow.Children.Add(reviewChild);
+        childReviewRow.Children.Add(recoverChild);
+        header.Children.Add(childReviewRow);
         Grid.SetRow(header, 0);
         layout.Children.Add(header);
 
@@ -2327,8 +2997,10 @@ public partial class MainWindow : Window
         var files = new ListBox();
         var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, Spacing = 7, Margin = new Thickness(0, 8, 0, 0) };
         var stage = new Button { Content = "Stage selected", Classes = { "soft" }, IsEnabled = false };
+        var bulkStage = new Button { Content = "Stage all", Classes = { "soft" }, IsEnabled = false };
         var commit = new Button { Content = "Review staged diff & commit…", Classes = { "soft" }, IsEnabled = false };
         actions.Children.Add(stage);
+        actions.Children.Add(bulkStage);
         actions.Children.Add(commit);
         Grid.SetRow(actions, 1);
         left.Children.Add(files);
@@ -2347,11 +3019,19 @@ public partial class MainWindow : Window
             Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
             Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
         };
+        var stageHunk = new Button { Content = "Stage hunk", Classes = { "soft" }, IsVisible = false, IsEnabled = false };
+        var unstageHunk = new Button { Content = "Unstage hunk", Classes = { "soft" }, IsVisible = false, IsEnabled = false };
+        var revertHunk = new Button { Content = "Revert hunk", Classes = { "soft" }, IsVisible = false, IsEnabled = false };
+        var revertFile = new Button { Content = "Revert file", Classes = { "soft" }, IsVisible = false, IsEnabled = false };
+        ToolTip.SetTip(stageHunk, "Stage only the selected diff hunk");
+        ToolTip.SetTip(unstageHunk, "Unstage only the selected diff hunk");
+        ToolTip.SetTip(revertHunk, "Revert only the selected unstaged diff hunk");
+        ToolTip.SetTip(revertFile, "Discard all unstaged changes for this file; staged changes are preserved");
         var askAboutDiff = new Button { Content = "Ask Codev about selection", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), IsEnabled = false };
         ToolTip.SetTip(askAboutDiff, "Add selected diff lines to the composer without sending them");
         var commentOnDiff = new Button { Content = "Comment on selection", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), IsEnabled = false };
         ToolTip.SetTip(commentOnDiff, "Attach a review comment to selected diff lines; it will not be sent until you send a prompt");
-        var diffActions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 8, 0, 0), Children = { askAboutDiff, commentOnDiff } };
+        var diffActions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 8, 0, 0), Children = { stageHunk, unstageHunk, revertHunk, revertFile, askAboutDiff, commentOnDiff } };
         var diffPanel = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
         var diffScroll = new ScrollViewer { Content = diffBox, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
         diffPanel.Children.Add(diffScroll);
@@ -2371,13 +3051,89 @@ public partial class MainWindow : Window
         dialog.Content = layout;
 
         var diffRevision = 0;
+        void UpdateHunkActions()
+        {
+            revertFile.IsVisible = revertFile.IsEnabled = files.SelectedItem is ListBoxItem { Tag: Codev.GitFileStatus revertableFile } &&
+                revertableFile.WorkingTree != " " && revertableFile.OriginalPath is null && !revertableFile.State.Contains('U') &&
+                !string.IsNullOrWhiteSpace(diffBox.Text) &&
+                !diffBox.Text.StartsWith("Loading diff", StringComparison.Ordinal) &&
+                !diffBox.Text.StartsWith("Could not load diff", StringComparison.Ordinal) &&
+                !diffBox.Text.StartsWith("Git reported no textual diff", StringComparison.Ordinal);
+            if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus selectedFile } ||
+                !Codev.GitDiffHunkSelector.TrySelect(diffBox.Text ?? "", diffBox.SelectionStart,
+                    diffBox.SelectionEnd - diffBox.SelectionStart, out var selection) || selection is null)
+            {
+                stageHunk.IsVisible = unstageHunk.IsVisible = revertHunk.IsVisible = false;
+                stageHunk.IsEnabled = unstageHunk.IsEnabled = revertHunk.IsEnabled = false;
+                return;
+            }
+
+            stageHunk.IsVisible = selection.Section == Codev.GitDiffHunkSection.Unstaged && selectedFile.WorkingTree != " ";
+            stageHunk.IsEnabled = stageHunk.IsVisible;
+            unstageHunk.IsVisible = selection.Section == Codev.GitDiffHunkSection.Staged && selectedFile.Staged != " ";
+            unstageHunk.IsEnabled = unstageHunk.IsVisible;
+            revertHunk.IsVisible = selection.Section == Codev.GitDiffHunkSection.Unstaged && selectedFile.WorkingTree != " ";
+            revertHunk.IsEnabled = revertHunk.IsVisible;
+        }
+
+        async Task ApplySelectedHunkAsync(Codev.GitDiffHunkAction action, string title)
+        {
+            if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file } ||
+                !Codev.GitDiffHunkSelector.TrySelect(diffBox.Text, diffBox.SelectionStart,
+                    diffBox.SelectionEnd - diffBox.SelectionStart, out _)) return;
+            stageHunk.IsEnabled = unstageHunk.IsEnabled = revertHunk.IsEnabled = false;
+            try
+            {
+                await service.ApplyHunkAsync(file.Path, diffBox.Text ?? "", diffBox.SelectionStart,
+                    diffBox.SelectionEnd - diffBox.SelectionStart, action);
+                await RefreshAsync();
+            }
+            catch (Exception ex)
+            {
+                await ShowGitInfoAsync(title, ex.Message, dialog);
+                await RefreshAsync();
+            }
+        }
+
+        reviewChild.Click += async (_, _) =>
+        {
+            if (childPicker.SelectedItem is not ChildWorktreeChoice choice || choice.Conversation.ChildWorktreeBranch is not { } childBranch ||
+                choice.Conversation.ChildWorktreeStartCommit is not { } startCommit) return;
+            await ReviewChildWorktreeAsync(childWorktreeManager, status.Root,
+                choice.Conversation, childBranch, startCommit, dialog, RefreshAsync);
+        };
+        void UpdateChildActions()
+        {
+            var selected = (childPicker.SelectedItem as ChildWorktreeChoice)?.Conversation;
+            reviewChild.IsEnabled = selected is not null && childWorktreeManager.IsManagedWorktreePath(selected.ProjectPath ?? "");
+            recoverChild.IsEnabled = selected is not null && !childWorktreeManager.IsManagedWorktreePath(selected.ProjectPath ?? "") &&
+                selected.ParentConversationId is not null && selected.ChildWorktreeBranch is not null && selected.ChildWorktreeStartCommit is not null;
+        }
+        childPicker.SelectionChanged += (_, _) => UpdateChildActions();
+        recoverChild.Click += async (_, _) =>
+        {
+            if (childPicker.SelectedItem is not ChildWorktreeChoice choice) return;
+            recoverChild.IsEnabled = false;
+            if (await viewModel.RecoverChildWorktreeAsync(choice.Conversation))
+            {
+                await ShowGitInfoAsync("Child worktree recovered", "The isolated checkout was restored from its saved branch. You can reopen the child conversation and continue.", dialog);
+                UpdateChildActions();
+            }
+            else
+                await ShowGitInfoAsync("Could not recover child worktree", viewModel.ContextActionStatus, dialog);
+            UpdateChildActions();
+        };
+        UpdateChildActions();
+
         void RenderStatus(Codev.GitRepositoryStatus value)
         {
             var tracking = value.Upstream is null ? "no upstream" : value.Upstream + (value.Ahead > 0 || value.Behind > 0 ? $" · ahead {value.Ahead}, behind {value.Behind}" : " · up to date");
             summary.Text = value.HasChanges ? $"{value.Files.Count} changed file(s) · {tracking}" : $"Working tree clean · {tracking}";
             files.Items.Clear();
             stage.IsEnabled = false;
+            bulkStage.IsEnabled = false;
             diffBox.Text = value.HasChanges ? "Select a changed file to inspect its staged and unstaged diff." : "The working tree is clean.";
+            UpdateHunkActions();
             if (!value.HasChanges) files.Items.Add(new ListBoxItem { Content = "No staged, unstaged, or untracked changes.", IsEnabled = false });
             foreach (var file in value.Files)
                 files.Items.Add(new ListBoxItem
@@ -2387,6 +3143,11 @@ public partial class MainWindow : Window
                     FontFamily = new global::Avalonia.Media.FontFamily("Consolas")
                 });
             commit.IsEnabled = value.Files.Any(file => file.Staged != " ");
+            var hasUnstaged = value.Files.Any(file => file.WorkingTree != " ");
+            var hasStaged = value.Files.Any(file => file.Staged != " ");
+            bulkStage.Content = hasUnstaged ? "Stage all" : "Unstage all";
+            bulkStage.IsEnabled = hasUnstaged || hasStaged;
+            discardAll.IsEnabled = hasUnstaged;
             UpdateBranchButtons(value);
         }
 
@@ -2414,8 +3175,11 @@ public partial class MainWindow : Window
                 switchBranch.IsEnabled = false;
                 createBranch.IsEnabled = false;
                 stage.IsEnabled = false;
+                bulkStage.IsEnabled = false;
+                discardAll.IsEnabled = false;
                 commit.IsEnabled = false;
                 diffBox.Text = "Git status could not be loaded.";
+                UpdateHunkActions();
             }
         }
 
@@ -2426,19 +3190,35 @@ public partial class MainWindow : Window
             {
                 stage.IsEnabled = false;
                 askAboutDiff.IsEnabled = false;
+                commentOnDiff.IsEnabled = false;
+                UpdateHunkActions();
                 return;
             }
             askAboutDiff.IsEnabled = false;
-            stage.Content = file.Staged != " " && file.WorkingTree == " " ? "Unstage selected" : "Stage selected";
+            commentOnDiff.IsEnabled = false;
+            stage.Content = file.Staged != " " ? "Unstage file" : "Stage file";
             stage.IsEnabled = true;
+            diffBox.SelectionStart = 0;
+            diffBox.SelectionEnd = 0;
             diffBox.Text = "Loading diff…";
+            UpdateHunkActions();
             try
             {
                 var diff = await service.GetFileDiffAsync(file);
                 if (revision == diffRevision)
+                {
                     diffBox.Text = string.IsNullOrWhiteSpace(diff) ? "Git reported no textual diff for this file (it may be binary or unchanged since status was refreshed)." : diff;
+                    UpdateHunkActions();
+                }
             }
-            catch (Exception ex) { if (revision == diffRevision) diffBox.Text = "Could not load diff: " + ex.Message; }
+            catch (Exception ex)
+            {
+                if (revision == diffRevision)
+                {
+                    diffBox.Text = "Could not load diff: " + ex.Message;
+                    UpdateHunkActions();
+                }
+            }
         };
         diffBox.PropertyChanged += (_, args) =>
         {
@@ -2447,6 +3227,33 @@ public partial class MainWindow : Window
                 var hasSelection = files.SelectedItem is ListBoxItem { Tag: Codev.GitFileStatus } && !string.IsNullOrWhiteSpace(diffBox.SelectedText);
                 askAboutDiff.IsEnabled = hasSelection;
                 commentOnDiff.IsEnabled = hasSelection;
+                UpdateHunkActions();
+            }
+        };
+        stageHunk.Click += async (_, _) => await ApplySelectedHunkAsync(Codev.GitDiffHunkAction.Stage, "Could not stage hunk");
+        unstageHunk.Click += async (_, _) => await ApplySelectedHunkAsync(Codev.GitDiffHunkAction.Unstage, "Could not unstage hunk");
+        revertHunk.Click += async (_, _) =>
+        {
+            if (!await ConfirmGitActionAsync(dialog, "Revert selected hunk?", "Only the selected unstaged hunk will be reversed. This cannot be undone.")) return;
+            await ApplySelectedHunkAsync(Codev.GitDiffHunkAction.Revert, "Could not revert hunk");
+        };
+        revertFile.Click += async (_, _) =>
+        {
+            if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file } || file.WorkingTree == " ") return;
+            var explanation = file.WorkingTree == "?"
+                ? $"Permanently delete the untracked file {file.DisplayPath}? This cannot be undone."
+                : $"Discard all unstaged changes to {file.DisplayPath}? Any staged changes will remain. This cannot be undone.";
+            if (!await ConfirmGitActionAsync(dialog, file.WorkingTree == "?" ? "Delete untracked file?" : "Revert entire file?", explanation)) return;
+            revertFile.IsEnabled = false;
+            try
+            {
+                await service.RevertFileAsync(file.Path, diffBox.Text ?? "");
+                await RefreshAsync();
+            }
+            catch (Exception ex)
+            {
+                await ShowGitInfoAsync("Could not revert file", ex.Message, dialog);
+                await RefreshAsync();
             }
         };
         askAboutDiff.Click += (_, _) =>
@@ -2494,11 +3301,84 @@ public partial class MainWindow : Window
             if (files.SelectedItem is not ListBoxItem { Tag: Codev.GitFileStatus file }) return;
             try
             {
-                if (file.Staged != " " && file.WorkingTree == " ") await service.UnstageFileAsync(file.Path);
+                if (file.Staged != " ") await service.UnstageFileAsync(file.Path);
                 else await service.StageFileAsync(file.Path);
                 await RefreshAsync();
             }
             catch (Exception ex) { await ShowGitInfoAsync("Could not update the Git index", ex.Message, dialog); await RefreshAsync(); }
+        };
+        bulkStage.Click += async (_, _) =>
+        {
+            var hasUnstaged = status.Files.Any(file => file.WorkingTree != " ");
+            bulkStage.IsEnabled = false;
+            try
+            {
+                if (hasUnstaged) await service.StageAllAsync();
+                else await service.UnstageAllAsync();
+                await RefreshAsync();
+            }
+            catch (Exception ex)
+            {
+                await ShowGitInfoAsync(hasUnstaged ? "Could not stage all changes" : "Could not unstage all changes", ex.Message, dialog);
+                await RefreshAsync();
+            }
+        };
+        discardAll.Click += async (_, _) =>
+        {
+            discardAll.IsEnabled = false;
+            try
+            {
+                var preview = await service.GetUnstagedDiscardPreviewAsync();
+                var details = string.Join(Environment.NewLine + Environment.NewLine,
+                    preview.Changes.Select(change => $"{change.File.State.Replace(' ', '·')}   {change.File.DisplayPath}{Environment.NewLine}{change.DisplayedDiff}"));
+                var previewContent = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto"), RowSpacing = 12 };
+                previewContent.Children.Add(new TextBlock
+                {
+                    Text = $"Review all {preview.Changes.Count} unstaged path(s). Confirming permanently discards these working-tree edits and removes listed untracked files. Staged changes are preserved. This cannot be undone.",
+                    TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+                });
+                var previewText = new TextBox
+                {
+                    Text = details,
+                    IsReadOnly = true,
+                    AcceptsReturn = true,
+                    TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+                    FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+                    FontSize = viewModel.UiFontSize,
+                    Padding = new Thickness(10),
+                    Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
+                    Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+                };
+                var previewScroll = new ScrollViewer { Content = previewText, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+                Grid.SetRow(previewScroll, 1);
+                previewContent.Children.Add(previewScroll);
+                var previewActions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+                var cancelDiscard = new Button { Content = "Cancel", Classes = { "soft" } };
+                var confirmDiscard = new Button { Content = "Discard all unstaged changes", Classes = { "soft" } };
+                previewActions.Children.Add(cancelDiscard);
+                previewActions.Children.Add(confirmDiscard);
+                Grid.SetRow(previewActions, 2);
+                previewContent.Children.Add(previewActions);
+                var previewWindow = new Window
+                {
+                    Title = "Review unstaged changes",
+                    Width = 850,
+                    Height = 620,
+                    MinWidth = 600,
+                    MinHeight = 400,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Content = previewContent
+                };
+                cancelDiscard.Click += (_, _) => previewWindow.Close(false);
+                confirmDiscard.Click += (_, _) => previewWindow.Close(true);
+                if (await previewWindow.ShowDialog<bool>(dialog) != true) return;
+                await service.RevertAllUnstagedAsync(preview);
+            }
+            catch (Exception ex)
+            {
+                await ShowGitInfoAsync("Could not discard all unstaged changes", ex.Message, dialog);
+            }
+            finally { await RefreshAsync(); }
         };
         switchBranch.Click += async (_, _) =>
         {
@@ -2596,6 +3476,72 @@ public partial class MainWindow : Window
             catch (Exception ex) { commit.IsEnabled = true; await ShowGitInfoAsync("Could not create commit", ex.Message, dialog); }
         };
         await dialog.ShowDialog(owner);
+    }
+
+    private async Task ReviewChildWorktreeAsync(Codev.GitChildWorktreeManager manager, string repositoryRoot,
+        Codev.Conversation child, string branch, string startCommit, Window owner, Func<Task> refresh)
+    {
+        Codev.GitChildWorktreeReview review;
+        try { review = await manager.GetReviewAsync(repositoryRoot, branch, startCommit); }
+        catch (Exception ex) { await ShowGitInfoAsync("Could not review child worktree", ex.Message, owner); return; }
+
+        var layout = new Grid { Margin = new Thickness(18), RowDefinitions = new RowDefinitions("Auto,*,Auto"), RowSpacing = 10 };
+        var note = new TextBlock
+        {
+            Text = $"Reviewing {child.Title} · {review.Branch} against its recorded start commit. The target branch is the currently checked out branch ({review.BaseBranch})." +
+                   (review.HasUncommittedChanges ? " The child also has uncommitted changes; commit them in the child conversation and refresh before merging." : ""),
+            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap
+        };
+        layout.Children.Add(note);
+        var diffBox = new TextBox
+        {
+            Text = string.IsNullOrWhiteSpace(review.Diff) ? "No committed child changes." : review.Diff,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
+            FontFamily = new global::Avalonia.Media.FontFamily("Consolas"),
+            FontSize = 11,
+            Padding = new Thickness(10),
+            Background = this.FindResource("SurfaceBrush") as global::Avalonia.Media.IBrush,
+            Foreground = this.FindResource("PrimaryTextBrush") as global::Avalonia.Media.IBrush
+        };
+        layout.Children.Add(new ScrollViewer { Content = diffBox, HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto });
+        var actions = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
+        var close = new Button { Content = "Close", Classes = { "soft" } };
+        var merge = new Button { Content = "Merge into current branch", Classes = { "soft" }, IsEnabled = !review.Truncated && !review.HasUncommittedChanges && review.Files.Count > 0 };
+        actions.Children.Add(close);
+        actions.Children.Add(merge);
+        Grid.SetRow(actions, 2);
+        layout.Children.Add(actions);
+        var dialog = new Window { Title = "Review child worktree", Width = 980, Height = 680, MinWidth = 680, MinHeight = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout };
+        close.Click += (_, _) => dialog.Close();
+        merge.Click += async (_, _) =>
+        {
+            var warning = review.Truncated
+                ? "The diff is truncated. Reduce the child changes before merging."
+                : $"Merge the reviewed changes from {review.Branch} into {review.BaseBranch}? This creates a local merge commit and does not push.";
+            if (!await ConfirmGitActionAsync(dialog, "Merge child worktree?", warning)) return;
+            merge.IsEnabled = false;
+            try
+            {
+                await manager.MergeAsync(repositoryRoot, review);
+                dialog.Close();
+                await refresh();
+            }
+            catch (Exception ex)
+            {
+                merge.IsEnabled = true;
+                await ShowGitInfoAsync("Could not merge child worktree", ex.Message, dialog);
+            }
+        };
+        await dialog.ShowDialog(owner);
+    }
+
+    private sealed record ChildWorktreeChoice(Codev.Conversation Conversation)
+    {
+        public string Label => $"{Conversation.Title} · {Conversation.ChildWorktreeBranch}";
+        public override string ToString() => Label;
     }
 
     private async Task<bool> ConfirmGitActionAsync(Window owner, string title, string message)
@@ -2984,6 +3930,12 @@ public partial class MainWindow : Window
             await viewModel.ForkConversationAsync(conversation);
     }
 
+    private async void CreateChildSession_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && GetMenuConversation(menuItem) is { } conversation && DataContext is ViewModels.MainViewModel viewModel)
+            await viewModel.CreateIsolatedChildSessionAsync(conversation);
+    }
+
     private void ArchiveConversation_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is MenuItem menuItem && GetMenuConversation(menuItem) is { } conversation && DataContext is ViewModels.MainViewModel viewModel)
@@ -3037,21 +3989,26 @@ public partial class MainWindow : Window
     private async void ExportBackup_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
-        if (!StorageProvider.CanSave)
+        if (!(_conversationBackupPicker?.CanSave ?? StorageProvider.CanSave))
         {
             viewModel.ReportContextActionStatus("This platform does not provide a local save dialog.");
             return;
         }
         try
         {
-            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            var options = new FilePickerSaveOptions
             {
                 Title = "Export all Codev conversations",
                 SuggestedFileName = $"codev-backup-{DateTime.Now:yyyy-MM-dd}.codev.json",
                 DefaultExtension = "json",
                 ShowOverwritePrompt = true,
                 FileTypeChoices = [new FilePickerFileType("Codev conversation backup") { Patterns = ["*.codev.json", "*.json"] }]
-            });
+            };
+            var file = _conversationBackupPicker is null
+                ? await StorageProvider.SaveFilePickerAsync(options) is { } nativeFile
+                    ? new AvaloniaConversationBackupFile(nativeFile)
+                    : null
+                : await _conversationBackupPicker.SaveFilePickerAsync(options);
             if (file is null) return;
             var backup = await viewModel.ExportConversationBackupAsync();
             await WriteTextFileAsync(file, backup);
@@ -3066,19 +4023,29 @@ public partial class MainWindow : Window
     private async void ImportBackup_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
-        if (!StorageProvider.CanOpen)
+        if (!(_conversationBackupPicker?.CanOpen ?? StorageProvider.CanOpen))
         {
             viewModel.ReportContextActionStatus("This platform does not provide a local file picker.");
             return;
         }
         try
         {
-            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            var options = new FilePickerOpenOptions
             {
                 Title = "Import Codev conversation backup",
                 AllowMultiple = false,
                 FileTypeFilter = [new FilePickerFileType("Codev conversation backup") { Patterns = ["*.codev.json", "*.json"] }]
-            });
+            };
+            IReadOnlyList<IConversationBackupFile> files;
+            if (_conversationBackupPicker is null)
+            {
+                var nativeFiles = await StorageProvider.OpenFilePickerAsync(options);
+                files = nativeFiles.Select(file => (IConversationBackupFile)new AvaloniaConversationBackupFile(file)).ToArray();
+            }
+            else
+            {
+                files = await _conversationBackupPicker.OpenFilePickerAsync(options);
+            }
             var file = files.FirstOrDefault();
             if (file is null) return;
             viewModel.ReportContextActionStatus($"Reading backup · {file.Name}");
@@ -3092,14 +4059,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task WriteTextFileAsync(IStorageFile file, string contents)
+    private static async Task WriteTextFileAsync(IConversationBackupFile file, string contents)
     {
         await using var stream = await file.OpenWriteAsync();
         await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         await writer.WriteAsync(contents);
     }
 
-    private static async Task<string> ReadTextFileAsync(IStorageFile file, int maxBytes)
+    private static Task WriteTextFileAsync(IStorageFile file, string contents) =>
+        WriteTextFileAsync(new AvaloniaConversationBackupFile(file), contents);
+
+    private static async Task<string> ReadTextFileAsync(IConversationBackupFile file, int maxBytes)
     {
         await using var stream = await file.OpenReadAsync();
         if (stream.CanSeek && stream.Length > maxBytes)
@@ -3117,6 +4087,9 @@ public partial class MainWindow : Window
         return Encoding.UTF8.GetString(buffer.ToArray()).TrimStart('\uFEFF');
     }
 
+    private static Task<string> ReadTextFileAsync(IStorageFile file, int maxBytes) =>
+        ReadTextFileAsync(new AvaloniaConversationBackupFile(file), maxBytes);
+
     private static string SafeExportName(string title)
     {
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
@@ -3124,22 +4097,114 @@ public partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(cleaned) ? "codev-conversation" : cleaned;
     }
 
+    private void OpenConversationFind_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        viewModel.OpenConversationFind();
+        ConversationFindTextBox.Focus();
+    }
+
+    private void CloseConversationFind_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel viewModel) viewModel.CloseConversationFind();
+    }
+
+    private void ClearConversationFind_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel) return;
+        viewModel.ConversationFindQuery = "";
+        ConversationFindTextBox.Focus();
+    }
+
+    private void ConversationFindResult_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainViewModel viewModel ||
+            sender is not Button { DataContext: Codev.ConversationMessageMatch match } ||
+            match.MessageIndex < 0 || match.MessageIndex >= viewModel.Messages.Count) return;
+
+        _followOutput = false;
+        MessageList.ScrollIntoView(match.MessageIndex);
+        viewModel.CloseConversationFind();
+    }
+
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
-        var primaryModifier = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
-        if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.M)
+        var primaryModifier = PlatformKeyboardShortcuts.HasPrimaryModifier(e.KeyModifiers);
+        if (e.Key == Key.F1)
+            ShowKeyboardShortcuts();
+        else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.F)
+        {
+            viewModel.OpenConversationFind();
+            ConversationFindTextBox.Focus();
+        }
+        else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.M)
             viewModel.CycleConversationMode();
+        else if (primaryModifier && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.A)
+            viewModel.CyclePrimaryAgent();
         else if (primaryModifier && e.Key == Key.N)
             viewModel.NewConversationCommand.Execute(null);
         else if (primaryModifier && e.Key == Key.F)
             SearchTextBox.Focus();
         else if (primaryModifier && e.Key == Key.L)
             ComposerTextBox.Focus();
+        else if (e.Key == Key.Escape && viewModel.IsConversationFindOpen)
+            viewModel.CloseConversationFind();
         else if (e.Key == Key.Escape && viewModel.IsGenerating)
             viewModel.StopGenerationCommand.Execute(null);
         else
             return;
         e.Handled = true;
+    }
+
+    private void ShowKeyboardShortcuts()
+    {
+        if (_keyboardShortcutsWindow is { IsVisible: true } existing)
+        {
+            existing.Activate();
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Title = "Keyboard shortcuts",
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            MinWidth = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        _keyboardShortcutsWindow = dialog;
+        dialog.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_keyboardShortcutsWindow, dialog)) _keyboardShortcutsWindow = null;
+        };
+
+        var shortcuts = new StackPanel { Spacing = 8 };
+        var modifier = PlatformKeyboardShortcuts.PrimaryModifierLabel;
+        foreach (var shortcut in new[]
+        {
+            $"{modifier}+N  New conversation",
+            $"{modifier}+F  Search conversations",
+            $"{modifier}+Shift+F  Find in this conversation",
+            $"{modifier}+L  Focus the composer",
+            $"{modifier}+Shift+M  Cycle Chat, Plan, and Code task",
+            $"{modifier}+Shift+A  Cycle the primary agent",
+            "Esc  Stop the active response",
+            "F1  Show these shortcuts",
+            "/status  Show local conversation and project status"
+        })
+            shortcuts.Children.Add(new TextBlock { Text = shortcut, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap });
+
+        var close = new Button { Content = "Close", Classes = { "soft" }, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, IsCancel = true };
+        close.Click += (_, _) => dialog.Close();
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 16,
+            Children = { shortcuts, close }
+        };
+        dialog.Show(this);
+        dialog.Activate();
     }
 }

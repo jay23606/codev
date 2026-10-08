@@ -37,6 +37,22 @@ node bench/report.cjs results.jsonl comparison.html --hardware "a laptop with 32
 
 Run one model at a time and avoid other heavy work while it runs, or the timings will be unreliable. `run.cjs` appends one JSON line per finished task and unloads models between runs so each starts cold. See the comments at the top of each script for every option.
 
+## Shadow-snapshot sizing prototype
+
+To measure the cost of copying a large tracked-plus-untracked source tree before a command, run `pwsh -NoProfile -File bench/shadow-snapshot.ps1`. The script creates an isolated temporary Git repository with 10,000 source files, binary assets, untracked files, and ignored build output; copies the tracked and non-ignored files to a temporary snapshot; verifies every copied file by SHA-256; reports copy time and disk use; then removes only its uniquely named temporary directories. It does not touch a real project. Parameters at the top of the script let you scale the fixture.
+
+## A9 literal-versus-semantic retrieval comparison
+
+This harness measures the V3 question of whether semantic retrieval helps supported local models find Codev implementations. It asks six fixed questions against the current Codev source tree and runs each in **literal-only**, **semantic-only**, and **both** tool modes. Its literal baseline mirrors Codev's bounded file traversal (first 500 supported files from the 10,000-entry scan), case-insensitive substring line matches, 50-result limit, and excerpt truncation; semantic search uses the complete bounded index corpus. Both tools use Codev's schema descriptions and return the same JSON `untrusted_tool_output` envelope, including search activity and semantic match scores. A fixed search-only system prompt keeps this as a retrieval comparison rather than a test of unrelated edit/command behavior. Each task/mode/run is appended as one JSONL row with the source commit, sampling seed, corpus size, literal file cap, index-build time, known-target top-k, tool-call validity, answer pass/fail, relevant/irrelevant returned chunks, tool-round count, final-response/round-limit state, and task latency. Repetitions use temperature 0 and distinct seeds 101, 102, and 103; the three tool modes for the same task and repetition share a seed. The final summary reports answer pass, final-response, round-limit and tool-call validity rates, average noise, and latency. These are separate measurements: valid tool arguments don't mean the model completed the task, and a five-round stop is reported as such. When the selected Codev root contains this A9 harness, the whole `bench/` subtree is excluded from both search corpora so the model cannot inspect the hidden task/target definitions or prior result files. Ordinary projects' `bench/` directories remain included.
+
+```bash
+node bench/a9-retrieval.cjs --selftest
+node bench/a9-retrieval.cjs --model qwen3.6:35b-a3b --embedding nomic-embed-text --runs 3 --out bench/results/a9-qwen36-clean.jsonl
+node bench/a9-retrieval.cjs --model qwen3.8:27b --embedding nomic-embed-text --runs 3 --out bench/results/a9-qwen38-clean.jsonl
+```
+
+Both endpoints must be loopback Ollama. The harness never downloads models and refuses a non-loopback server because it sends source excerpts to `/api/embed` and `/api/chat`. The default corpus is the current repo; `--root` can select a disposable Codev checkout. It skips symlinks, hidden paths, ignored build folders, unsupported files, and secret-like filenames, and enforces file/byte/chunk bounds. Use a fresh output file per benchmark run. **Do not use the earlier `a9-qwen38.jsonl`, `a9-qwen36.jsonl`, or `a9-qwen36-repeat-contaminated.jsonl` as retrieval-quality evidence:** the indexed `bench/` subtree exposed the harness's task targets and prior answers, and Qwen3.6 explicitly cited the harness source when returning one target. Those files are retained only as contaminated audit history. An attempted corrected Qwen3.6 run wrote 13 of 54 rows while an interactive Codev request overlapped the same Ollama model; the capture is preserved as `a9-qwen36-interrupted-overlap.jsonl` and is also invalid as quality or timing evidence. Run the corrected harness in isolation with fresh `*-clean.jsonl` outputs before drawing conclusions.
+
 ## Results in this folder
 
 `results/2026-09-28.jsonl` is the raw data behind the published page, `results/2026-09-28-big-budget.jsonl` is the follow-up run with a larger thinking budget, and `results/2026-09-28-verdict.html` is the written conclusion shown at the top of the page. To rebuild the page:

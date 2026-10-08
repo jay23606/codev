@@ -11,6 +11,7 @@ public enum SlashCommandAction
     TogglePlan,
     ReviewProject,
     ReviewWorkingTree,
+    ReviewLastTurn,
     SecurityReviewWorkingTree,
     ReviewCommit,
     SecurityReviewCommit,
@@ -24,7 +25,7 @@ public enum SlashCommandAction
 }
 
 public sealed record SlashCommandDefinition(string Name, string Description, SlashCommandAction Action, string? Prompt = null,
-    IReadOnlyList<string>? ArgumentNames = null, string? Scope = null, string? FilePath = null)
+    IReadOnlyList<string>? ArgumentNames = null, string? Scope = null, string? FilePath = null, bool UserOnly = false)
 {
     public bool IsCustom => Action == SlashCommandAction.UserPrompt;
     public string ScopeLabel => Scope switch { "project" => "PROJECT", "user" => "USER", "template" => "SAVED", "skill-user" => "USER SKILL", "skill-project" => "PROJECT SKILL", _ => "BUILT IN" };
@@ -45,6 +46,7 @@ public static class SlashCommandCatalog
         new("/model", "Choose a different model", SlashCommandAction.SelectModel),
         new("/plan", "Toggle read-only Plan mode", SlashCommandAction.TogglePlan),
         new("/review", "Review uncommitted Git changes with the selected local model", SlashCommandAction.ReviewWorkingTree),
+        new("/review-last-turn", "Review files changed by the assistant's last completed turn", SlashCommandAction.ReviewLastTurn),
         new("/security-review", "Scan uncommitted changes for likely security issues and exposed secrets", SlashCommandAction.SecurityReviewWorkingTree),
         new("/review-commit", "Review a commit by hash with the selected local model", SlashCommandAction.ReviewCommit),
         new("/security-review-commit", "Scan a commit for likely security issues and exposed secrets", SlashCommandAction.SecurityReviewCommit),

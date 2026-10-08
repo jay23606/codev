@@ -34,10 +34,34 @@ public sealed class ConversationStatusReportTests
         Assert.DoesNotContain(@"C:\work\app", report, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Project context: 1 selected file(s)", report);
         Assert.Contains("Repository map: off", report);
+        Assert.Contains("Semantic project search: off", report);
         Assert.Contains("Folder trust: untrusted", report);
         Assert.Contains("Queue: 2 queued turn(s)", report);
         Assert.Contains("Hosted requests: not in use", report);
         Assert.DoesNotContain("api-key", report, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Status_reports_semantic_search_toggle_index_and_policy_availability()
+    {
+        var conversation = new Conversation
+        {
+            IsCodeTask = true,
+            EnableSemanticSearch = true,
+            ProjectPath = @"C:\work\app"
+        };
+
+        var missingIndex = ConversationStatusReport.Build(conversation, false, 0, false, false,
+            semanticSearchAvailable: true);
+        Assert.Contains("Semantic project search: enabled · no local index; build in Settings", missingIndex);
+
+        var ready = ConversationStatusReport.Build(conversation, false, 0, false, false,
+            semanticIndexExists: true, semanticSearchAvailable: true);
+        Assert.Contains("Semantic project search: on · local index exists", ready);
+
+        var unavailable = ConversationStatusReport.Build(conversation, false, 0, false, false,
+            semanticIndexExists: true, semanticSearchAvailable: false);
+        Assert.Contains("Semantic project search: enabled · unavailable under current project/provider policy", unavailable);
     }
 
     [Theory]
@@ -138,8 +162,18 @@ public sealed class ConversationStatusReportTests
         var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true, ProjectPath = @"C:\work\repo" }, false, 0, false, false, projectFolderTrusted: true);
 
         Assert.Contains("Mode: Code task", report);
-        Assert.Contains("Tools and file changes: available with per-change review and project command permissions", report);
+        Assert.Contains("Tools and file changes: available with project file-review and command approval policies", report);
         Assert.Contains("Project command permissions: ask every time", report);
+    }
+
+    [Fact]
+    public void Status_reports_auto_command_policy_and_saved_deny_count()
+    {
+        var report = ConversationStatusReport.Build(new Conversation { IsCodeTask = true, ProjectPath = @"C:\work\repo" },
+            false, 0, false, false, projectFolderTrusted: true,
+            commandPermissionMode: ProjectCommandPermissionMode.Auto, deniedCommandRules: 2);
+
+        Assert.Contains("Project command permissions: Auto · ordinary file changes apply with rollback checkpoints; all commands run unless exactly denied · 2 saved deny rule(s)", report);
     }
 
     [Fact]

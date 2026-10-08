@@ -76,6 +76,46 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Backup_round_trip_remaps_child_session_links_and_keeps_only_bounded_worktree_metadata()
+    {
+        var parentId = Guid.NewGuid();
+        var parent = new Conversation { Id = parentId, Title = "Parent" };
+        parent.Messages = [new ChatMessage("user", "task"), new ChatMessage("assistant", "delegating")];
+        var child = new Conversation
+        {
+            Id = Guid.NewGuid(),
+            ParentConversationId = parentId,
+            DelegatedFromMessageIndex = 1,
+            DelegatedAgentName = "Debug",
+            DelegatedResultReported = true,
+            ChildWorktreeBranch = "codev/child-session",
+            ChildWorktreeStartCommit = new string('a', 40),
+            Title = "Child"
+        };
+
+        var imported = ConversationBackupService.Import(ConversationBackupService.Export([parent, child], Options), Options);
+        var importedParent = Assert.Single(imported, conversation => conversation.Title == "Parent");
+        var importedChild = Assert.Single(imported, conversation => conversation.Title == "Child");
+
+        Assert.NotEqual(parentId, importedParent.Id);
+        Assert.Equal(importedParent.Id, importedChild.ParentConversationId);
+        Assert.Equal("codev/child-session", importedChild.ChildWorktreeBranch);
+        Assert.Equal(new string('a', 40), importedChild.ChildWorktreeStartCommit);
+        Assert.Equal(1, importedChild.DelegatedFromMessageIndex);
+        Assert.Equal("Debug", importedChild.DelegatedAgentName);
+        Assert.True(importedChild.DelegatedResultReported);
+
+        var childOnly = Assert.Single(ConversationBackupService.Import(
+            ConversationBackupService.Export([child], Options), Options));
+        Assert.Null(childOnly.ParentConversationId);
+        Assert.Null(childOnly.ChildWorktreeBranch);
+        Assert.Null(childOnly.ChildWorktreeStartCommit);
+        Assert.Null(childOnly.DelegatedFromMessageIndex);
+        Assert.Null(childOnly.DelegatedAgentName);
+        Assert.False(childOnly.DelegatedResultReported);
+    }
+
+    [Fact]
     public void Imported_code_task_is_disabled_for_hosted_or_plan_conversations()
     {
         var json = """[{"Provider":"anthropic","IsCodeTask":true},{"Provider":"ollama","IsPlanMode":true,"IsCodeTask":true}]""";
@@ -141,6 +181,23 @@ public sealed class ConversationBackupServiceTests
     }
 
     [Fact]
+    public void Backup_import_discards_untrusted_checkpoint_file_paths()
+    {
+        var backup = JsonSerializer.Serialize(new[]
+        {
+            new Conversation
+            {
+                FileChanges = [new FileChangeRecord("src/app.cs", @"C:\Users\other\AppData\Codev\checkpoint.txt", DateTimeOffset.Now, "Modified")]
+            }
+        }, Options);
+
+        var imported = Assert.Single(ConversationBackupService.Import(backup, Options));
+
+        Assert.Equal("src/app.cs", imported.FileChanges[0].RelativePath);
+        Assert.Null(imported.FileChanges[0].CheckpointPath);
+    }
+
+    [Fact]
     public void Backup_import_normalizes_null_drafts_and_caps_oversized_drafts()
     {
         var nullDraft = Assert.Single(ConversationBackupService.Import("[{\"Draft\":null,\"Messages\":[]}]", Options));
@@ -159,6 +216,21 @@ public sealed class ConversationBackupServiceTests
         var imported = Assert.Single(ConversationBackupService.Import(JsonSerializer.Serialize(new[] { source }, Options), Options));
 
         Assert.Equal(WorkspaceFileService.MaxContextFiles, imported.ContextFiles.Count);
+    }
+
+    [Fact]
+    public void Backup_keeps_the_selected_agent_profile_but_rejects_invalid_profile_names()
+    {
+        var conversation = new Conversation { AgentProfileName = "Code Reviewer" };
+        var backup = ConversationBackupService.Export([conversation], Options);
+        var imported = Assert.Single(ConversationBackupService.Import(backup, Options));
+
+        Assert.Equal("Code Reviewer", imported.AgentProfileName);
+        var invalid = Assert.Single(ConversationBackupService.Import("""[{"AgentProfileName":"../secrets"}]""", Options));
+        Assert.Null(invalid.AgentProfileName);
+
+        var invalidExport = ConversationBackupService.Export([new Conversation { AgentProfileName = ".." }], Options);
+        Assert.Null(Assert.Single(ConversationBackupService.Import(invalidExport, Options)).AgentProfileName);
     }
 
     [Fact]

@@ -82,6 +82,32 @@ public sealed class SerialAsyncQueueTests
     }
 
     [Fact]
+    public async Task Moving_a_queued_item_to_the_front_preserves_the_order_of_other_items()
+    {
+        var queue = new SerialAsyncQueue<int>();
+        queue.Enqueue(1);
+        queue.Enqueue(2);
+        queue.Enqueue(3);
+
+        Assert.True(queue.MoveToFront(item => item == 3));
+        var order = new List<int>();
+        await queue.ProcessPendingAsync(item => { order.Add(item); return Task.CompletedTask; }, (_, _) => Task.CompletedTask);
+
+        Assert.Equal([3, 1, 2], order);
+    }
+
+    [Fact]
+    public void Moving_a_missing_queue_item_does_not_change_order()
+    {
+        var queue = new SerialAsyncQueue<int>();
+        queue.Enqueue(1);
+        queue.Enqueue(2);
+
+        Assert.False(queue.MoveToFront(item => item == 3));
+        Assert.Equal([1, 2], queue.RemoveWhere(_ => true));
+    }
+
+    [Fact]
     public async Task Processing_can_pause_between_items_and_resume_without_reordering()
     {
         var queue = new SerialAsyncQueue<int>();

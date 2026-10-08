@@ -22,6 +22,14 @@ public static class ConversationQueueRecovery
                 .ToList();
             conversation.PendingTurns = valid;
             restored.AddRange(valid.Select(turn => new RestoredConversationTurn(conversation, turn)));
+            if (conversation.DelegatedFromMessageIndex is { } parentMessageIndex &&
+                (parentMessageIndex < 0 || parentMessageIndex >= 100_000 ||
+                 AgentProfileCatalog.NormalizeReferenceName(conversation.DelegatedAgentName) is null))
+            {
+                conversation.DelegatedFromMessageIndex = null;
+                conversation.DelegatedAgentName = null;
+                conversation.DelegatedResultReported = false;
+            }
         }
         return restored.OrderBy(item => item.Turn.EnqueuedAt).ToArray();
     }

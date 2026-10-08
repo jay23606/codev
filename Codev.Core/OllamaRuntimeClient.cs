@@ -8,6 +8,9 @@ public sealed record OllamaRunningModel(string Name, long Size, long SizeVram, i
 /// <summary>Reads and unloads models reported as resident by an Ollama server.</summary>
 public sealed class OllamaRuntimeClient(HttpClient http, Uri endpoint)
 {
+    /// <summary>Keep models resident long enough for users to review a reply and send a follow-up without a cold reload.</summary>
+    public const string ConversationKeepAlive = "30m";
+
     public async Task<IReadOnlyList<OllamaRunningModel>> ListRunningModelsAsync(CancellationToken cancellationToken = default)
     {
         using var response = await http.GetAsync(OllamaEndpoint.ApiUri(endpoint, "api/ps"), cancellationToken).ConfigureAwait(false);

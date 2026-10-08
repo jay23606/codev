@@ -9,17 +9,28 @@ public static class ConversationPersistence
         return conversations.Select(conversation => new Conversation
         {
             Id = conversation.Id,
+            ParentConversationId = conversation.ParentConversationId,
+            DelegatedFromMessageIndex = conversation.DelegatedFromMessageIndex,
+            DelegatedAgentName = conversation.DelegatedAgentName,
+            DelegatedResultReported = conversation.DelegatedResultReported,
+            ChildWorktreeBranch = conversation.ChildWorktreeBranch,
+            ChildWorktreeStartCommit = conversation.ChildWorktreeStartCommit,
+            ChildConversationsExpanded = conversation.ChildConversationsExpanded,
             Title = conversation.Title,
             Draft = conversation.Draft,
             Model = conversation.Model,
             Provider = conversation.Provider,
             IsPlanMode = conversation.IsPlanMode,
             IsCodeTask = conversation.IsCodeTask,
+            AgentProfileName = AgentProfileCatalog.NormalizeReferenceName(conversation.AgentProfileName),
+            QueueEnabled = conversation.QueueEnabled,
             ThinkEnabled = conversation.ThinkEnabled,
             OutputStyle = conversation.OutputStyle,
             AllowHostedCodeTask = conversation.AllowHostedCodeTask,
             IncludeProjectContextForHosted = conversation.IncludeProjectContextForHosted,
             IncludeRepoMap = conversation.IncludeRepoMap,
+            EnableSemanticSearch = conversation.EnableSemanticSearch,
+            BestOfNAttempts = Math.Clamp(conversation.BestOfNAttempts, 1, BestOfNAttemptCoordinator.MaximumAttempts),
             NumCtx = conversation.NumCtx,
             Temperature = ConversationSamplingSettings.NormalizeTemperature(conversation.Temperature),
             TopP = ConversationSamplingSettings.NormalizeProbability(conversation.TopP),
@@ -45,6 +56,8 @@ public static class ConversationPersistence
             ProjectPath = conversation.ProjectPath,
             Messages = [.. conversation.Messages],
             FileChanges = [.. conversation.FileChanges],
+            FileChangesPrunedThroughMessageIndex = conversation.FileChangesPrunedThroughMessageIndex,
+            FileChangesPrunedUnlinked = conversation.FileChangesPrunedUnlinked,
             ContextFiles = [.. conversation.ContextFiles],
             PendingDiffComments = conversation.PendingDiffComments?.Select(comment => comment with { }).ToList() ?? [],
             PendingTurns = conversation.PendingTurns?.Select(turn => turn with
@@ -59,7 +72,9 @@ public static class ConversationPersistence
                 NumPredict = ConversationSamplingSettings.NormalizeOutputTokens(turn.NumPredict),
                 OpenAiReasoningEffort = OpenAiGenerationSettings.NormalizeEffort(turn.OpenAiReasoningEffort),
                 OpenAiVerbosity = OpenAiGenerationSettings.NormalizeVerbosity(turn.OpenAiVerbosity),
-                OpenAiReasoningMode = OpenAiGenerationSettings.NormalizeReasoningMode(turn.OpenAiReasoningMode, turn.Model)
+                OpenAiReasoningMode = OpenAiGenerationSettings.NormalizeReasoningMode(turn.OpenAiReasoningMode, turn.Model),
+                AgentProfileName = AgentProfileCatalog.NormalizeReferenceName(turn.AgentProfileName),
+                BestOfNAttempts = Math.Clamp(turn.BestOfNAttempts, 1, BestOfNAttemptCoordinator.MaximumAttempts)
             }).ToList() ?? []
         }).ToList();
     }

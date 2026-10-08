@@ -1,0 +1,32 @@
+{
+  "Project": "disposable Codev worktree",
+  "SelectedFile": "Codev.Core/OllamaRuntimeClient.cs",
+  "Prompt": "Using Codev\u0027s source tools, inspect Codev.Core/OllamaRuntimeClient.cs and answer: what Ollama keep-alive duration does this version request for ordinary conversations, where is it declared, and what user-facing delay is it intended to avoid? Cite the file and symbol. Do not edit files or run commands.",
+  "Model": "qwen3.6:35b-a3b",
+  "Provider": "ollama",
+  "KeepAliveExpected": "30m",
+  "IdleMilliseconds": 360002,
+  "FirstTurn": {
+    "Completed": true,
+    "ModelLoadMilliseconds": 4.4867,
+    "TimeToFirstTokenMilliseconds": 5846.7206,
+    "Reply": "In \u0060Codev.Core/OllamaRuntimeClient.cs\u0060, the keep-alive duration is declared as a constant:\n\n- **Symbol**: \u0060OllamaRuntimeClient.ConversationKeepAlive\u0060\n- **Value**: \u0060\u002230m\u0022\u0060 (30 minutes)\n- **Purpose**: To \u0022keep models resident long enough for users to review a reply and send a follow-up without a cold reload.\u0022 This avoids the delay associated with reloading the model into memory (a \u0022cold reload\u0022) between consecutive messages in a conversation."
+  },
+  "ModelStateAfterFirstTurn": {
+    "Loaded": true,
+    "ExpiresAt": "2026-10-04T15:05:02.3082555-04:00",
+    "VramBytes": 0
+  },
+  "ModelStateAfterIdle": {
+    "Loaded": true,
+    "ExpiresAt": "2026-10-04T15:05:02.3082555-04:00",
+    "VramBytes": 0
+  },
+  "FollowUp": {
+    "Completed": true,
+    "ModelLoadMilliseconds": 1.9742,
+    "TimeToFirstTokenMilliseconds": 1734.2264,
+    "Reply": "Based on \u0060Codev.Core/OllamaRuntimeClient.cs\u0060:\n\n*   **Keep-alive duration:** \u0060\u002230m\u0022\u0060 (30 minutes).\n*   **Declared in:** The constant \u0060ConversationKeepAlive\u0060 within the \u0060OllamaRuntimeClient\u0060 class.\n*   **User-facing delay avoided:** It avoids the delay of a **\u0022cold reload\u0022** (reloading the model into memory) when a user sends a follow-up message after reviewing a previous reply."
+  },
+  "TotalElapsedMilliseconds": 376793
+}

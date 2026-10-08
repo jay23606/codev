@@ -41,6 +41,41 @@ public sealed record PromptContextSnapshot(
 
 public static class PromptContextBreakdown
 {
+    private static readonly System.Text.Json.JsonSerializerOptions WebJson = new(System.Text.Json.JsonSerializerDefaults.Web);
+    private static readonly System.Text.Json.JsonSerializerOptions PrettyJson = new() { WriteIndented = true };
+
+    public static IReadOnlyList<PromptContextSection> BuildCodeTaskRoundSections(
+        IEnumerable<PromptContextSection> capturedContext, string? toolInteractions,
+        string? toolSchemas, string? generationControls)
+    {
+        ArgumentNullException.ThrowIfNull(capturedContext);
+        var sections = capturedContext.Where(section => !string.IsNullOrWhiteSpace(section.Content)).ToList();
+        if (!string.IsNullOrWhiteSpace(toolInteractions)) sections.Add(new("Tool calls and results", toolInteractions));
+        if (!string.IsNullOrWhiteSpace(toolSchemas)) sections.Add(new("Available tool schemas", toolSchemas));
+        if (!string.IsNullOrWhiteSpace(generationControls)) sections.Add(new("Generation controls", generationControls));
+        return sections;
+    }
+
+    /// <summary>Turns Responses API input items into readable snapshot rows while retaining each complete item.</summary>
+    public static IReadOnlyList<ChatMessage> ToOpenAiInputDisplayMessages(IEnumerable<object> inputItems)
+    {
+        ArgumentNullException.ThrowIfNull(inputItems);
+        var messages = new List<ChatMessage>();
+        foreach (var item in inputItems)
+        {
+            var json = System.Text.Json.JsonSerializer.SerializeToElement(item, WebJson);
+            var kind = json.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                       json.TryGetProperty("role", out var role) && role.ValueKind == System.Text.Json.JsonValueKind.String
+                ? role.GetString()!
+                : json.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                  json.TryGetProperty("type", out var type) && type.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? type.GetString()!
+                    : "input item";
+            messages.Add(new ChatMessage(kind, System.Text.Json.JsonSerializer.Serialize(json, PrettyJson)));
+        }
+        return messages;
+    }
+
     public static PromptContextSnapshot Create(
         string provider,
         string model,

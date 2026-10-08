@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -6,9 +7,10 @@ namespace Codev;
 public sealed record CodeTaskFileProposal(string RelativePath, string Before, string After, bool IsNewFile, string? ProposedPatch = null,
     IReadOnlyList<string>? ContextSources = null);
 public sealed record CodeTaskCommandProposal(string Command, string ProjectPath, string ShellName, bool IsVerification = false,
-    IReadOnlyList<string>? ContextSources = null, string? MatchingUntrustedSource = null);
+    IReadOnlyList<string>? ContextSources = null, string? MatchingUntrustedSource = null, bool ProfileApprovalSatisfied = false,
+    bool IsBackground = false, string? PermissionProjectPath = null);
 
-/// <summary>Executes the bounded Code task tools. Mutations and shell commands require UI-provided approval.</summary>
+/// <summary>Executes bounded Code task tools. The UI supplies file-review and command-policy decisions, which may allow, deny, or prompt according to the active project and agent modes.</summary>
 public sealed class CodeTaskToolExecutor(
     WorkspaceFileService files,
     Conversation conversation,
@@ -18,8 +20,24 @@ public sealed class CodeTaskToolExecutor(
     Action<string>? status = null,
     int maxRepairAttempts = 2,
     IEnumerable<string>? initialContextSources = null,
-    Func<CodeTaskCommandProposal, Task<CommandApprovalOutcome>>? permissionApproval = null)
+    Func<CodeTaskCommandProposal, Task<CommandApprovalOutcome>>? permissionApproval = null,
+    int? turnUserMessageIndex = null,
+    IReadOnlyDictionary<string, McpCodeTaskTool>? mcpTools = null,
+    Func<McpCodeTaskTool, JsonElement, bool, Task<CommandApprovalOutcome>>? mcpPermissionApproval = null,
+    Func<string, JsonElement, Task<AgentToolProfileDecision>>? agentProfilePermission = null,
+    AgentProfile? agentProfile = null,
+    IReadOnlyDictionary<string, SlashCommandDefinition>? agentSkills = null,
+    Func<SlashCommandDefinition, string, CancellationToken, Task<string>>? agentSkillInvocation = null,
+    Func<McpCodeTaskTool, JsonElement, CancellationToken, Task<string>>? mcpCall = null,
+    BackgroundCommandManager? backgroundCommands = null,
+    Func<string, CancellationToken, Task<string>>? afterFileWrite = null,
+    Func<string, CancellationToken, Task<IReadOnlyList<SemanticSearchResult>>>? semanticSearch = null,
+    string? permissionProjectPath = null,
+    ShellCommandSpec? backgroundShell = null)
 {
+    private readonly string _permissionProjectPath = string.IsNullOrWhiteSpace(permissionProjectPath)
+        ? files.Root : Path.GetFullPath(permissionProjectPath);
+    private readonly ShellCommandSpec _backgroundShell = backgroundShell ?? ShellCommandResolver.ResolveCurrent();
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> ToolArgumentLimits =
         new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
         {
@@ -30,9 +48,13 @@ public sealed class CodeTaskToolExecutor(
             ["write_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
             ["apply_patch"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["patch"] = 500_000 },
             ["verify_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 },
-            ["run_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 }
+            ["run_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 },
+            ["start_background_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["command"] = 4_000 },
+            ["read_background_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["id"] = 80 },
+            ["stop_background_command"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["id"] = 80 }
         };
     private int _failedVerifications;
+    public int SuccessfulVerificationCount { get; private set; }
     private readonly List<(string Source, string Content)> _untrustedContents = [];
     private readonly List<string> _contextSources = initialContextSources?
         .Where(source => !string.IsNullOrWhiteSpace(source))
@@ -45,24 +67,167 @@ public sealed class CodeTaskToolExecutor(
     {
         if (ToolArgumentLimits.ContainsKey(name) && ValidateToolArguments(name, arguments) is { } error)
             return "Rejected: " + error;
+        if (agentSkills?.ContainsKey(name) == true && ValidateAgentSkillArguments(arguments) is { } skillError)
+            return "Rejected: " + skillError;
+        if (agentSkills?.TryGetValue(name, out var requestedSkill) == true && requestedSkill.UserOnly)
+            return "Denied: this skill is configured for user-only invocation.";
         string Arg(string key) => arguments.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
+        if ((name is "create_file" or "write_file" or "apply_patch") &&
+            !AgentProfilePolicy.CanEditPath(agentProfile, Arg("relative_path"), files.Root))
+            return "Rejected: the selected agent profile does not allow edits to this path.";
+        var profileApprovalSatisfied = false;
+        if (agentProfilePermission is not null)
+        {
+            var profileDecision = await agentProfilePermission(name, arguments);
+            if (profileDecision is AgentToolProfileDecision.Denied or AgentToolProfileDecision.Rejected)
+                return profileDecision == AgentToolProfileDecision.Denied
+                    ? "Denied by the selected agent profile; this tool is unavailable."
+                    : "Rejected by the selected agent profile; the tool was not run.";
+            profileApprovalSatisfied = profileDecision == AgentToolProfileDecision.ApprovedOnce;
+        }
         try
         {
+            if (mcpTools is not null && mcpTools.TryGetValue(name, out var mcpTool))
+                return await ExecuteMcpToolAsync(mcpTool, arguments, profileApprovalSatisfied, cancellationToken);
+            if (agentSkills is not null && agentSkills.TryGetValue(name, out var agentSkill))
+                return await ExecuteAgentSkillAsync(agentSkill, arguments, cancellationToken);
             return name switch
             {
-                "list_files" => UntrustedToolOutput.Format("project file listing", string.Join("\n", files.ListFiles(Arg("relative_directory"), 160))),
+                "list_files" => ListFiles(Arg("relative_directory")),
                 "read_file" => await ReadFileAsync(Arg("relative_path"), cancellationToken),
                 "search_files" => await SearchFilesAsync(Arg("query"), cancellationToken),
                 "create_file" => await CreateFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "write_file" => await WriteFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "apply_patch" => await ApplyPatchAsync(Arg("relative_path"), Arg("patch"), cancellationToken),
-                "verify_command" => await VerifyCommandAsync(Arg("command"), cancellationToken),
-                "run_command" => await RunCommandAsync(Arg("command"), cancellationToken),
+                "verify_command" => await VerifyCommandAsync(Arg("command"), cancellationToken, profileApprovalSatisfied),
+                "run_command" => await RunCommandAsync(Arg("command"), cancellationToken, profileApprovalSatisfied),
+                "start_background_command" => await StartBackgroundCommandAsync(Arg("command"), cancellationToken, profileApprovalSatisfied),
+                "read_background_command" => ReadBackgroundCommand(Arg("id")),
+                "stop_background_command" => await StopBackgroundCommandAsync(Arg("id")),
                 _ => "Error: this tool is not available."
             };
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { return "Error: " + ex.Message; }
+    }
+
+    /// <summary>Applies one selected isolated-attempt result through the normal profile, review, and checkpoint path.</summary>
+    public async Task<string> ApplyReviewedProposalAsync(CodeTaskFileProposal proposal, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+        if (string.IsNullOrWhiteSpace(proposal.RelativePath)) return "Rejected: a project-relative file path is required.";
+        if (!AgentProfilePolicy.CanEditPath(agentProfile, proposal.RelativePath, files.Root))
+            return "Rejected: the selected agent profile does not allow edits to this path.";
+        if (agentProfilePermission is not null)
+        {
+            var arguments = JsonSerializer.SerializeToElement(new { relative_path = proposal.RelativePath, content = proposal.After });
+            var profileDecision = await agentProfilePermission(proposal.IsNewFile ? "create_file" : "write_file", arguments).ConfigureAwait(false);
+            if (profileDecision is AgentToolProfileDecision.Denied or AgentToolProfileDecision.Rejected)
+                return profileDecision == AgentToolProfileDecision.Denied
+                    ? "Denied by the selected agent profile; the winner file was not applied."
+                    : "Rejected by the selected agent profile; the winner file was not applied.";
+        }
+
+        if (proposal.IsNewFile)
+        {
+            if (proposal.Before.Length > 0) return "Rejected: a new-file proposal cannot include previous contents.";
+            return await CreateFileAsync(proposal.RelativePath, proposal.After, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!File.Exists(files.ResolvePath(proposal.RelativePath)))
+            return "Rejected: the selected file no longer exists in the original project.";
+        var original = await files.ReadFileSnapshotAsync(proposal.RelativePath, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(original.Content, proposal.Before, StringComparison.Ordinal))
+            return "Rejected: the selected file changed after the attempt baseline was captured; inspect it again before applying.";
+        return await ReviewAndWriteAsync(proposal.RelativePath, original, proposal.After, proposal.ProposedPatch,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<string> ExecuteAgentSkillAsync(SlashCommandDefinition skill, JsonElement arguments, CancellationToken cancellationToken)
+    {
+        if (skill.UserOnly) return "Denied: this skill is configured for user-only invocation.";
+        if (agentSkillInvocation is null) return "Rejected: agent skill loading is not available for this task.";
+        var invocationArguments = arguments.TryGetProperty("arguments", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? "" : "";
+        var result = await agentSkillInvocation(skill, invocationArguments, cancellationToken);
+        return AgentSkillTool.FormatLoadedPrompt(skill, result);
+    }
+
+    private static string? ValidateAgentSkillArguments(JsonElement arguments)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object) return "skill arguments must be a JSON object.";
+        foreach (var property in arguments.EnumerateObject())
+            if (!property.NameEquals("arguments")) return $"'{property.Name}' is not an accepted argument for this skill.";
+        if (!arguments.TryGetProperty("arguments", out var value) || value.ValueKind != JsonValueKind.String)
+            return "required argument 'arguments' must be a string.";
+        var text = value.GetString() ?? "";
+        return text.Length > 4_000 ? "skill arguments exceed the 4,000-character limit." : null;
+    }
+
+    private async Task<string> ExecuteMcpToolAsync(McpCodeTaskTool tool, JsonElement arguments, bool profileApprovalSatisfied, CancellationToken cancellationToken)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object || arguments.GetRawText().Length > 500_000)
+            return "Rejected: MCP tool arguments must be a JSON object no larger than 500,000 characters.";
+        var approval = mcpPermissionApproval is null
+            ? CommandApprovalOutcome.Rejected
+            : await mcpPermissionApproval(tool, arguments, profileApprovalSatisfied);
+        if (approval is not (CommandApprovalOutcome.Approved or CommandApprovalOutcome.ApprovedReadOnly))
+            return approval == CommandApprovalOutcome.Denied
+                ? "Denied by a saved project MCP tool permission rule; the tool was not called."
+                : "MCP tool call rejected; the server was not called.";
+
+        status?.Invoke($"Code task · calling {tool.ServerName}/{tool.ToolName}…");
+        try
+        {
+            var result = mcpCall is not null
+                ? await mcpCall(tool, arguments, cancellationToken).ConfigureAwait(false)
+                : await CallLegacyMcpToolAsync(tool, arguments, cancellationToken).ConfigureAwait(false);
+            var operation = tool.Operation.DisplayName();
+            var activity = tool.Operation.ActivityName();
+            var source = $"MCP {operation} output: {tool.ServerName}/{tool.ToolName}";
+            AddContextSource(source);
+            TrackUntrustedContent(source, result);
+            return UntrustedToolOutput.Format($"MCP {operation} output", result, command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + activity);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException)
+        {
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.DisplayName()} error", "The MCP server canceled the operation.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ActivityName());
+        }
+        catch (TimeoutException)
+        {
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.DisplayName()} error", $"The external MCP operation timed out after {tool.ExecutionTimeoutMs} ms.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ActivityName());
+        }
+        catch (Exception ex)
+        {
+            return UntrustedToolOutput.Format($"MCP {tool.Operation.DisplayName()} error", $"The external MCP operation failed ({ex.GetType().Name}). Check the server configuration and logs.", command: tool.ServerName + "/" + tool.ToolName, activity: "mcp_" + tool.Operation.ActivityName());
+        }
+        finally { status?.Invoke("Code task · Thinking…"); }
+    }
+
+    private static async Task<string> CallLegacyMcpToolAsync(McpCodeTaskTool tool, JsonElement arguments, CancellationToken cancellationToken)
+    {
+        if (tool.Operation != McpCodeTaskOperationKind.Tool || tool.ClientTool is null)
+            throw new InvalidOperationException("This MCP operation is no longer available.");
+        var callArguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText(), new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+        var output = await McpOperationTimeout.RunAsync(
+            async token => await tool.ClientTool.CallAsync(callArguments, cancellationToken: token).ConfigureAwait(false), tool.ExecutionTimeoutMs, cancellationToken);
+        var text = new System.Text.StringBuilder();
+        var truncated = false;
+        if (output.IsError == true) McpToolOutputFormatter.Append(text, "MCP server reported a tool error.", ref truncated);
+        foreach (var block in output.Content)
+        {
+            if (block is ModelContextProtocol.Protocol.TextContentBlock content && !string.IsNullOrEmpty(content.Text))
+                McpToolOutputFormatter.Append(text, content.Text, ref truncated);
+            else McpToolOutputFormatter.Append(text, $"[{block.Type} content omitted from text-only Code task results]", ref truncated);
+            if (truncated) break;
+        }
+        if (output.StructuredContent is { } structured && structured.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+        {
+            McpToolOutputFormatter.Append(text, "Structured content:", ref truncated, blankLine: true);
+            McpToolOutputFormatter.Append(text, structured.GetRawText(), ref truncated, separator: false);
+        }
+        return text.Length == 0 ? "MCP tool returned no text content." : text.ToString();
     }
 
     private static string? ValidateToolArguments(string name, JsonElement arguments)
@@ -88,16 +253,76 @@ public sealed class CodeTaskToolExecutor(
         var content = Truncate(await files.ReadFileAsync(relativePath, cancellationToken));
         AddContextSource("File: " + relativePath);
         TrackUntrustedContent("File: " + relativePath, content);
-        return UntrustedToolOutput.Format("project file", content, relativePath);
+        return UntrustedToolOutput.Format("project file", content, relativePath, activity: "read_file");
+    }
+
+    private string ListFiles(string relativeDirectory)
+    {
+        var source = string.IsNullOrWhiteSpace(relativeDirectory)
+            ? "Project file listing"
+            : "Project file listing: " + relativeDirectory;
+        var listing = string.Join("\n", files.ListFiles(relativeDirectory, 160));
+        AddContextSource(source);
+        TrackUntrustedContent(source, listing);
+        return UntrustedToolOutput.Format("project file listing", listing, path: relativeDirectory, activity: "list_files");
     }
 
     private async Task<string> SearchFilesAsync(string query, CancellationToken cancellationToken)
     {
-        var results = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken));
-        AddContextSource("Search results for: " + query);
-        results = Truncate(results);
-        TrackUntrustedContent("Search results for: " + query, results);
-        return UntrustedToolOutput.Format("project search results", results);
+        var source = semanticSearch is null
+            ? "Search results for: " + query
+            : "Hybrid literal and semantic search results for: " + query;
+        string body;
+        if (semanticSearch is null)
+        {
+            body = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken).ConfigureAwait(false));
+        }
+        else
+        {
+            var literal = await files.SearchFileMatchesAsync(query, cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<SemanticSearchResult> semantic = [];
+            string? semanticFailure = null;
+            try
+            {
+                semantic = await semanticSearch(query, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                semanticFailure = Truncate(ex.Message, 600);
+            }
+
+            var fused = HybridProjectSearch.Fuse(literal, semantic);
+            body = string.Join("\n\n", fused.Select(FormatHybridResult));
+            if (fused.Count == 0)
+                body = "No literal or semantic matches found. Update the local index in Settings if project files have changed.";
+            if (semanticFailure is not null)
+            {
+                var literalFallback = string.Join("\n", literal.Select(match => match.ToString()));
+                body = $"Semantic ranking is unavailable; showing literal matches only. {semanticFailure}" +
+                    (literalFallback.Length == 0 ? "\nNo literal matches found." : "\n\n" + literalFallback);
+            }
+            body = Truncate(body, 8_000);
+        }
+
+        AddContextSource(source);
+        body = Truncate(body);
+        TrackUntrustedContent(source, body);
+        return UntrustedToolOutput.Format(semanticSearch is null ? "project search results" : "hybrid project search results",
+            body, activity: "search_files");
+
+        static string FormatHybridResult(HybridProjectSearchResult result)
+        {
+            var sources = new List<string>(2);
+            if (result.LiteralMatch is not null) sources.Add("literal");
+            if (result.SemanticMatch is not null) sources.Add("semantic");
+            var text = new StringBuilder($"{result.RelativePath} ({string.Join(" + ", sources)} match)");
+            if (result.LiteralMatch is { } literalMatch)
+                text.Append($"\nLiteral line {literalMatch.LineNumber}: {literalMatch.LineText}");
+            if (result.SemanticMatch is { } semanticMatch)
+                text.Append($"\nSemantic chunk {semanticMatch.Chunk} (match {semanticMatch.Score:P0}):\n{semanticMatch.Content}");
+            return text.ToString();
+        }
     }
 
     private void AddContextSource(string source)
@@ -142,8 +367,17 @@ public sealed class CodeTaskToolExecutor(
         if (!await reviewFile(new CodeTaskFileProposal(relativePath, "", content, IsNewFile: true, ContextSources: _contextSources.ToArray())))
             return "Rejected by user; no file was created.";
         await files.CreateFileAtomicAsync(relativePath, content, cancellationToken);
-        conversation.FileChanges.Add(new FileChangeRecord(relativePath, null, DateTimeOffset.Now, "Create", PreviousFileExisted: false));
-        return "Approved and created the new project file.";
+        var formatterResult = "";
+        FileSnapshot created;
+        try { formatterResult = await RunAfterFileWriteAsync(relativePath, cancellationToken); }
+        finally
+        {
+            created = await files.ReadFileSnapshotAsync(relativePath, CancellationToken.None);
+            ConversationFileChangeHistoryService.Record(conversation, new FileChangeRecord(relativePath, null, DateTimeOffset.Now, "Create", PreviousFileExisted: false,
+                TurnUserMessageIndex: turnUserMessageIndex, ResultFileExisted: true, ResultSha256: created.Sha256));
+        }
+        return FormatFileChangeOutput("project file created", "Created the new project file.", relativePath,
+            "created_file", created.Content, formatterResult);
     }
 
     private async Task<string> WriteFileAsync(string relativePath, string content, CancellationToken cancellationToken)
@@ -174,18 +408,50 @@ public sealed class CodeTaskToolExecutor(
             return "Rejected by user; the file was left unchanged.";
         var checkpoint = await files.CreateCheckpointAsync(relativePath, conversation.Id, cancellationToken, original.Sha256);
         await files.WriteFileAtomicAsync(relativePath, content, cancellationToken, original.Sha256);
-        if (checkpoint is not null) conversation.FileChanges.Add(new FileChangeRecord(relativePath, checkpoint, DateTimeOffset.Now, "Edit"));
-        return "Approved and applied. A local checkpoint was saved before the change.";
+        var formatterResult = "";
+        FileSnapshot written;
+        try { formatterResult = await RunAfterFileWriteAsync(relativePath, cancellationToken); }
+        finally
+        {
+            written = await files.ReadFileSnapshotAsync(relativePath, CancellationToken.None);
+            if (checkpoint is not null) ConversationFileChangeHistoryService.Record(conversation, new FileChangeRecord(relativePath, checkpoint, DateTimeOffset.Now, "Edit",
+                TurnUserMessageIndex: turnUserMessageIndex, ResultFileExisted: true, ResultSha256: written.Sha256));
+        }
+        return FormatFileChangeOutput("project file updated", "Applied the change. A local checkpoint was saved before the change.", relativePath,
+            proposedPatch is null ? "edited_file" : "applied_patch", written.Content, formatterResult);
     }
 
-    private async Task<string> RunCommandAsync(string command, CancellationToken cancellationToken)
+    private async Task<string> RunAfterFileWriteAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        if (afterFileWrite is null) return "";
+        try { return await afterFileWrite(relativePath, cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return UntrustedToolOutput.Format("project formatter error", $"Formatter hook failed ({ex.GetType().Name}); the accepted file change remains checkpointed.", relativePath, activity: "formatter");
+        }
+    }
+
+    private static string FormatFileChangeOutput(string source, string message, string relativePath, string activity, string proposedContent,
+        string formatterResult = "")
+    {
+        if (!string.IsNullOrWhiteSpace(formatterResult)) message += "\n" + formatterResult;
+        var warnings = InstructionFollowingContentDetector.Detect(proposedContent);
+        if (warnings.Count > 0)
+            message += "\nAdvisory: the proposed file content matched instruction-risk patterns (" + string.Join(", ", warnings) +
+                "). This advisory does not change the selected permission mode.";
+        return UntrustedToolOutput.Format(source, message, relativePath, activity: activity);
+    }
+
+    private async Task<string> RunCommandAsync(string command, CancellationToken cancellationToken, bool profileApprovalSatisfied)
     {
         if (RepairBudgetExhausted) return RepairLimitMessage;
         if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
             return "Rejected: command must contain 1–4,000 characters.";
         var shell = ShellCommandResolver.ResolveCurrent();
         var commandProposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
-            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command));
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command), ProfileApprovalSatisfied: profileApprovalSatisfied,
+            PermissionProjectPath: _permissionProjectPath);
         var approval = await RequestCommandApprovalAsync(commandProposal);
         if (approval is not (CommandApprovalOutcome.Approved or CommandApprovalOutcome.ApprovedReadOnly))
             return approval == CommandApprovalOutcome.Denied
@@ -199,7 +465,7 @@ public sealed class CodeTaskToolExecutor(
                 var output = await ReadOnlyCommandClassifier.ExecuteAsync(command, files.Root, shell.DisplayName, cancellationToken, files.ContextExclusions);
                 AddContextSource("Output from read-only project inspection: " + command);
                 TrackUntrustedContent("Output from read-only project inspection: " + command, output);
-                return UntrustedToolOutput.Format("read-only project inspection output", Truncate(output, 8000));
+                return UntrustedToolOutput.Format("read-only project inspection output", Truncate(output, 8000), command: command);
             }
             finally { status?.Invoke("Code task · Thinking…"); }
         }
@@ -211,7 +477,7 @@ public sealed class CodeTaskToolExecutor(
             var output = await files.RunApprovedCommandAsync(command, TimeSpan.FromMinutes(3), cancellationToken, commandProgress ?? progress);
             AddContextSource("Output from approved command: " + command);
             TrackUntrustedContent("Output from approved command: " + command, output);
-            return UntrustedToolOutput.Format("approved command output", Truncate(output, 8000));
+            return UntrustedToolOutput.Format("approved command output", Truncate(output, 8000), command: command);
         }
         finally { status?.Invoke("Code task · Thinking…"); }
     }
@@ -219,14 +485,15 @@ public sealed class CodeTaskToolExecutor(
     private bool RepairBudgetExhausted => _failedVerifications > Math.Clamp(maxRepairAttempts, 0, 3);
     private const string RepairLimitMessage = "Rejected: the verification repair limit has been reached for this task. Further Codev file edits and commands are blocked; report the remaining failure.";
 
-    private async Task<string> VerifyCommandAsync(string command, CancellationToken cancellationToken)
+    private async Task<string> VerifyCommandAsync(string command, CancellationToken cancellationToken, bool profileApprovalSatisfied)
     {
         if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
             return "Rejected: verification command must contain 1–4,000 characters.";
         if (RepairBudgetExhausted) return RepairLimitMessage;
         var shell = ShellCommandResolver.ResolveCurrent();
         var commandProposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName, IsVerification: true,
-            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command));
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command), ProfileApprovalSatisfied: profileApprovalSatisfied,
+            PermissionProjectPath: _permissionProjectPath);
         var approval = await RequestCommandApprovalAsync(commandProposal);
         if (approval != CommandApprovalOutcome.Approved)
             return approval == CommandApprovalOutcome.Denied
@@ -243,19 +510,72 @@ public sealed class CodeTaskToolExecutor(
             TrackUntrustedContent("Output from approved verification: " + command, output);
             var exitMatch = Regex.Match(output, @"(?:^|\n)Exit code: (-?\d+)\s*$", RegexOptions.CultureInvariant);
             if (exitMatch.Success && int.TryParse(exitMatch.Groups[1].Value, out var exitCode) && exitCode == 0)
-                return "Verification PASSED (exit code 0).\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000));
+            {
+                SuccessfulVerificationCount++;
+                return "Verification PASSED (exit code 0).\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000), command: command);
+            }
 
             _failedVerifications++;
             var limit = Math.Clamp(maxRepairAttempts, 0, 3);
             var budget = RepairBudgetExhausted
                 ? "\nRepair limit reached: further Codev file edits and commands are blocked. Report the remaining failure."
-                : $"\nVerification failures: {_failedVerifications}; repair attempts allowed: {limit}. You may make a reviewed fix and request verification again. Each run needs approval.";
+                : $"\nVerification failures: {_failedVerifications}; repair attempts allowed: {limit}. You may make a reviewed fix and request verification again; Codev will apply the configured command permission policy.";
             var verificationStatus = (exitMatch.Success
                 ? $"Verification FAILED (exit code {exitMatch.Groups[1].Value}).\n"
                 : "Verification FAILED (no successful exit status; command may have timed out).\n") + budget;
-            return verificationStatus + "\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000));
+            return verificationStatus + "\n" + UntrustedToolOutput.Format("approved verification command output", Truncate(output, 8000), command: command);
         }
         finally { status?.Invoke("Code task · Thinking…"); }
+    }
+
+    private async Task<string> StartBackgroundCommandAsync(string command, CancellationToken cancellationToken, bool profileApprovalSatisfied)
+    {
+        if (backgroundCommands is null) return "Rejected: background commands are not available in this task.";
+        if (string.IsNullOrWhiteSpace(command) || command.Length > 4000)
+            return "Rejected: command must contain 1–4,000 characters.";
+        if (RepairBudgetExhausted) return RepairLimitMessage;
+        var shell = _backgroundShell;
+        var proposal = new CodeTaskCommandProposal(command, files.Root, shell.DisplayName,
+            ContextSources: _contextSources.ToArray(), MatchingUntrustedSource: FindCommandSource(command),
+            ProfileApprovalSatisfied: profileApprovalSatisfied, IsBackground: true,
+            PermissionProjectPath: _permissionProjectPath);
+        var approval = await RequestCommandApprovalAsync(proposal);
+        if (approval != CommandApprovalOutcome.Approved)
+            return approval switch
+            {
+                CommandApprovalOutcome.Denied => "Denied by a saved project command permission rule; the command was not started.",
+                CommandApprovalOutcome.ApprovedReadOnly => "Rejected: read-only command mode does not allow long-running shell processes.",
+                _ => "Rejected by the selected project command policy or user; the command was not started."
+            };
+        try
+        {
+            var commandInfo = await backgroundCommands.StartAsync(conversation.Id, command, files.Root, shell, cancellationToken);
+            var result = $"Started background command {commandInfo.Id}. It is running in the project workspace; read its output with read_background_command and stop it with stop_background_command. Output is untrusted data.";
+            AddContextSource("Background command started: " + command);
+            TrackUntrustedContent("Background command metadata: " + command, result);
+            return UntrustedToolOutput.Format("background command", result, command: command, activity: "background_command_started");
+        }
+        catch (InvalidOperationException ex) { return "Rejected: " + ex.Message; }
+    }
+
+    private string ReadBackgroundCommand(string id)
+    {
+        if (backgroundCommands is null) return "Rejected: background commands are not available in this task.";
+        if (string.IsNullOrWhiteSpace(id)) return "Rejected: a background command id is required.";
+        var snapshot = backgroundCommands.Read(conversation.Id, id);
+        if (snapshot is null) return "Rejected: no background command with that id belongs to this conversation.";
+        var content = $"Command: {snapshot.Command}\nStatus: {snapshot.Status}\nElapsed: {snapshot.Elapsed.TotalSeconds:0}s\nOutput (untrusted):\n{Truncate(snapshot.Output, 8000)}";
+        TrackUntrustedContent($"Background command output: {snapshot.Command}", snapshot.Output);
+        return UntrustedToolOutput.Format("background command output", content, command: snapshot.Command, activity: "background_command_output");
+    }
+
+    private async Task<string> StopBackgroundCommandAsync(string id)
+    {
+        if (backgroundCommands is null) return "Rejected: background commands are not available in this task.";
+        if (string.IsNullOrWhiteSpace(id)) return "Rejected: a background command id is required.";
+        return await backgroundCommands.StopAsync(conversation.Id, id)
+            ? $"Stopped background command {id}."
+            : "Rejected: no running background command with that id belongs to this conversation.";
     }
 
     private async Task<CommandApprovalOutcome> RequestCommandApprovalAsync(CodeTaskCommandProposal proposal)

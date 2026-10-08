@@ -22,7 +22,9 @@ public sealed class ConversationHistoryClearServiceTests
             CompactionThroughMessageCount = 2,
             TaskChecklist = [new TaskChecklistItem(Guid.NewGuid(), "Old task")],
             Messages = [new("user", "hello"), new("assistant", "world")],
-            FileChanges = [new("src/App.cs", "checkpoint.json", DateTimeOffset.UnixEpoch, "Edit")]
+            FileChangesPrunedThroughMessageIndex = 3,
+            FileChangesPrunedUnlinked = true,
+            FileChanges = [new("src/App.cs", "checkpoint.json", DateTimeOffset.UnixEpoch, "Edit", TurnUserMessageIndex: 2)]
         };
 
         Assert.True(ConversationHistoryClearService.Clear(conversation));
@@ -44,6 +46,9 @@ public sealed class ConversationHistoryClearServiceTests
         Assert.Equal(["src/App.cs"], conversation.ContextFiles);
         Assert.True(conversation.IsPinned);
         Assert.Single(conversation.FileChanges);
+        Assert.Null(conversation.FileChanges[0].TurnUserMessageIndex);
+        Assert.Null(conversation.FileChangesPrunedThroughMessageIndex);
+        Assert.False(conversation.FileChangesPrunedUnlinked);
     }
 
     [Fact]

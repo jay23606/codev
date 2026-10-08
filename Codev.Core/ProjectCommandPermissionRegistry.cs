@@ -1,5 +1,6 @@
-using System.Text.Json;
+using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Codev;
@@ -7,6 +8,7 @@ namespace Codev;
 public enum ProjectCommandPermissionMode
 {
     AskEveryTime,
+    Auto,
     Allowlist,
     ReadOnly
 }
@@ -45,12 +47,24 @@ public sealed class ProjectCommandPermissionRegistry
     private const int MaxRulesPerProject = 300;
     private const int MaxCommandLength = 4000;
     private const int MaxFileBytes = 8 * 1024 * 1024;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+        Converters = { new ProjectCommandPermissionModeJsonConverter(settingsUseCurrentNumericValues: false) }
+    };
     private static readonly Regex GitCommand = new(@"\bgit(?:\.exe)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex GitMetadataPath = new(@"(?:^|[/\\\s])\.git(?:$|[/\\\s])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    // Saved allow rules are exact strings, but shells expand variables, home paths, and
+    // environment-provider lookups at execution time. Refuse these forms because their
+    // resolved target can include Codev's private data directory even when the literal
+    // command text does not.
+    private static readonly Regex IndirectPathReference = new(
+        @"\$|%[^%\r\n]+%|![^!\r\n]+!|`|(?:^|[;|&\s])~(?:$|[/\\])|\b(?:env:|GetEnvironmentVariable|GetFolderPath)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly Dictionary<string, ProjectCommandPermissions> _projects = new(PathComparer);
+    private readonly ConcurrentDictionary<string, ProjectCommandPermissions> _projects = new(PathComparer);
 
     private ProjectCommandPermissionRegistry(string path, bool canPersist = true, string? loadError = null)
     {
@@ -70,7 +84,8 @@ public sealed class ProjectCommandPermissionRegistry
         try
         {
             if (new FileInfo(path).Length > MaxFileBytes) throw new InvalidDataException("The permission file exceeds the size limit.");
-            var projects = JsonSerializer.Deserialize<List<ProjectCommandPermissions>>(File.ReadAllText(path), JsonOptions) ?? [];
+            var projects = JsonSerializer.Deserialize<List<ProjectCommandPermissions>>(File.ReadAllText(path), JsonOptions)
+                ?? throw new InvalidDataException("The permission file has no project list.");
             if (projects.Count > MaxProjects) throw new InvalidDataException("The permission file contains too many projects.");
             foreach (var project in projects)
             {
@@ -79,7 +94,8 @@ public sealed class ProjectCommandPermissionRegistry
                 var normalizedPath = NormalizeProjectPath(project.ProjectPath);
                 var mode = Enum.IsDefined(project.Mode) ? project.Mode : ProjectCommandPermissionMode.AskEveryTime;
                 var rules = NormalizeRules(project.Rules);
-                registry._projects[normalizedPath] = new ProjectCommandPermissions(normalizedPath, mode, rules);
+                if (!registry._projects.TryAdd(normalizedPath, new ProjectCommandPermissions(normalizedPath, mode, rules)))
+                    throw new InvalidDataException("The permission file contains duplicate project entries.");
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or ArgumentException or NotSupportedException)
@@ -92,25 +108,55 @@ public sealed class ProjectCommandPermissionRegistry
 
     public ProjectCommandPermissionMode GetMode(string projectPath) => GetProject(projectPath)?.Mode ?? ProjectCommandPermissionMode.AskEveryTime;
 
+    public bool HasProjectSettings(string projectPath) => GetProject(projectPath) is not null;
+
     public IReadOnlyList<ProjectCommandPermissionRule> GetRules(string projectPath) => GetProject(projectPath)?.Rules.ToArray() ?? [];
 
     public ProjectCommandPermissionDecision Evaluate(string projectPath, string command, string shellName = "", bool allowReadOnly = true,
-        IReadOnlyList<string>? contextExclusions = null)
+        IReadOnlyList<string>? contextExclusions = null, bool isVerification = false,
+        ProjectCommandPermissionMode? modeWhenUnconfigured = null)
     {
+        if (!CanPersist) return ProjectCommandPermissionDecision.Ask;
         var project = GetProject(projectPath);
-        if (project is null) return ProjectCommandPermissionDecision.Ask;
+        var mode = project?.Mode ?? modeWhenUnconfigured ?? ProjectCommandPermissionMode.AskEveryTime;
+        var rules = project?.Rules ?? [];
         var normalizedCommand = NormalizeCommand(command);
-        if (project.Rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Deny &&
+        if (rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Deny &&
                                       string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal)))
             return ProjectCommandPermissionDecision.Deny;
-        if (project.Mode == ProjectCommandPermissionMode.Allowlist && CanCreateAllowRule(normalizedCommand) &&
-            project.Rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Allow &&
+        // Auto is an explicit trust decision: resolve every outstanding command prompt as allow,
+        // while preserving per-project exact deny rules. This mirrors OpenCode's --auto behavior.
+        if (mode == ProjectCommandPermissionMode.Auto) return ProjectCommandPermissionDecision.Allow;
+        if ((mode is ProjectCommandPermissionMode.Auto or ProjectCommandPermissionMode.Allowlist) && CanCreateAllowRule(normalizedCommand) &&
+            rules.Any(rule => rule.Decision == ProjectCommandPermissionDecision.Allow &&
                                       string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal)))
             return ProjectCommandPermissionDecision.Allow;
-        if (allowReadOnly && project.Mode == ProjectCommandPermissionMode.ReadOnly &&
-            ReadOnlyCommandClassifier.IsReadOnly(normalizedCommand, project.ProjectPath, shellName, contextExclusions))
-            return ProjectCommandPermissionDecision.Allow;
+        if (allowReadOnly && mode is (ProjectCommandPermissionMode.ReadOnly or ProjectCommandPermissionMode.Auto))
+        {
+            string classificationRoot;
+            try { classificationRoot = project?.ProjectPath ?? NormalizeProjectPath(projectPath); }
+            catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+            {
+                return ProjectCommandPermissionDecision.Ask;
+            }
+            if (ReadOnlyCommandClassifier.IsReadOnly(normalizedCommand, classificationRoot, shellName, contextExclusions))
+                return ProjectCommandPermissionDecision.Allow;
+        }
         return ProjectCommandPermissionDecision.Ask;
+    }
+
+    /// <summary>True when an approved inspection should use Codev's bounded file APIs instead of launching a shell.</summary>
+    public bool ShouldUseBoundedFileInspection(string projectPath, string command,
+        ProjectCommandPermissionDecision decision, bool isVerification = false, string shellName = "",
+        IReadOnlyList<string>? contextExclusions = null)
+    {
+        if (decision != ProjectCommandPermissionDecision.Allow || isVerification) return false;
+        return GetMode(projectPath) switch
+        {
+            ProjectCommandPermissionMode.ReadOnly => true,
+            ProjectCommandPermissionMode.Auto => ReadOnlyCommandClassifier.IsReadOnly(command, projectPath, shellName, contextExclusions),
+            _ => false
+        };
     }
 
     public static bool CanCreateAllowRule(string command) => !TargetsProtectedLocation(command);
@@ -119,6 +165,40 @@ public sealed class ProjectCommandPermissionRegistry
     {
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
         return UpdateProjectAsync(projectPath, project => project with { Mode = mode }, cancellationToken);
+    }
+
+    /// <summary>Copies a project's mode and eligible exact rules to a new isolated project in one durable update.</summary>
+    public async Task CopyProjectSettingsAsync(string sourceProjectPath, string destinationProjectPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CanPersist) throw new InvalidOperationException(LoadError ?? "Command permissions are read-only.");
+        var sourcePath = NormalizeProjectPath(sourceProjectPath);
+        var destinationPath = NormalizeProjectPath(destinationProjectPath);
+        if (PathComparer.Equals(sourcePath, destinationPath)) return;
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var source = _projects.TryGetValue(sourcePath, out var currentSource)
+                ? currentSource
+                : new ProjectCommandPermissions(sourcePath, ProjectCommandPermissionMode.AskEveryTime, []);
+            var rules = source.Rules.Where(rule => rule.Decision == ProjectCommandPermissionDecision.Deny ||
+                CanCreateAllowRule(rule.Command)).ToList();
+            if (rules.Count > MaxRulesPerProject)
+                throw new InvalidOperationException("Copied command permissions exceed the per-project rule limit.");
+            var next = new ProjectCommandPermissions(destinationPath, source.Mode, rules);
+            var candidate = new Dictionary<string, ProjectCommandPermissions>(_projects, PathComparer)
+            {
+                [destinationPath] = next
+            };
+            if (candidate.Count > MaxProjects) throw new InvalidOperationException("Too many projects have saved command permissions.");
+            var json = JsonSerializer.Serialize(candidate.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
+            if (Encoding.UTF8.GetByteCount(json) > MaxFileBytes)
+                throw new InvalidOperationException("Saved command permissions would exceed the size limit.");
+            await AtomicTextFile.WriteAsync(_path, json, cancellationToken).ConfigureAwait(false);
+            _projects[destinationPath] = next;
+        }
+        finally { _gate.Release(); }
     }
 
     public Task SetRuleAsync(string projectPath, string command, ProjectCommandPermissionDecision decision,
@@ -131,7 +211,7 @@ public sealed class ProjectCommandPermissionRegistry
         if (decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny))
             throw new ArgumentOutOfRangeException(nameof(decision), "A saved command rule must allow or deny.");
         if (decision == ProjectCommandPermissionDecision.Allow && !CanCreateAllowRule(normalizedCommand))
-            throw new InvalidOperationException("Commands that invoke Git or reference .git metadata or Codev app data must always ask for approval.");
+            throw new InvalidOperationException("Commands that invoke Git or reference .git metadata or Codev app data cannot be saved as persistent allow rules in Ask or Allowlist modes.");
         return UpdateProjectAsync(projectPath, project =>
         {
             var rules = project.Rules.Where(rule => !string.Equals(rule.Command, normalizedCommand, StringComparison.Ordinal) || rule.Decision != decision).ToList();
@@ -166,22 +246,17 @@ public sealed class ProjectCommandPermissionRegistry
         if (!CanPersist) throw new InvalidOperationException(LoadError ?? "Command permissions are read-only.");
         var normalizedPath = NormalizeProjectPath(projectPath);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        var previous = _projects.TryGetValue(normalizedPath, out var current) ? current : null;
         try
         {
+            var previous = _projects.TryGetValue(normalizedPath, out var current) ? current : null;
             current ??= new ProjectCommandPermissions(normalizedPath, ProjectCommandPermissionMode.AskEveryTime, []);
             var next = update(current);
-            _projects[normalizedPath] = next;
-            if (_projects.Count > MaxProjects) throw new InvalidOperationException("Too many projects have saved command permissions.");
-            var json = JsonSerializer.Serialize(_projects.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
+            var candidate = new Dictionary<string, ProjectCommandPermissions>(_projects, PathComparer) { [normalizedPath] = next };
+            if (candidate.Count > MaxProjects) throw new InvalidOperationException("Too many projects have saved command permissions.");
+            var json = JsonSerializer.Serialize(candidate.Values.OrderBy(item => item.ProjectPath, PathComparer), JsonOptions);
             if (Encoding.UTF8.GetByteCount(json) > MaxFileBytes) throw new InvalidOperationException("Saved command permissions would exceed the size limit.");
             await AtomicTextFile.WriteAsync(_path, json, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            if (previous is null) _projects.Remove(normalizedPath);
-            else _projects[normalizedPath] = previous;
-            throw;
+            _projects[normalizedPath] = next;
         }
         finally { _gate.Release(); }
     }
@@ -191,9 +266,15 @@ public sealed class ProjectCommandPermissionRegistry
         var normalized = new List<ProjectCommandPermissionRule>();
         foreach (var rule in rules)
         {
-            if (rule is null || rule.Decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny)) continue;
+            if (rule is null || rule.Decision is not (ProjectCommandPermissionDecision.Allow or ProjectCommandPermissionDecision.Deny))
+                throw new InvalidDataException("The permission file contains an invalid command rule.");
             var command = NormalizeCommand(rule.Command);
-            if (command.Length is 0 or > MaxCommandLength) continue;
+            if (command.Length is 0 or > MaxCommandLength)
+                throw new InvalidDataException("The permission file contains an invalid command rule.");
+            // Drop legacy or manually edited persistent allows that bypassed the guard.
+            // Denies remain valid even when their command contains shell expansion.
+            if (rule.Decision == ProjectCommandPermissionDecision.Allow && !CanCreateAllowRule(command))
+                continue;
             normalized.RemoveAll(item => string.Equals(item.Command, command, StringComparison.Ordinal) && item.Decision == rule.Decision);
             if (normalized.Count < MaxRulesPerProject) normalized.Add(rule with { Command = command });
         }
@@ -212,9 +293,9 @@ public sealed class ProjectCommandPermissionRegistry
     private static bool TargetsProtectedLocation(string command)
     {
         if (string.IsNullOrWhiteSpace(command)) return true;
-        if (GitCommand.IsMatch(command) || GitMetadataPath.IsMatch(command)) return true;
+        if (GitCommand.IsMatch(command) || GitMetadataPath.IsMatch(command) || IndirectPathReference.IsMatch(command)) return true;
         var normalizedCommand = command.Replace('\\', '/');
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appData = CodevDataPaths.LocalDataRoot;
         if (!string.IsNullOrWhiteSpace(appData))
         {
             var protectedPath = Path.Combine(appData, "Codev").Replace('\\', '/').TrimEnd('/');

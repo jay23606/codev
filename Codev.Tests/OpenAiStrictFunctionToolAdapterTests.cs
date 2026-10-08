@@ -25,6 +25,80 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
     }
 
     [Fact]
+    public void File_tool_descriptions_explain_that_auto_applies_without_review()
+    {
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var descriptions = CodeTaskToolSchemaFactory.CreateOllamaTools(shell)
+            .Select(tool => JsonSerializer.SerializeToElement(tool))
+            .Concat(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell)
+                .Select(tool => JsonSerializer.SerializeToElement(tool)))
+            .Select(tool => tool.TryGetProperty("function", out var function) ? function : tool)
+            .Where(tool => tool.GetProperty("name").GetString() is "create_file" or "write_file" or "apply_patch")
+            .Select(tool => tool.GetProperty("description").GetString() ?? "")
+            .ToArray();
+
+        Assert.Equal(6, descriptions.Length);
+        Assert.All(descriptions, description => Assert.Contains("Auto mode applies", description, StringComparison.Ordinal));
+        Assert.All(descriptions, description => Assert.Contains("may show", description, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Selected_profile_removes_denied_tools_from_strict_schema_but_keeps_approved_categories()
+    {
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"required":[],"additionalProperties":false}""");
+        var mcpTool = new McpCodeTaskTool("mcp_github_search_1234567890abcdef", "github", "GitHub", "search", "Search issues.", schema.RootElement.Clone(), null!);
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var askProfile = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Ask");
+        var names = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, [mcpTool], askProfile)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString()).ToArray();
+
+        Assert.Contains("read_file", names);
+        Assert.Contains(mcpTool.FunctionName, names);
+        Assert.DoesNotContain("write_file", names);
+        Assert.DoesNotContain("create_file", names);
+        Assert.DoesNotContain("run_command", names);
+        Assert.DoesNotContain("verify_command", names);
+    }
+
+    [Fact]
+    public void Plan_primary_agent_exposes_project_inspection_only()
+    {
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"required":[],"additionalProperties":false}""");
+        var mcpTool = new McpCodeTaskTool("mcp_github_search_1234567890abcdef", "github", "GitHub", "search", "Search issues.", schema.RootElement.Clone(), null!);
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var plan = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Plan");
+
+        var names = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, [mcpTool], plan, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString()).ToArray();
+
+        Assert.Equal(new[] { "list_files", "read_file", "search_files" }, names);
+    }
+
+    [Fact]
+    public void Delegation_schema_is_exposed_only_to_an_explicit_orchestrator_profile()
+    {
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var orchestrator = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Orchestrator");
+        var code = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Code");
+
+        var normal = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: null)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
+        var codeNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: code, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
+        var orchestratorNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: orchestrator, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
+
+        Assert.DoesNotContain("delegate_task", normal);
+        Assert.DoesNotContain("delegate_task", codeNames);
+        var delegation = JsonSerializer.SerializeToElement(CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(
+                shell, profile: orchestrator, allowDelegation: true).Single(tool =>
+                JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString() == "delegate_task"));
+        Assert.Contains("delegate_task", orchestratorNames);
+        Assert.True(delegation.GetProperty("strict").GetBoolean());
+        AssertStrictSchema(delegation.GetProperty("parameters"));
+    }
+
+    [Fact]
     public void Converts_nested_function_schema_to_strict_form_and_leaves_size_checks_to_runtime()
     {
         using var source = JsonDocument.Parse("""
@@ -79,6 +153,26 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
         using var source = JsonDocument.Parse("""{"type":"function","function":{"name":"bad","parameters":{"type":"array"}}}""");
 
         Assert.Throws<ArgumentException>(() => OpenAiStrictFunctionToolAdapter.Convert(source.RootElement));
+    }
+
+    [Fact]
+    public void Optional_tool_properties_become_required_nullable_fields_in_strict_schema()
+    {
+        using var source = JsonDocument.Parse("""
+            {"type":"function","function":{"name":"mcp_optional","parameters":{"type":"object","properties":{"required":{"type":"string"},"optional":{"type":"string"},"already_nullable":{"anyOf":[{"type":"string"},{"type":"null"}]}},"required":["required"],"additionalProperties":false}}}
+            """);
+
+        var result = OpenAiStrictFunctionToolAdapter.Convert(source.RootElement);
+        var parameters = result["parameters"]!.AsObject();
+        var properties = parameters["properties"]!.AsObject();
+
+        Assert.Equal(new[] { "required", "optional", "already_nullable" },
+            parameters["required"]!.AsArray().Select(value => value!.GetValue<string>()));
+        Assert.Equal("string", properties["required"]!["type"]!.GetValue<string>());
+        Assert.Equal(new[] { "string", "null" }, properties["optional"]!["anyOf"]!.AsArray()
+            .Select(branch => branch!["type"]!.GetValue<string>()));
+        Assert.Equal(new[] { "string", "null" }, properties["already_nullable"]!["anyOf"]!.AsArray()
+            .Select(branch => branch!["type"]!.GetValue<string>()));
     }
 
     private static void AssertStrictSchema(JsonElement schema)

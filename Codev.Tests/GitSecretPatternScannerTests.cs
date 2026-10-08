@@ -41,4 +41,19 @@ public sealed class GitSecretPatternScannerTests
         Assert.Contains(findings, finding => finding.Kind == "npm token");
         Assert.DoesNotContain(findings, finding => finding.Kind == "credential-like assignment");
     }
+
+    [Fact]
+    public void Scan_finds_hugging_face_user_and_oauth_tokens_without_returning_the_value()
+    {
+        const string userToken = "hf_0123456789abcdefghijklmnopqrstuvwxyz";
+        const string oauthToken = "hf_oauth_0123456789abcdefghijklmnopqrstuvwxyz";
+        var diff = "diff --git a/model.py b/model.py\n+++ b/model.py\n@@ -0,0 +1,2 @@\n+token = \"" + userToken + "\"\n+token = \"" + oauthToken + "\"";
+
+        var findings = GitSecretPatternScanner.Scan(new GitWorkingTreeReview("main", ["model.py"], diff, false));
+
+        Assert.Contains(findings, finding => finding.Kind == "Hugging Face token" && finding.Line == 1);
+        Assert.Contains(findings, finding => finding.Kind == "Hugging Face token" && finding.Line == 2);
+        Assert.DoesNotContain(findings, finding => finding.ToString().Contains(userToken, StringComparison.Ordinal) ||
+            finding.ToString().Contains(oauthToken, StringComparison.Ordinal));
+    }
 }

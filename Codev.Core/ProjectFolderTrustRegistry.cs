@@ -6,15 +6,13 @@ namespace Codev;
 public sealed class ProjectFolderTrustRegistry
 {
     private readonly string _path;
-    private readonly HashSet<string> _trustedRoots;
-    private readonly HashSet<string> _knownFolders;
+    private TrustSnapshot _snapshot;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     private ProjectFolderTrustRegistry(string path, IEnumerable<string> roots, IEnumerable<string> knownFolders, bool canWrite, string? loadError)
     {
         _path = Path.GetFullPath(path);
-        _trustedRoots = new HashSet<string>(roots, PathComparer);
-        _knownFolders = new HashSet<string>(knownFolders, PathComparer);
+        _snapshot = new TrustSnapshot(new HashSet<string>(roots, PathComparer), new HashSet<string>(knownFolders, PathComparer));
         CanWrite = canWrite;
         LoadError = loadError;
     }
@@ -22,7 +20,7 @@ public sealed class ProjectFolderTrustRegistry
     private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     public bool CanWrite { get; }
     public string? LoadError { get; }
-    public IReadOnlyList<string> TrustedRoots => _trustedRoots.OrderBy(path => path, PathComparer).ToArray();
+    public IReadOnlyList<string> TrustedRoots => Volatile.Read(ref _snapshot).TrustedRoots.OrderBy(path => path, PathComparer).ToArray();
 
     public static ProjectFolderTrustRegistry Load(string path)
     {
@@ -46,8 +44,8 @@ public sealed class ProjectFolderTrustRegistry
         try
         {
             var candidate = NormalizePath(folder);
-            return _trustedRoots
-                .Where(root => ContainsPath(root, candidate))
+            return Volatile.Read(ref _snapshot).TrustedRoots
+                .Where(root => ContainsPath(root, candidate) && ContainsNoLinkedPathSegments(root, candidate))
                 .OrderByDescending(root => root.Length)
                 .FirstOrDefault();
         }
@@ -57,13 +55,13 @@ public sealed class ProjectFolderTrustRegistry
     public bool IsTrusted(string folder) => FindTrustedRoot(folder) is not null;
     public bool IsKnown(string folder)
     {
-        try { return _knownFolders.Contains(NormalizePath(folder)); }
+        try { return Volatile.Read(ref _snapshot).KnownFolders.Contains(NormalizePath(folder)); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
     }
 
     public bool IsDirectTrustRoot(string folder)
     {
-        try { return _trustedRoots.Contains(NormalizePath(folder)); }
+        try { return Volatile.Read(ref _snapshot).TrustedRoots.Contains(NormalizePath(folder)); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
     }
 
@@ -71,20 +69,17 @@ public sealed class ProjectFolderTrustRegistry
     {
         var normalized = NormalizePath(folder);
         if (!IsAllowedTrustRoot(normalized)) throw new InvalidOperationException("The filesystem root cannot be trusted. Choose a narrower project folder.");
+        if (!ContainsNoLinkedPathSegments(normalized, normalized))
+            throw new UnauthorizedAccessException("A project folder with a symbolic link or junction in its path cannot be trusted.");
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             EnsureWritable();
-            var addedRoot = _trustedRoots.Add(normalized);
-            var addedKnown = _knownFolders.Add(normalized);
-            if (!addedRoot && !addedKnown) return;
-            try { await PersistAsync(cancellationToken).ConfigureAwait(false); }
-            catch
-            {
-                if (addedRoot) _trustedRoots.Remove(normalized);
-                if (addedKnown) _knownFolders.Remove(normalized);
-                throw;
-            }
+            var current = Volatile.Read(ref _snapshot);
+            if (current.TrustedRoots.Contains(normalized) && current.KnownFolders.Contains(normalized)) return;
+            var roots = new HashSet<string>(current.TrustedRoots, PathComparer) { normalized };
+            var knownFolders = new HashSet<string>(current.KnownFolders, PathComparer) { normalized };
+            await PublishAsync(new TrustSnapshot(roots, knownFolders), cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -96,9 +91,10 @@ public sealed class ProjectFolderTrustRegistry
         try
         {
             EnsureWritable();
-            if (!_knownFolders.Add(normalized)) return;
-            try { await PersistAsync(cancellationToken).ConfigureAwait(false); }
-            catch { _knownFolders.Remove(normalized); throw; }
+            var current = Volatile.Read(ref _snapshot);
+            if (current.KnownFolders.Contains(normalized)) return;
+            var knownFolders = new HashSet<string>(current.KnownFolders, PathComparer) { normalized };
+            await PublishAsync(current with { KnownFolders = knownFolders }, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -110,15 +106,23 @@ public sealed class ProjectFolderTrustRegistry
         try
         {
             EnsureWritable();
-            if (!_trustedRoots.Remove(normalized)) return;
-            try { await PersistAsync(cancellationToken).ConfigureAwait(false); }
-            catch { _trustedRoots.Add(normalized); throw; }
+            var current = Volatile.Read(ref _snapshot);
+            if (!current.TrustedRoots.Contains(normalized)) return;
+            var roots = new HashSet<string>(current.TrustedRoots, PathComparer);
+            roots.Remove(normalized);
+            await PublishAsync(current with { TrustedRoots = roots }, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
 
-    private async Task PersistAsync(CancellationToken cancellationToken) =>
-        await AtomicTextFile.WriteAsync(_path, JsonSerializer.Serialize(new TrustFile(TrustedRoots.ToArray(), _knownFolders.OrderBy(path => path, PathComparer).ToArray()), new JsonSerializerOptions { WriteIndented = true }), cancellationToken).ConfigureAwait(false);
+    private async Task PublishAsync(TrustSnapshot next, CancellationToken cancellationToken)
+    {
+        var file = new TrustFile(next.TrustedRoots.OrderBy(path => path, PathComparer).ToArray(),
+            next.KnownFolders.OrderBy(path => path, PathComparer).ToArray());
+        await AtomicTextFile.WriteAsync(_path, JsonSerializer.Serialize(file, new JsonSerializerOptions { WriteIndented = true }), cancellationToken)
+            .ConfigureAwait(false);
+        Volatile.Write(ref _snapshot, next);
+    }
 
     private void EnsureWritable()
     {
@@ -139,6 +143,7 @@ public sealed class ProjectFolderTrustRegistry
         !string.Equals(path, Path.GetPathRoot(path), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private sealed record TrustFile(string[]? TrustedRoots, string[]? KnownFolders);
+    private sealed record TrustSnapshot(HashSet<string> TrustedRoots, HashSet<string> KnownFolders);
 
     private static bool ContainsPath(string root, string candidate)
     {
@@ -146,5 +151,36 @@ public sealed class ProjectFolderTrustRegistry
         return relative == "." || (!Path.IsPathRooted(relative) && relative != ".." &&
             !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
             !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal));
+    }
+
+    private static bool ContainsNoLinkedPathSegments(string root, string candidate)
+    {
+        try
+        {
+            var rootPath = Path.GetFullPath(root);
+            var candidatePath = Path.GetFullPath(candidate);
+            if (!ContainsPath(rootPath, candidatePath)) return false;
+            var pathSegments = new Stack<string>();
+            var current = candidatePath;
+            var rootDirectory = Path.GetPathRoot(current);
+            while (!string.IsNullOrEmpty(current))
+            {
+                pathSegments.Push(current);
+                var parent = Path.GetDirectoryName(current);
+                if (string.IsNullOrEmpty(parent) || PathComparer.Equals(parent, current)) break;
+                current = parent;
+            }
+            while (pathSegments.Count > 0)
+            {
+                current = pathSegments.Pop();
+                if ((Directory.Exists(current) || File.Exists(current)) &&
+                    (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 }

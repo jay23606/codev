@@ -68,7 +68,7 @@ public sealed class ReadOnlyCommandClassifierTests : IDisposable
     [Fact]
     public void Location_commands_refuse_codev_app_data_roots()
     {
-        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localData = CodevDataPaths.LocalDataRoot;
         if (string.IsNullOrWhiteSpace(localData)) return;
         var protectedRoot = Path.Combine(localData, "Codev");
         var protectedRootExisted = Directory.Exists(protectedRoot);

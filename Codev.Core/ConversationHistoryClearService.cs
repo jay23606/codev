@@ -11,6 +11,15 @@ public static class ConversationHistoryClearService
     {
         if (!CanClear(conversation, isGenerating)) return false;
         conversation.Messages.Clear();
+        for (var index = 0; index < conversation.FileChanges.Count; index++)
+        {
+            var change = conversation.FileChanges[index];
+            if (change.TurnUserMessageIndex is not null)
+                conversation.FileChanges[index] = change with { TurnUserMessageIndex = null };
+        }
+        // Chat history starts a new timeline; current workspace files become its baseline.
+        conversation.FileChangesPrunedThroughMessageIndex = null;
+        conversation.FileChangesPrunedUnlinked = false;
         conversation.Title = "New conversation";
         conversation.Draft = "";
         conversation.LastPromptTokens = 0;
