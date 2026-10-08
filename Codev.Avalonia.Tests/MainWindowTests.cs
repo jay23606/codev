@@ -211,6 +211,7 @@ public sealed class MainWindowTests
             viewModel = new MainViewModel(root);
             var pinned = Assert.IsType<Conversation>(viewModel.ActiveConversation);
             pinned.Title = "Pinned sidebar fixture";
+            var pinnedConversationId = pinned.Id;
             viewModel.TogglePinCommand.Execute(null);
             viewModel.NewConversationCommand.Execute(null);
             var recent = Assert.IsType<Conversation>(viewModel.ActiveConversation);
@@ -248,6 +249,10 @@ public sealed class MainWindowTests
             reloadedViewModel = new MainViewModel(root);
             Assert.True(reloadedViewModel.PinnedConversationsExpanded);
             Assert.False(reloadedViewModel.RecentConversationsExpanded);
+            var reloadedPinned = Assert.Single(reloadedViewModel.PinnedConversations);
+            Assert.Equal(pinnedConversationId, reloadedPinned.Id);
+            Assert.Equal("Pinned sidebar fixture", reloadedPinned.Title);
+            Assert.Empty(reloadedViewModel.RecentConversations.Where(conversation => conversation.Id == pinnedConversationId));
         }
         finally
         {
