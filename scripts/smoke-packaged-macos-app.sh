@@ -279,13 +279,20 @@ assert_mode_button_state() {
   local automation_id="$1"
   local expected_name="$2"
   local expected_help="$3"
+  local wait_seconds="${4:-0}"
   local state
-  state="$(report_mode_button_state "$automation_id")"
-  if [[ "$state" != *"name=$expected_name,"* || "$state" != *"$expected_help"* || "$state" != *"enabled=true"* ]]; then
-    echo "macOS accessibility state for $automation_id was incomplete: $state" >&2
-    exit 1
-  fi
-  echo "macOS accessibility state passed for $automation_id: $state"
+  local deadline=$((SECONDS + wait_seconds))
+  while true; do
+    state="$(report_mode_button_state "$automation_id")"
+    if [[ "$state" == *"name=$expected_name,"* && "$state" == *"$expected_help"* && "$state" == *"enabled=true"* ]]; then
+      echo "macOS accessibility state passed for $automation_id: $state"
+      return
+    fi
+    if (( SECONDS >= deadline )); then break; fi
+    sleep 0.25
+  done
+  echo "macOS accessibility state for $automation_id was incomplete after ${wait_seconds}s: $state" >&2
+  exit 1
 }
 
 send_mode_shortcut
@@ -338,7 +345,7 @@ assert_mode false false 'Packaged macOS app restored the same conversation in Ch
 # conversation/model discovery completes. Let the window settle before input.
 sleep 2
 assert_mode_button_state PlanModeButton 'Chat mode' 'switches Chat to Plan'
-assert_mode_button_state CodeTaskModeButton 'Enable Code task' 'Enable Code task'
+assert_mode_button_state CodeTaskModeButton 'Enable Code task' 'Enable Code task' 20
 
 # Exercise the complete mode cycle now that the local model is available.
 send_mode_shortcut
