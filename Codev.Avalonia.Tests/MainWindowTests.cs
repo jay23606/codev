@@ -1972,7 +1972,7 @@ public sealed class MainWindowTests
             var editor = await viewModel.GetMcpServerConfigurationEditorStateAsync();
 
             Assert.Equal(malformed, editor.Json);
-            Assert.Contains("Correct the JSON and save", editor.LoadError, StringComparison.Ordinal);
+            Assert.Contains("Correct the JSON or settings and save", editor.LoadError, StringComparison.Ordinal);
             Assert.Equal(malformed, await File.ReadAllTextAsync(configPath));
 
             await viewModel.SaveMcpServerConfigurationsAsync([
@@ -1991,6 +1991,23 @@ public sealed class MainWindowTests
 
             await StopAndFlushAsync(restarted);
             viewModel = null;
+            const string invalidEntry = "[{\"id\":\"docs\",\"name\":42,\"transport\":\"Http\",\"enabled\":false,\"url\":\"https://example.test/mcp\"}]";
+            await File.WriteAllTextAsync(configPath, invalidEntry);
+            var invalidEntryEditor = new MainViewModel(root);
+            viewModel = invalidEntryEditor;
+
+            var invalidEntryState = await invalidEntryEditor.GetMcpServerConfigurationEditorStateAsync();
+
+            Assert.Equal(invalidEntry, invalidEntryState.Json);
+            Assert.Contains("Correct the JSON or settings and save", invalidEntryState.LoadError, StringComparison.Ordinal);
+            Assert.Equal(invalidEntry, await File.ReadAllTextAsync(configPath));
+            await invalidEntryEditor.SaveMcpServerConfigurationsAsync([
+                new McpServerConfiguration("docs", "Docs", McpServerTransportKind.Http, Enabled: false,
+                    Url: "https://example.test/mcp")
+            ]);
+            await StopAndFlushAsync(invalidEntryEditor);
+            viewModel = null;
+
             const string duplicates = "[{\"id\":\"docs\",\"name\":\"Docs\",\"transport\":\"Http\",\"enabled\":false,\"url\":\"https://example.test/mcp\"},{\"id\":\"DOCS\",\"name\":\"Docs duplicate\",\"transport\":\"Http\",\"enabled\":false,\"url\":\"https://example.test/other\"}]";
             await File.WriteAllTextAsync(configPath, duplicates);
             var duplicateEditor = new MainViewModel(root);

@@ -483,6 +483,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         await _mcpServerConfigurations.LoadAsync(cancellationToken);
     public async Task<(string Json, string? LoadError)> GetMcpServerConfigurationEditorStateAsync(CancellationToken cancellationToken = default)
     {
+        var rawJson = await _mcpServerConfigurations.ReadRawJsonForRepairAsync(cancellationToken);
         var serializerOptions = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
         {
             WriteIndented = true,
@@ -490,7 +491,11 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         };
         try
         {
-            var servers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
+            using var document = System.Text.Json.JsonDocument.Parse(rawJson);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                throw new InvalidDataException("The MCP server configuration must be a JSON array.");
+            var servers = System.Text.Json.JsonSerializer.Deserialize<List<Codev.McpServerConfiguration>>(rawJson, serializerOptions) ?? [];
+            servers = servers.Select(Codev.McpServerConfigurationStore.NormalizeAndValidate).ToList();
             var duplicates = servers.GroupBy(server => server.Id, StringComparer.OrdinalIgnoreCase)
                 .Where(group => group.Count() > 1)
                 .Select(group => group.Key)
@@ -500,10 +505,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 : $"Duplicate MCP server ID(s): {string.Join(", ", duplicates)}. Choose a unique ID for each entry before saving; the original file remains unchanged until a valid save succeeds.";
             return (System.Text.Json.JsonSerializer.Serialize(servers, serializerOptions), duplicateWarning);
         }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or ArgumentException)
         {
-            var rawJson = await _mcpServerConfigurations.ReadRawJsonForRepairAsync(cancellationToken);
-            return (rawJson, $"The saved MCP configuration could not be loaded ({ex.GetType().Name}). Correct the JSON and save; the original file remains unchanged until a valid save succeeds.");
+            return (rawJson, $"The saved MCP configuration could not be loaded ({ex.GetType().Name}). Correct the JSON or settings and save; the original file remains unchanged until a valid save succeeds.");
         }
     }
     public async Task SaveMcpServerConfigurationsAsync(IEnumerable<Codev.McpServerConfiguration> servers, CancellationToken cancellationToken = default)
