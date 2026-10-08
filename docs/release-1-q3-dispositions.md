@@ -8,6 +8,17 @@ Recorded 2026-10-08 against the Release 1 candidate. The numbered rows below ref
 
 These deferrals do not waive the Q5 release gates for data loss, unauthorized actions, startup failures, or false success. Existing focused tests and hosted package checks remain required CI gates; any failure in those safety invariants blocks Release 1. Release notes must identify native-platform and accessibility checks that remain unverified.
 
+## Non-waivable release-gate evidence
+
+The exact candidate CI and four-target package preview passed at PR head `513326c` ([CI run](https://github.com/jay23606/codev/actions/runs/37738265379), [package preview](https://github.com/jay23606/codev/actions/runs/37738265382)). Their full portable and Avalonia suites include regressions for the safety invariants below. These tests are evidence for the guards; they do not count as completing the broader UI smoke rows.
+
+- **Unauthorized command execution:** `ProjectCommandApprovalPolicyTests.Auto_approves_even_protected_compound_commands_without_requesting_approval`, `ProjectCommandApprovalPolicyTests.Exact_deny_blocks_auto_without_requesting_approval`, `CodeTaskToolExecutorTests.Exact_deny_blocks_destructive_command_in_auto_before_execution_or_approval`, `CodeTaskToolExecutorTests.Command_copied_from_project_text_is_flagged_before_approval_and_rejection_runs_nothing`, and `MainWindowTests.Inline_command_review_attributes_an_equivalent_untrusted_command_and_denial_runs_nothing`. The Auto tests verify the selected mode runs without a modal, while exact Deny and explicit Ask denial stop execution.
+- **Data loss and stale review:** `GitRepositoryServiceTests.Bulk_revert_discards_all_reviewed_unstaged_files_and_preserves_staged_changes`, `GitRepositoryServiceTests.Bulk_revert_refuses_a_stale_preview_before_changing_any_file`, `GitRepositoryServiceTests.Can_stage_unstage_and_revert_one_hunk_without_touching_other_hunks`, `WorkspaceFileServiceTests.Refuses_to_overwrite_a_file_changed_after_its_review_snapshot`, `ConversationCodeRewindServiceTests.Plan_fails_closed_when_current_file_no_longer_matches_Codev_history`, and `ConversationCodeRewindServiceTests.Apply_rolls_back_earlier_files_if_a_later_file_changed_after_review`.
+- **False success:** `OllamaCodeTaskRunnerTests.Corrects_tool_output_mimic_before_publishing_a_real_tool_result`, `OllamaCodeTaskRunnerTests.Suppresses_repeated_tool_output_mimic_when_no_tool_is_executed`, `OpenAiCodeTaskRunnerTests.Rejects_tool_output_mimic_before_publishing_a_real_function_result`, and `CodeTaskToolExecutorTests.Rejected_verification_does_not_execute_or_claim_a_result`.
+- **Startup and package launch:** the exact-head preview launches the packaged Avalonia app on Windows, Linux/Xvfb, macOS Apple silicon, and macOS Intel; all four target jobs passed. This hosted smoke does not establish a clean-machine installation or native assistive-technology support.
+
+Keep the full end-to-end data-loss, permission, and hostile-input workflows in their deferred rows. If any listed regression or exact-head platform launch fails, stop the release even if the manual row has a deferral.
+
 | Checklist row | Release 1 disposition | Remaining evidence needed |
 | --- | --- | --- |
 | R1-Q3-01 | Defer to R2 | Native Linux/macOS keyboard access and persisted compact-header options. |
