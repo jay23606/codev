@@ -153,6 +153,7 @@ if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
 fi
 xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+f
+python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
 xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
 if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
