@@ -94,7 +94,7 @@ start_orca() {
 assert_orca_focus_event() {
   local expected_text="$1"
   for _ in {1..120}; do
-    if rg --hidden --fixed-strings "OBJECT EVENT: object:state-changed:focused for [entry: '$expected_text']" "$smoke_root/orca-debug.log" >/dev/null 2>&1; then
+    if grep --fixed-strings --quiet -- "OBJECT EVENT: object:state-changed:focused for [entry: '$expected_text']" "$smoke_root/orca-debug.log"; then
       echo "Orca processed the AT-SPI focus event for: $expected_text (spoken wording is not asserted)"
       return
     fi
