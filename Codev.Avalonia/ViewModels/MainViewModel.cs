@@ -479,8 +479,46 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public string UserSkillsFolder => UserSkillsPath;
     private static IReadOnlyList<string> CompatibleUserSkillFolders => Codev.ProjectSkillCatalog.GetCompatibleUserSkillDirectories();
     public string UserAgentProfilesFolder => UserAgentProfilesPath;
+    public string McpServerSettingsPath => McpServerConfigurationPath;
     public async Task<IReadOnlyList<Codev.McpServerConfiguration>> GetMcpServerConfigurationsAsync(CancellationToken cancellationToken = default) =>
         await _mcpServerConfigurations.LoadAsync(cancellationToken);
+    public async Task<(string Json, string? LoadError)> GetMcpServerConfigurationEditorStateAsync(CancellationToken cancellationToken = default)
+    {
+        string rawJson;
+        try
+        {
+            rawJson = await _mcpServerConfigurations.ReadRawJsonForRepairAsync(cancellationToken);
+        }
+        catch (InvalidDataException)
+        {
+            return ("[]", $"The saved MCP configuration is larger than the {Codev.McpServerConfigurationStore.MaxFileBytes / 1024 / 1024} MiB editor limit and was not loaded. An empty replacement is shown; the original file remains unchanged until you save a valid configuration.");
+        }
+        var serializerOptions = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true,
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+        };
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(rawJson);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                throw new InvalidDataException("The MCP server configuration must be a JSON array.");
+            var servers = System.Text.Json.JsonSerializer.Deserialize<List<Codev.McpServerConfiguration>>(rawJson, serializerOptions) ?? [];
+            servers = servers.Select(Codev.McpServerConfigurationStore.NormalizeAndValidate).ToList();
+            var duplicates = servers.GroupBy(server => server.Id, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .ToArray();
+            var duplicateWarning = duplicates.Length == 0
+                ? null
+                : $"Duplicate MCP server ID(s): {string.Join(", ", duplicates)}. Choose a unique ID for each entry before saving; the original file remains unchanged until a valid save succeeds.";
+            return (System.Text.Json.JsonSerializer.Serialize(servers, serializerOptions), duplicateWarning);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or ArgumentException)
+        {
+            return (rawJson, $"The saved MCP configuration could not be loaded ({ex.GetType().Name}). Correct the JSON or settings and save; the original file remains unchanged until a valid save succeeds.");
+        }
+    }
     public async Task SaveMcpServerConfigurationsAsync(IEnumerable<Codev.McpServerConfiguration> servers, CancellationToken cancellationToken = default)
     {
         var serverList = servers.ToArray();
