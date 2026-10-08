@@ -1504,8 +1504,9 @@ public static class CodevCommonDialog
 
     public static void ClickAt(int x, int y)
     {
-        if (!SetCursorPos(x, y)) throw new InvalidOperationException("Could not focus the native filename field.");
+        if (!SetCursorPos(x, y)) throw new InvalidOperationException("Could not move the pointer to the requested screen position.");
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(60);
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
     }
 
