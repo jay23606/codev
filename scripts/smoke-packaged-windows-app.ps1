@@ -165,7 +165,24 @@ function Test-NewConversationShortcut($Window, [string]$DataRoot) {
             'Message Codev'))
     $composer = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $composerCondition)
     if ($null -eq $composer) { throw 'The named composer is missing for the Ctrl+N check.' }
+    if (-not [CodevCommonDialog]::ActivateWindow([IntPtr]$Window.Current.NativeWindowHandle)) {
+        throw 'Could not activate the packaged app before sending Ctrl+N.'
+    }
     $composer.SetFocus()
+    $focusDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    $focused = $null
+    do {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($composer.Current.HasKeyboardFocus -and $null -ne $focused -and
+            $focused.Current.ProcessId -eq $Window.Current.ProcessId) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $focusDeadline)
+    if (-not $composer.Current.HasKeyboardFocus -or $null -eq $focused -or
+        $focused.Current.ProcessId -ne $Window.Current.ProcessId) {
+        $focusName = if ($null -eq $focused) { '<none>' } else { $focused.Current.Name }
+        $focusProcessId = if ($null -eq $focused) { 0 } else { $focused.Current.ProcessId }
+        throw "The composer did not have keyboard focus in the Codev process before Ctrl+N (focused='$focusName', process=$focusProcessId)."
+    }
     [System.Windows.Forms.SendKeys]::SendWait('^n')
     $newConversationDeadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
