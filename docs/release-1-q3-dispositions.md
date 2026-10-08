@@ -80,7 +80,7 @@ Keep the full end-to-end data-loss, permission, and hostile-input workflows in t
 | R1-Q3-57 | Defer to R2 | Real model completing all requested action types and web-search/imported-transcript checks; grouped activity display has packaged and UI-test evidence. |
 | R1-Q3-58 | Defer to R2 | Full `/review-last-turn` scope, stale-history, and unchanged-project-state workflow. |
 | R1-Q3-59 | Defer to R2 | Packaged SSE fallback, HTTP OAuth UI, and native macOS/Linux checks; stdio and Streamable HTTP packaged calls have evidence. |
-| R1-Q3-60 | Defer to R2 | Packaged UI readability of tool, prompt, resource, and template activity details; protocol behavior has Core-test evidence. |
+| R1-Q3-60 | Defer to R2 | A headless Avalonia UI regression now covers collapsed summaries and expanded accessible details for MCP tools, prompts, resources, and resource templates. Still needed: packaged interaction and native macOS/Linux readability verification. |
 | R1-Q3-61 | Defer to R2 | Packaged prompt/resource/template denial and native macOS/Linux UI checks; executor, headless, and packaged stdio-tool safety cases have evidence. |
 | R1-Q3-62 | Defer to R2 | Packaged interaction and native screen-reader checks for disabled/invalid/unavailable MCP servers; Core and headless diagnostics have evidence. |
 | R1-Q3-63 | Defer to R2 | Complete browser OAuth and restart/forget-token workflow with test server; credential absence from persisted and diagnostic surfaces. |
