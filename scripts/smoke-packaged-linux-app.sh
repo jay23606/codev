@@ -103,6 +103,7 @@ assert_orca_announcement() {
   echo "Orca did not send the expected focus announcement to Speech Dispatcher: $expected_text" >&2
   find "$speech_log_dir" -maxdepth 2 -type f -print -exec tail -n 60 {} \; >&2 || true
   cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+  tail -n 160 "$smoke_root/orca-debug.log" >&2 || true
   exit 1
 }
 
