@@ -2203,10 +2203,12 @@ public static class CodevCommonDialog
         throw 'The Auto instruction-risk create-file row disappeared before its details could be expanded.'
     }
     $activityRowTogglePattern = $null
+    $activityRowToggleState = 'unavailable'
     if ($createdActivityRow.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$activityRowTogglePattern)) {
         if ($activityRowTogglePattern.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
             $activityRowTogglePattern.Toggle()
         }
+        $activityRowToggleState = [string]$activityRowTogglePattern.Current.ToggleState
     }
     else {
         $activityRowInvokePattern = $null
@@ -2236,7 +2238,18 @@ public static class CodevCommonDialog
     if (-not ($expandedActivityDetails | Where-Object {
         $_.Contains('Advisory: the proposed file content matched instruction-risk patterns', [StringComparison]::Ordinal)
     })) {
-        throw "The expanded Auto activity details did not expose the instruction-risk advisory as readable output (detailCount=$($expandedActivityDetails.Count), names=$($expandedActivityDetails | ForEach-Object { $_.Substring(0, [Math]::Min(260, $_.Length)) } | ConvertTo-Json -Compress))."
+        $activityOutputDiagnostics = @()
+        try {
+            $activityOutputDiagnostics = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+                    $current = $_.Current
+                    if ($current.Name -match 'Advisory|instruction-risk|ACTIVITY_SOURCE_MARKER|Created file|ToolOutput') {
+                        "name='$($current.Name)' id='$($current.AutomationId)' type='$($current.ControlType.ProgrammaticName)' offscreen=$($current.IsOffscreen)"
+                    }
+                } | Where-Object { $_ } | Select-Object -First 30)
+        }
+        catch { $activityOutputDiagnostics = @("UIA subtree unavailable ($($_.Exception.GetType().Name))") }
+        throw "The expanded Auto activity details did not expose the instruction-risk advisory as readable output (detailCount=$($expandedActivityDetails.Count), rowToggleState=$activityRowToggleState, names=$($expandedActivityDetails | ForEach-Object { $_.Substring(0, [Math]::Min(260, $_.Length)) } | ConvertTo-Json -Compress), related UI elements=$($activityOutputDiagnostics -join ' | '))."
     }
     Write-Host 'Packaged Windows Auto applied the instruction-risk file proposal without review, recorded file history, and exposed its advisory in the expanded activity output alongside read/search/create/Cargo verification rows.'
 
