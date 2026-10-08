@@ -1037,38 +1037,27 @@ public partial class MainWindow : Window
     private async void McpServers_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainViewModel viewModel) return;
-        IReadOnlyList<Codev.McpServerConfiguration> servers;
-        try { servers = await viewModel.GetMcpServerConfigurationsAsync(); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException)
+        string editorText;
+        string? loadStatus = null;
+        try
         {
-            var warning = new Window
-            {
-                Title = "MCP configuration unavailable", Width = 440, SizeToContent = SizeToContent.Height,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
-                {
-                    new TextBlock { Text = $"Codev could not load the MCP server file ({ex.GetType().Name}). The file was left unchanged.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
-                    new Button { Content = "Close", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right }
-                } }
-            };
-            ((Button)((StackPanel)warning.Content!).Children[1]).Click += (_, _) => warning.Close();
-            await warning.ShowDialog(this);
+            (editorText, loadStatus) = await viewModel.GetMcpServerConfigurationEditorStateAsync();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            await ShowMcpConfigurationUnavailableAsync(ex);
             return;
         }
         var editor = new TextBox
         {
-            Text = System.Text.Json.JsonSerializer.Serialize(servers, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
-            {
-                WriteIndented = true,
-                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
-            }),
+            Text = editorText,
             AcceptsReturn = true, TextWrapping = global::Avalonia.Media.TextWrapping.NoWrap,
             FontFamily = new global::Avalonia.Media.FontFamily("Cascadia Code"), FontSize = 12,
             MinHeight = 320, MaxHeight = 540, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Stretch,
             Foreground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#F2F2F2")),
             Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#171717"))
         };
-        var status = new TextBlock { TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        var status = new TextBlock { Text = loadStatus ?? string.Empty, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
         var close = new Button { Content = "Close", Classes = { "soft" } };
         var save = new Button { Content = "Save servers", Classes = { "soft" } };
         var forgetSignIns = new Button { Content = "Forget saved OAuth sign-ins", Classes = { "soft" } };
@@ -1123,6 +1112,22 @@ public partial class MainWindow : Window
             }
         };
         await dialog.ShowDialog(this);
+    }
+
+    private async Task ShowMcpConfigurationUnavailableAsync(Exception ex)
+    {
+        var warning = new Window
+        {
+            Title = "MCP configuration unavailable", Width = 440, SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children =
+            {
+                new TextBlock { Text = $"Codev could not open the MCP server file ({ex.GetType().Name}). The file was left unchanged.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap },
+                new Button { Content = "Close", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right }
+            } }
+        };
+        ((Button)((StackPanel)warning.Content!).Children[1]).Click += (_, _) => warning.Close();
+        await warning.ShowDialog(this);
     }
 
     private void ReadingWidth_Click(object? sender, RoutedEventArgs e)

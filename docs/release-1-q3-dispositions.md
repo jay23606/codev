@@ -85,4 +85,4 @@ Keep the full end-to-end data-loss, permission, and hostile-input workflows in t
 | R1-Q3-62 | Defer to R2 | Packaged interaction and native screen-reader checks for disabled/invalid/unavailable MCP servers; Core and headless diagnostics have evidence. |
 | R1-Q3-63 | Defer to R2 | Complete browser OAuth and restart/forget-token workflow with test server; credential absence from persisted and diagnostic surfaces. |
 | R1-Q3-64 | Defer to R2 | Slow/canceled/oversized MCP operation and shutdown bounds while proving the app remains responsive. |
-| R1-Q3-65 | Defer to R2 | Restart and malformed/duplicate settings recovery while preserving unreadable source JSON. |
+| R1-Q3-65 | Defer to R2 | A headless recovery test now preserves malformed JSON until valid settings are saved and confirms reload through a fresh view model. Still needed: duplicate-entry correction in the editor, packaged/native recovery interaction, and unreadable-file handling. |

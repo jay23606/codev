@@ -1955,6 +1955,47 @@ public sealed class MainWindowTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Malformed_mcp_settings_can_be_repaired_without_overwriting_the_source_before_save()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", "mcp-settings-recovery", Guid.NewGuid().ToString("N"));
+        var configDirectory = Path.Combine(root, "Codev");
+        var configPath = Path.Combine(configDirectory, "mcp-servers.json");
+        const string malformed = "[{\"id\": \"docs\", broken";
+        MainViewModel? viewModel = null;
+        try
+        {
+            Directory.CreateDirectory(configDirectory);
+            await File.WriteAllTextAsync(configPath, malformed);
+            viewModel = new MainViewModel(root);
+
+            var editor = await viewModel.GetMcpServerConfigurationEditorStateAsync();
+
+            Assert.Equal(malformed, editor.Json);
+            Assert.Contains("Correct the JSON and save", editor.LoadError, StringComparison.Ordinal);
+            Assert.Equal(malformed, await File.ReadAllTextAsync(configPath));
+
+            await viewModel.SaveMcpServerConfigurationsAsync([
+                new McpServerConfiguration("docs", "Docs", McpServerTransportKind.Http, Enabled: false,
+                    Url: "https://example.test/mcp")
+            ]);
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            var restarted = new MainViewModel(root);
+            viewModel = restarted;
+            var reloaded = await restarted.GetMcpServerConfigurationEditorStateAsync();
+            Assert.Null(reloaded.LoadError);
+            using var document = JsonDocument.Parse(reloaded.Json);
+            Assert.Equal("docs", document.RootElement[0].GetProperty("id").GetString());
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
     private static async Task StopAndFlushAsync(MainViewModel viewModel)
     {
         var startup = typeof(MainViewModel).GetField("_managedWorkspacePermissionDefaultsTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task;

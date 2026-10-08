@@ -481,6 +481,24 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public string UserAgentProfilesFolder => UserAgentProfilesPath;
     public async Task<IReadOnlyList<Codev.McpServerConfiguration>> GetMcpServerConfigurationsAsync(CancellationToken cancellationToken = default) =>
         await _mcpServerConfigurations.LoadAsync(cancellationToken);
+    public async Task<(string Json, string? LoadError)> GetMcpServerConfigurationEditorStateAsync(CancellationToken cancellationToken = default)
+    {
+        var serializerOptions = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true,
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+        };
+        try
+        {
+            var servers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
+            return (System.Text.Json.JsonSerializer.Serialize(servers, serializerOptions), null);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException)
+        {
+            var rawJson = await _mcpServerConfigurations.ReadRawJsonForRepairAsync(cancellationToken);
+            return (rawJson, $"The saved MCP configuration could not be loaded ({ex.GetType().Name}). Correct the JSON and save; the original file remains unchanged until a valid save succeeds.");
+        }
+    }
     public async Task SaveMcpServerConfigurationsAsync(IEnumerable<Codev.McpServerConfiguration> servers, CancellationToken cancellationToken = default)
     {
         var serverList = servers.ToArray();
