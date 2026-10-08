@@ -1956,7 +1956,7 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public async Task Malformed_mcp_settings_can_be_repaired_without_overwriting_the_source_before_save()
+    public async Task Mcp_settings_recover_from_malformed_json_and_duplicate_ids_without_overwriting_the_source()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", "mcp-settings-recovery", Guid.NewGuid().ToString("N"));
         var configDirectory = Path.Combine(root, "Codev");
@@ -1988,6 +1988,37 @@ public sealed class MainWindowTests
             Assert.Null(reloaded.LoadError);
             using var document = JsonDocument.Parse(reloaded.Json);
             Assert.Equal("docs", document.RootElement[0].GetProperty("id").GetString());
+
+            await StopAndFlushAsync(restarted);
+            viewModel = null;
+            const string duplicates = "[{\"id\":\"docs\",\"name\":\"Docs\",\"transport\":\"Http\",\"enabled\":false,\"url\":\"https://example.test/mcp\"},{\"id\":\"DOCS\",\"name\":\"Docs duplicate\",\"transport\":\"Http\",\"enabled\":false,\"url\":\"https://example.test/other\"}]";
+            await File.WriteAllTextAsync(configPath, duplicates);
+            var duplicateEditor = new MainViewModel(root);
+            viewModel = duplicateEditor;
+
+            var duplicateState = await duplicateEditor.GetMcpServerConfigurationEditorStateAsync();
+
+            Assert.Equal(duplicates, await File.ReadAllTextAsync(configPath));
+            Assert.Contains("Duplicate MCP server ID(s): docs", duplicateState.LoadError, StringComparison.Ordinal);
+            Assert.Contains("Docs duplicate", duplicateState.Json, StringComparison.Ordinal);
+            await Assert.ThrowsAsync<InvalidDataException>(() => duplicateEditor.SaveMcpServerConfigurationsAsync([
+                new McpServerConfiguration("docs", "Docs", McpServerTransportKind.Http, Enabled: false,
+                    Url: "https://example.test/mcp"),
+                new McpServerConfiguration("DOCS", "Docs duplicate", McpServerTransportKind.Http, Enabled: false,
+                    Url: "https://example.test/other")
+            ]));
+            Assert.Equal(duplicates, await File.ReadAllTextAsync(configPath));
+
+            await duplicateEditor.SaveMcpServerConfigurationsAsync([
+                new McpServerConfiguration("docs", "Docs", McpServerTransportKind.Http, Enabled: false,
+                    Url: "https://example.test/mcp")
+            ]);
+            await StopAndFlushAsync(duplicateEditor);
+            viewModel = new MainViewModel(root);
+            var afterDuplicateRepair = await viewModel.GetMcpServerConfigurationEditorStateAsync();
+            Assert.Null(afterDuplicateRepair.LoadError);
+            using var repairedDocument = JsonDocument.Parse(afterDuplicateRepair.Json);
+            Assert.Equal(1, repairedDocument.RootElement.GetArrayLength());
         }
         finally
         {

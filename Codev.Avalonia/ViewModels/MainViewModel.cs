@@ -491,7 +491,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         try
         {
             var servers = await _mcpServerConfigurations.LoadAsync(cancellationToken);
-            return (System.Text.Json.JsonSerializer.Serialize(servers, serializerOptions), null);
+            var duplicates = servers.GroupBy(server => server.Id, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .ToArray();
+            var duplicateWarning = duplicates.Length == 0
+                ? null
+                : $"Duplicate MCP server ID(s): {string.Join(", ", duplicates)}. Choose a unique ID for each entry before saving; the original file remains unchanged until a valid save succeeds.";
+            return (System.Text.Json.JsonSerializer.Serialize(servers, serializerOptions), duplicateWarning);
         }
         catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException)
         {
