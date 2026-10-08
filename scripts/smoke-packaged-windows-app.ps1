@@ -267,7 +267,7 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
     throw 'Selecting Smoke QA in the packaged primary-agent picker did not persist to the active conversation.'
 }
 
-function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string]$ExpectedRepairJson) {
+function Open-McpSettingsEditorInPackagedApp($Window) {
     $mcpButton = Find-ByAutomationId $Window 'McpServersButton'
     if ($null -eq $mcpButton) { throw 'The MCP servers settings button is missing.' }
     $invoke = $null
@@ -278,20 +278,57 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
 
     $dialog = Wait-ForTopLevelWindow 'MCP servers' 10
     if ($null -eq $dialog) { throw 'The MCP servers editor did not open.' }
+    return $dialog
+}
+
+function Get-McpSettingsEditorAndStatus($Dialog) {
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Edit)
-    $editor = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
+    $editor = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
     if ($null -eq $editor) { throw 'The MCP servers editor did not expose its JSON field.' }
     $editorValue = $null
     if (-not $editor.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$editorValue)) {
         throw 'The MCP servers JSON field does not expose its value to UI Automation.'
     }
+    $status = Find-ByAutomationId $Dialog 'McpConfigurationStatus'
+    if ($null -eq $status) { throw 'The MCP settings editor did not expose its recovery status.' }
+    return @{ Editor = $editorValue; Status = $status }
+}
+
+function Save-McpSettingsEditorInPackagedApp($Dialog, $Editor, [string]$Json) {
+    $Editor.SetValue($Json)
+    $saveCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Save servers'))
+    $saveButton = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $saveCondition)
+    $saveInvoke = $null
+    if ($null -eq $saveButton -or -not $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
+        throw 'The MCP editor Save servers button is missing or cannot be activated.'
+    }
+    $saveInvoke.Invoke()
+    $closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $currentDialog = Wait-ForTopLevelWindow 'MCP servers' 1
+        if ($null -eq $currentDialog) { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $closeDeadline)
+    throw 'Saving valid MCP server settings did not close the editor.'
+}
+
+function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string]$ExpectedRepairJson) {
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    $editorValue = $controls.Editor
+    $status = $controls.Status
     $configurationText = [string]$editorValue.Current.Value
     if (-not $configurationText.Contains('{"id":"broken"', [StringComparison]::Ordinal)) {
         throw "The MCP servers editor did not expose the malformed source JSON for repair: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
     }
-    $status = Find-ByAutomationId $dialog 'McpConfigurationStatus'
     if ($null -eq $status -or -not $status.Current.Name.Contains('Correct the JSON or settings and save', [StringComparison]::Ordinal)) {
         throw 'The MCP settings editor did not explain how to repair the malformed file.'
     }
@@ -308,26 +345,7 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
         throw 'The MCP settings editor did not accept the corrected isolated fixture configuration.'
     }
 
-    $saveCondition = [System.Windows.Automation.AndCondition]::new(
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::Button),
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::NameProperty,
-            'Save servers'))
-    $saveButton = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $saveCondition)
-    $saveInvoke = $null
-    if ($null -eq $saveButton -or -not $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
-        throw 'The MCP editor Save servers button is missing or cannot be activated.'
-    }
-    $saveInvoke.Invoke()
-    $closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
-    do {
-        $dialog = Wait-ForTopLevelWindow 'MCP servers' 1
-        if ($null -eq $dialog) { break }
-        Start-Sleep -Milliseconds 100
-    } while ([DateTime]::UtcNow -lt $closeDeadline)
-    if ($null -ne $dialog) { throw 'Saving the MCP server settings did not close the editor.' }
+    Save-McpSettingsEditorInPackagedApp $dialog $editorValue $ExpectedRepairJson
 
     $savedConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
     try {
@@ -347,7 +365,64 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
         }
     }
     finally { $savedConfiguration.Dispose() }
-    Write-Host 'Packaged Windows MCP settings editor preserved malformed source JSON until valid stdio and loopback HTTP settings were saved.'
+
+    $invalidEntry = '[{"id":"broken","name":42,"transport":"Http","enabled":false,"url":"https://example.test/mcp"}]'
+    [System.IO.File]::WriteAllText($configurationPath, $invalidEntry, [System.Text.UTF8Encoding]::new($false))
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    if ([string]$controls.Editor.Current.Value -ne $invalidEntry -or
+        -not $controls.Status.Current.Name.Contains('Correct the JSON or settings and save', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not preserve an invalidly typed server entry for repair.'
+    }
+    if ([System.IO.File]::ReadAllText($configurationPath) -ne $invalidEntry) {
+        throw 'Opening invalidly typed MCP settings changed the source file before a valid save.'
+    }
+    Save-McpSettingsEditorInPackagedApp $dialog $controls.Editor $ExpectedRepairJson
+
+    $duplicates = '[{"id":"docs","name":"Docs","transport":"Http","enabled":false,"url":"https://example.test/mcp"},{"id":"DOCS","name":"Docs duplicate","transport":"Http","enabled":false,"url":"https://example.test/other"}]'
+    [System.IO.File]::WriteAllText($configurationPath, $duplicates, [System.Text.UTF8Encoding]::new($false))
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    $configurationText = [string]$controls.Editor.Current.Value
+    if (-not $configurationText.Contains('Docs duplicate', [StringComparison]::Ordinal) -or
+        -not $controls.Status.Current.Name.Contains('Duplicate MCP server ID(s)', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not identify duplicate server IDs and preserve both entries.'
+    }
+    $saveInvoke = $null
+    $duplicateSave = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Save servers')))
+    if ($null -eq $duplicateSave -or -not $duplicateSave.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
+        throw 'The MCP editor Save servers button is missing for duplicate-ID validation.'
+    }
+    $saveInvoke.Invoke()
+    $errorDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $duplicateDialog = Wait-ForTopLevelWindow 'MCP servers' 1
+        if ($null -eq $duplicateDialog) { break }
+        $duplicateStatus = Find-ByAutomationId $duplicateDialog 'McpConfigurationStatus'
+        if ($null -ne $duplicateStatus -and $duplicateStatus.Current.Name.Contains('Could not save MCP servers', [StringComparison]::Ordinal)) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $errorDeadline)
+    if ([System.IO.File]::ReadAllText($configurationPath) -ne $duplicates) {
+        throw 'Attempting to save duplicate MCP IDs changed the source file.'
+    }
+    if ($null -eq $duplicateStatus -or -not $duplicateStatus.Current.Name.Contains('Could not save MCP servers', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not explain that duplicate IDs must be repaired before saving.'
+    }
+    $dialog = Wait-ForTopLevelWindow 'MCP servers' 1
+    if ($null -eq $dialog) { throw 'The MCP settings editor closed after rejecting duplicate IDs.' }
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    Save-McpSettingsEditorInPackagedApp $dialog $controls.Editor $ExpectedRepairJson
+    $finalConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
+    try {
+        if ($finalConfiguration.RootElement.GetArrayLength() -ne 2) {
+            throw 'Repairing duplicate MCP IDs did not save the valid replacement settings.'
+        }
+    }
+    finally { $finalConfiguration.Dispose() }
+    Write-Host 'Packaged Windows MCP settings editor recovered malformed JSON, invalidly typed entries, and duplicate IDs without replacing the source before a valid save.'
 }
 
 function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
