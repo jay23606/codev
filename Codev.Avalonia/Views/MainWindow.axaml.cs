@@ -4174,7 +4174,7 @@ public partial class MainWindow : Window
         else if (primaryModifier && e.Key == Key.N)
             viewModel.NewConversationCommand.Execute(null);
         else if (primaryModifier && e.Key == Key.F)
-            SearchTextBox.Focus();
+            SearchTextBox.Focus(NavigationMethod.Tab, e.KeyModifiers);
         else if (primaryModifier && e.Key == Key.L)
             ComposerTextBox.Focus();
         else if (e.Key == Key.Escape && viewModel.IsConversationFindOpen)
