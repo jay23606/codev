@@ -2460,6 +2460,64 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Multiple_mcp_action_types_expand_to_named_readable_untrusted_results()
+    {
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var toolBody = "Created issue #42.";
+            var promptBody = "Review the release notes and summarize risks.";
+            var resourceBody = "Release notes for 2.0.";
+            var templateBody = "Issue 42: update dependencies.";
+            var transcript = "The MCP review is complete.\n" +
+                "**mcp_tool**\n" + UntrustedToolOutput.Format("MCP tool output", toolBody, command: "GitHub/create_issue", activity: "mcp_tool") + "\n" +
+                "**mcp_prompt**\n" + UntrustedToolOutput.Format("MCP prompt output", promptBody, command: "GitHub/release_review", activity: "mcp_prompt") + "\n" +
+                "**mcp_resource**\n" + UntrustedToolOutput.Format("MCP resource output", resourceBody, command: "GitHub/release-notes", activity: "mcp_resource") + "\n" +
+                "**mcp_resource_template**\n" + UntrustedToolOutput.Format("MCP resource template output", templateBody, command: "GitHub/issue/{id}", activity: "mcp_resource_template");
+            var message = new ChatMessage("assistant", transcript) { IsCodeTaskTurn = true };
+            var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
+            messages.ItemsSource = new[] { message };
+            window.UpdateLayout();
+
+            var group = Assert.Single(window.GetVisualDescendants().OfType<Expander>(),
+                expander => expander.Header?.ToString() == "Used MCP tools, used MCP prompts, read MCP resources, read MCP resource templates");
+            Assert.False(group.IsExpanded);
+            Assert.Equal("The MCP review is complete.", message.DisplayContent);
+
+            group.IsExpanded = true;
+            window.UpdateLayout();
+            var outputList = Assert.IsType<ItemsControl>(group.Content);
+            var rows = outputList.GetVisualDescendants().OfType<ToggleButton>().ToArray();
+            Assert.Equal(4, rows.Length);
+            Assert.Equal(new[]
+            {
+                "Used MCP tool · GitHub/create_issue",
+                "Used MCP prompt · GitHub/release_review",
+                "Read MCP resource · GitHub/release-notes",
+                "Read MCP resource template · GitHub/issue/{id}"
+            }, outputList.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text).Where(text => text is not null &&
+                (text.StartsWith("Used MCP", StringComparison.Ordinal) || text.StartsWith("Read MCP", StringComparison.Ordinal))));
+
+            var expectedBodies = new[] { toolBody, promptBody, resourceBody, templateBody };
+            for (var index = 0; index < rows.Length; index++)
+            {
+                rows[index].IsChecked = true;
+                window.UpdateLayout();
+                var output = Assert.Single(outputList.GetVisualDescendants().OfType<TextBox>(),
+                    text => text.Text?.Contains(expectedBodies[index], StringComparison.Ordinal) == true);
+                Assert.Equal("ToolOutputContent", AutomationProperties.GetAutomationId(output));
+                Assert.Equal(output.Text, AutomationProperties.GetName(output));
+                Assert.DoesNotContain("untrusted_tool_output", output.Text, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Multiple_mcp_connection_diagnostics_start_collapsed_and_expand_with_server_names_and_status()
     {
         var transcript = "**MCP connection**\n" + UntrustedToolOutput.Format("Disabled server", "Disabled server: disabled.", activity: "mcp_connection") + "\n" +
