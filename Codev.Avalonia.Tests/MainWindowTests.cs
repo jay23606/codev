@@ -212,14 +212,22 @@ public sealed class MainWindowTests
             var pinned = Assert.IsType<Conversation>(viewModel.ActiveConversation);
             pinned.Title = "Pinned sidebar fixture";
             var pinnedConversationId = pinned.Id;
-            viewModel.TogglePinCommand.Execute(null);
-            viewModel.NewConversationCommand.Execute(null);
-            var recent = Assert.IsType<Conversation>(viewModel.ActiveConversation);
-            recent.Title = "Recent sidebar fixture";
 
             window = new MainWindow { DataContext = viewModel };
             window.Show();
             window.UpdateLayout();
+
+            var moreButton = Assert.IsType<Button>(window.FindControl<Button>("MoreButton"));
+            var moreMenu = Assert.IsType<MenuFlyout>(moreButton.Flyout);
+            moreMenu.ShowAt(moreButton);
+            var pinItem = Assert.Single(moreMenu.Items.OfType<MenuItem>(), item => item.Header?.ToString() == "☆  Pin");
+            await Dispatcher.UIThread.InvokeAsync(() => pinItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)));
+            Assert.True(pinned.IsPinned);
+            Assert.Equal("★  Pinned", viewModel.PinLabel);
+
+            viewModel.NewConversationCommand.Execute(null);
+            var recent = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            recent.Title = "Recent sidebar fixture";
 
             var pinnedToggle = Assert.IsType<Button>(window.FindControl<Button>("PinnedConversationsToggleButton"));
             var pinnedList = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("PinnedConversationsList"));
