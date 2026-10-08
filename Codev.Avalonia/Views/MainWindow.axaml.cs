@@ -4123,8 +4123,11 @@ public partial class MainWindow : Window
             match.MessageIndex < 0 || match.MessageIndex >= viewModel.Messages.Count) return;
 
         _followOutput = false;
-        MessageList.ScrollIntoView(match.MessageIndex);
         viewModel.CloseConversationFind();
+        var approximateOffset = ConversationScrollViewer.Extent.Height * match.MessageIndex / Math.Max(1, viewModel.Messages.Count);
+        ConversationScrollViewer.Offset = new global::Avalonia.Vector(ConversationScrollViewer.Offset.X, approximateOffset);
+        ConversationScrollViewer.UpdateLayout();
+        MessageList.ScrollIntoView(match.MessageIndex);
     }
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)

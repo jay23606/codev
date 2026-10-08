@@ -656,9 +656,10 @@ public sealed class MainWindowTests
         {
             for (var index = 0; index < 96; index++)
             {
+                var bodyLength = index < 5 ? 2200 : index % 11 == 0 ? 1100 : 420;
                 var content = index == 5
-                    ? $"An earlier note contains the needle to find. {new string('x', 420)}"
-                    : $"Transcript message {index}. {new string('x', 420)}";
+                    ? $"An earlier note contains the needle to find. {new string('x', bodyLength)}"
+                    : $"Transcript message {index}. {new string('x', bodyLength)}";
                 viewModel.Messages.Add(new ChatMessage(index % 2 == 0 ? "user" : "assistant", content));
             }
 
@@ -695,7 +696,8 @@ public sealed class MainWindowTests
             Assert.False(viewModel.IsConversationFindOpen);
             var messagePanel = Assert.Single(window.FindControl<ItemsControl>("MessageList")!
                 .GetVisualDescendants().OfType<VirtualizingStackPanel>());
-            Assert.InRange(5, messagePanel.FirstRealizedIndex, messagePanel.LastRealizedIndex);
+            Assert.True(5 >= messagePanel.FirstRealizedIndex && 5 <= messagePanel.LastRealizedIndex,
+                $"Target was not realized: range={messagePanel.FirstRealizedIndex}-{messagePanel.LastRealizedIndex}, visible={messagePanel.IsVisible}, bounds={messagePanel.Bounds}, children={messagePanel.Children.Count}, offset={scrollViewer.Offset.Y}, extent={scrollViewer.Extent.Height}, viewport={scrollViewer.Viewport.Height}");
             Assert.True(scrollViewer.Offset.Y < scrollViewer.Extent.Height - scrollViewer.Viewport.Height,
                 "Selecting a search result should move the transcript away from the bottom and show that message.");
 

@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Headless;
 using Xunit;
-using Xunit.Sdk;
 
 [assembly: AvaloniaTestApplication(typeof(Codev.Avalonia.Tests.TestAppBuilder))]
 
@@ -13,7 +12,6 @@ public sealed class TestAppBuilder
         .UseHeadless(new AvaloniaHeadlessPlatformOptions());
 }
 
-[XunitTestCaseDiscoverer("Avalonia.Headless.XUnit.AvaloniaUIFactDiscoverer", "Avalonia.Headless.XUnit")]
 public sealed class LiveOllamaFactAttribute : FactAttribute
 {
     public LiveOllamaFactAttribute()
