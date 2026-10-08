@@ -107,12 +107,28 @@ assert_orca_focus_event() {
   local expected_text="$1"
   for _ in {1..120}; do
     if grep --fixed-strings --quiet -- "OBJECT EVENT: object:state-changed:focused for [entry: '$expected_text']" "$smoke_root/orca-debug.log"; then
-      echo "Orca processed the AT-SPI focus event for: $expected_text (spoken wording is not asserted)"
+      echo "Orca processed the AT-SPI focus event for: $expected_text"
       return
     fi
     sleep 0.25
   done
   echo "Orca did not process the expected AT-SPI focus event: $expected_text" >&2
+  find "$speech_log_dir" -maxdepth 2 -type f -print -exec tail -n 60 {} \; >&2 || true
+  cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+  tail -n 160 "$smoke_root/orca-debug.log" >&2 || true
+  exit 1
+}
+
+assert_orca_spoke_text() {
+  local expected_text="$1"
+  for _ in {1..120}; do
+    if grep --fixed-strings --quiet -- "Speaking '$expected_text'" "$smoke_root/orca-debug.log"; then
+      echo "Orca sent the accessible label to Speech Dispatcher: $expected_text"
+      return
+    fi
+    sleep 0.25
+  done
+  echo "Orca did not send the expected accessible label to Speech Dispatcher: $expected_text" >&2
   find "$speech_log_dir" -maxdepth 2 -type f -print -exec tail -n 60 {} \; >&2 || true
   cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
   tail -n 160 "$smoke_root/orca-debug.log" >&2 || true
@@ -136,6 +152,7 @@ assert_orca_audio_output() {
   xdotool key --clearmodifiers ctrl+f
   python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
   assert_orca_focus_event 'Search conversations'
+  assert_orca_spoke_text 'Search conversations'
   sleep 1.5
   kill -INT "$speech_record_pid" 2>/dev/null || true
   wait "$speech_record_pid" 2>/dev/null || true
