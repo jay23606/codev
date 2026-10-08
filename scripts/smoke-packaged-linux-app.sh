@@ -15,7 +15,11 @@ export CODEV_DATA_ROOT="$smoke_root/data"
 log_path="$smoke_root/app.log"
 app_pid=''
 mock_pid=''
+orca_pid=''
+speech_dispatcher_pid=''
 cleanup() {
+  if [[ -n "$orca_pid" ]]; then kill "$orca_pid" 2>/dev/null || true; wait "$orca_pid" 2>/dev/null || true; fi
+  if [[ -n "$speech_dispatcher_pid" ]]; then kill "$speech_dispatcher_pid" 2>/dev/null || true; wait "$speech_dispatcher_pid" 2>/dev/null || true; fi
   if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
     kill "$app_pid" 2>/dev/null || true
     for _ in {1..20}; do
@@ -29,6 +33,49 @@ cleanup() {
   rm -rf -- "$smoke_root"
 }
 trap cleanup EXIT
+
+start_orca() {
+  speech_log_dir="$smoke_root/speech-dispatcher-logs"
+  mkdir -p "$speech_log_dir"
+  speech-dispatcher --run-single --log-level 4 --log-dir "$speech_log_dir" >"$smoke_root/speech-dispatcher.out" 2>&1 &
+  speech_dispatcher_pid=$!
+  sleep 0.5
+  if ! kill -0 "$speech_dispatcher_pid" 2>/dev/null; then
+    cat "$smoke_root/speech-dispatcher.out" >&2
+    echo 'Speech Dispatcher did not start for the packaged Orca smoke.' >&2
+    exit 1
+  fi
+
+  orca --replace --enable=speech --debug-file="$smoke_root/orca-debug.log" >"$smoke_root/orca.out" 2>&1 &
+  orca_pid=$!
+  for _ in {1..80}; do
+    if ! kill -0 "$orca_pid" 2>/dev/null; then
+      cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+      echo 'Orca exited before it connected to the packaged application.' >&2
+      exit 1
+    fi
+    if [[ -s "$smoke_root/orca-debug.log" ]]; then return; fi
+    sleep 0.25
+  done
+  cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+  echo 'Orca did not initialize within 20 seconds.' >&2
+  exit 1
+}
+
+assert_orca_announcement() {
+  local expected_text="$1"
+  for _ in {1..120}; do
+    if rg --hidden --fixed-strings "$expected_text" "$speech_log_dir" >/dev/null 2>&1; then
+      echo "Orca sent this focus announcement to Speech Dispatcher: $expected_text"
+      return
+    fi
+    sleep 0.25
+  done
+  echo "Orca did not send the expected focus announcement to Speech Dispatcher: $expected_text" >&2
+  find "$speech_log_dir" -maxdepth 2 -type f -print -exec tail -n 60 {} \; >&2 || true
+  cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+  exit 1
+}
 
 mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
@@ -70,6 +117,7 @@ if [[ -z "$window_id" ]]; then
   exit 1
 fi
 
+start_orca
 python3 ./scripts/assert-linux-atspi.py
 
 active_path="$CODEV_DATA_ROOT/Codev/avalonia-active-conversation.json"
@@ -154,6 +202,7 @@ fi
 xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+f
 python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
+assert_orca_announcement 'Search conversations'
 xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
 if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
