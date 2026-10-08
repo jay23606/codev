@@ -824,14 +824,16 @@ function Find-ConversationMenuItem($Window, [string]$Title, [string]$MenuName) {
 }
 
 function Invoke-AccessibleMenuItem($Item) {
-    $invoke = $null
-    if ($Item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
-        $invoke.Invoke()
+    $bounds = $Item.Current.BoundingRectangle
+    if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) {
+        throw "The menu item '$($Item.Current.Name)' has no clickable screen bounds."
     }
-    else {
-        $Item.SetFocus()
-        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-    }
+    # Avalonia MenuFlyout items can expose InvokePattern (or accept focus plus
+    # Enter) without raising Click. Use the visible pointer target, as the
+    # display-preference menu smoke does, then verify the persisted effect.
+    [CodevCommonDialog]::ClickAt(
+        [int]($bounds.Left + $bounds.Width / 2),
+        [int]($bounds.Top + $bounds.Height / 2))
 }
 
 function Invoke-MoreSubmenuItem($Window, [string]$SectionName, [string]$ItemName) {
