@@ -1030,7 +1030,14 @@ function Test-PinnedConversationSearchArchiveRestore($Window, [string]$DataRoot)
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if (-not $archived) { throw 'Archiving the searched pinned conversation did not persist both states.' }
-    $activeAfterArchive = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json)
+    $activeAfterArchive = [string]$conversationId
+    $activeConversationDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        try { $activeAfterArchive = [string](Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json) }
+        catch { }
+        if ($activeAfterArchive -ne $conversationId) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $activeConversationDeadline)
     if ($activeAfterArchive -eq $conversationId) { throw 'Archiving the searched active conversation did not select another chat.' }
 
     $buttonsCondition = [System.Windows.Automation.PropertyCondition]::new(
