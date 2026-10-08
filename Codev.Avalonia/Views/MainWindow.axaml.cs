@@ -533,7 +533,30 @@ public partial class MainWindow : Window
             Foreground = secondaryForeground
         });
         if (!string.IsNullOrWhiteSpace(proposal.MatchingUntrustedSource))
-            panel.Children.Add(new TextBlock { Text = $"This exact command appears in untrusted output from {proposal.MatchingUntrustedSource}.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Foreground = secondaryForeground });
+        {
+            var warningForeground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#FFD166" : "#8A4B00"));
+            var warningBackground = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#352A12" : "#FFF4D6"));
+            var warning = new StackPanel { Spacing = 3 };
+            warning.Children.Add(new TextBlock
+            {
+                Text = "POTENTIAL INSTRUCTION FOLLOWING",
+                FontWeight = global::Avalonia.Media.FontWeight.Bold,
+                Foreground = warningForeground
+            });
+            warning.Children.Add(new TextBlock
+            {
+                Text = $"This exact command appears in untrusted output from {proposal.MatchingUntrustedSource}. Check it against your request before running it.",
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                Foreground = warningForeground
+            });
+            panel.Children.Add(new Border
+            {
+                Background = warningBackground,
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(10, 7),
+                Child = warning
+            });
+        }
         panel.Children.Add(new TextBlock { Text = "Working directory: " + proposal.ProjectPath, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 10, Foreground = secondaryForeground });
         var command = new TextBox
         {

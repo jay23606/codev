@@ -1409,6 +1409,68 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Command_review_highlights_and_attributes_commands_copied_from_untrusted_output()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        var app = Application.Current!;
+        var originalTheme = app.RequestedThemeVariant;
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(Path.Combine(root, "app-data"));
+            viewModel.SetProjectFolder(project);
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.AskEveryTime);
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+
+            var buildReview = typeof(MainWindow).GetMethod("BuildCommandApprovalContent", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var proposal = new CodeTaskCommandProposal("rm -f ./dist/secret.json", project, "PowerShell",
+                ContextSources: ["File: README.md"], MatchingUntrustedSource: "File: README.md");
+            foreach (var theme in new[] { global::Avalonia.Styling.ThemeVariant.Dark, global::Avalonia.Styling.ThemeVariant.Light })
+            {
+                app.RequestedThemeVariant = theme;
+                window.UpdateLayout();
+                var review = Assert.IsAssignableFrom<Control>(buildReview.Invoke(window, [proposal]));
+                window.FindControl<ContentControl>("InlineApprovalContent")!.Content = review;
+                window.UpdateLayout();
+
+                var warningBorder = Assert.Single(review.GetVisualDescendants().OfType<Border>(), border =>
+                    border.Child is StackPanel stack && stack.Children.OfType<TextBlock>().Any(block =>
+                        block.Text == "POTENTIAL INSTRUCTION FOLLOWING"));
+                var warningStack = Assert.IsType<StackPanel>(warningBorder.Child);
+                var heading = Assert.Single(warningStack.Children.OfType<TextBlock>(), block =>
+                    block.Text == "POTENTIAL INSTRUCTION FOLLOWING");
+                var sourceWarning = Assert.Single(warningStack.Children.OfType<TextBlock>(), block =>
+                    block.Text?.Contains("File: README.md", StringComparison.Ordinal) == true);
+                var foreground = Assert.IsType<SolidColorBrush>(heading.Foreground).Color;
+                var background = Assert.IsType<SolidColorBrush>(warningBorder.Background).Color;
+                Assert.True(ContrastRatio(foreground, background) >= 4.5,
+                    $"Expected readable warning contrast in {theme}, got {foreground} on {background}.");
+                Assert.Contains("Check it against your request", sourceWarning.Text, StringComparison.Ordinal);
+                Assert.Contains(review.GetVisualDescendants().OfType<TextBox>(), box =>
+                    box.Text == "rm -f ./dist/secret.json");
+
+                var ordinaryProposal = new CodeTaskCommandProposal("dotnet test", project, "PowerShell");
+                var ordinaryReview = Assert.IsAssignableFrom<Control>(buildReview.Invoke(window, [ordinaryProposal]));
+                window.FindControl<ContentControl>("InlineApprovalContent")!.Content = ordinaryReview;
+                window.UpdateLayout();
+                Assert.DoesNotContain(ordinaryReview.GetVisualDescendants().OfType<TextBlock>(), block =>
+                    block.Text == "POTENTIAL INSTRUCTION FOLLOWING");
+            }
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            app.RequestedThemeVariant = originalTheme;
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Auto_stops_repeated_tool_loop_without_opening_confirmation_modal()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
