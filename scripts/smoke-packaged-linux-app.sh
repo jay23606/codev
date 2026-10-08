@@ -152,6 +152,13 @@ assert_orca_audio_output() {
   xdotool key --clearmodifiers ctrl+f
   python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
   assert_orca_focus_event 'Search conversations'
+  # Orca sees the programmatic shortcut focus, but only spoke the enclosing
+  # panel on that event. Navigate away and back with real keyboard focus events
+  # so the focused entry's accessible name is announced as it is for users.
+  xdotool key --clearmodifiers Tab
+  sleep 0.25
+  xdotool key --clearmodifiers shift+Tab
+  python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
   assert_orca_spoke_text 'Search conversations'
   sleep 1.5
   kill -INT "$speech_record_pid" 2>/dev/null || true
