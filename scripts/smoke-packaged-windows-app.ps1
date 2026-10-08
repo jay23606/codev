@@ -2194,11 +2194,19 @@ public static class CodevCommonDialog
     $toolOutputContentCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'ToolOutputContent')
     $expandedActivityDetails = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $toolOutputContentCondition) |
-        ForEach-Object { [string]$_.Current.Name })
+        ForEach-Object {
+            $valuePattern = $null
+            if ($_.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+                [string]$valuePattern.Current.Value
+            }
+            else {
+                [string]$_.Current.Name
+            }
+        })
     if (-not ($expandedActivityDetails | Where-Object {
         $_.Contains('Advisory: the proposed file content matched instruction-risk patterns', [StringComparison]::Ordinal)
     })) {
-        throw 'The expanded Auto activity details did not expose the instruction-risk advisory as readable output.'
+        throw "The expanded Auto activity details did not expose the instruction-risk advisory as readable output (detailCount=$($expandedActivityDetails.Count), names=$($expandedActivityDetails | ForEach-Object { $_.Substring(0, [Math]::Min(260, $_.Length)) } | ConvertTo-Json -Compress))."
     }
     Write-Host 'Packaged Windows Auto applied the instruction-risk file proposal without review, recorded file history, and exposed its advisory in the expanded activity output alongside read/search/create/Cargo verification rows.'
 
