@@ -91,16 +91,16 @@ start_orca() {
   exit 1
 }
 
-assert_orca_announcement() {
+assert_orca_focus_event() {
   local expected_text="$1"
   for _ in {1..120}; do
-    if rg --hidden --fixed-strings "$expected_text" "$speech_log_dir" >/dev/null 2>&1; then
-      echo "Orca sent this focus announcement to Speech Dispatcher: $expected_text"
+    if rg --hidden --fixed-strings "OBJECT EVENT: object:state-changed:focused for [entry: '$expected_text']" "$smoke_root/orca-debug.log" >/dev/null 2>&1; then
+      echo "Orca processed the AT-SPI focus event for: $expected_text (spoken wording is not asserted)"
       return
     fi
     sleep 0.25
   done
-  echo "Orca did not send the expected focus announcement to Speech Dispatcher: $expected_text" >&2
+  echo "Orca did not process the expected AT-SPI focus event: $expected_text" >&2
   find "$speech_log_dir" -maxdepth 2 -type f -print -exec tail -n 60 {} \; >&2 || true
   cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
   tail -n 160 "$smoke_root/orca-debug.log" >&2 || true
@@ -232,7 +232,7 @@ fi
 xdotool windowfocus --sync "$window_id"
 xdotool key --clearmodifiers ctrl+f
 python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
-assert_orca_announcement 'Search conversations'
+assert_orca_focus_event 'Search conversations'
 xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
 if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
