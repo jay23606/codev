@@ -292,7 +292,7 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
         throw "The MCP servers editor did not expose the malformed source JSON for repair: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
     }
     $status = Find-ByAutomationId $dialog 'McpConfigurationStatus'
-    if ($null -eq $status -or -not $status.Current.Name.Contains('Correct the JSON and save', [StringComparison]::Ordinal)) {
+    if ($null -eq $status -or -not $status.Current.Name.Contains('Correct the JSON or settings and save', [StringComparison]::Ordinal)) {
         throw 'The MCP settings editor did not explain how to repair the malformed file.'
     }
     $configurationPath = Join-Path $DataRoot 'Codev\mcp-servers.json'
