@@ -17,16 +17,22 @@ def main(path: str, skip_seconds: float) -> None:
     except (OSError, wave.Error) as error:
         raise SystemExit(f"Could not read screen-reader audio capture: {error}") from error
 
-    if channels != 1 or sample_width != 2 or sample_rate != 22050:
+    if channels < 1 or sample_width != 2 or sample_rate < 1:
         raise SystemExit(
             "Unexpected screen-reader capture format: "
             f"channels={channels}, sample_width={sample_width}, rate={sample_rate}"
         )
 
+    frame_width = channels * sample_width
+    if len(frames) % frame_width:
+        raise SystemExit("Screen-reader audio capture ended with an incomplete PCM frame")
     all_samples = [sample[0] for sample in struct.iter_unpack("<h", frames)]
-    samples = all_samples[int(sample_rate * skip_seconds) :]
-    if len(samples) < sample_rate // 2:
-        raise SystemExit(f"Screen-reader audio capture was too short: {len(samples)} samples")
+    skip_samples = int(sample_rate * skip_seconds) * channels
+    samples = all_samples[skip_samples:]
+    if len(samples) < sample_rate // 2 * channels:
+        raise SystemExit(
+            f"Screen-reader audio capture was too short: {len(samples) // channels} frames"
+        )
 
     nonzero = sum(sample != 0 for sample in samples)
     rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
@@ -38,7 +44,8 @@ def main(path: str, skip_seconds: float) -> None:
         )
     print(
         "Orca produced non-silent Speech Dispatcher audio for the Search focus event: "
-        f"nonzero_samples={nonzero}, rms={rms:.2f}, peak={peak}"
+        f"channels={channels}, rate={sample_rate}, nonzero_samples={nonzero}, "
+        f"rms={rms:.2f}, peak={peak}"
     )
 
 
