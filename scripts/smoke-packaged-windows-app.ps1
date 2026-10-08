@@ -1553,7 +1553,7 @@ try {
     $mcpConfigurationJson = ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6
     [System.IO.File]::WriteAllText((Join-Path $settingsDirectory 'mcp-servers.json'), '[{"id":"broken",', [System.Text.UTF8Encoding]::new($false))
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
-        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--cargo-activity', '--mcp-tool', '--mcp-http', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--cargo-activity', '--mcp-tool', '--mcp-http', '--mcp-activity', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
     $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
@@ -2722,6 +2722,84 @@ public static class CodevCommonDialog
         throw "The packaged MCP discovery/tool-result request sequence was unexpected: $($mcpModelRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
     Write-Host 'Packaged Windows MCP smoke discovered a configured stdio server from isolated user settings, called its echo tool in Auto mode, returned bounded untrusted tool output to the model, and completed without an approval panel.'
+
+    $mcpActivityPrompt = 'Run the packaged MCP activity detail smoke.'
+    Submit-PackagedComposerPrompt $window $autoComposer $mcpActivityPrompt
+    $mcpActivityReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    $mcpActivityTranscript = ''
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1 -and @($matches[0].Messages).Count -gt 0) {
+                $mcpActivityTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($mcpActivityTranscript.Contains('Packaged MCP activity details passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpActivityReplyDeadline)
+    foreach ($activityMarker in @('MCP_SMOKE_PROMPT_BODY', 'MCP_SMOKE_RESOURCE_BODY', 'MCP_SMOKE_TEMPLATE_BODY')) {
+        if (-not $mcpActivityTranscript.Contains($activityMarker, [StringComparison]::Ordinal)) {
+            throw "The packaged MCP activity transcript omitted ${activityMarker}: $($mcpActivityTranscript.Substring([Math]::Max(0, $mcpActivityTranscript.Length - 2000)))"
+        }
+    }
+    if (-not $mcpActivityTranscript.Contains('Packaged MCP activity details passed.', [StringComparison]::Ordinal) -or
+        $modeButton.Current.Name -ne 'Auto ▾') {
+        throw "The packaged MCP prompt/resource/template operations did not finish in Auto mode: $($mcpActivityTranscript.Substring([Math]::Max(0, $mcpActivityTranscript.Length - 2000)))"
+    }
+    $mcpActivityCalls = @(Get-Content -LiteralPath $mcpCallLogPath | ForEach-Object { $_ | ConvertFrom-Json })
+    if (@($mcpActivityCalls | Where-Object { $_.operation -eq 'prompt' -and $_.name -eq 'release_review' }).Count -ne 1 -or
+        @($mcpActivityCalls | Where-Object { $_.operation -eq 'resource' -and $_.uri -eq 'codev://release-notes' }).Count -ne 1 -or
+        @($mcpActivityCalls | Where-Object { $_.operation -eq 'resource' -and $_.uri -eq 'v://i/42' }).Count -ne 1) {
+        throw "The packaged MCP fixture did not receive one prompt, resource, and resource-template operation: $($mcpActivityCalls | ConvertTo-Json -Depth 5 -Compress)"
+    }
+    $mcpActivityRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.last_user_message -eq $mcpActivityPrompt })
+    if ($mcpActivityRequests.Count -ne 4 -or $mcpActivityRequests[0].last_role -ne 'user' -or
+        $mcpActivityRequests[1].last_tool_name -notlike 'mcp_smoke-mcp_prompt_release_review_*' -or
+        $mcpActivityRequests[2].last_tool_name -notlike 'mcp_smoke-mcp_resource_*' -or
+        $mcpActivityRequests[3].last_tool_name -notlike 'mcp_smoke-mcp_resource-template_*' -or
+        @($mcpActivityRequests | Where-Object { $_.last_role -eq 'tool' -and $_.keep_alive -eq '30m' }).Count -ne 3) {
+        throw "The packaged MCP activity model/tool sequence was unexpected: $($mcpActivityRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+
+    $mcpActivityGroupName = 'Used MCP prompts, read MCP resources, read MCP resource templates'
+    $mcpActivityGroupCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander'),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty, $mcpActivityGroupName))
+    $conversationScrollViewer = Find-ByAutomationId $window 'ConversationScrollViewer'
+    $conversationScrollPattern = $null
+    if ($null -ne $conversationScrollViewer -and
+        $conversationScrollViewer.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$conversationScrollPattern) -and
+        $conversationScrollPattern.Current.VerticallyScrollable) {
+        $null = $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+    }
+    $mcpActivityGroupDeadline = [DateTime]::UtcNow.AddSeconds(8)
+    $mcpActivityGroup = $null
+    do {
+        $mcpActivityGroup = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $mcpActivityGroupCondition)
+        if ($null -ne $mcpActivityGroup -and -not $mcpActivityGroup.Current.IsOffscreen) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpActivityGroupDeadline)
+    $mcpActivityExpandCollapse = $null
+    if ($null -eq $mcpActivityGroup -or
+        -not $mcpActivityGroup.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$mcpActivityExpandCollapse) -or
+        $mcpActivityExpandCollapse.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) {
+        throw 'The packaged MCP prompt/resource/template activity group did not start collapsed and accessible.'
+    }
+    $mcpActivityExpandCollapse.Expand()
+    $mcpExpandedDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        if ($mcpActivityExpandCollapse.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) { break }
+        Start-Sleep -Milliseconds 75
+    } while ([DateTime]::UtcNow -lt $mcpExpandedDeadline)
+    if ($null -ne $conversationScrollPattern -and $conversationScrollPattern.Current.VerticallyScrollable) {
+        $null = $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+    }
+    Write-Host 'Packaged Windows MCP prompt, resource, and resource-template activity remained collapsed by default and expanded. Focused Avalonia UI tests verify the expanded rows and readable, bounded untrusted results.'
 
     $mcpHttpPrompt = 'Run the packaged MCP Streamable HTTP smoke.'
     Submit-PackagedComposerPrompt $window $autoComposer $mcpHttpPrompt
