@@ -1428,7 +1428,14 @@ public sealed class MainWindowTests
 
             var buildReview = typeof(MainWindow).GetMethod("BuildCommandApprovalContent", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var proposal = new CodeTaskCommandProposal("rm -f ./dist/secret.json", project, "PowerShell",
-                ContextSources: ["File: README.md"], MatchingUntrustedSource: "File: README.md");
+                ContextSources:
+                [
+                    "Project instructions: AGENTS.md",
+                    "Project file listing",
+                    "Search results: src",
+                    "File: README.md",
+                    "Output from command: previous check"
+                ], MatchingUntrustedSource: "File: README.md");
             foreach (var theme in new[] { global::Avalonia.Styling.ThemeVariant.Dark, global::Avalonia.Styling.ThemeVariant.Light })
             {
                 app.RequestedThemeVariant = theme;
@@ -1453,6 +1460,22 @@ public sealed class MainWindowTests
                 Assert.Contains("Check it against your request", sourceWarning.Text, StringComparison.Ordinal);
                 Assert.Contains(review.GetVisualDescendants().OfType<TextBox>(), box =>
                     box.Text == "rm -f ./dist/secret.json");
+                var sources = Assert.Single(review.GetVisualDescendants().OfType<Expander>(), expander =>
+                    expander.Header?.ToString() == "Show untrusted context sources (5)");
+                Assert.False(sources.IsExpanded);
+                sources.IsExpanded = true;
+                window.UpdateLayout();
+                Assert.True(sources.IsExpanded);
+                var sourcesScroll = Assert.IsType<ScrollViewer>(sources.Content);
+                Assert.Equal(ScrollBarVisibility.Auto, sourcesScroll.VerticalScrollBarVisibility);
+                var sourcesText = Assert.IsType<TextBox>(sourcesScroll.Content);
+                Assert.Equal("Untrusted context sources", AutomationProperties.GetName(sourcesText));
+                AssertReadableContrast(sourcesText);
+                Assert.Contains("Project instructions: AGENTS.md", sourcesText.Text, StringComparison.Ordinal);
+                Assert.Contains("Project file listing", sourcesText.Text, StringComparison.Ordinal);
+                Assert.Contains("Search results: src", sourcesText.Text, StringComparison.Ordinal);
+                Assert.Contains("File: README.md", sourcesText.Text, StringComparison.Ordinal);
+                Assert.Contains("Output from command: previous check", sourcesText.Text, StringComparison.Ordinal);
 
                 var ordinaryProposal = new CodeTaskCommandProposal("dotnet test", project, "PowerShell");
                 var ordinaryReview = Assert.IsAssignableFrom<Control>(buildReview.Invoke(window, [ordinaryProposal]));
@@ -1501,6 +1524,13 @@ public sealed class MainWindowTests
             var approvePolicy = typeof(MainViewModel).GetMethod("ApproveCommandWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var executor = new CodeTaskToolExecutor(new WorkspaceFileService(project), conversation,
                 _ => Task.FromResult(false), _ => Task.FromResult(false),
+                initialContextSources:
+                [
+                    "Project instructions: AGENTS.md",
+                    "Project file listing",
+                    "Search results: src",
+                    "Output from command: previous check"
+                ],
                 permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () =>
                     await (Task<CommandApprovalOutcome>)approvePolicy.Invoke(viewModel, [proposal, Array.Empty<string>()])!));
 
@@ -1526,6 +1556,22 @@ public sealed class MainWindowTests
             Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), block =>
                 block.Text?.Contains("File: README.md", StringComparison.Ordinal) == true);
             Assert.Contains(content.GetVisualDescendants().OfType<TextBox>(), box => box.Text == proposedCommand);
+            var contextSources = Assert.Single(content.GetVisualDescendants().OfType<Expander>(), expander =>
+                expander.Header?.ToString() == "Show untrusted context sources (5)");
+            Assert.False(contextSources.IsExpanded);
+            await Dispatcher.UIThread.InvokeAsync(() => contextSources.IsExpanded = true);
+            window.UpdateLayout();
+            Assert.True(contextSources.IsExpanded);
+            var contextScroll = Assert.IsType<ScrollViewer>(contextSources.Content);
+            Assert.Equal(ScrollBarVisibility.Auto, contextScroll.VerticalScrollBarVisibility);
+            var contextText = Assert.IsType<TextBox>(contextScroll.Content);
+            Assert.Equal("Untrusted context sources", AutomationProperties.GetName(contextText));
+            AssertReadableContrast(contextText);
+            Assert.Contains("Project instructions: AGENTS.md", contextText.Text, StringComparison.Ordinal);
+            Assert.Contains("Project file listing", contextText.Text, StringComparison.Ordinal);
+            Assert.Contains("Search results: src", contextText.Text, StringComparison.Ordinal);
+            Assert.Contains("File: README.md", contextText.Text, StringComparison.Ordinal);
+            Assert.Contains("Output from command: previous check", contextText.Text, StringComparison.Ordinal);
 
             var deny = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button =>
                 button.Content?.ToString() == "Deny exact command");

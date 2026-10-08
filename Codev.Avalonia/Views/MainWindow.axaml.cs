@@ -557,6 +557,35 @@ public partial class MainWindow : Window
                 Child = warning
             });
         }
+        if (proposal.ContextSources is { Count: > 0 } contextSources)
+        {
+            var sourcesBox = new TextBox
+            {
+                Text = string.Join(Environment.NewLine, contextSources),
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                MinHeight = 54,
+                MaxHeight = 120,
+                FontSize = 10,
+                Background = reviewBackground,
+                Foreground = reviewForeground,
+                CaretBrush = reviewForeground,
+                BorderBrush = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse(isDark ? "#555555" : "#B8B5AF"))
+            };
+            global::Avalonia.Automation.AutomationProperties.SetName(sourcesBox, "Untrusted context sources");
+            panel.Children.Add(new Expander
+            {
+                Header = $"Show untrusted context sources ({contextSources.Count})",
+                IsExpanded = false,
+                Content = new ScrollViewer
+                {
+                    Content = sourcesBox,
+                    MaxHeight = 130,
+                    VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+                }
+            });
+        }
         panel.Children.Add(new TextBlock { Text = "Working directory: " + proposal.ProjectPath, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontSize = 10, Foreground = secondaryForeground });
         var command = new TextBox
         {
