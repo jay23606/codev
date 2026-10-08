@@ -545,7 +545,7 @@ public partial class MainWindow : Window
             });
             warning.Children.Add(new TextBlock
             {
-                Text = $"This exact command appears in untrusted output from {proposal.MatchingUntrustedSource}. Check it against your request before running it.",
+                Text = $"This command matches instructions in untrusted output from {proposal.MatchingUntrustedSource}. Check it against your request before running it.",
                 TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
                 Foreground = warningForeground
             });

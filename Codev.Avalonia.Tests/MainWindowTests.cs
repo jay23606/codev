@@ -1449,6 +1449,7 @@ public sealed class MainWindowTests
                 var background = Assert.IsType<SolidColorBrush>(warningBorder.Background).Color;
                 Assert.True(ContrastRatio(foreground, background) >= 4.5,
                     $"Expected readable warning contrast in {theme}, got {foreground} on {background}.");
+                Assert.Contains("matches instructions in untrusted output from File: README.md", sourceWarning.Text, StringComparison.Ordinal);
                 Assert.Contains("Check it against your request", sourceWarning.Text, StringComparison.Ordinal);
                 Assert.Contains(review.GetVisualDescendants().OfType<TextBox>(), box =>
                     box.Text == "rm -f ./dist/secret.json");
