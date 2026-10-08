@@ -70,6 +70,8 @@ if [[ -z "$window_id" ]]; then
   exit 1
 fi
 
+python3 ./scripts/assert-linux-atspi.py
+
 active_path="$CODEV_DATA_ROOT/Codev/avalonia-active-conversation.json"
 conversations_path="$CODEV_DATA_ROOT/Codev/avalonia-conversations.json"
 for _ in {1..80}; do
