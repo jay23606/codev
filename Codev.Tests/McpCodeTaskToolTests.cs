@@ -6,6 +6,8 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -477,13 +479,9 @@ public sealed class McpCodeTaskToolTests
     [Fact]
     public async Task Http_mcp_uses_streamable_http_to_discover_and_call_a_tool()
     {
-        using var portReservation = new TcpListener(IPAddress.Loopback, 0);
-        portReservation.Start();
-        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
-        portReservation.Stop();
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
         builder.Services.AddMcpServer()
             .WithHttpTransport(options =>
             {
@@ -499,12 +497,19 @@ public sealed class McpCodeTaskToolTests
 
         try
         {
+            var serverAddress = Assert.Single(app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses);
             await using var session = await McpCodeTaskSession.ConnectAsync([
                 new McpServerConfiguration("streamable-http", "Streamable HTTP test", McpServerTransportKind.Http,
-                    Enabled: true, Url: $"http://127.0.0.1:{port}/mcp", OAuthEnabled: false)
+                    Enabled: true, Url: new Uri(new Uri(serverAddress), "/mcp").AbsoluteUri, OAuthEnabled: false)
             ]);
 
-            var tool = Assert.Single(session.Tools.Values, candidate => candidate.Operation == McpCodeTaskOperationKind.Tool);
+            var tools = session.Tools.Values
+                .Where(candidate => candidate.Operation == McpCodeTaskOperationKind.Tool)
+                .ToArray();
+            Assert.True(tools.Length == 1,
+                $"Expected one Streamable HTTP tool, got {tools.Length}. Connection log: {string.Join("; ", session.ConnectionLog)}");
+            var tool = tools[0];
             using var arguments = JsonDocument.Parse("""{"message":"hello"}""");
             var result = await session.CallAsync(tool.FunctionName, arguments.RootElement);
 
