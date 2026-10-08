@@ -416,7 +416,13 @@ function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if (-not $profileSaved) {
-        throw 'Saving edited profile instructions in the packaged UI did not persist the new content.'
+        $status = Find-ByAutomationId $editorWindow 'AgentProfileEditorStatus'
+        $statusText = if ($null -eq $status) { '<status unavailable>' } else { $status.Current.Name }
+        $editorText = [string]$contentsValue.Current.Value
+        $savedText = if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+            [System.IO.File]::ReadAllText($profilePath)
+        } else { '<profile file missing>' }
+        throw "Saving edited profile instructions in the packaged UI did not persist the new content (status='$statusText', editorContainsNewText=$($editorText.Contains('Updated disposable profile instructions from the native editor smoke.', [StringComparison]::Ordinal)), savedContents='$savedText')."
     }
 
     $closeCondition = [System.Windows.Automation.AndCondition]::new(
