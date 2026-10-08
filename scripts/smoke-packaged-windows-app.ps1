@@ -1754,6 +1754,7 @@ public static class CodevCommonDialog
     $statusConversation = @($savedConversations | Where-Object { [string]$_.Id -eq $statusActiveId })
     if ($statusConversation.Count -ne 1) { throw 'The active conversation is missing before the /status smoke.' }
     $statusBeforeCount = @($statusConversation[0].Messages).Count
+    $modelRequestCountBeforeStatus = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue).Count
     $composer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('/status')
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
@@ -1775,9 +1776,18 @@ public static class CodevCommonDialog
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $statusDeadline)
     if ([string]::IsNullOrWhiteSpace($statusReport) -or
-        -not $statusReport.Contains('Model: Ollama (local)', [StringComparison]::Ordinal) -or
+        -not $statusReport.Contains('Model: Ollama (local) · codev-smoke:latest', [StringComparison]::Ordinal) -or
+        -not $statusReport.Contains('Context window:', [StringComparison]::Ordinal) -or
+        -not $statusReport.Contains('Mode: Chat', [StringComparison]::Ordinal) -or
+        -not $statusReport.Contains('Project: not attached', [StringComparison]::Ordinal) -or
+        -not $statusReport.Contains('Queue: idle', [StringComparison]::Ordinal) -or
         -not $statusReport.Contains('Project command permissions:', [StringComparison]::Ordinal)) {
-        throw 'Sending /status through the packaged composer did not save the expected local status report.'
+        throw "Sending /status through the packaged composer did not save the expected provider, context, mode, project, queue, and permissions report (report='$statusReport')."
+    }
+    $modelRequestCountAfterStatus = @(Get-Content -LiteralPath $mockRequestLog -ErrorAction SilentlyContinue).Count
+    if ($modelRequestCountAfterStatus -ne $modelRequestCountBeforeStatus -or
+        [System.Text.RegularExpressions.Regex]::IsMatch($statusReport, '\bsk-[A-Za-z0-9_-]{16,}')) {
+        throw "The packaged /status command invoked the model or exposed a credential-like value (requestsBefore=$modelRequestCountBeforeStatus, requestsAfter=$modelRequestCountAfterStatus, report='$statusReport')."
     }
 
     $allButtonCondition = [System.Windows.Automation.PropertyCondition]::new(
