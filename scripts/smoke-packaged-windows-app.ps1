@@ -1407,7 +1407,7 @@ try {
     ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6 |
         Set-Content -LiteralPath (Join-Path $settingsDirectory 'mcp-servers.json') -Encoding utf8
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
-        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--mcp-tool', '--mcp-http', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--cargo-activity', '--mcp-tool', '--mcp-http', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
     $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {

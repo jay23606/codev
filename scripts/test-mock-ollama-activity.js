@@ -39,7 +39,7 @@ function post(port, payload) {
 }
 
 async function main() {
-  const server = spawn(process.execPath, [serverScript, "--activity-summary", "--port-file", portFile,
+  const server = spawn(process.execPath, [serverScript, "--activity-summary", "--cargo-activity", "--port-file", portFile,
     "--request-log", requestLog], { stdio: "ignore", windowsHide: true });
   try {
     const deadline = Date.now() + 10_000;

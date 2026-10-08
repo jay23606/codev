@@ -9,6 +9,7 @@ const REPLY = "Packaged chat round-trip passed.";
 const args = process.argv.slice(2);
 const autoDestructive = args.includes("--auto-destructive");
 const activitySummary = args.includes("--activity-summary");
+const cargoActivity = args.includes("--cargo-activity");
 const mcpToolSmoke = args.includes("--mcp-tool");
 const mcpHttpSmoke = args.includes("--mcp-http");
 const AUTO_COMMAND_PROMPT = autoDestructive
@@ -208,7 +209,9 @@ const server = http.createServer((request, response) => {
       const nextTool = {
         read_file: ["search_files", { query: "ACTIVITY_SOURCE_MARKER" }],
         search_files: ["create_file", { relative_path: "activity-result.txt", content: "ACTIVITY_SOURCE_MARKER" }],
-        create_file: ["verify_command", { command: "cargo check --manifest-path space-invaders-game/signaling/Cargo.toml" }],
+        create_file: ["verify_command", { command: cargoActivity
+          ? "cargo check --manifest-path space-invaders-game/signaling/Cargo.toml"
+          : "node --version" }],
       }[entry.last_tool_name];
       if (nextTool) {
         if (!entry.tool_names.includes(nextTool[0])) {
