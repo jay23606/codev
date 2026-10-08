@@ -898,7 +898,10 @@ public sealed class MainWindowTests
             window.Show();
             window.UpdateLayout();
 
-            Assert.Equal("Search conversations", AutomationProperties.GetName(Assert.IsType<TextBox>(window.FindControl<TextBox>("SearchTextBox"))));
+            var searchLabel = Assert.IsType<TextBlock>(window.FindControl<TextBlock>("SearchLabel"));
+            Assert.Equal("Search conversations", searchLabel.Text);
+            Assert.Same(searchLabel, AutomationProperties.GetLabeledBy(
+                Assert.IsType<TextBox>(window.FindControl<TextBox>("SearchTextBox"))));
             Assert.Equal("Message Codev", AutomationProperties.GetName(Assert.IsType<TextBox>(window.FindControl<TextBox>("ComposerTextBox"))));
             Assert.Equal("Model picker", AutomationProperties.GetName(Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ModelPicker"))));
             var optionsButton = Assert.IsType<Button>(window.FindControl<Button>("ConversationOptionsButton"));
