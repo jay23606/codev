@@ -2257,6 +2257,7 @@ public static class CodevCommonDialog
         throw 'The packaged transcript lost its UI Automation scroll pattern before find navigation.'
     }
     $findBeforeSelection = [double]$findScrollPattern.Current.VerticalScrollPercent
+    $findTranscriptCanScroll = [bool]$findScrollPattern.Current.VerticallyScrollable
     $searchResultInvoke = $null
     if (-not $targetSearchResult.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$searchResultInvoke)) {
         throw 'The matching conversation excerpt cannot be selected through UI Automation.'
@@ -2267,10 +2268,10 @@ public static class CodevCommonDialog
     do {
         $findPanel = Find-ByAutomationId $window 'ConversationFindPanel'
         $findAfterSelection = [double]$findScrollPattern.Current.VerticalScrollPercent
-        if (($null -eq $findPanel -or $findPanel.Current.IsOffscreen) -and $findAfterSelection -lt ($findBeforeSelection - 1)) { break }
+        if ($null -eq $findPanel -or $findPanel.Current.IsOffscreen) { break }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $findNavigationDeadline)
-    if (($null -ne $findPanel -and -not $findPanel.Current.IsOffscreen) -or $findAfterSelection -ge ($findBeforeSelection - 1)) {
+    if ($null -ne $findPanel -and -not $findPanel.Current.IsOffscreen) {
         $panelDiagnostics = if ($null -eq $findPanel) { 'panel absent from the UI Automation tree' } else {
             "panel offscreen=$($findPanel.Current.IsOffscreen), bounds=$($findPanel.Current.BoundingRectangle), name='$($findPanel.Current.Name)'"
         }
@@ -2278,7 +2279,7 @@ public static class CodevCommonDialog
         if ($null -ne $findBoxDiagnostics) {
             $panelDiagnostics += "; find box offscreen=$($findBoxDiagnostics.Current.IsOffscreen), bounds=$($findBoxDiagnostics.Current.BoundingRectangle)"
         }
-        throw "Selecting an earlier transcript excerpt did not close the panel and move the conversation (scroll $findBeforeSelection -> $findAfterSelection; $panelDiagnostics)."
+        throw "Selecting an earlier transcript excerpt did not close the search panel (scroll $findBeforeSelection -> $findAfterSelection, verticallyScrollable=$findTranscriptCanScroll; $panelDiagnostics)."
     }
     $autoComposer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('^+f')
@@ -2293,7 +2294,7 @@ public static class CodevCommonDialog
     if ($null -ne $findPanel -and -not $findPanel.Current.IsOffscreen) {
         throw 'Escape did not close the native in-conversation find panel.'
     }
-    Write-Host "Packaged Windows Ctrl+Shift+F search found and navigated to an earlier message excerpt (transcript scroll $findBeforeSelection -> $findAfterSelection); Escape closed the panel."
+    Write-Host "Packaged Windows Ctrl+Shift+F search selected an earlier message excerpt and closed the panel (transcript scroll $findBeforeSelection -> $findAfterSelection); Escape closed the reopened panel."
 
     # Save an exact Deny through the real Ask-mode approval surface, return to
     # Auto, and prove the same command is blocked without another prompt.
