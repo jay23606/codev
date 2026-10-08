@@ -2027,7 +2027,7 @@ public sealed class MainWindowTests
             var transcript = "Final answer stays visible.\n" +
                 "**read_file**\n" + UntrustedToolOutput.Format("project file", "README contents", path: "README.md", activity: "read_file") + "\n" +
                 "**search_files**\n" + UntrustedToolOutput.Format("project search results", "Matched source line", activity: "search_files") + "\n" +
-                "**write_file**\n" + UntrustedToolOutput.Format("project file updated", "Updated JavaScript source", path: "game.js", activity: "edited_file") + "\n" +
+                "**write_file**\n" + UntrustedToolOutput.Format("project file updated", "Updated JavaScript source\nAdvisory: the proposed file content matched instruction-risk patterns (instruction-like text). This advisory does not change the selected permission mode.", path: "game.js", activity: "edited_file") + "\n" +
                 "**run_command**\n" + UntrustedToolOutput.Format("approved command output", "Exit code: 0\nAll tests passed.", command: "npm test");
             var message = new ChatMessage("assistant", transcript) { IsCodeTaskTurn = true };
             var messages = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("MessageList"));
@@ -2057,6 +2057,12 @@ public sealed class MainWindowTests
                 text => text.Text?.Contains("All tests passed.", StringComparison.Ordinal) == true);
             Assert.Equal("ToolOutputContent", AutomationProperties.GetAutomationId(outputText));
             Assert.Equal(outputText.Text, AutomationProperties.GetName(outputText));
+
+            rows[2].IsChecked = true;
+            window.UpdateLayout();
+            var editedOutputText = Assert.Single(outputList.GetVisualDescendants().OfType<TextBox>(),
+                text => text.Text?.Contains("Advisory: the proposed file content matched instruction-risk patterns", StringComparison.Ordinal) == true);
+            Assert.Contains("This advisory does not change the selected permission mode.", editedOutputText.Text, StringComparison.Ordinal);
         }
         finally
         {
