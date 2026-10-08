@@ -2191,18 +2191,48 @@ public static class CodevCommonDialog
         catch { $expanderOffscreen = "unavailable ($($_.Exception.GetType().Name))" }
         throw "Expanding the packaged activity summary did not expose: $($missingActivityRows -join ', '). State=$activityExpandState; expanderOffscreen=$expanderOffscreen; scrollPercent=$activityScrollPosition; children=$($activityChildDiagnostics -join ' | '); related UI elements=$($visibleActivityRows -join ' | ')"
     }
+    $createdActivityRowCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Created file · activity-result.txt'))
+    $createdActivityRow = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $createdActivityRowCondition)
+    if ($null -eq $createdActivityRow) {
+        throw 'The Auto instruction-risk create-file row disappeared before its details could be expanded.'
+    }
+    $activityRowTogglePattern = $null
+    if ($createdActivityRow.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$activityRowTogglePattern)) {
+        if ($activityRowTogglePattern.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
+            $activityRowTogglePattern.Toggle()
+        }
+    }
+    else {
+        $activityRowInvokePattern = $null
+        if (-not $createdActivityRow.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$activityRowInvokePattern)) {
+            throw 'The created-file activity row cannot be expanded through UI Automation.'
+        }
+        $activityRowInvokePattern.Invoke()
+    }
     $toolOutputContentCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'ToolOutputContent')
-    $expandedActivityDetails = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $toolOutputContentCondition) |
-        ForEach-Object {
-            $valuePattern = $null
-            if ($_.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
-                [string]$valuePattern.Current.Value
-            }
-            else {
-                [string]$_.Current.Name
-            }
-        })
+    $activityDetailDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    $expandedActivityDetails = @()
+    do {
+        $expandedActivityDetails = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $toolOutputContentCondition) |
+            ForEach-Object {
+                $valuePattern = $null
+                if ($_.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+                    [string]$valuePattern.Current.Value
+                }
+                else {
+                    [string]$_.Current.Name
+                }
+            })
+        if ($expandedActivityDetails.Count -gt 0) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $activityDetailDeadline)
     if (-not ($expandedActivityDetails | Where-Object {
         $_.Contains('Advisory: the proposed file content matched instruction-risk patterns', [StringComparison]::Ordinal)
     })) {
