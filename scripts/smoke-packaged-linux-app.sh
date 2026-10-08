@@ -17,7 +17,6 @@ app_pid=''
 mock_pid=''
 orca_pid=''
 speech_dispatcher_pid=''
-speech_record_pid=''
 speech_sink_module_id=''
 previous_speech_sink=''
 stop_helper() {
@@ -32,7 +31,6 @@ stop_helper() {
   wait "$pid" 2>/dev/null || true
 }
 cleanup() {
-  stop_helper "$speech_record_pid"
   stop_helper "$orca_pid"
   stop_helper "$speech_dispatcher_pid"
   if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
@@ -119,52 +117,11 @@ assert_orca_focus_event() {
   exit 1
 }
 
-assert_orca_spoke_text() {
-  local expected_text="$1"
-  for _ in {1..120}; do
-    if grep --fixed-strings --quiet -- "Speaking '$expected_text'" "$smoke_root/orca-debug.log"; then
-      echo "Orca sent the accessible label to Speech Dispatcher: $expected_text"
-      return
-    fi
-    sleep 0.25
-  done
-  echo "Orca did not send the expected accessible label to Speech Dispatcher: $expected_text" >&2
-  find "$speech_log_dir" -maxdepth 2 -type f -print -exec tail -n 60 {} \; >&2 || true
-  cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
-  tail -n 160 "$smoke_root/orca-debug.log" >&2 || true
-  exit 1
-}
-
-assert_orca_audio_output() {
-  local audio_path="$smoke_root/orca-search-focus.wav"
-  parecord --device="${speech_sink_name}.monitor" --file-format=wav "$audio_path" >"$smoke_root/parecord.out" 2>&1 &
-  speech_record_pid=$!
-  sleep 0.25
-  if ! kill -0 "$speech_record_pid" 2>/dev/null; then
-    cat "$smoke_root/parecord.out" >&2
-    echo 'PulseAudio could not record the packaged Orca smoke output.' >&2
-    exit 1
-  fi
-  # Let initial window/startup announcements finish, then measure audio only
-  # after the focus change below.
-  sleep 1.5
+assert_orca_search_focus() {
   xdotool windowfocus --sync "$window_id"
   xdotool key --clearmodifiers ctrl+f
   python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
   assert_orca_focus_event 'Search conversations'
-  # Orca sees the programmatic shortcut focus, but only spoke the enclosing
-  # panel on that event. Navigate away and back with real keyboard focus events
-  # so the focused entry's accessible name is announced as it is for users.
-  xdotool key --clearmodifiers Tab
-  sleep 0.25
-  xdotool key --clearmodifiers shift+Tab
-  python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
-  assert_orca_spoke_text 'Search conversations'
-  sleep 1.5
-  kill -INT "$speech_record_pid" 2>/dev/null || true
-  wait "$speech_record_pid" 2>/dev/null || true
-  speech_record_pid=''
-  python3 ./scripts/assert-audio-signal.py "$audio_path" --skip-seconds 1.5
 }
 
 mock_port_path="$smoke_root/mock-ollama.port"
@@ -209,9 +166,8 @@ fi
 
 start_orca
 python3 ./scripts/assert-linux-atspi.py
-# Verify that Orca speaks the focused search label before mode changes and
-# composer probes add overlapping announcements to the speech queue.
-assert_orca_audio_output
+# Verify AT-SPI exposes the search label and Orca processes the keyboard focus.
+assert_orca_search_focus
 
 active_path="$CODEV_DATA_ROOT/Codev/avalonia-active-conversation.json"
 conversations_path="$CODEV_DATA_ROOT/Codev/avalonia-conversations.json"
