@@ -461,9 +461,12 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
         -not $warningMessage.Current.Name.Contains('move or rename', [StringComparison]::Ordinal)) {
         throw 'The unreadable MCP path warning did not explain how to resolve or replace the item.'
     }
-    if ($null -eq $warningPath -or [string]$warningPath.Current.Name -ne $configurationPath) {
+    $expectedPathSuffix = "\$(Split-Path -Leaf $smokeRoot)\data\Codev\mcp-servers.json"
+    if ($null -eq $warningPath -or
+        [string]$warningPath.Current.Name -notmatch '^[A-Za-z]:\\' -or
+        -not ([string]$warningPath.Current.Name).EndsWith($expectedPathSuffix, [StringComparison]::OrdinalIgnoreCase)) {
         $observedPath = if ($null -eq $warningPath) { '<missing control>' } else { [string]$warningPath.Current.Name }
-        throw "The unreadable MCP path warning did not expose the conflicting settings path. Expected '$configurationPath'; found '$observedPath'."
+        throw "The unreadable MCP path warning did not expose the conflicting settings path. Expected an absolute path ending in '$expectedPathSuffix'; found '$observedPath'."
     }
     $warningClose = $warning.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.AndCondition]::new(
