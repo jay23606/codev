@@ -1978,6 +1978,9 @@ public static class CodevCommonDialog
         # Windows exposes native caption buttons as UIA buttons even though they
         # are system commands, not stops in the app's Tab order.
         if ($button.Current.Name -in @('Minimize', 'Maximize', 'Close')) { continue }
+        # Avalonia exposes NumericUpDown's internal spin buttons as UIA buttons,
+        # but keyboard focus belongs to the parent editor rather than its parts.
+        if ($button.Current.AutomationId -in @('PART_LineUpButton', 'PART_LineDownButton')) { continue }
         if (-not $button.Current.IsKeyboardFocusable) {
             throw "A packaged-app button is not keyboard-focusable ('$($button.Current.Name)', automation id '$($button.Current.AutomationId)')."
         }
