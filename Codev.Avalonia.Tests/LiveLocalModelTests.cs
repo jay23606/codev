@@ -3,7 +3,6 @@ using Codev;
 using Codev.Avalonia.ViewModels;
 using System.Diagnostics;
 using System.Reflection;
-using Xunit.Abstractions;
 using System.Text.Json;
 
 namespace Codev.Avalonia.Tests;

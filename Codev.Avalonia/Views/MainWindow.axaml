@@ -217,8 +217,8 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <TextBlock Grid.Column="1" Width="225" IsVisible="{Binding IsModelPickerPlaceholderVisible}" Text="{Binding ModelPickerPlaceholder}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="The model selector appears when at least one model is available." />
-                    <Button Grid.Column="2" Classes="soft" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" AutomationProperties.Name="{Binding PlanModeLabel}" AutomationProperties.HelpText="{Binding ConversationModeCycleTooltip}" AutomationProperties.AutomationId="PlanModeButton" />
-                    <Button Grid.Column="3" Classes="soft" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" AutomationProperties.Name="{Binding CodeTaskLabel}" AutomationProperties.HelpText="{Binding CodeTaskTooltip}" AutomationProperties.AutomationId="CodeTaskModeButton" />
+                    <Button Grid.Column="2" Classes="soft" FontSize="12" Content="{Binding PlanModeLabel}" Command="{Binding TogglePlanModeCommand}" ToolTip.Tip="{Binding ConversationModeCycleTooltip}" AutomationProperties.Name="{Binding PlanModeLabel}" AutomationProperties.HelpText="{Binding ConversationModeCycleTooltip}" AutomationProperties.AutomationId="PlanModeButton" />
+                    <Button Grid.Column="3" Classes="soft" FontSize="12" Content="{Binding CodeTaskLabel}" Command="{Binding ToggleCodeTaskCommand}" ToolTip.Tip="{Binding CodeTaskTooltip}" AutomationProperties.Name="{Binding CodeTaskLabel}" AutomationProperties.HelpText="{Binding CodeTaskTooltip}" AutomationProperties.AutomationId="CodeTaskModeButton" />
                     <Button x:Name="ConversationOptionsButton" Grid.Column="4" Classes="soft" Content="Options" ToolTip.Tip="Context size, primary agent, and response style" AutomationProperties.Name="Conversation options">
                         <Button.Flyout>
                             <Flyout>
@@ -356,7 +356,7 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:ChatMessage">
                         <Grid Margin="0,0,0,20">
-                            <StackPanel IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="{Binding ReadingWidth}" Margin="48,0,24,0" Spacing="4">
+                            <StackPanel IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" Margin="48,0,24,0" Spacing="4">
                                 <Border HorizontalAlignment="Right" Padding="16,10" CornerRadius="15" Background="{DynamicResource UserBubbleBrush}">
                                     <md:MarkdownScrollViewer Markdown="{Binding Content}" SelectionEnabled="True" MaxWidth="{Binding $parent[Window].DataContext.ReadingWidth}" />
                                 </Border>

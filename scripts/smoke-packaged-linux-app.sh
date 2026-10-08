@@ -15,7 +15,26 @@ export CODEV_DATA_ROOT="$smoke_root/data"
 log_path="$smoke_root/app.log"
 app_pid=''
 mock_pid=''
+orca_pid=''
+speech_dispatcher_pid=''
+speech_record_pid=''
+speech_sink_module_id=''
+previous_speech_sink=''
+stop_helper() {
+  local pid="$1"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then return; fi
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
 cleanup() {
+  stop_helper "$speech_record_pid"
+  stop_helper "$orca_pid"
+  stop_helper "$speech_dispatcher_pid"
   if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
     kill "$app_pid" 2>/dev/null || true
     for _ in {1..20}; do
@@ -26,9 +45,103 @@ cleanup() {
   fi
   if [[ -n "$app_pid" ]]; then wait "$app_pid" 2>/dev/null || true; fi
   if [[ -n "$mock_pid" ]]; then kill "$mock_pid" 2>/dev/null || true; wait "$mock_pid" 2>/dev/null || true; fi
+  if [[ -n "$speech_sink_module_id" ]]; then
+    if [[ -n "$previous_speech_sink" ]]; then pactl set-default-sink "$previous_speech_sink" >/dev/null 2>&1 || true; fi
+    pactl unload-module "$speech_sink_module_id" >/dev/null 2>&1 || true
+  fi
   rm -rf -- "$smoke_root"
 }
 trap cleanup EXIT
+
+start_orca() {
+  speech_log_dir="$smoke_root/speech-dispatcher-logs"
+  speech_home="$smoke_root/speech-home"
+  speech_config_dir="$speech_home/.config/speech-dispatcher"
+  mkdir -p "$speech_config_dir/modules" "$speech_log_dir"
+  pulseaudio --start --exit-idle-time=-1 --log-target="file:$smoke_root/pulseaudio.log"
+  for _ in {1..40}; do
+    if pactl info >/dev/null 2>&1; then break; fi
+    sleep 0.25
+  done
+  if ! pactl info >/dev/null 2>&1; then
+    cat "$smoke_root/pulseaudio.log" >&2 || true
+    echo 'PulseAudio did not start for the packaged Orca smoke.' >&2
+    exit 1
+  fi
+  previous_speech_sink="$(pactl get-default-sink)"
+  speech_sink_name="codev_screenreader_$$"
+  speech_sink_module_id="$(pactl load-module module-null-sink sink_name="$speech_sink_name" rate=22050 channels=1 channel_map=mono)"
+  pactl set-default-sink "$speech_sink_name"
+  if [[ ! -f /etc/speech-dispatcher/modules/espeak-ng.conf ]]; then
+    echo 'The packaged Orca smoke requires the espeak-ng Speech Dispatcher module configuration.' >&2
+    exit 1
+  fi
+  cp /etc/speech-dispatcher/modules/espeak-ng.conf "$speech_config_dir/modules/espeak-ng.conf"
+  printf '%s\n' 'AddModule "espeak-ng" "sd_espeak-ng" "espeak-ng.conf"' >"$speech_config_dir/speechd.conf"
+  HOME="$speech_home" speech-dispatcher --run-single --config-dir "$speech_config_dir" --log-level 4 --log-dir "$speech_log_dir" >"$smoke_root/speech-dispatcher.out" 2>&1 &
+  speech_dispatcher_pid=$!
+  sleep 0.5
+  if ! kill -0 "$speech_dispatcher_pid" 2>/dev/null; then
+    cat "$smoke_root/speech-dispatcher.out" >&2
+    echo 'Speech Dispatcher did not start for the packaged Orca smoke.' >&2
+    exit 1
+  fi
+
+  HOME="$speech_home" orca --replace --enable=speech --debug-file="$smoke_root/orca-debug.log" >"$smoke_root/orca.out" 2>&1 &
+  orca_pid=$!
+  for _ in {1..80}; do
+    if ! kill -0 "$orca_pid" 2>/dev/null; then
+      cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+      echo 'Orca exited before it connected to the packaged application.' >&2
+      exit 1
+    fi
+    if [[ -s "$smoke_root/orca-debug.log" ]]; then return; fi
+    sleep 0.25
+  done
+  cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+  echo 'Orca did not initialize within 20 seconds.' >&2
+  exit 1
+}
+
+assert_orca_focus_event() {
+  local expected_text="$1"
+  for _ in {1..120}; do
+    if grep --fixed-strings --quiet -- "OBJECT EVENT: object:state-changed:focused for [entry: '$expected_text']" "$smoke_root/orca-debug.log"; then
+      echo "Orca processed the AT-SPI focus event for: $expected_text (spoken wording is not asserted)"
+      return
+    fi
+    sleep 0.25
+  done
+  echo "Orca did not process the expected AT-SPI focus event: $expected_text" >&2
+  find "$speech_log_dir" -maxdepth 2 -type f -print -exec tail -n 60 {} \; >&2 || true
+  cat "$smoke_root/orca.out" "$smoke_root/speech-dispatcher.out" >&2
+  tail -n 160 "$smoke_root/orca-debug.log" >&2 || true
+  exit 1
+}
+
+assert_orca_audio_output() {
+  local audio_path="$smoke_root/orca-search-focus.wav"
+  parecord --device="${speech_sink_name}.monitor" --file-format=wav "$audio_path" >"$smoke_root/parecord.out" 2>&1 &
+  speech_record_pid=$!
+  sleep 0.25
+  if ! kill -0 "$speech_record_pid" 2>/dev/null; then
+    cat "$smoke_root/parecord.out" >&2
+    echo 'PulseAudio could not record the packaged Orca smoke output.' >&2
+    exit 1
+  fi
+  # Let initial window/startup announcements finish, then measure audio only
+  # after the focus change below.
+  sleep 1.5
+  xdotool windowfocus --sync "$window_id"
+  xdotool key --clearmodifiers ctrl+f
+  python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
+  assert_orca_focus_event 'Search conversations'
+  sleep 1.5
+  kill -INT "$speech_record_pid" 2>/dev/null || true
+  wait "$speech_record_pid" 2>/dev/null || true
+  speech_record_pid=''
+  python3 ./scripts/assert-audio-signal.py "$audio_path" --skip-seconds 1.5
+}
 
 mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
@@ -69,6 +182,9 @@ if [[ -z "$window_id" ]]; then
   echo 'Packaged Avalonia app did not create a visible Codev window under Xvfb.' >&2
   exit 1
 fi
+
+start_orca
+python3 ./scripts/assert-linux-atspi.py
 
 active_path="$CODEV_DATA_ROOT/Codev/avalonia-active-conversation.json"
 conversations_path="$CODEV_DATA_ROOT/Codev/avalonia-conversations.json"
@@ -149,8 +265,7 @@ if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   echo 'Linux packaged app did not save the composer sentinel before the Ctrl+F check.' >&2
   exit 1
 fi
-xdotool windowfocus --sync "$window_id"
-xdotool key --clearmodifiers ctrl+f
+assert_orca_audio_output
 xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
 if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
