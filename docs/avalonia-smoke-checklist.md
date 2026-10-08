@@ -9,7 +9,7 @@ Use this checklist for the Avalonia desktop app across its supported operating s
 
 ## Latest cross-platform preview
 
-- [x] Exact-head packaged cross-platform preview (2026-10-08, PR source head `c83fe09`, CI [#37714479483](https://github.com/jay23606/codev/actions/runs/37714479483), preview [#37714479616](https://github.com/jay23606/codev/actions/runs/37714479616)): all Windows/Linux/macOS CI jobs and all four packaged desktop/CLI targets passed. Windows UI Automation, Linux Xvfb, and macOS window-server checks on Apple silicon and Intel passed; the Windows smoke confirms connection diagnostics stay visible without polluting the action summary. GitHub release publishing was skipped because the PR remains open. This is automated hosted-runner coverage; clean-machine installation, native screen-reader/scaling checks, direct native/manual platform checks, and manual security review remain unchecked.
+- [x] Exact-head packaged cross-platform preview (2026-10-08, PR source head `f3d9c4b`, CI [#37715478266](https://github.com/jay23606/codev/actions/runs/37715478266), preview [#37715478292](https://github.com/jay23606/codev/actions/runs/37715478292)): all Windows/Linux/macOS CI jobs and all four packaged desktop/CLI targets passed. Windows UI Automation, Linux Xvfb, and macOS window-server checks on Apple silicon and Intel passed; the Windows smoke confirms connection diagnostics stay visible without polluting the action summary. GitHub release publishing was skipped because the PR remains open. This is automated hosted-runner coverage; clean-machine installation, native screen-reader/scaling checks, direct native/manual platform checks, and manual security review remain unchecked.
 
 ## Child session UI regression
 
