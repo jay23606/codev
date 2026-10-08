@@ -267,7 +267,7 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
     throw 'Selecting Smoke QA in the packaged primary-agent picker did not persist to the active conversation.'
 }
 
-function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
+function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string]$ExpectedRepairJson) {
     $mcpButton = Find-ByAutomationId $Window 'McpServersButton'
     if ($null -eq $mcpButton) { throw 'The MCP servers settings button is missing.' }
     $invoke = $null
@@ -288,11 +288,24 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
         throw 'The MCP servers JSON field does not expose its value to UI Automation.'
     }
     $configurationText = [string]$editorValue.Current.Value
+    if (-not $configurationText.Contains('{"id":"broken"', [StringComparison]::Ordinal)) {
+        throw "The MCP servers editor did not expose the malformed source JSON for repair: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
+    }
+    $status = Find-ByAutomationId $dialog 'McpConfigurationStatus'
+    if ($null -eq $status -or -not $status.Current.Name.Contains('Correct the JSON and save', [StringComparison]::Ordinal)) {
+        throw 'The MCP settings editor did not explain how to repair the malformed file.'
+    }
+    $configurationPath = Join-Path $DataRoot 'Codev\mcp-servers.json'
+    if ([System.IO.File]::ReadAllText($configurationPath) -ne '[{"id":"broken",') {
+        throw 'Opening malformed MCP settings changed the source file before a valid save.'
+    }
+    $editorValue.SetValue($ExpectedRepairJson)
+    $configurationText = [string]$editorValue.Current.Value
     if (-not $configurationText.Contains('Packaged smoke MCP', [StringComparison]::Ordinal) -or
         -not $configurationText.Contains('smoke-mcp', [StringComparison]::Ordinal) -or
         -not $configurationText.Contains('Packaged smoke HTTP MCP', [StringComparison]::Ordinal) -or
         -not $configurationText.Contains('smoke-http', [StringComparison]::Ordinal)) {
-        throw "The MCP servers editor did not load the isolated fixture configuration: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
+        throw 'The MCP settings editor did not accept the corrected isolated fixture configuration.'
     }
 
     $saveCondition = [System.Windows.Automation.AndCondition]::new(
@@ -316,7 +329,6 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
     } while ([DateTime]::UtcNow -lt $closeDeadline)
     if ($null -ne $dialog) { throw 'Saving the MCP server settings did not close the editor.' }
 
-    $configurationPath = Join-Path $DataRoot 'Codev\mcp-servers.json'
     $savedConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
     try {
         if ($savedConfiguration.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
@@ -335,7 +347,7 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
         }
     }
     finally { $savedConfiguration.Dispose() }
-    Write-Host 'Packaged Windows MCP settings editor loaded and saved isolated stdio and loopback HTTP server configurations.'
+    Write-Host 'Packaged Windows MCP settings editor preserved malformed source JSON until valid stdio and loopback HTTP settings were saved.'
 }
 
 function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
@@ -1406,8 +1418,8 @@ try {
             oauthEnabled = $false
         }
     )
-    ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6 |
-        Set-Content -LiteralPath (Join-Path $settingsDirectory 'mcp-servers.json') -Encoding utf8
+    $mcpConfigurationJson = ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6
+    [System.IO.File]::WriteAllText((Join-Path $settingsDirectory 'mcp-servers.json'), '[{"id":"broken",', [System.Text.UTF8Encoding]::new($false))
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
         -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--cargo-activity', '--mcp-tool', '--mcp-http', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
@@ -1568,7 +1580,7 @@ public static class CodevCommonDialog
         $windowBounds.Right -gt $workingArea.Right -or $windowBounds.Bottom -gt $workingArea.Bottom) {
         throw "The packaged main window extends outside the monitor work area (window=$([int]$windowBounds.Left),$([int]$windowBounds.Top),$([int]$windowBounds.Width),$([int]$windowBounds.Height); workArea=$($workingArea.X),$($workingArea.Y),$($workingArea.Width),$($workingArea.Height))."
     }
-    Test-McpSettingsEditorInPackagedApp $window $dataRoot
+    Test-McpSettingsEditorInPackagedApp $window $dataRoot $mcpConfigurationJson
 
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,

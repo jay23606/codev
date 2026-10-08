@@ -1058,6 +1058,7 @@ public partial class MainWindow : Window
             Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#171717"))
         };
         var status = new TextBlock { Text = loadStatus ?? string.Empty, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, Foreground = this.FindResource("MutedTextBrush") as global::Avalonia.Media.IBrush };
+        global::Avalonia.Automation.AutomationProperties.SetAutomationId(status, "McpConfigurationStatus");
         var close = new Button { Content = "Close", Classes = { "soft" } };
         var save = new Button { Content = "Save servers", Classes = { "soft" } };
         var forgetSignIns = new Button { Content = "Forget saved OAuth sign-ins", Classes = { "soft" } };
