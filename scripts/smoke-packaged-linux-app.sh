@@ -17,9 +17,20 @@ app_pid=''
 mock_pid=''
 orca_pid=''
 speech_dispatcher_pid=''
+stop_helper() {
+  local pid="$1"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then return; fi
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
 cleanup() {
-  if [[ -n "$orca_pid" ]]; then kill "$orca_pid" 2>/dev/null || true; wait "$orca_pid" 2>/dev/null || true; fi
-  if [[ -n "$speech_dispatcher_pid" ]]; then kill "$speech_dispatcher_pid" 2>/dev/null || true; wait "$speech_dispatcher_pid" 2>/dev/null || true; fi
+  stop_helper "$orca_pid"
+  stop_helper "$speech_dispatcher_pid"
   if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
     kill "$app_pid" 2>/dev/null || true
     for _ in {1..20}; do
@@ -36,8 +47,11 @@ trap cleanup EXIT
 
 start_orca() {
   speech_log_dir="$smoke_root/speech-dispatcher-logs"
-  mkdir -p "$speech_log_dir"
-  speech-dispatcher --run-single --log-level 4 --log-dir "$speech_log_dir" >"$smoke_root/speech-dispatcher.out" 2>&1 &
+  speech_home="$smoke_root/speech-home"
+  speech_config_dir="$speech_home/.config/speech-dispatcher"
+  mkdir -p "$speech_config_dir" "$speech_log_dir"
+  printf '%s\n' 'AddModule "espeak-ng" "sd_espeak-ng" "espeak-ng.conf"' >"$speech_config_dir/speechd.conf"
+  HOME="$speech_home" speech-dispatcher --run-single --config-dir "$speech_config_dir" --log-level 4 --log-dir "$speech_log_dir" >"$smoke_root/speech-dispatcher.out" 2>&1 &
   speech_dispatcher_pid=$!
   sleep 0.5
   if ! kill -0 "$speech_dispatcher_pid" 2>/dev/null; then
@@ -46,7 +60,7 @@ start_orca() {
     exit 1
   fi
 
-  orca --replace --enable=speech --debug-file="$smoke_root/orca-debug.log" >"$smoke_root/orca.out" 2>&1 &
+  HOME="$speech_home" orca --replace --enable=speech --debug-file="$smoke_root/orca-debug.log" >"$smoke_root/orca.out" 2>&1 &
   orca_pid=$!
   for _ in {1..80}; do
     if ! kill -0 "$orca_pid" 2>/dev/null; then
