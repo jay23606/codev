@@ -2510,17 +2510,27 @@ public static class CodevCommonDialog
     Set-BackupDialogPath $openDialog $backupPath
     Invoke-BackupDialogButton $openDialog 'Open'
 
+    $expectedImportStatus = "Imported $($backup.Count) conversation(s). Existing history was left unchanged."
+    $importStatusCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Text),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $expectedImportStatus))
     $importDeadline = [DateTime]::UtcNow.AddSeconds(10)
-    $importedConversations = @()
+    $importStatus = $null
     do {
-        Start-Sleep -Milliseconds 100
-        try {
-            if (Test-Path -LiteralPath $conversationPath -PathType Leaf) {
-                $importedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json -AsHashtable)
-            }
-        }
-        catch { }
-    } while ($importedConversations.Count -lt $expectedConversationCount -and [DateTime]::UtcNow -lt $importDeadline)
+        $importStatus = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $importStatusCondition)
+        if ($null -eq $importStatus) { Start-Sleep -Milliseconds 100 }
+    } while ($null -eq $importStatus -and [DateTime]::UtcNow -lt $importDeadline)
+    if ($null -eq $importStatus) {
+        throw "The app did not confirm importing all $($backup.Count) backed-up conversations through its status message."
+    }
+    # Read only after the view-model confirms the awaited atomic persistence has completed.
+    # Repeated reads during File.Replace can hold a Windows read handle and make this check
+    # interfere with the very write it is trying to verify.
+    $importedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json -AsHashtable)
     if ($importedConversations.Count -ne $expectedConversationCount) {
         throw "The native Open dialog did not import every backed-up conversation; expected $expectedConversationCount total entries, persisted $($importedConversations.Count)."
     }
