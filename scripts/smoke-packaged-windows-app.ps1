@@ -2796,6 +2796,9 @@ public static class CodevCommonDialog
         if ($mcpActivityExpandCollapse.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) { break }
         Start-Sleep -Milliseconds 75
     } while ([DateTime]::UtcNow -lt $mcpExpandedDeadline)
+    if ($mcpActivityExpandCollapse.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Expanded) {
+        throw 'The packaged MCP prompt/resource/template activity group did not expand.'
+    }
     if ($null -ne $conversationScrollPattern -and $conversationScrollPattern.Current.VerticallyScrollable) {
         $null = $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
     }
