@@ -10,8 +10,19 @@ namespace Codev.Avalonia.Tests;
 
 public sealed class TestAppBuilder
 {
-    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<Codev.Avalonia.App>()
-        .UseHeadless(new AvaloniaHeadlessPlatformOptions());
+    public static AppBuilder BuildAvaloniaApp()
+    {
+        var builder = AppBuilder.Configure<Codev.Avalonia.App>();
+        if (string.Equals(Environment.GetEnvironmentVariable("CODEV_TEST_REAL_RENDERING"), "1", StringComparison.Ordinal))
+        {
+            return builder.UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions
+            {
+                UseHeadlessDrawing = false,
+                ShouldRenderOnUIThread = true
+            });
+        }
+        return builder.UseHeadless(new AvaloniaHeadlessPlatformOptions());
+    }
 }
 
 [XunitTestCaseDiscoverer(typeof(AvaloniaFactDiscoverer))]

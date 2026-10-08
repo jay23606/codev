@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
 using ColorTextBlock.Avalonia;
 using Markdown.Avalonia;
@@ -37,6 +39,17 @@ public sealed class MarkdownRenderingTests
             Assert.Contains("bold text", renderedText, StringComparison.Ordinal);
             Assert.Contains("inline code", renderedText, StringComparison.Ordinal);
             Assert.Contains("a link", renderedText, StringComparison.Ordinal);
+
+            var capturePath = Environment.GetEnvironmentVariable("CODEV_MARKDOWN_RENDER_CAPTURE");
+            if (!string.IsNullOrWhiteSpace(capturePath))
+            {
+                using var renderedFrame = new RenderTargetBitmap(new PixelSize(900, 600), new Vector(96, 96));
+                renderedFrame.Render(window);
+                var fullCapturePath = Path.GetFullPath(capturePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(fullCapturePath)!);
+                using var stream = File.Create(fullCapturePath);
+                renderedFrame.Save(stream, PngBitmapEncoderOptions.Default);
+            }
         }
         finally
         {
