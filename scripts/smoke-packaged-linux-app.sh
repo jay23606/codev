@@ -166,8 +166,6 @@ fi
 
 start_orca
 python3 ./scripts/assert-linux-atspi.py
-# Verify AT-SPI exposes the search label and Orca processes the keyboard focus.
-assert_orca_search_focus
 
 active_path="$CODEV_DATA_ROOT/Codev/avalonia-active-conversation.json"
 conversations_path="$CODEV_DATA_ROOT/Codev/avalonia-conversations.json"
@@ -248,6 +246,9 @@ if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   echo 'Linux packaged app did not save the composer sentinel before the Ctrl+F check.' >&2
   exit 1
 fi
+# Let Orca finish its startup announcements and initial tree scan before
+# validating the search field's AT-SPI label and keyboard focus event.
+assert_orca_search_focus
 xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
 if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
