@@ -261,6 +261,18 @@ public sealed class McpServerConfigurationStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Refuses_a_directory_at_the_configuration_path_instead_of_treating_it_as_missing()
+    {
+        Directory.CreateDirectory(PathName);
+        var store = new McpServerConfigurationStore(PathName);
+
+        await Assert.ThrowsAsync<IOException>(() => store.LoadAsync());
+        await Assert.ThrowsAsync<IOException>(() => store.ReadRawJsonForRepairAsync());
+
+        Assert.True(Directory.Exists(PathName));
+    }
+
+    [Fact]
     public async Task Refuses_more_than_the_supported_server_count()
     {
         var servers = Enumerable.Range(0, McpServerConfigurationStore.MaxServers + 1)

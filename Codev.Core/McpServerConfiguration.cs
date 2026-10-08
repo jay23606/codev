@@ -63,6 +63,7 @@ public sealed class McpServerConfigurationStore(string path)
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (Directory.Exists(_path)) throw new IOException("The MCP server configuration path is a directory.");
             if (_servers is not null) return _servers.Select(Clone).ToArray();
             if (!File.Exists(_path)) return _servers = [];
             if (new FileInfo(_path).Length > MaxFileBytes) throw new InvalidDataException("The MCP server configuration exceeds the size limit.");
@@ -89,6 +90,21 @@ public sealed class McpServerConfigurationStore(string path)
             }
             _servers = loaded.Select(Clone).ToArray();
             return _servers.Select(Clone).ToArray();
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Returns the bounded on-disk JSON so the settings UI can repair a malformed file without replacing it first.</summary>
+    public async Task<string> ReadRawJsonForRepairAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Directory.Exists(_path)) throw new IOException("The MCP server configuration path is a directory.");
+            if (!File.Exists(_path)) return "[]";
+            if (new FileInfo(_path).Length > MaxFileBytes)
+                throw new InvalidDataException("The MCP server configuration exceeds the size limit and cannot be opened for repair.");
+            return await File.ReadAllTextAsync(_path, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
