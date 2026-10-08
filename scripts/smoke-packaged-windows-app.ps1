@@ -267,7 +267,7 @@ function Select-AgentProfileInPackagedApp($Window, [string]$DataRoot, [string]$C
     throw 'Selecting Smoke QA in the packaged primary-agent picker did not persist to the active conversation.'
 }
 
-function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
+function Open-McpSettingsEditorInPackagedApp($Window) {
     $mcpButton = Find-ByAutomationId $Window 'McpServersButton'
     if ($null -eq $mcpButton) { throw 'The MCP servers settings button is missing.' }
     $invoke = $null
@@ -278,23 +278,26 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
 
     $dialog = Wait-ForTopLevelWindow 'MCP servers' 10
     if ($null -eq $dialog) { throw 'The MCP servers editor did not open.' }
+    return $dialog
+}
+
+function Get-McpSettingsEditorAndStatus($Dialog) {
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Edit)
-    $editor = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
+    $editor = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
     if ($null -eq $editor) { throw 'The MCP servers editor did not expose its JSON field.' }
     $editorValue = $null
     if (-not $editor.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$editorValue)) {
         throw 'The MCP servers JSON field does not expose its value to UI Automation.'
     }
-    $configurationText = [string]$editorValue.Current.Value
-    if (-not $configurationText.Contains('Packaged smoke MCP', [StringComparison]::Ordinal) -or
-        -not $configurationText.Contains('smoke-mcp', [StringComparison]::Ordinal) -or
-        -not $configurationText.Contains('Packaged smoke HTTP MCP', [StringComparison]::Ordinal) -or
-        -not $configurationText.Contains('smoke-http', [StringComparison]::Ordinal)) {
-        throw "The MCP servers editor did not load the isolated fixture configuration: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
-    }
+    $status = Find-ByAutomationId $Dialog 'McpConfigurationStatus'
+    if ($null -eq $status) { throw 'The MCP settings editor did not expose its recovery status.' }
+    return @{ Editor = $editorValue; Status = $status }
+}
 
+function Save-McpSettingsEditorInPackagedApp($Dialog, $Editor, [string]$Json) {
+    $Editor.SetValue($Json)
     $saveCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -302,7 +305,7 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::NameProperty,
             'Save servers'))
-    $saveButton = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $saveCondition)
+    $saveButton = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $saveCondition)
     $saveInvoke = $null
     if ($null -eq $saveButton -or -not $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
         throw 'The MCP editor Save servers button is missing or cannot be activated.'
@@ -310,13 +313,40 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
     $saveInvoke.Invoke()
     $closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
-        $dialog = Wait-ForTopLevelWindow 'MCP servers' 1
-        if ($null -eq $dialog) { break }
+        $currentDialog = Wait-ForTopLevelWindow 'MCP servers' 1
+        if ($null -eq $currentDialog) { return }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $closeDeadline)
-    if ($null -ne $dialog) { throw 'Saving the MCP server settings did not close the editor.' }
+    throw 'Saving valid MCP server settings did not close the editor.'
+}
 
+function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string]$ExpectedRepairJson) {
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    $editorValue = $controls.Editor
+    $status = $controls.Status
+    $configurationText = [string]$editorValue.Current.Value
+    if (-not $configurationText.Contains('{"id":"broken"', [StringComparison]::Ordinal)) {
+        throw "The MCP servers editor did not expose the malformed source JSON for repair: $($configurationText.Substring(0, [Math]::Min(500, $configurationText.Length)))"
+    }
+    if ($null -eq $status -or -not $status.Current.Name.Contains('Correct the JSON or settings and save', [StringComparison]::Ordinal)) {
+        throw 'The MCP settings editor did not explain how to repair the malformed file.'
+    }
     $configurationPath = Join-Path $DataRoot 'Codev\mcp-servers.json'
+    if ([System.IO.File]::ReadAllText($configurationPath) -ne '[{"id":"broken",') {
+        throw 'Opening malformed MCP settings changed the source file before a valid save.'
+    }
+    $editorValue.SetValue($ExpectedRepairJson)
+    $configurationText = [string]$editorValue.Current.Value
+    if (-not $configurationText.Contains('Packaged smoke MCP', [StringComparison]::Ordinal) -or
+        -not $configurationText.Contains('smoke-mcp', [StringComparison]::Ordinal) -or
+        -not $configurationText.Contains('Packaged smoke HTTP MCP', [StringComparison]::Ordinal) -or
+        -not $configurationText.Contains('smoke-http', [StringComparison]::Ordinal)) {
+        throw 'The MCP settings editor did not accept the corrected isolated fixture configuration.'
+    }
+
+    Save-McpSettingsEditorInPackagedApp $dialog $editorValue $ExpectedRepairJson
+
     $savedConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
     try {
         if ($savedConfiguration.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
@@ -335,7 +365,121 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot) {
         }
     }
     finally { $savedConfiguration.Dispose() }
-    Write-Host 'Packaged Windows MCP settings editor loaded and saved isolated stdio and loopback HTTP server configurations.'
+
+    $invalidEntry = '[{"id":"broken","name":42,"transport":"Http","enabled":false,"url":"https://example.test/mcp"}]'
+    [System.IO.File]::WriteAllText($configurationPath, $invalidEntry, [System.Text.UTF8Encoding]::new($false))
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    if ([string]$controls.Editor.Current.Value -ne $invalidEntry -or
+        -not $controls.Status.Current.Name.Contains('Correct the JSON or settings and save', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not preserve an invalidly typed server entry for repair.'
+    }
+    if ([System.IO.File]::ReadAllText($configurationPath) -ne $invalidEntry) {
+        throw 'Opening invalidly typed MCP settings changed the source file before a valid save.'
+    }
+    Save-McpSettingsEditorInPackagedApp $dialog $controls.Editor $ExpectedRepairJson
+
+    $duplicates = '[{"id":"docs","name":"Docs","transport":"Http","enabled":false,"url":"https://example.test/mcp"},{"id":"DOCS","name":"Docs duplicate","transport":"Http","enabled":false,"url":"https://example.test/other"}]'
+    [System.IO.File]::WriteAllText($configurationPath, $duplicates, [System.Text.UTF8Encoding]::new($false))
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    $configurationText = [string]$controls.Editor.Current.Value
+    if (-not $configurationText.Contains('Docs duplicate', [StringComparison]::Ordinal) -or
+        -not $controls.Status.Current.Name.Contains('Duplicate MCP server ID(s)', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not identify duplicate server IDs and preserve both entries.'
+    }
+    $saveInvoke = $null
+    $duplicateSave = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Save servers')))
+    if ($null -eq $duplicateSave -or -not $duplicateSave.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$saveInvoke)) {
+        throw 'The MCP editor Save servers button is missing for duplicate-ID validation.'
+    }
+    $saveInvoke.Invoke()
+    $errorDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $duplicateDialog = Wait-ForTopLevelWindow 'MCP servers' 1
+        if ($null -eq $duplicateDialog) { break }
+        $duplicateStatus = Find-ByAutomationId $duplicateDialog 'McpConfigurationStatus'
+        if ($null -ne $duplicateStatus -and $duplicateStatus.Current.Name.Contains('Could not save MCP servers', [StringComparison]::Ordinal)) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $errorDeadline)
+    if ([System.IO.File]::ReadAllText($configurationPath) -ne $duplicates) {
+        throw 'Attempting to save duplicate MCP IDs changed the source file.'
+    }
+    if ($null -eq $duplicateStatus -or -not $duplicateStatus.Current.Name.Contains('Could not save MCP servers', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not explain that duplicate IDs must be repaired before saving.'
+    }
+    $dialog = Wait-ForTopLevelWindow 'MCP servers' 1
+    if ($null -eq $dialog) { throw 'The MCP settings editor closed after rejecting duplicate IDs.' }
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    Save-McpSettingsEditorInPackagedApp $dialog $controls.Editor $ExpectedRepairJson
+    $finalConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
+    try {
+        if ($finalConfiguration.RootElement.GetArrayLength() -ne 2) {
+            throw 'Repairing duplicate MCP IDs did not save the valid replacement settings.'
+        }
+    }
+    finally { $finalConfiguration.Dispose() }
+
+    $oversized = ' ' * (1MB + 1)
+    [System.IO.File]::WriteAllText($configurationPath, $oversized, [System.Text.UTF8Encoding]::new($false))
+    $dialog = Open-McpSettingsEditorInPackagedApp $Window
+    $controls = Get-McpSettingsEditorAndStatus $dialog
+    if ([string]$controls.Editor.Current.Value -ne '[]' -or
+        -not $controls.Status.Current.Name.Contains('larger than the 1 MiB editor limit', [StringComparison]::Ordinal) -or
+        -not $controls.Status.Current.Name.Contains('original file remains unchanged', [StringComparison]::Ordinal)) {
+        throw 'The packaged MCP editor did not explain its bounded replacement path for an oversized source file.'
+    }
+    if ((Get-Item -LiteralPath $configurationPath).Length -ne (1MB + 1)) {
+        throw 'Opening an oversized MCP settings file changed the source before an explicit valid save.'
+    }
+    Save-McpSettingsEditorInPackagedApp $dialog $controls.Editor $ExpectedRepairJson
+    $finalConfiguration = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($configurationPath))
+    try {
+        if ($finalConfiguration.RootElement.GetArrayLength() -ne 2) {
+            throw 'Saving a valid MCP replacement did not recover the oversized source file.'
+        }
+    }
+    finally { $finalConfiguration.Dispose() }
+
+    [System.IO.File]::Delete($configurationPath)
+    [System.IO.Directory]::CreateDirectory($configurationPath) | Out-Null
+    $mcpButton = Find-ByAutomationId $Window 'McpServersButton'
+    $mcpInvoke = $null
+    if ($null -eq $mcpButton -or -not $mcpButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$mcpInvoke)) {
+        throw 'The MCP servers settings button is missing for the unreadable-path smoke.'
+    }
+    $mcpInvoke.Invoke()
+    $warning = Wait-ForTopLevelWindow 'MCP configuration unavailable' 10
+    if ($null -eq $warning) { throw 'A conflicting directory at the MCP settings path did not show a recovery warning.' }
+    $warningMessage = Find-ByAutomationId $warning 'McpConfigurationUnavailableMessage'
+    $warningPath = Find-ByAutomationId $warning 'McpConfigurationUnavailablePath'
+    if ($null -eq $warningMessage -or
+        -not $warningMessage.Current.Name.Contains('Check its file permissions', [StringComparison]::Ordinal) -or
+        -not $warningMessage.Current.Name.Contains('move or rename', [StringComparison]::Ordinal)) {
+        throw 'The unreadable MCP path warning did not explain how to resolve or replace the item.'
+    }
+    $expectedPathSuffix = "\$(Split-Path -Leaf $smokeRoot)\data\Codev\mcp-servers.json"
+    if ($null -eq $warningPath -or
+        [string]$warningPath.Current.Name -notmatch '^[A-Za-z]:\\' -or
+        -not ([string]$warningPath.Current.Name).EndsWith($expectedPathSuffix, [StringComparison]::OrdinalIgnoreCase)) {
+        $observedPath = if ($null -eq $warningPath) { '<missing control>' } else { [string]$warningPath.Current.Name }
+        throw "The unreadable MCP path warning did not expose the conflicting settings path. Expected an absolute path ending in '$expectedPathSuffix'; found '$observedPath'."
+    }
+    $warningClose = $warning.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Close')))
+    $warningCloseInvoke = $null
+    if ($null -eq $warningClose -or -not $warningClose.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$warningCloseInvoke)) {
+        throw 'The unreadable MCP path recovery warning has no accessible Close action.'
+    }
+    $warningCloseInvoke.Invoke()
+    [System.IO.Directory]::Delete($configurationPath)
+    [System.IO.File]::WriteAllText($configurationPath, $ExpectedRepairJson, [System.Text.UTF8Encoding]::new($false))
+    Write-Host 'Packaged Windows MCP settings UI covered malformed JSON, invalidly typed entries, duplicate IDs, oversized files, and a conflicting directory path.'
 }
 
 function Test-AgentProfileEditorInPackagedApp($Window, [string]$DataRoot) {
@@ -1406,10 +1550,10 @@ try {
             oauthEnabled = $false
         }
     )
-    ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6 |
-        Set-Content -LiteralPath (Join-Path $settingsDirectory 'mcp-servers.json') -Encoding utf8
+    $mcpConfigurationJson = ConvertTo-Json -InputObject ([object[]]$mcpConfiguration) -Depth 6
+    [System.IO.File]::WriteAllText((Join-Path $settingsDirectory 'mcp-servers.json'), '[{"id":"broken",', [System.Text.UTF8Encoding]::new($false))
     $mockServer = Start-Process -FilePath $nodePath -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
-        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--cargo-activity', '--mcp-tool', '--mcp-http', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
+        -ArgumentList @($mockServerPath, '--auto-destructive', '--activity-summary', '--cargo-activity', '--mcp-tool', '--mcp-http', '--mcp-activity', '--port-file', $mockPortPath, '--request-log', $mockRequestLog) `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $mockStdoutPath -RedirectStandardError $mockStderrPath
     $mockDeadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $mockDeadline -and -not (Test-Path -LiteralPath $mockPortPath -PathType Leaf)) {
@@ -1504,8 +1648,9 @@ public static class CodevCommonDialog
 
     public static void ClickAt(int x, int y)
     {
-        if (!SetCursorPos(x, y)) throw new InvalidOperationException("Could not focus the native filename field.");
+        if (!SetCursorPos(x, y)) throw new InvalidOperationException("Could not move the pointer to the requested screen position.");
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(60);
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
     }
 
@@ -1568,7 +1713,7 @@ public static class CodevCommonDialog
         $windowBounds.Right -gt $workingArea.Right -or $windowBounds.Bottom -gt $workingArea.Bottom) {
         throw "The packaged main window extends outside the monitor work area (window=$([int]$windowBounds.Left),$([int]$windowBounds.Top),$([int]$windowBounds.Width),$([int]$windowBounds.Height); workArea=$($workingArea.X),$($workingArea.Y),$($workingArea.Width),$($workingArea.Height))."
     }
-    Test-McpSettingsEditorInPackagedApp $window $dataRoot
+    Test-McpSettingsEditorInPackagedApp $window $dataRoot $mcpConfigurationJson
 
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -2577,6 +2722,87 @@ public static class CodevCommonDialog
         throw "The packaged MCP discovery/tool-result request sequence was unexpected: $($mcpModelRequests | ConvertTo-Json -Depth 8 -Compress)"
     }
     Write-Host 'Packaged Windows MCP smoke discovered a configured stdio server from isolated user settings, called its echo tool in Auto mode, returned bounded untrusted tool output to the model, and completed without an approval panel.'
+
+    $mcpActivityPrompt = 'Run the packaged MCP activity detail smoke.'
+    Submit-PackagedComposerPrompt $window $autoComposer $mcpActivityPrompt
+    $mcpActivityReplyDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    $mcpActivityTranscript = ''
+    do {
+        try {
+            $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
+            $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
+            if ($matches.Count -eq 1 -and @($matches[0].Messages).Count -gt 0) {
+                $mcpActivityTranscript = (@($matches[0].Messages | ForEach-Object { [string]$_.Content }) -join "`n")
+                if ($mcpActivityTranscript.Contains('Packaged MCP activity details passed.', [StringComparison]::Ordinal)) { break }
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpActivityReplyDeadline)
+    foreach ($activityMarker in @('MCP_SMOKE_PROMPT_BODY', 'MCP_SMOKE_RESOURCE_BODY', 'MCP_SMOKE_TEMPLATE_BODY')) {
+        if (-not $mcpActivityTranscript.Contains($activityMarker, [StringComparison]::Ordinal)) {
+            throw "The packaged MCP activity transcript omitted ${activityMarker}: $($mcpActivityTranscript.Substring([Math]::Max(0, $mcpActivityTranscript.Length - 2000)))"
+        }
+    }
+    if (-not $mcpActivityTranscript.Contains('Packaged MCP activity details passed.', [StringComparison]::Ordinal) -or
+        $modeButton.Current.Name -ne 'Auto ▾') {
+        throw "The packaged MCP prompt/resource/template operations did not finish in Auto mode: $($mcpActivityTranscript.Substring([Math]::Max(0, $mcpActivityTranscript.Length - 2000)))"
+    }
+    $mcpActivityCalls = @(Get-Content -LiteralPath $mcpCallLogPath | ForEach-Object { $_ | ConvertFrom-Json })
+    if (@($mcpActivityCalls | Where-Object { $_.operation -eq 'prompt' -and $_.name -eq 'release_review' }).Count -ne 1 -or
+        @($mcpActivityCalls | Where-Object { $_.operation -eq 'resource' -and $_.uri -eq 'codev://release-notes' }).Count -ne 1 -or
+        @($mcpActivityCalls | Where-Object { $_.operation -eq 'resource' -and $_.uri -eq 'v://i/42' }).Count -ne 1) {
+        throw "The packaged MCP fixture did not receive one prompt, resource, and resource-template operation: $($mcpActivityCalls | ConvertTo-Json -Depth 5 -Compress)"
+    }
+    $mcpActivityRequests = @(Get-Content -LiteralPath $mockRequestLog | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.last_user_message -eq $mcpActivityPrompt })
+    if ($mcpActivityRequests.Count -ne 4 -or $mcpActivityRequests[0].last_role -ne 'user' -or
+        $mcpActivityRequests[1].last_tool_name -notlike 'mcp_smoke-mcp_prompt_release_review_*' -or
+        $mcpActivityRequests[2].last_tool_name -notlike 'mcp_smoke-mcp_resource_*' -or
+        $mcpActivityRequests[3].last_tool_name -notlike 'mcp_smoke-mcp_resource-template_*' -or
+        @($mcpActivityRequests | Where-Object { $_.last_role -eq 'tool' -and $_.keep_alive -eq '30m' }).Count -ne 3) {
+        throw "The packaged MCP activity model/tool sequence was unexpected: $($mcpActivityRequests | ConvertTo-Json -Depth 8 -Compress)"
+    }
+
+    $mcpActivityGroupName = 'Used MCP prompts, read MCP resources, read MCP resource templates'
+    $mcpActivityGroupCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandToolOutputsExpander'),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty, $mcpActivityGroupName))
+    $conversationScrollViewer = Find-ByAutomationId $window 'ConversationScrollViewer'
+    $conversationScrollPattern = $null
+    if ($null -ne $conversationScrollViewer -and
+        $conversationScrollViewer.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$conversationScrollPattern) -and
+        $conversationScrollPattern.Current.VerticallyScrollable) {
+        $null = $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+    }
+    $mcpActivityGroupDeadline = [DateTime]::UtcNow.AddSeconds(8)
+    $mcpActivityGroup = $null
+    do {
+        $mcpActivityGroup = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $mcpActivityGroupCondition)
+        if ($null -ne $mcpActivityGroup -and -not $mcpActivityGroup.Current.IsOffscreen) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $mcpActivityGroupDeadline)
+    $mcpActivityExpandCollapse = $null
+    if ($null -eq $mcpActivityGroup -or
+        -not $mcpActivityGroup.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$mcpActivityExpandCollapse) -or
+        $mcpActivityExpandCollapse.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) {
+        throw 'The packaged MCP prompt/resource/template activity group did not start collapsed and accessible.'
+    }
+    $mcpActivityExpandCollapse.Expand()
+    $mcpExpandedDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        if ($mcpActivityExpandCollapse.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) { break }
+        Start-Sleep -Milliseconds 75
+    } while ([DateTime]::UtcNow -lt $mcpExpandedDeadline)
+    if ($mcpActivityExpandCollapse.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Expanded) {
+        throw 'The packaged MCP prompt/resource/template activity group did not expand.'
+    }
+    if ($null -ne $conversationScrollPattern -and $conversationScrollPattern.Current.VerticallyScrollable) {
+        $null = $conversationScrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+    }
+    Write-Host 'Packaged Windows MCP prompt, resource, and resource-template activity remained collapsed by default and expanded. Focused Avalonia UI tests verify the expanded rows and readable, bounded untrusted results.'
 
     $mcpHttpPrompt = 'Run the packaged MCP Streamable HTTP smoke.'
     Submit-PackagedComposerPrompt $window $autoComposer $mcpHttpPrompt

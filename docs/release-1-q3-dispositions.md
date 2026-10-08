@@ -22,7 +22,7 @@ Keep the full end-to-end data-loss, permission, and hostile-input workflows in t
 | Checklist row | Release 1 disposition | Remaining evidence needed |
 | --- | --- | --- |
 | R1-Q3-01 | Defer to R2 | Native Linux/macOS keyboard access and persisted compact-header options. |
-| R1-Q3-02 | Defer to R2 | Repeat packaged Windows UI automation reliably and capture a complete local Auto transcript; hosted smoke does not resolve local automation flakiness. |
+| R1-Q3-02 | Defer to R2 | Run the packaged Windows path with a real local Ollama model and repeat native input reliably. A local deterministic mock-backed UI run now passed end to end on the second attempt; the first exposed SendKeys text loss, so this does not close the live-model workflow. |
 | R1-Q3-03 | Defer to R2 | Native Linux/macOS shortcut, search navigation, Escape, and help-page flow. |
 | R1-Q3-04 | Defer to R2 | Full hosted-provider comparison and native cross-platform confirmation; local Qwen and headless warning behavior already have evidence. |
 | R1-Q3-05 | Defer to R2 | Full summarize-range lifecycle, export/import boundaries, extension, and rewind interaction. |
@@ -56,7 +56,7 @@ Keep the full end-to-end data-loss, permission, and hostile-input workflows in t
 | R1-Q3-33 | Defer to R2 | Multi-round token totals and interrupted-response accounting using a hosted OpenAI Code task. |
 | R1-Q3-34 | Defer to R2 | Full Ask/Allow exact/Deny persistence and default UI command workflow. |
 | R1-Q3-35 | Defer to R2 | Complete destructive Git preview/cancel/stale-diff/limits flow; retain automated assertions for staged-content preservation and stale-state refusal as release gates. |
-| R1-Q3-36 | Defer to R2 | Full Auto matrix for ordinary/risk-flagged file operations, commands, chains, and deny rules; exact compound-command package and executor regressions already have evidence. |
+| R1-Q3-36 | Defer to R2 | Complete the Auto matrix. The local packaged mock-backed run now covers an instruction-risk file proposal, the screenshot-shaped destructive command, exact-Deny blocking, and no approval panel; ordinary file/command variants and the real-model workflow remain. |
 | R1-Q3-37 | Defer to R2 | Web-search activity and older imported-transcript compatibility; collapsed multi-action rendering already has packaged and UI-test evidence. |
 | R1-Q3-38 | Defer to R2 | Source attribution and inline warning when a hostile instruction does cause a proposal, plus list/search/command-output cases; live Qwen no-action case is partial. Keep unauthorized-action checks blocking. |
 | R1-Q3-39 | Defer to R2 | Checklist editing, state persistence, prompt inclusion, and `/clear` behavior in a real Code task. |
@@ -79,10 +79,10 @@ Keep the full end-to-end data-loss, permission, and hostile-input workflows in t
 | R1-Q3-56 | Defer to R2 | 200% system scaling and largest-font layout review across all named surfaces. |
 | R1-Q3-57 | Defer to R2 | Real model completing all requested action types and web-search/imported-transcript checks; grouped activity display has packaged and UI-test evidence. |
 | R1-Q3-58 | Defer to R2 | Full `/review-last-turn` scope, stale-history, and unchanged-project-state workflow. |
-| R1-Q3-59 | Defer to R2 | Packaged SSE fallback, HTTP OAuth UI, and native macOS/Linux checks; stdio and Streamable HTTP packaged calls have evidence. |
-| R1-Q3-60 | Defer to R2 | Packaged UI readability of tool, prompt, resource, and template activity details; protocol behavior has Core-test evidence. |
-| R1-Q3-61 | Defer to R2 | Packaged prompt/resource/template denial and native macOS/Linux UI checks; executor, headless, and packaged stdio-tool safety cases have evidence. |
+| R1-Q3-59 | Defer to R2 | Local packaged Windows UI now configures, discovers, and calls stdio and Streamable HTTP MCP echo tools in Auto with the isolated mock. Packaged SSE fallback, HTTP OAuth through the app UI, and native manual macOS/Linux behavior remain open. |
+| R1-Q3-60 | Defer to R2 | Headless Avalonia coverage verifies that tool, prompt, resource, and resource-template operations share a collapsed natural-language group and expand to correctly named rows with readable untrusted results rather than raw output envelopes. Packaged UI readability and native macOS/Linux checks remain open. |
+| R1-Q3-61 | Defer to R2 | Local packaged Windows UI denies a configured stdio tool in Ask, persists the exact deny, leaves the server uncalled, then completes tool calls in Auto over stdio and Streamable HTTP. Prompt/resource/template UI coverage and native macOS/Linux interaction remain open. |
 | R1-Q3-62 | Defer to R2 | Packaged interaction and native screen-reader checks for disabled/invalid/unavailable MCP servers; Core and headless diagnostics have evidence. |
 | R1-Q3-63 | Defer to R2 | Complete browser OAuth and restart/forget-token workflow with test server; credential absence from persisted and diagnostic surfaces. |
 | R1-Q3-64 | Defer to R2 | Slow/canceled/oversized MCP operation and shutdown bounds while proving the app remains responsive. |
-| R1-Q3-65 | Defer to R2 | Restart and malformed/duplicate settings recovery while preserving unreadable source JSON. |
+| R1-Q3-65 | Defer to R2 | Headless tests cover malformed JSON, wrongly typed fields, duplicate IDs, and oversized files, preserving the source through invalid states and confirming reload after repair; the Core test also rejects a directory at the settings-file path instead of treating it as missing. Exact-head four-target preview [#37824930304](https://github.com/jay23606/codev/actions/runs/37824930304) verifies the packaged Windows editor preserves and repairs all four cases, leaves the source unchanged before valid save, and gives accessible guidance for a directory collision. Still needed: native settings interaction and a true permission-denied read. |

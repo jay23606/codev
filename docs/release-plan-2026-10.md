@@ -2,6 +2,8 @@
 
 Status checked 2026-10-08. This is the proposed sequence for the next public Codev release and its early follow-up. It does not authorize merging PR #1, waiving release checks, or publishing a tag.
 
+**Local smoke-test cadence.** Full packaged UI smokes can take focus and interact with the desktop, so run them locally only at a release-candidate checkpoint or when a change specifically affects end-to-end UI behavior, permissions, startup, or persistence. During ordinary implementation and debugging, prefer focused unit/integration tests, static checks, and targeted UI tests. If a full smoke fails, diagnose with its captured artifacts or a focused reproducer before considering another full run; do not rerun it merely to recheck an unchanged path. Hosted CI/package-preview checks remain the shared exact-head validation gate and do not take over the developer's desktop.
+
 ## Release 1: early preview
 
 Publish the current Avalonia candidate as a clearly labeled early preview once PR #1 reaches `main` and every Q3 release check in `DESIGN.md` is either completed or has a written, release-specific waiver. Use the repository's existing `v*` tag workflow, which publishes self-contained desktop and CLI archives for Windows x64, Linux x64, macOS Apple silicon, and macOS Intel. The README's `/releases/latest/download/` links already point users to the newest tag, with Windows first.
