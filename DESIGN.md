@@ -1135,6 +1135,8 @@ Run after phases 1 to 5 and again before every release, as its own change set.
 
 **Windows conversation-backup regression tests (2026-10-07, .NET SDK 10.0.401).** In an isolated temporary SDK install, the core backup-filtered suite passed 17/17 and the Avalonia backup-filtered suite passed 2/2. `Backup_menu_exports_and_imports_through_the_platform_picker` exercised the menu through a fake platform picker, verified the exported JSON and import filter, retained the original conversation, and added a fresh-ID import. This confirms the app-level path; it does not exercise the native Windows Save/Open dialogs. The native packaged backup flow remains open pending a full smoke rerun.
 
+**Exact-head cross-platform packaged preview (2026-10-08, PR head `6d7dbf5`).** Windows/Linux/macOS CI [#37709067059](https://github.com/jay23606/codev/actions/runs/37709067059) and the four-target desktop/CLI preview [#37709067090](https://github.com/jay23606/codev/actions/runs/37709067090) passed. The packaged Windows UI Automation, Linux Xvfb interaction, and macOS window-server interaction smokes on Apple silicon and Intel passed, including Auto command execution and local chat. GitHub Release publishing skipped because PR #1 remains open. This validates exact-head automated package and interaction paths; Q3's remaining clean-machine install, native assistive-technology/scaling, physical native desktop, and manual security checks remain open.
+
 #### Q4. Exit rule and ownership
 
 - **The pass is finished when every Q3 row is ticked or waived with a written reason,** not when nothing could be improved. New findings that are not release blockers become backlog items instead of ad hoc fixes.
