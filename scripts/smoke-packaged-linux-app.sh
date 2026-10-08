@@ -50,6 +50,16 @@ start_orca() {
   speech_home="$smoke_root/speech-home"
   speech_config_dir="$speech_home/.config/speech-dispatcher"
   mkdir -p "$speech_config_dir" "$speech_log_dir"
+  pulseaudio --start --exit-idle-time=-1 --log-target="file:$smoke_root/pulseaudio.log"
+  for _ in {1..40}; do
+    if pactl info >/dev/null 2>&1; then break; fi
+    sleep 0.25
+  done
+  if ! pactl info >/dev/null 2>&1; then
+    cat "$smoke_root/pulseaudio.log" >&2 || true
+    echo 'PulseAudio did not start for the packaged Orca smoke.' >&2
+    exit 1
+  fi
   printf '%s\n' 'AddModule "espeak-ng" "sd_espeak-ng" "espeak-ng.conf"' >"$speech_config_dir/speechd.conf"
   HOME="$speech_home" speech-dispatcher --run-single --config-dir "$speech_config_dir" --log-level 4 --log-dir "$speech_log_dir" >"$smoke_root/speech-dispatcher.out" 2>&1 &
   speech_dispatcher_pid=$!

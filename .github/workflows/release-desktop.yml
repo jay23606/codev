@@ -174,7 +174,7 @@ jobs:
             -o Acquire::Retries=2 \
             -o Acquire::http::Timeout=15 \
             -o Acquire::https::Timeout=15 \
-            install --yes --no-install-recommends xdotool dbus-daemon at-spi2-core python3-pyatspi orca speech-dispatcher speech-dispatcher-espeak-ng
+            install --yes --no-install-recommends xdotool dbus-daemon at-spi2-core python3-pyatspi orca speech-dispatcher speech-dispatcher-espeak-ng pulseaudio pulseaudio-utils
 
       - name: Smoke-test packaged Linux modes, Auto command, and local chat under Xvfb
         if: runner.os == 'Linux'
