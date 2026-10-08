@@ -1133,6 +1133,7 @@ public partial class MainWindow : Window
             Background = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.Parse("#171717"))
         };
         global::Avalonia.Automation.AutomationProperties.SetAutomationId(path, "McpConfigurationUnavailablePath");
+        global::Avalonia.Automation.AutomationProperties.SetName(path, viewModel.McpServerSettingsPath);
         var close = new Button { Content = "Close", HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right };
         var warning = new Window
         {

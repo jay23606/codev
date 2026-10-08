@@ -461,10 +461,9 @@ function Test-McpSettingsEditorInPackagedApp($Window, [string]$DataRoot, [string
         -not $warningMessage.Current.Name.Contains('move or rename', [StringComparison]::Ordinal)) {
         throw 'The unreadable MCP path warning did not explain how to resolve or replace the item.'
     }
-    $warningPathValue = $null
-    if ($null -eq $warningPath -or -not $warningPath.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$warningPathValue) -or
-        [string]$warningPathValue.Current.Value -ne $configurationPath) {
-        throw 'The unreadable MCP path warning did not expose the conflicting settings path.'
+    if ($null -eq $warningPath -or [string]$warningPath.Current.Name -ne $configurationPath) {
+        $observedPath = if ($null -eq $warningPath) { '<missing control>' } else { [string]$warningPath.Current.Name }
+        throw "The unreadable MCP path warning did not expose the conflicting settings path. Expected '$configurationPath'; found '$observedPath'."
     }
     $warningClose = $warning.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.AndCondition]::new(
