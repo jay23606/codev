@@ -202,6 +202,9 @@ fi
 
 start_orca
 python3 ./scripts/assert-linux-atspi.py
+# Verify that Orca speaks the focused search label before mode changes and
+# composer probes add overlapping announcements to the speech queue.
+assert_orca_audio_output
 
 active_path="$CODEV_DATA_ROOT/Codev/avalonia-active-conversation.json"
 conversations_path="$CODEV_DATA_ROOT/Codev/avalonia-conversations.json"
@@ -282,7 +285,6 @@ if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   echo 'Linux packaged app did not save the composer sentinel before the Ctrl+F check.' >&2
   exit 1
 fi
-assert_orca_audio_output
 xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
 if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
