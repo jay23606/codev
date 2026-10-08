@@ -347,9 +347,14 @@ public sealed class LiveLocalModelTests
 
             var transcript = string.Join("\n", conversation.Messages.Select(message => message.Content));
             Assert.True(sawGeneration, $"The local Auto Code task did not start. Transcript: {transcript}");
+            var queueProcessorRunning = typeof(MainViewModel).GetField("_queueProcessorRunning", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel);
+            var persistenceTask = typeof(MainViewModel).GetField("_persistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Task;
             Assert.False(viewModel.IsGenerating,
                 $"The local Auto Code task did not finish within five minutes. Status: {viewModel.ConnectionStatus}; " +
-                $"last request: {viewModel.LastPromptContextLabel}; request details length: {viewModel.GetLastPromptContextDetails()?.Length ?? 0} characters. " +
+                $"pending requests: {conversation.PendingRequestCount}; queued turns: {viewModel.HasQueuedTurns}; " +
+                $"queue paused: {viewModel.IsQueuePaused}; processor running: {queueProcessorRunning}; " +
+                $"persistence complete: {persistenceTask?.IsCompleted}; last request: {viewModel.LastPromptContextLabel}; " +
+                $"request details length: {viewModel.GetLastPromptContextDetails()?.Length ?? 0} characters. " +
                 $"Transcript: {transcript}");
             Assert.Equal(0, Volatile.Read(ref approvalRequests));
             Assert.Contains("Verification PASSED (exit code 0)", transcript, StringComparison.Ordinal);
