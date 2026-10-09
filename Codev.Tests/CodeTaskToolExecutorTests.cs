@@ -127,6 +127,7 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
         var search = GetUntrustedContent(await ExecuteAsync(executor, "search_files", """{"query":"needle"}"""));
         var allowedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/guide.md"}""");
         var deniedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/private/secret.md"}""");
+        var traversalDeniedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/../docs/private/secret.md"}""");
         var unmatchedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"README.md"}""");
 
         Assert.Contains(Path.Combine("docs", "guide.md"), listing, StringComparison.Ordinal);
@@ -135,6 +136,7 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
         Assert.DoesNotContain("private needle", search, StringComparison.Ordinal);
         Assert.Contains("public needle", allowedRead, StringComparison.Ordinal);
         Assert.Contains("Denied by the selected agent profile", deniedRead, StringComparison.Ordinal);
+        Assert.Contains("Denied by the selected agent profile", traversalDeniedRead, StringComparison.Ordinal);
         Assert.Contains("Rejected by the selected agent profile", unmatchedRead, StringComparison.Ordinal);
 
         var semanticExecutor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
