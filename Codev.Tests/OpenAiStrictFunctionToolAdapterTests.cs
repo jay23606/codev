@@ -99,17 +99,24 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
     }
 
     [Fact]
-    public void Delegation_schema_is_exposed_only_to_an_explicit_orchestrator_profile()
+    public void Delegation_schema_is_exposed_to_orchestrator_and_explicit_primary_profiles()
     {
         var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
         var orchestrator = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Orchestrator");
         var code = AgentProfileCatalog.BuiltInProfiles.Single(profile => profile.Name == "Code");
+        var coordinator = new AgentProfile("Coordinator", "Delegate bounded work.", null, null, null,
+            AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "Delegate selected tasks.", "test", "",
+            Mode: "primary", OpenCodePermissionRules: [new("task", "Explore*", AgentToolPermission.Allow)]);
 
         var normal = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: null)
             .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
         var codeNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: code, allowDelegation: true)
             .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
         var orchestratorNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: orchestrator, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
+        var ollamaCoordinatorNames = CodeTaskToolSchemaFactory.CreateOllamaTools(shell, profile: coordinator, allowDelegation: true)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("function").GetProperty("name").GetString());
+        var openAiCoordinatorNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: coordinator, allowDelegation: true)
             .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString());
 
         Assert.DoesNotContain("delegate_task", normal);
@@ -120,6 +127,8 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
         Assert.Contains("delegate_task", orchestratorNames);
         Assert.True(delegation.GetProperty("strict").GetBoolean());
         AssertStrictSchema(delegation.GetProperty("parameters"));
+        Assert.Contains("delegate_task", ollamaCoordinatorNames);
+        Assert.Contains("delegate_task", openAiCoordinatorNames);
     }
 
     [Fact]

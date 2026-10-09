@@ -2018,13 +2018,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     private static bool CanDelegate(Codev.Conversation conversation, Codev.AgentProfile? profile)
     {
-        if (conversation.ParentConversationId is not null || profile is null ||
-            !Codev.AgentProfilePolicy.IsAvailable(profile, "delegate_task")) return false;
-        if (profile.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase)) return true;
-        var hasExplicitTaskPermission = profile.OpenCodePermissionRules?.Any(rule =>
-                (rule.Action is "task" or "subagent") && rule.Permission != Codev.AgentToolPermission.Deny) == true ||
-            profile.ToolPermissions.TryGetValue("delegate_task", out var permission) && permission != Codev.AgentToolPermission.Deny;
-        return hasExplicitTaskPermission && (profile.Mode is "primary" or "all");
+        return conversation.ParentConversationId is null && Codev.AgentProfilePolicy.CanExposeDelegationTool(profile);
     }
 
     private async Task<string> DelegateTaskAsync(Codev.Conversation parent, Codev.AgentProfile? parentProfile, JsonElement arguments,
