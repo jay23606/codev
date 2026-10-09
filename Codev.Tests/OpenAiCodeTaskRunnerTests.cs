@@ -140,7 +140,7 @@ public sealed class OpenAiCodeTaskRunnerTests
     }
 
     [Fact]
-    public async Task Allowing_one_repeated_call_resets_guard_before_prompting_again()
+    public async Task Auto_approves_repeated_function_calls_until_the_shared_step_limit()
     {
         var requests = 0;
         using var http = new HttpClient(new ResponseHandler(_ =>
@@ -156,12 +156,12 @@ public sealed class OpenAiCodeTaskRunnerTests
         var result = await runner.RunAsync("gpt-test", [new { role = "user", content = "list files" }], [],
             (_, _, _) => Task.FromResult("key"),
             (_, _, _) => { toolExecutions++; return Task.FromResult("[]"); },
-            (_, _, _) => Task.FromResult(++repeatedPrompts == 1));
+            (_, _, _) => { repeatedPrompts++; return Task.FromResult(true); });
 
-        Assert.Equal(6, requests);
-        Assert.Equal(5, toolExecutions);
+        Assert.Equal(OpenAiCodeTaskLimits.MaxModelStepsPerTurn, requests);
+        Assert.Equal(requests, toolExecutions);
         Assert.Equal(2, repeatedPrompts);
-        Assert.Contains("same tool call repeated", result.Transcript);
+        Assert.Contains($"{OpenAiCodeTaskLimits.MaxModelStepsPerTurn}-request limit", result.Transcript);
     }
 
     [Fact]

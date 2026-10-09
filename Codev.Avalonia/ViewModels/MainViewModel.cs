@@ -1598,11 +1598,11 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     public bool ReorderConversation(Guid draggedId, Codev.Conversation target, bool insertAfter)
     {
+        if (!CanReorderConversation(draggedId, target)) return false;
         var dragged = _conversations.FirstOrDefault(item => item.Id == draggedId);
-        if (dragged is null || !_conversations.Contains(target) || dragged.IsPinned != target.IsPinned ||
-            dragged.IsArchived != target.IsArchived || dragged.ParentConversationId is not null || target.ParentConversationId is not null) return false;
+        if (dragged is null) return false;
 
-        var section = _conversations.Where(item => item.ParentConversationId is null &&
+        var section = _conversations.Where(item => item.ParentConversationId == dragged.ParentConversationId &&
             item.IsPinned == dragged.IsPinned && item.IsArchived == dragged.IsArchived)
             .OrderBy(item => item.SidebarOrder ?? int.MaxValue)
             .ThenByDescending(item => item.UpdatedAt).ToList();
@@ -1610,6 +1610,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         Persist();
         RebuildLists();
         return true;
+    }
+
+    public bool CanReorderConversation(Guid draggedId, Codev.Conversation target)
+    {
+        var dragged = _conversations.FirstOrDefault(item => item.Id == draggedId);
+        return dragged is not null && dragged.Id != target.Id && _conversations.Contains(target) &&
+            dragged.IsPinned == target.IsPinned && dragged.IsArchived == target.IsArchived &&
+            dragged.ParentConversationId == target.ParentConversationId;
     }
 
     public async Task<bool> DeleteConversationAsync(Codev.Conversation conversation)
@@ -1982,6 +1990,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             {
                 Id = childId,
                 ParentConversationId = parent.Id,
+                SidebarOrder = NextSidebarOrder(isPinned: false, isArchived: false, parentConversationId: parent.Id),
                 ChildWorktreeBranch = worktree.Branch,
                 ChildWorktreeStartCommit = worktree.StartCommit,
                 Title = title,
@@ -3746,11 +3755,11 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     private async Task<bool> ConfirmRepeatedToolCallForProjectAsync(string? projectPath, string name)
     {
-        // Auto never interrupts a task with a modal. Stop the repeated-call loop at the runner's
-        // guard threshold; the runner records the stop in its transcript and asks for follow-up.
+        // OpenCode-style Auto approves the loop guard unless an explicit deny blocks a tool call.
+        // The runner still enforces the configured per-turn model-step limit.
         if (!string.IsNullOrWhiteSpace(projectPath) &&
             GetProjectCommandPermissionMode(projectPath) == Codev.ProjectCommandPermissionMode.Auto)
-            return false;
+            return true;
 
         return await Dispatcher.UIThread.InvokeAsync(async () =>
             await (ConfirmRepeatedToolCallAsync?.Invoke(name) ?? Task.FromResult(false)));
@@ -5018,7 +5027,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         foreach (var child in _conversations.Where(conversation => conversation.ParentConversationId is not null))
             if (conversationsById.TryGetValue(child.ParentConversationId!.Value, out var parent)) parent.ChildConversations.Add(child);
         foreach (var parent in _conversations.Where(conversation => conversation.ParentConversationId is null))
-            parent.ChildConversations = parent.ChildConversations.OrderByDescending(child => child.UpdatedAt).ToList();
+            parent.ChildConversations = parent.ChildConversations.OrderBy(child => child.SidebarOrder ?? int.MaxValue)
+                .ThenByDescending(child => child.UpdatedAt).ToList();
 
         var matched = _conversations.Where(conversation => conversation.IsArchived == _showArchived &&
             Codev.ConversationSearch.Matches(conversation, SearchText)).ToArray();
@@ -5086,8 +5096,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         foreach (var item in source) target.Add(item);
     }
 
-    private int NextSidebarOrder(bool isPinned, bool isArchived) => _conversations
-        .Where(item => item.ParentConversationId is null && item.IsPinned == isPinned && item.IsArchived == isArchived)
+    private int NextSidebarOrder(bool isPinned, bool isArchived, Guid? parentConversationId = null) => _conversations
+        .Where(item => item.ParentConversationId == parentConversationId && item.IsPinned == isPinned && item.IsArchived == isArchived)
         .Select(item => item.SidebarOrder ?? int.MaxValue)
         .DefaultIfEmpty(0)
         .Min() - 1;
