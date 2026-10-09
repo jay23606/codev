@@ -214,6 +214,82 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Dropping_conversations_across_sidebar_groups_does_not_reorder_them()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var pinned = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            pinned.Title = "Pinned parent fixture";
+            pinned.IsPinned = true;
+            pinned.SidebarOrder = 0;
+            pinned.ChildConversationsExpanded = true;
+            var recent = new Conversation
+            {
+                Title = "Recent parent fixture",
+                SidebarOrder = 0,
+                ChildConversationsExpanded = true
+            };
+            var pinnedChild = new Conversation
+            {
+                Title = "Pinned child fixture",
+                ParentConversationId = pinned.Id,
+                SidebarOrder = 0
+            };
+            var recentChild = new Conversation
+            {
+                Title = "Recent child fixture",
+                ParentConversationId = recent.Id,
+                SidebarOrder = 0
+            };
+            var conversations = Assert.IsType<System.Collections.ObjectModel.ObservableCollection<Conversation>>(
+                typeof(MainViewModel).GetField("_conversations", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel));
+            conversations.Add(recent);
+            conversations.Add(pinnedChild);
+            conversations.Add(recentChild);
+            typeof(MainViewModel).GetMethod("RebuildLists", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(viewModel, null);
+
+            Assert.False(viewModel.CanReorderConversation(pinned.Id, recent));
+            Assert.False(viewModel.CanReorderConversation(pinnedChild.Id, recentChild));
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            Drop(pinned, recent);
+            Drop(pinnedChild, recentChild);
+
+            Assert.Equal(new[] { pinned.Id }, viewModel.PinnedConversations.Select(item => item.Id));
+            Assert.Equal(new[] { recent.Id }, viewModel.RecentConversations.Select(item => item.Id));
+            Assert.Equal(new[] { pinnedChild.Id }, pinned.ChildConversations.Select(item => item.Id));
+            Assert.Equal(new[] { recentChild.Id }, recent.ChildConversations.Select(item => item.Id));
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+
+        void Drop(Conversation source, Conversation target)
+        {
+            var targetRow = Assert.Single(window!.GetVisualDescendants().OfType<Button>(), button =>
+                button.DataContext is Conversation item && item.Id == target.Id);
+            var targetPoint = targetRow.TranslatePoint(new Point(targetRow.Bounds.Width / 2, targetRow.Bounds.Height / 2), window);
+            Assert.NotNull(targetPoint);
+
+            var transfer = new DataTransfer();
+            transfer.Add(DataTransferItem.Create(
+                DataFormat.CreateStringApplicationFormat("Codev.ConversationId"), source.Id.ToString("D")));
+            window.DragDrop(targetPoint!.Value, global::Avalonia.Input.Raw.RawDragEventType.DragEnter, transfer, DragDropEffects.Move);
+            window.DragDrop(targetPoint.Value, global::Avalonia.Input.Raw.RawDragEventType.DragOver, transfer, DragDropEffects.Move);
+            window.DragDrop(targetPoint.Value, global::Avalonia.Input.Raw.RawDragEventType.Drop, transfer, DragDropEffects.Move);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Git_status_reviews_child_changes_blocks_dirty_merge_and_recovers_missing_checkout()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
