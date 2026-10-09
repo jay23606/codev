@@ -28,7 +28,7 @@ public static class ProjectContextReader
         IReadOnlyList<string>? relevantRuleNames = null)
     {
         var service = new WorkspaceFileService(projectPath, contextExclusions);
-        var files = selectedFiles is { Count: > 0 } ? selectedFiles : service.ListContextFiles(maxEntries: 300);
+        var files = selectedFiles ?? service.ListContextFiles(maxEntries: 300);
         var sourceFiles = new List<SourceFile>();
         foreach (var relativePath in files)
         {

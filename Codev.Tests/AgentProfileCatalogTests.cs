@@ -315,6 +315,8 @@ public sealed class AgentProfileCatalogTests : IDisposable
         Assert.True(AgentProfilePolicy.CanExposeReadPath(writer, "docs/guide.md"));
         Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "docs/private/key.md"));
         Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "README.md"));
+        Assert.Equal(["docs/guide.md"], AgentProfilePolicy.FilterReadablePaths(writer,
+            ["docs/guide.md", "docs/private/key.md", "README.md"]));
         Assert.Empty(loaded.Warnings);
     }
 

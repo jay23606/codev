@@ -48,6 +48,38 @@ public sealed class RepoMapBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task Empty_explicit_selection_does_not_fall_back_to_automatic_map()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "secret.cs"), "class Secret {}");
+
+        var map = await RepoMapBuilder.BuildAsync(_root, []);
+
+        Assert.DoesNotContain("secret.cs", map);
+    }
+
+    [Fact]
+    public async Task Scoped_agent_read_rules_filter_repo_map_paths()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "docs"));
+        Directory.CreateDirectory(Path.Combine(_root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "guide.cs"), "class Guide {}");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "secret.cs"), "class HiddenSecret {}");
+        var profile = new AgentProfile("docs", "Documentation only", null, null, null,
+            AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "", "user", "docs.md",
+            OpenCodePermissionRules:
+            [
+                new("read", "docs/**", AgentToolPermission.Allow),
+                new("read", "src/**", AgentToolPermission.Deny)
+            ]);
+        var selected = AgentProfilePolicy.FilterReadablePaths(profile, ["docs/guide.cs", "src/secret.cs"]);
+
+        var map = await RepoMapBuilder.BuildAsync(_root, selected);
+
+        Assert.Contains("docs/guide.cs: Guide", map);
+        Assert.DoesNotContain("src/secret.cs", map);
+    }
+
+    [Fact]
     public async Task Output_remains_within_the_map_character_budget()
     {
         for (var index = 0; index < RepoMapBuilder.MaxFiles; index++)
