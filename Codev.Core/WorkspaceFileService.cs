@@ -315,17 +315,21 @@ public sealed class WorkspaceFileService
         return new FileSnapshot(Encoding.UTF8.GetString(bytes), Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
-    public async Task<IReadOnlyList<string>> SearchFilesAsync(string query, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<string>> SearchFilesAsync(string query, CancellationToken cancellationToken = default,
+        IReadOnlyCollection<string>? allowedPaths = null)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
-        var matches = await SearchFilesCoreAsync(query, ListFiles(maxEntries: 500), 50, null, cancellationToken);
+        var candidates = allowedPaths ?? ListFiles(maxEntries: 500);
+        var matches = await SearchFilesCoreAsync(query, candidates, 50, null, cancellationToken);
         return matches.Select(match => match.ToString()).ToArray();
     }
 
-    public Task<IReadOnlyList<FileSearchMatch>> SearchFileMatchesAsync(string query, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<FileSearchMatch>> SearchFileMatchesAsync(string query, CancellationToken cancellationToken = default,
+        IReadOnlyCollection<string>? allowedPaths = null)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
-        return SearchFilesCoreAsync(query, ListFiles(maxEntries: 500), 50, maxMatchesPerFile: 3, cancellationToken: cancellationToken);
+        var candidates = allowedPaths ?? ListFiles(maxEntries: 500);
+        return SearchFilesCoreAsync(query, candidates, 50, maxMatchesPerFile: 3, cancellationToken: cancellationToken);
     }
 
     public Task<IReadOnlyList<FileSearchMatch>> SearchContextFilesAsync(string query, CancellationToken cancellationToken = default)

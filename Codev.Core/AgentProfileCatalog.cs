@@ -44,7 +44,7 @@ public sealed record AgentProfileLoadResult(IReadOnlyList<AgentProfile> Profiles
 public static class AgentProfilePolicy
 {
     /// <summary>Profile Allow defers to Codev's project mode; Ask adds a one-call confirmation outside Auto; the last matching rule determines the permission.</summary>
-    public static AgentToolPermission PermissionFor(AgentProfile? profile, string toolName, string? command = null)
+    public static AgentToolPermission PermissionFor(AgentProfile? profile, string toolName, string? command = null, string? resource = null)
     {
         if (profile is null) return AgentToolPermission.Allow;
         var permission = profile.DefaultPermission;
@@ -86,6 +86,10 @@ public static class AgentProfilePolicy
                     AgentProfileCatalog.OpenCodeToolPatternMatches(pattern, toolName)))
             {
                 if (rule.Resource == "*") permission = rule.Permission;
+                else if (rule.Action.Equals("read", StringComparison.OrdinalIgnoreCase) &&
+                         toolName == "read_file" && resource is not null &&
+                         AgentProfileCatalog.OpenCodePathPatternMatches(rule.Resource, resource))
+                    permission = rule.Permission;
                 else if (rule.Action.Equals("edit", StringComparison.OrdinalIgnoreCase) &&
                          rule.Permission != AgentToolPermission.Deny && IsEditTool(toolName))
                 {
@@ -95,7 +99,28 @@ public static class AgentProfilePolicy
                 }
             }
         }
+        // Listing and searching are filtered per file by CanExposeReadPath. Treat the aggregate
+        // tool call as allowed so an imported scoped read rule does not ask once per search.
+        if (toolName is "list_files" or "search_files" && HasScopedReadRules(profile))
+            permission = AgentToolPermission.Allow;
         return permission;
+    }
+
+    public static bool HasScopedReadRules(AgentProfile? profile) =>
+        profile?.OpenCodePermissionRules?.Any(rule => rule.Action.Equals("read", StringComparison.OrdinalIgnoreCase) && rule.Resource != "*") == true;
+
+    /// <summary>Aggregate list/search results expose only paths with an explicit matching V2 read allow.</summary>
+    public static bool CanExposeReadPath(AgentProfile? profile, string relativePath)
+    {
+        if (!HasScopedReadRules(profile)) return true;
+        var permission = profile!.DefaultPermission;
+        foreach (var rule in profile.OpenCodePermissionRules ?? [])
+        {
+            if (!rule.Action.Equals("read", StringComparison.OrdinalIgnoreCase) ||
+                !AgentProfileCatalog.OpenCodePathPatternMatches(rule.Resource, relativePath)) continue;
+            permission = rule.Permission;
+        }
+        return permission == AgentToolPermission.Allow;
     }
 
     public static bool IsAvailable(AgentProfile? profile, string toolName) =>
@@ -119,7 +144,7 @@ public static class AgentProfilePolicy
         foreach (var rule in profile.OpenCodePermissionRules ?? [])
         {
             if (rule.Action is not ("*" or "edit") ||
-                !AgentProfileCatalog.PathPatternMatches(rule.Resource, normalized)) continue;
+                !AgentProfileCatalog.OpenCodePathPatternMatches(rule.Resource, normalized)) continue;
             permission = rule.Permission;
         }
         return permission != AgentToolPermission.Deny;
@@ -379,6 +404,15 @@ public static class AgentProfileCatalog
         var options = RegexOptions.CultureInvariant | (OperatingSystem.IsWindows() ? RegexOptions.IgnoreCase : RegexOptions.None);
         return CommandClauseSeparators.Split(command).Any(clause =>
             Regex.IsMatch(NormalizeCommandWhitespace(clause), regex, options, TimeSpan.FromMilliseconds(100)));
+    }
+
+    internal static bool OpenCodePathPatternMatches(string pattern, string relativePath)
+    {
+        var normalizedPattern = pattern.Replace('\\', '/');
+        var normalizedPath = relativePath.Replace('\\', '/');
+        var regex = "^" + Regex.Escape(normalizedPattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+        var options = RegexOptions.CultureInvariant | (OperatingSystem.IsWindows() ? RegexOptions.IgnoreCase : RegexOptions.None);
+        return Regex.IsMatch(normalizedPath, regex, options, TimeSpan.FromMilliseconds(100));
     }
 
     internal static bool OpenCodeShellRuleMatches(string pattern, string command, AgentToolPermission permission)
@@ -790,10 +824,10 @@ public static class AgentProfileCatalog
             if (!IsValidCommandPattern(resource) || CommandClauseSeparators.IsMatch(resource))
                 return Fail("OpenCode V2 shell resources must be single safe command patterns", out error);
         }
-        else if (normalizedAction == "edit" && resource != "*")
+        else if (normalizedAction is "edit" or "read" && resource != "*")
         {
-            if (!IsValidPathPattern(resource)) return Fail("OpenCode V2 edit resources must be safe project-relative path patterns", out error);
-            if (effect == AgentToolPermission.Ask)
+            if (!IsValidPathPattern(resource)) return Fail($"OpenCode V2 {normalizedAction} resources must be safe project-relative path patterns", out error);
+            if (normalizedAction == "edit" && effect == AgentToolPermission.Ask)
                 return Fail("path-scoped OpenCode V2 edit ask rules are not supported; use allow or deny", out error);
         }
         else if (resource != "*")

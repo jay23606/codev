@@ -62,6 +62,48 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenCode_scoped_read_rules_filter_list_search_and_direct_file_reads()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "docs", "private"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "guide.txt"), "public needle");
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "private", "secret.txt"), "private needle");
+        var profile = new AgentProfile("DocsOnly", "Read public documentation.", null, null, null,
+            AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "Only read docs.", "test", "",
+            OpenCodePermissionRules:
+            [
+                new("read", "docs/**", AgentToolPermission.Allow),
+                new("read", "docs/private/**", AgentToolPermission.Deny)
+            ]);
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false), agentProfile: profile,
+            agentProfilePermission: (name, arguments) =>
+            {
+                var resource = name == "read_file" && arguments.TryGetProperty("relative_path", out var path)
+                    ? path.GetString() : null;
+                return Task.FromResult(AgentProfilePolicy.PermissionFor(profile, name, resource: resource) switch
+                {
+                    AgentToolPermission.Deny => AgentToolProfileDecision.Denied,
+                    AgentToolPermission.Ask => AgentToolProfileDecision.Rejected,
+                    _ => AgentToolProfileDecision.DeferToProjectPolicy
+                });
+            });
+
+        var listing = await ExecuteAsync(executor, "list_files", """{"relative_directory":""}""");
+        var search = await ExecuteAsync(executor, "search_files", """{"query":"needle"}""");
+        var allowedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/guide.txt"}""");
+        var deniedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/private/secret.txt"}""");
+        var unmatchedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"README.md"}""");
+
+        Assert.Contains("docs/guide.txt", listing, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret.txt", listing, StringComparison.Ordinal);
+        Assert.Contains("public needle", search, StringComparison.Ordinal);
+        Assert.DoesNotContain("private needle", search, StringComparison.Ordinal);
+        Assert.Contains("public needle", allowedRead, StringComparison.Ordinal);
+        Assert.Contains("Denied by the selected agent profile", deniedRead, StringComparison.Ordinal);
+        Assert.Contains("Rejected by the selected agent profile", unmatchedRead, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Built_in_plan_agent_blocks_direct_edit_and_command_requests()
     {
         var reviewCalled = false;

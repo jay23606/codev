@@ -283,7 +283,7 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task Imports_OpenCode_V2_profiles_as_primary_by_default_and_rejects_unmappable_scoped_reads()
+    public async Task Imports_OpenCode_V2_profiles_with_path_scoped_reads()
     {
         var directory = Path.Combine(_project, ".opencode", "agents");
         Directory.CreateDirectory(directory);
@@ -295,28 +295,49 @@ public sealed class AgentProfileCatalogTests : IDisposable
               - action: read
                 resource: "docs/**"
                 effect: allow
+              - action: read
+                resource: "docs/private/**"
+                effect: deny
             ---
             Write concise, accurate documentation.
             """);
 
         var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
 
-        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "writer");
-        Assert.Contains(loaded.Warnings, warning => warning.Contains("resource-scoped OpenCode V2 'read' rules are not supported", StringComparison.Ordinal));
-
-        await File.WriteAllTextAsync(Path.Combine(directory, "writer.md"), """
-            ---
-            description: Write project documentation.
-            steps: 6
-            ---
-            Write concise, accurate documentation.
-            """);
-        loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
-
         var writer = Assert.Single(loaded.Profiles, profile => profile.Name == "writer");
         Assert.Equal("primary", writer.Mode);
         Assert.Equal(6, writer.MaxSteps);
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "docs/guide.md"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "docs/private/key.md"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "README.md"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "list_files"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "search_files"));
+        Assert.True(AgentProfilePolicy.CanExposeReadPath(writer, "docs/guide.md"));
+        Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "docs/private/key.md"));
+        Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "README.md"));
         Assert.Empty(loaded.Warnings);
+    }
+
+    [Fact]
+    public async Task Skips_OpenCode_V2_glob_rules_with_resource_semantics_Codev_cannot_represent()
+    {
+        var directory = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "explorer.md"), """
+            ---
+            description: Explore selected project files.
+            permissions:
+              - action: glob
+                resource: "docs/**/*.md"
+                effect: allow
+            ---
+            Inspect documentation.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "explorer");
+        Assert.Contains(loaded.Warnings, warning => warning.Contains("resource-scoped OpenCode V2 'glob' rules are not supported", StringComparison.Ordinal));
     }
 
     [Fact]
