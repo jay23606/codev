@@ -94,7 +94,7 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
         var deniedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/private/secret.md"}""");
         var unmatchedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"README.md"}""");
 
-        Assert.Contains("docs/guide.md", listing, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine("docs", "guide.md"), listing, StringComparison.Ordinal);
         Assert.DoesNotContain("secret.md", listing, StringComparison.Ordinal);
         Assert.Contains("public needle", search, StringComparison.Ordinal);
         Assert.DoesNotContain("private needle", search, StringComparison.Ordinal);
