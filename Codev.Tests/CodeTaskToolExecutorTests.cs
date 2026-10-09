@@ -65,8 +65,8 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     public async Task OpenCode_scoped_read_rules_filter_list_search_and_direct_file_reads()
     {
         Directory.CreateDirectory(Path.Combine(_root, "docs", "private"));
-        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "guide.txt"), "public needle");
-        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "private", "secret.txt"), "private needle");
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "guide.md"), "public needle");
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "private", "secret.md"), "private needle");
         var profile = new AgentProfile("DocsOnly", "Read public documentation.", null, null, null,
             AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "Only read docs.", "test", "",
             OpenCodePermissionRules:
@@ -90,12 +90,12 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
 
         var listing = await ExecuteAsync(executor, "list_files", """{"relative_directory":""}""");
         var search = await ExecuteAsync(executor, "search_files", """{"query":"needle"}""");
-        var allowedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/guide.txt"}""");
-        var deniedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/private/secret.txt"}""");
+        var allowedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/guide.md"}""");
+        var deniedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/private/secret.md"}""");
         var unmatchedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"README.md"}""");
 
-        Assert.Contains("docs/guide.txt", listing, StringComparison.Ordinal);
-        Assert.DoesNotContain("secret.txt", listing, StringComparison.Ordinal);
+        Assert.Contains("docs/guide.md", listing, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret.md", listing, StringComparison.Ordinal);
         Assert.Contains("public needle", search, StringComparison.Ordinal);
         Assert.DoesNotContain("private needle", search, StringComparison.Ordinal);
         Assert.Contains("public needle", allowedRead, StringComparison.Ordinal);
