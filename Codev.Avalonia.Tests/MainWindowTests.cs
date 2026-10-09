@@ -2654,7 +2654,9 @@ public sealed class MainWindowTests
 
         window.MouseDown(sourcePoint!.Value, MouseButton.Left, RawInputModifiers.LeftMouseButton);
         window.MouseMove(sourcePoint.Value + new Vector(8, 0), RawInputModifiers.LeftMouseButton);
-        window.MouseUp(sourcePoint.Value + new Vector(8, 0), MouseButton.Left);
+        var releasePoint = new Point(-10, -10);
+        window.MouseMove(releasePoint, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(releasePoint, MouseButton.Left);
         Assert.Null(typeof(MainWindow).GetField("_conversationDragCandidate", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(window));
 
         var conversation = Assert.IsType<Conversation>(sourceRow.DataContext);
