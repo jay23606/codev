@@ -388,6 +388,41 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Imports_and_applies_resource_scoped_OpenCode_V2_task_permissions()
+    {
+        var directory = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "coordinator.md"), """
+            ---
+            description: Delegate only to approved child agents.
+            mode: primary
+            permissions:
+              - action: task
+                resource: "*"
+                effect: deny
+              - action: task
+                resource: "Explore*"
+                effect: allow
+              - action: subagent
+                resource: "Audit"
+                effect: ask
+            ---
+            Delegate bounded, independent work.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        var coordinator = Assert.Single(loaded.Profiles, profile => profile.Name == "coordinator");
+        Assert.Equal("primary", coordinator.Mode);
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task", resource: "Explorer"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task", resource: "Explore Docs"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task", resource: "Audit"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task", resource: "SecretReader"));
+        Assert.Empty(loaded.Warnings);
+    }
+
+    [Fact]
     public async Task Rejects_invalid_resource_scoped_OpenCode_V2_grep_regex()
     {
         var directory = Path.Combine(_project, ".opencode", "agents");

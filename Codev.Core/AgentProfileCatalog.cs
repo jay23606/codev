@@ -98,6 +98,16 @@ public static class AgentProfilePolicy
                          toolName == "grep_files" && resource is not null &&
                          AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
                     permission = rule.Permission;
+                else if ((rule.Action is "task" or "subagent") && toolName == "delegate_task")
+                {
+                    // A scoped task permission names a child agent profile. Keep the tool
+                    // available for scoped allow/ask rules, then evaluate the selected target.
+                    if (rule.Resource == "*") permission = rule.Permission;
+                    else if (resource is not null && AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
+                        permission = rule.Permission;
+                    else if (resource is null && rule.Permission != AgentToolPermission.Deny)
+                        permission = rule.Permission;
+                }
                 else if (rule.Action == "*" && resource is not null &&
                          (toolName is "glob_files" or "grep_files") &&
                          AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
@@ -479,6 +489,10 @@ public static class AgentProfileCatalog
         catch (ArgumentException) { return false; }
     }
 
+    private static bool IsValidAgentNamePattern(string pattern) =>
+        pattern.Length is > 0 and <= 80 && !pattern.Any(char.IsControl) &&
+        !pattern.Contains('/') && !pattern.Contains('\\') && !pattern.Contains(':');
+
     private static async Task<List<AgentProfile>> LoadScopeAsync(string directory, string scope, List<string> warnings,
         CancellationToken cancellationToken, int maxProfiles = MaxProfilesPerScope,
         string? trustedProjectRoot = null, string? relativeDirectory = null)
@@ -802,7 +816,7 @@ public static class AgentProfileCatalog
             "read" => new[] { "list_files", "read_file", "search_files" },
             "list" or "glob" => new[] { "list_files" },
             "grep" => new[] { "search_files" },
-            "task" => new[] { "delegate_task" },
+            "task" or "subagent" => new[] { "delegate_task" },
             "skill" => new[] { "load_skill_*" },
             "webfetch" or "websearch" or "external_directory" or "lsp" or "question" or "doom_loop" => [],
             _ when SafeTool.IsMatch(permissionName) => [permissionName],
@@ -872,6 +886,11 @@ public static class AgentProfileCatalog
             if (!IsValidRegexPattern(resource))
                 return Fail("OpenCode V2 grep resources must be valid, bounded regular expressions", out error);
         }
+        else if ((normalizedAction is "task" or "subagent") && resource != "*")
+        {
+            if (!IsValidAgentNamePattern(resource))
+                return Fail($"OpenCode V2 {normalizedAction} resources must be bounded agent-name patterns", out error);
+        }
         else if (resource != "*")
         {
             return Fail($"resource-scoped OpenCode V2 '{action}' rules are not supported by Codev and were not imported", out error);
@@ -885,7 +904,7 @@ public static class AgentProfileCatalog
     }
 
     private static bool IsSupportedOpenCodePermission(string name) => name.ToLowerInvariant() is
-        "edit" or "write" or "bash" or "read" or "list" or "glob" or "grep" or "task" or "skill" or
+        "edit" or "write" or "bash" or "read" or "list" or "glob" or "grep" or "task" or "subagent" or "skill" or
         "webfetch" or "websearch" or "external_directory" or "lsp" or "question" or "doom_loop";
 
     private static void MergePermission(Dictionary<string, AgentToolPermission> rules, string key, AgentToolPermission permission)

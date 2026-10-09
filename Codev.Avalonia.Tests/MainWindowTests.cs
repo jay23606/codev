@@ -316,6 +316,66 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task OpenCode_scoped_task_rules_limit_child_profiles_and_allow_primary_coordinators()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            viewModel.SetProjectFolder(project);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            var profile = new AgentProfile("Coordinator", "Delegate to selected child agents.", null, null, null,
+                AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "Delegate bounded tasks.", "test", "",
+                Mode: "primary",
+                OpenCodePermissionRules:
+                [
+                    new("task", "*", AgentToolPermission.Deny),
+                    new("task", "Explore*", AgentToolPermission.Allow),
+                    new("subagent", "Audit", AgentToolPermission.Ask)
+                ]);
+            var canDelegate = typeof(MainViewModel).GetMethod("CanDelegate", BindingFlags.Static | BindingFlags.NonPublic)!;
+            Assert.True((bool)canDelegate.Invoke(null, [conversation, profile])!);
+            Assert.False((bool)canDelegate.Invoke(null, [conversation, AgentProfileCatalog.BuiltInProfiles.Single(item => item.Name == "Code")])!);
+
+            string? approvedAgent = null;
+            viewModel.ConfirmAgentProfileToolAsync = (_, name, arguments) =>
+            {
+                Assert.Equal("delegate_task", name);
+                approvedAgent = arguments.GetProperty("agent").GetString();
+                return Task.FromResult(true);
+            };
+            var checkPermission = typeof(MainViewModel).GetMethod("CheckAgentProfileToolPermissionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var allowedArguments = JsonSerializer.SerializeToElement(new { agent = "Explore Docs", task = "Read the usage overview." });
+            var deniedArguments = JsonSerializer.SerializeToElement(new { agent = "SecretReader", task = "Read private credentials." });
+            var askArguments = JsonSerializer.SerializeToElement(new { agent = "Audit", task = "Review the new parser." });
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            Assert.Equal(AgentToolProfileDecision.DeferToProjectPolicy,
+                await (Task<AgentToolProfileDecision>)checkPermission.Invoke(viewModel, [conversation, profile, "delegate_task", allowedArguments])!);
+            Assert.Equal(AgentToolProfileDecision.Denied,
+                await (Task<AgentToolProfileDecision>)checkPermission.Invoke(viewModel, [conversation, profile, "delegate_task", deniedArguments])!);
+            Assert.Equal(AgentToolProfileDecision.DeferToProjectPolicy,
+                await (Task<AgentToolProfileDecision>)checkPermission.Invoke(viewModel, [conversation, profile, "delegate_task", askArguments])!);
+            Assert.Null(approvedAgent);
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.AskEveryTime);
+            Assert.Equal(AgentToolProfileDecision.ApprovedOnce,
+                await (Task<AgentToolProfileDecision>)checkPermission.Invoke(viewModel, [conversation, profile, "delegate_task", askArguments])!);
+            Assert.Equal("Audit", approvedAgent);
+            var childConversation = new Conversation { ParentConversationId = conversation.Id };
+            Assert.False((bool)canDelegate.Invoke(null, [childConversation, profile])!);
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Sidebar_conversation_sections_toggle_and_persist_expanded_state()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

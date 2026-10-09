@@ -1233,6 +1233,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         {
             "read_file" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("relative_path", out var pathValue) => pathValue.GetString(),
             "create_file" or "write_file" or "apply_patch" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("relative_path", out var editPathValue) => editPathValue.GetString(),
+            "delegate_task" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("agent", out var agentValue) => agentValue.GetString(),
             "glob_files" or "grep_files" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("pattern", out var patternValue) => patternValue.GetString(),
             _ => null
         };
@@ -2015,16 +2016,22 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
     }
 
-    private static bool CanDelegate(Codev.Conversation conversation, Codev.AgentProfile? profile) =>
-        conversation.ParentConversationId is null &&
-        profile?.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase) == true &&
-        Codev.AgentProfilePolicy.IsAvailable(profile, "delegate_task");
+    private static bool CanDelegate(Codev.Conversation conversation, Codev.AgentProfile? profile)
+    {
+        if (conversation.ParentConversationId is not null || profile is null ||
+            !Codev.AgentProfilePolicy.IsAvailable(profile, "delegate_task")) return false;
+        if (profile.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase)) return true;
+        var hasExplicitTaskPermission = profile.OpenCodePermissionRules?.Any(rule =>
+                (rule.Action is "task" or "subagent") && rule.Permission != Codev.AgentToolPermission.Deny) == true ||
+            profile.ToolPermissions.TryGetValue("delegate_task", out var permission) && permission != Codev.AgentToolPermission.Deny;
+        return hasExplicitTaskPermission && (profile.Mode is "primary" or "all");
+    }
 
-    private async Task<string> DelegateTaskAsync(Codev.Conversation parent, JsonElement arguments,
+    private async Task<string> DelegateTaskAsync(Codev.Conversation parent, Codev.AgentProfile? parentProfile, JsonElement arguments,
         int parentAssistantIndex, CancellationToken cancellationToken)
     {
-        if (parent.ParentConversationId is not null || parent.AgentProfileName?.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase) != true)
-            return "Delegation is available only in a root conversation using the Orchestrator profile.";
+        if (!CanDelegate(parent, parentProfile))
+            return "Delegation is available only in a root conversation using a primary agent profile with task permission.";
         if (string.IsNullOrWhiteSpace(parent.ProjectPath) || !_projectFolderTrust.IsTrusted(parent.ProjectPath))
             return "Delegation requires a trusted Git project attached to this conversation.";
         if (parent.ChildConversations.Count >= 3)
@@ -3285,7 +3292,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 var toolResult = name switch
                 {
                     "update_task_checklist" => await UpdateTaskChecklistFromModelAsync(conversation, arguments),
-                    "delegate_task" => await DelegateTaskAsync(conversation, arguments, assistantIndex, token),
+                    "delegate_task" => await DelegateTaskAsync(conversation, agentProfile, arguments, assistantIndex, token),
                     _ => await executor.ExecuteAsync(name, arguments, token)
                 };
                 Persist();
@@ -3579,7 +3586,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             var toolResult = name switch
             {
                 "update_task_checklist" => await UpdateTaskChecklistFromModelAsync(conversation, arguments),
-                "delegate_task" => await DelegateTaskAsync(conversation, arguments, assistantIndex, token),
+                "delegate_task" => await DelegateTaskAsync(conversation, agentProfile, arguments, assistantIndex, token),
                 _ => await executor.ExecuteAsync(name, arguments, token)
             };
             Persist();
