@@ -101,6 +101,19 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
         Assert.Contains("public needle", allowedRead, StringComparison.Ordinal);
         Assert.Contains("Denied by the selected agent profile", deniedRead, StringComparison.Ordinal);
         Assert.Contains("Rejected by the selected agent profile", unmatchedRead, StringComparison.Ordinal);
+
+        var semanticExecutor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false), agentProfile: profile,
+            semanticSearch: (_, _) => Task.FromResult<IReadOnlyList<SemanticSearchResult>>
+            ([
+                new SemanticSearchResult("docs/guide.md", 0, 0.9, "public semantic needle"),
+                new SemanticSearchResult("docs/private/secret.md", 0, 0.9, "private semantic needle")
+            ]));
+
+        var semanticResults = await ExecuteAsync(semanticExecutor, "search_files", """{"query":"needle"}""");
+
+        Assert.Contains("public semantic needle", semanticResults, StringComparison.Ordinal);
+        Assert.DoesNotContain("private semantic needle", semanticResults, StringComparison.Ordinal);
     }
 
     [Fact]
