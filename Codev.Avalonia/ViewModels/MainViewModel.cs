@@ -58,6 +58,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private bool _thinkEnabled;
     private bool _cloudRequestsEnabled;
     private string? _autoConnectProvider;
+    private bool _autoConnectProviderPreferenceSet;
     private int _contextSize;
     private readonly DispatcherTimer _draftSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly SemaphoreSlim _persistGate = new(1, 1);
@@ -70,8 +71,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private long _persistenceRevision;
     private long _activeConversationRevision;
     private readonly HttpClient _http;
-    private readonly Codev.CloudApiKeyVault _cloudApiKeyVault = new();
+    private readonly Codev.ICloudApiKeyVault _cloudApiKeyVault;
     private Task _savedCloudApiKeysRestoreTask = Task.CompletedTask;
+    private Task _autoConnectProviderStartupTask = Task.CompletedTask;
     private Task _managedWorkspacePermissionDefaultsTask = Task.CompletedTask;
     private Uri _ollamaEndpoint = Codev.OllamaEndpoint.Default;
     private readonly Dictionary<string, string> _savedCloudApiKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -186,8 +188,10 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
 
     internal Codev.GitChildWorktreeManager ChildWorktreeManager => _childWorktrees;
 
-    public MainViewModel(string? localDataRoot = null, HttpMessageHandler? httpMessageHandler = null)
+    public MainViewModel(string? localDataRoot = null, HttpMessageHandler? httpMessageHandler = null,
+        Codev.ICloudApiKeyVault? cloudApiKeyVault = null)
     {
+        _cloudApiKeyVault = cloudApiKeyVault ?? new Codev.CloudApiKeyVault();
         Messages.CollectionChanged += (_, _) => RefreshConversationFindResults();
         _http = new HttpClient(httpMessageHandler ?? new SocketsHttpHandler { AllowAutoRedirect = false })
         {
@@ -276,7 +280,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         LoadSettings();
         _managedWorkspacePermissionDefaultsTask = InitializeManagedWorkspacePermissionDefaultsAsync();
         _savedCloudApiKeysRestoreTask = RestoreSavedCloudApiKeysAsync();
-        _ = AutoConnectSavedProviderOnStartupAsync();
+        _autoConnectProviderStartupTask = AutoConnectSavedProviderOnStartupAsync();
         _ = LoadModelsAsync();
     }
 
@@ -1365,6 +1369,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     }
     public bool CloudRequestsEnabled => _cloudRequestsEnabled;
     public string? AutoConnectProvider => _autoConnectProvider;
+    public bool HasAutoConnectProviderPreference => _autoConnectProviderPreferenceSet;
     public bool HasSavedCloudApiKey(string provider) => _savedCloudApiKeys.ContainsKey(provider);
     public Task WaitForSavedCloudApiKeysAsync() => _savedCloudApiKeysRestoreTask;
     public bool IncludeProjectContextForHosted
@@ -4487,6 +4492,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             _isDarkTheme = !string.Equals(settings.Theme, "light", StringComparison.OrdinalIgnoreCase);
             _readingWidth = Codev.AvaloniaUiSettings.NormalizeReadingWidth(settings.ReadingWidth);
             _autoConnectProvider = settings.AutoConnectProvider;
+            _autoConnectProviderPreferenceSet = settings.AutoConnectProviderPreferenceSet;
             _uiFontFamily = Codev.AvaloniaUiSettings.NormalizeFontFamily(settings.FontFamily);
             _uiFontSize = Codev.AvaloniaUiSettings.NormalizeFontSize(settings.FontSize);
             _pinnedConversationsExpanded = settings.PinnedConversationsExpanded;
@@ -4540,7 +4546,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         var settings = new Codev.AvaloniaUiSettings(_isDarkTheme ? "dark" : "light", _ollamaEndpoint.ToString(),
             PromptTemplates.ToList(), SamplingPresets.ToList(), _readingWidth, _autoConnectProvider, _uiFontFamily, _uiFontSize,
-            _pinnedConversationsExpanded, _recentConversationsExpanded, _embeddingModel, _defaultProjectCommandPermissionMode);
+            _pinnedConversationsExpanded, _recentConversationsExpanded, _embeddingModel, _defaultProjectCommandPermissionMode,
+            _autoConnectProviderPreferenceSet);
         var revision = Interlocked.Increment(ref _settingsRevision);
         _settingsPersistenceTask = Task.Run(async () =>
         {
@@ -4811,6 +4818,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public void SetAutoConnectProvider(string? provider)
     {
         _autoConnectProvider = provider is not null && Codev.CloudModelProviders.IsCloud(provider) ? provider : null;
+        _autoConnectProviderPreferenceSet = true;
         OnPropertyChanged(nameof(AutoConnectProvider));
         PersistSettings();
     }
@@ -4878,15 +4886,14 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 foreach (var (provider, key) in restored) _savedCloudApiKeys[provider] = key;
-                // Existing saved credentials should reconnect automatically unless the user opts out.
-                // Prefer the saved provider of the active conversation, then OpenAI, then Anthropic.
-                if (_autoConnectProvider is null && restored.Count > 0)
+                // If settings predate this preference, connect the active saved provider (then
+                // OpenAI/Anthropic). Preserve an explicit null opt-out across restarts.
+                var resolvedAutoConnectProvider = Codev.AvaloniaUiSettings.ResolveAutoConnectProvider(
+                    _autoConnectProvider, _autoConnectProviderPreferenceSet, restored.Keys,
+                    ActiveConversation?.Provider);
+                if (_autoConnectProvider is null && !_autoConnectProviderPreferenceSet && resolvedAutoConnectProvider is not null)
                 {
-                    _autoConnectProvider = ActiveConversation is { } active && restored.ContainsKey(active.Provider)
-                        ? active.Provider
-                        : restored.ContainsKey(Codev.CloudModelProviders.OpenAI)
-                            ? Codev.CloudModelProviders.OpenAI
-                            : Codev.CloudModelProviders.Anthropic;
+                    _autoConnectProvider = resolvedAutoConnectProvider;
                     OnPropertyChanged(nameof(AutoConnectProvider));
                     PersistSettings();
                 }
