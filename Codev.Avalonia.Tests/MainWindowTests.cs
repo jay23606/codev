@@ -1768,6 +1768,7 @@ public sealed class MainWindowTests
             window.UpdateLayout();
 
             var approvePolicy = typeof(MainViewModel).GetMethod("ApproveCommandWithProjectPolicyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            CodeTaskCommandProposal? observedProposal = null;
             var executor = new CodeTaskToolExecutor(new WorkspaceFileService(project), conversation,
                 _ => Task.FromResult(false), _ => Task.FromResult(false),
                 initialContextSources:
@@ -1777,8 +1778,12 @@ public sealed class MainWindowTests
                     "Search results: src",
                     "Output from command: previous check"
                 ],
-                permissionApproval: proposal => Dispatcher.UIThread.InvokeAsync(async () =>
-                    await (Task<CommandApprovalOutcome>)approvePolicy.Invoke(viewModel, [proposal, Array.Empty<string>()])!));
+                permissionApproval: proposal =>
+                {
+                    observedProposal = proposal;
+                    return Dispatcher.UIThread.InvokeAsync(async () =>
+                        await (Task<CommandApprovalOutcome>)approvePolicy.Invoke(viewModel, [proposal, Array.Empty<string>()])!);
+                });
 
             using var readArguments = JsonDocument.Parse("""{"relative_path":"README.md"}""");
             var readResult = await executor.ExecuteAsync("read_file", readArguments.RootElement.Clone());
@@ -1794,6 +1799,8 @@ public sealed class MainWindowTests
                 await Task.Delay(10);
             }
             Assert.True(approvalPanel.IsVisible, "The copied command did not open inline review in Ask mode.");
+            Assert.Equal("File: README.md", observedProposal?.MatchingUntrustedSource);
+            await Dispatcher.UIThread.InvokeAsync(() => window.UpdateLayout());
 
             var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
             var warning = Assert.Single(content.GetVisualDescendants().OfType<TextBlock>(), block =>
