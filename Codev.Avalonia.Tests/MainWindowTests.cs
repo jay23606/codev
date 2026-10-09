@@ -3050,6 +3050,53 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Command_review_explains_unreadable_permission_store_and_temporary_ask_mode()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-command-permission-error-ui", Guid.NewGuid().ToString("N"));
+        var appData = Path.Combine(root, "Codev");
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(appData);
+        Directory.CreateDirectory(project);
+        await File.WriteAllTextAsync(Path.Combine(appData, "avalonia-command-permissions.json"), "null");
+
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            viewModel.SetProjectFolder(project);
+            Assert.False(viewModel.CanPersistProjectCommandPermissions);
+            Assert.Equal(ProjectCommandPermissionMode.AskEveryTime, viewModel.ProjectCommandPermissionMode);
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            var proposal = new CodeTaskCommandProposal("git status --short", project, "PowerShell");
+            var request = typeof(MainWindow).GetMethod("ApproveAgentCommandAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var pending = Assert.IsAssignableFrom<Task<ProjectCommandApprovalChoice>>(request.Invoke(window, [proposal]));
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            var modeButton = Assert.IsType<Button>(window.FindControl<Button>("ProjectCommandModeButton"));
+            Assert.Equal("Ask every time ▾", modeButton.Content?.ToString());
+            Assert.False(modeButton.IsEnabled);
+            var content = Assert.IsType<ContentControl>(window.FindControl<ContentControl>("InlineApprovalContent"));
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains("using Ask every time rather than risk bypassing a saved deny rule", StringComparison.Ordinal) == true);
+            Assert.Contains(content.GetVisualDescendants().OfType<TextBlock>(), text =>
+                text.Text?.Contains(viewModel.ProjectCommandPermissionStoreNotice, StringComparison.Ordinal) == true);
+
+            var runOnce = Assert.Single(content.GetVisualDescendants().OfType<Button>(), button => button.Content?.ToString() == "Run once");
+            await Dispatcher.UIThread.InvokeAsync(() => runOnce.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            Assert.Equal(ProjectCommandApprovalChoice.RunOnce, await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Background_command_review_shows_lifetime_warning_and_exact_command()
     {
         var window = new MainWindow();
