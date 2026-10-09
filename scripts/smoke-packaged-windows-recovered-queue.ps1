@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $env:GITHUB_ACTIONS -and -not $AllowLocalDesktop) {
+if ($env:GITHUB_ACTIONS -cne 'true' -and -not $AllowLocalDesktop) {
     throw 'This packaged queue smoke takes focus and interacts with the desktop. It is disabled on local desktops by default; use -AllowLocalDesktop only for an announced release-signoff check.'
 }
 

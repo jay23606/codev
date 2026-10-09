@@ -160,6 +160,10 @@ jobs:
         shell: pwsh
         run: ./scripts/audit-nuget-vulnerabilities.ps1
 
+      - name: Test local packaged-smoke launch guards
+        shell: pwsh
+        run: ./scripts/test-packaged-smoke-local-guard.ps1
+
       - name: Run portable tests
         run: dotnet test Codev.Tests\Codev.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=codev-portable-tests.trx"
 

@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $env:GITHUB_ACTIONS -and -not $AllowLocalDesktop) {
+if ($env:GITHUB_ACTIONS -cne 'true' -and -not $AllowLocalDesktop) {
     throw 'This packaged data-survival smoke starts the app process. It is disabled on local desktops by default; use -AllowLocalDesktop only for an announced release-signoff check.'
 }
 
