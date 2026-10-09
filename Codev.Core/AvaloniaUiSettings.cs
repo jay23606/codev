@@ -7,7 +7,8 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, Lis
     List<SamplingPreset>? SamplingPresets = null, int ReadingWidth = 800, string? AutoConnectProvider = null,
     string FontFamily = "Inter", int FontSize = 14, bool PinnedConversationsExpanded = true,
     bool RecentConversationsExpanded = true, string EmbeddingModel = "nomic-embed-text",
-    ProjectCommandPermissionMode DefaultProjectCommandPermissionMode = ProjectCommandPermissionMode.Auto)
+    ProjectCommandPermissionMode DefaultProjectCommandPermissionMode = ProjectCommandPermissionMode.Auto,
+    bool AutoConnectProviderPreferenceSet = false)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -33,7 +34,8 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, Lis
             NormalizeReadingWidth(value.ReadingWidth), NormalizeAutoConnectProvider(value.AutoConnectProvider),
             NormalizeFontFamily(value.FontFamily), NormalizeFontSize(value.FontSize), value.PinnedConversationsExpanded,
             value.RecentConversationsExpanded, NormalizeEmbeddingModel(value.EmbeddingModel),
-            NormalizeDefaultProjectCommandPermissionMode(value.DefaultProjectCommandPermissionMode));
+            NormalizeDefaultProjectCommandPermissionMode(value.DefaultProjectCommandPermissionMode),
+            value.AutoConnectProviderPreferenceSet);
     }
 
     public static string Serialize(AvaloniaUiSettings settings) => JsonSerializer.Serialize(settings, JsonOptions);
@@ -70,6 +72,22 @@ public sealed record AvaloniaUiSettings(string Theme, string OllamaEndpoint, Lis
 
     public static ProjectCommandPermissionMode NormalizeDefaultProjectCommandPermissionMode(ProjectCommandPermissionMode value) =>
         Enum.IsDefined(value) ? value : ProjectCommandPermissionMode.Auto;
+
+    public static string? ResolveAutoConnectProvider(string? configuredProvider, bool preferenceSet,
+        IEnumerable<string> savedProviders, string? activeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(savedProviders);
+        if (preferenceSet || NormalizeAutoConnectProvider(configuredProvider) is not null)
+            return NormalizeAutoConnectProvider(configuredProvider);
+
+        var saved = savedProviders.Select(NormalizeAutoConnectProvider).Where(provider => provider is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var active = NormalizeAutoConnectProvider(activeProvider);
+        if (active is not null && saved.Contains(active)) return active;
+        if (saved.Contains(CloudModelProviders.OpenAI)) return CloudModelProviders.OpenAI;
+        if (saved.Contains(CloudModelProviders.Anthropic)) return CloudModelProviders.Anthropic;
+        return null;
+    }
 
     private static string? NormalizeAutoConnectProvider(string? value) => value?.ToLowerInvariant() switch
     {

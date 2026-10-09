@@ -987,7 +987,7 @@ public partial class MainWindow : Window
         };
         var autoConnect = new CheckBox
         {
-            IsChecked = viewModel.AutoConnectProvider is not null,
+            IsChecked = viewModel.AutoConnectProvider is not null || !viewModel.HasAutoConnectProviderPreference,
             MaxWidth = 390
         };
         var includeProjectContext = new CheckBox
@@ -1013,7 +1013,8 @@ public partial class MainWindow : Window
             autoConnect.Content = hasSavedKey
                 ? $"Reconnect {selectedProvider} automatically on startup using the saved key"
                 : "Reconnect this provider automatically on startup after saving a key";
-            autoConnect.IsChecked = viewModel.AutoConnectProvider?.Equals(selectedProvider, StringComparison.OrdinalIgnoreCase) == true;
+            autoConnect.IsChecked = viewModel.AutoConnectProvider?.Equals(selectedProvider, StringComparison.OrdinalIgnoreCase) == true ||
+                (viewModel.AutoConnectProvider is null && !viewModel.HasAutoConnectProviderPreference);
         }
         provider.SelectionChanged += (_, _) => { replacementRequested = false; ShowSavedKeyStatus(); };
         ShowSavedKeyStatus();

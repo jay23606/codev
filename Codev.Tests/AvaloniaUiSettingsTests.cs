@@ -159,6 +159,39 @@ public sealed class AvaloniaUiSettingsTests
     }
 
     [Fact]
+    public void Round_trips_explicit_hosted_auto_connect_opt_out()
+    {
+        var settings = new AvaloniaUiSettings("dark", OllamaEndpoint.Default.ToString(),
+            AutoConnectProviderPreferenceSet: true);
+
+        var restored = AvaloniaUiSettings.Deserialize(AvaloniaUiSettings.Serialize(settings));
+
+        Assert.Null(restored.AutoConnectProvider);
+        Assert.True(restored.AutoConnectProviderPreferenceSet);
+    }
+
+    [Fact]
+    public void Explicit_hosted_auto_connect_opt_out_wins_over_saved_keys()
+    {
+        var provider = AvaloniaUiSettings.ResolveAutoConnectProvider(null, preferenceSet: true,
+            [CloudModelProviders.OpenAI, CloudModelProviders.Anthropic], CloudModelProviders.OpenAI);
+
+        Assert.Null(provider);
+    }
+
+    [Fact]
+    public void Unconfigured_hosted_auto_connect_prefers_active_provider_then_saved_provider_order()
+    {
+        var savedProviders = new[] { CloudModelProviders.OpenAI, CloudModelProviders.Anthropic };
+
+        Assert.Equal(CloudModelProviders.Anthropic,
+            AvaloniaUiSettings.ResolveAutoConnectProvider(null, preferenceSet: false, savedProviders,
+                CloudModelProviders.Anthropic));
+        Assert.Equal(CloudModelProviders.OpenAI,
+            AvaloniaUiSettings.ResolveAutoConnectProvider(null, preferenceSet: false, savedProviders, "ollama"));
+    }
+
+    [Fact]
     public void Invalid_or_credential_bearing_endpoint_falls_back_to_loopback()
     {
         var settings = AvaloniaUiSettings.Deserialize("""{"Theme":"unexpected","OllamaEndpoint":"https://user:secret@ollama.example"}""");

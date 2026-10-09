@@ -1081,6 +1081,101 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Explicit_hosted_auto_connect_opt_out_survives_restart_and_skips_provider_request()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var settingsDirectory = Path.Combine(root, "Codev");
+
+        var hostedRequests = 0;
+        var handler = new TestHttpMessageHandler((request, _) =>
+        {
+            if (request.RequestUri?.Host == "api.openai.com") Interlocked.Increment(ref hostedRequests);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"models\":[]}", Encoding.UTF8, "application/json")
+            });
+        });
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root, handler, new TestCloudApiKeyVault(null));
+            var firstStartup = typeof(MainViewModel)
+                .GetField("_autoConnectProviderStartupTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(viewModel) as Task;
+            Assert.NotNull(firstStartup);
+            await firstStartup!.WaitAsync(TimeSpan.FromSeconds(5));
+            viewModel.SetAutoConnectProvider(null);
+            var settingsSave = typeof(MainViewModel)
+                .GetField("_settingsPersistenceTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(viewModel) as Task;
+            Assert.NotNull(settingsSave);
+            await settingsSave!.WaitAsync(TimeSpan.FromSeconds(5));
+            await StopAndFlushAsync(viewModel);
+            viewModel = null;
+
+            viewModel = new MainViewModel(root, handler, new TestCloudApiKeyVault("test-key"));
+            var startup = typeof(MainViewModel)
+                .GetField("_autoConnectProviderStartupTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(viewModel) as Task;
+            Assert.NotNull(startup);
+            await startup!.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(viewModel.HasSavedCloudApiKey(CloudModelProviders.OpenAI));
+            Assert.Null(viewModel.AutoConnectProvider);
+            Assert.False(viewModel.CloudRequestsEnabled);
+            Assert.Equal(0, Volatile.Read(ref hostedRequests));
+
+            var settingsJson = await File.ReadAllTextAsync(Path.Combine(settingsDirectory, "avalonia-settings.json"));
+            var savedSettings = AvaloniaUiSettings.Deserialize(settingsJson);
+            Assert.True(savedSettings.AutoConnectProviderPreferenceSet);
+            Assert.Null(savedSettings.AutoConnectProvider);
+            Assert.DoesNotContain("test-key", settingsJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task New_hosted_connection_defaults_to_startup_reconnect()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root, new TestHttpMessageHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"models\":[]}", Encoding.UTF8, "application/json")
+                })), new TestCloudApiKeyVault(null));
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var configureButton = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString()?.Contains("Connect hosted models", StringComparison.Ordinal) == true);
+            configureButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var dialog = await WaitForOwnedWindowAsync(window, child => child.Title == "Connect hosted models");
+            dialog.UpdateLayout();
+
+            var reconnect = Assert.Single(dialog.GetVisualDescendants().OfType<CheckBox>(), checkbox =>
+                checkbox.Content?.ToString()?.StartsWith("Reconnect this provider automatically", StringComparison.Ordinal) == true);
+            Assert.True(reconnect.IsChecked);
+            dialog.Close();
+            await WaitForOwnedWindowClosedAsync(dialog, window);
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task F1_opens_keyboard_shortcuts_reference_in_Avalonia()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
@@ -4139,6 +4234,22 @@ public sealed class MainWindowTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             sendAsync(request, cancellationToken);
+    }
+
+    private sealed class TestCloudApiKeyVault(string? openAiKey) : Codev.ICloudCredentialVault
+    {
+        public Task<string?> GetAsync(string provider) => Task.FromResult(
+            provider == CloudModelProviders.OpenAI ? openAiKey : null);
+
+        public Task SaveAsync(string provider, string apiKey) => Task.CompletedTask;
+
+        public Task<bool> RemoveAsync(string provider) => Task.FromResult(false);
+
+        public Task<string?> GetTokensAsync(string account) => Task.FromResult<string?>(null);
+
+        public Task SaveTokensAsync(string account, string tokens) => Task.CompletedTask;
+
+        public Task<bool> RemoveTokensAsync(string account) => Task.FromResult(false);
     }
 
     private sealed class TestAgentProfileEditorService(UserAgentProfileStore store) : Codev.Avalonia.ViewModels.IUserAgentProfileEditorService
