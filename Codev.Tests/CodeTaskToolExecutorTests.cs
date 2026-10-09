@@ -661,6 +661,34 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_exact_deny_blocks_its_command_but_allows_a_harmless_text_variation()
+    {
+        const string deniedMarker = "exact-deny-command-ran";
+        var deniedCommand = OperatingSystem.IsWindows() ? $"Write-Output {deniedMarker}" : $"printf {deniedMarker}";
+        var variation = OperatingSystem.IsWindows() ? "Write-Output harmless-variation" : "printf harmless-variation";
+        var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-exact-deny-variation-permissions.json"));
+        await registry.SetModeAsync(_root, ProjectCommandPermissionMode.Auto);
+        await registry.SetRuleAsync(_root, deniedCommand, ProjectCommandPermissionDecision.Deny);
+        var approvalPolicy = new ProjectCommandApprovalPolicy(registry);
+        var approvalRequests = 0;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false),
+            permissionApproval: async proposal => (await approvalPolicy.ApproveAsync(proposal, requestApproval: _ =>
+            {
+                approvalRequests++;
+                return Task.FromResult(ProjectCommandApprovalChoice.RunOnce);
+            })).Outcome);
+
+        var deniedResult = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command = deniedCommand }));
+        var variationResult = await ExecuteAsync(executor, "run_command", JsonSerializer.Serialize(new { command = variation }));
+
+        Assert.Contains("saved project command permission rule", deniedResult, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(deniedMarker, deniedResult, StringComparison.Ordinal);
+        Assert.Contains("harmless-variation", variationResult, StringComparison.Ordinal);
+        Assert.Equal(0, approvalRequests);
+    }
+
+    [Fact]
     public async Task Auto_policy_starts_background_command_without_showing_approval_dialog()
     {
         var registry = ProjectCommandPermissionRegistry.Load(Path.Combine(_root, "auto-background-command-permissions.json"));
