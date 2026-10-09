@@ -94,7 +94,10 @@
                     </StackPanel>
                 </Grid>
                 <Button Grid.Row="1" Classes="nav" Content="＋   New conversation" Command="{Binding NewConversationCommand}" Background="#D97757" Foreground="White" Margin="0,0,0,4" />
-                <TextBox x:Name="SearchTextBox" Grid.Row="2" Classes="search" Watermark="⌕  Search conversations" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,14" AutomationProperties.Name="Search conversations" />
+                <StackPanel Grid.Row="2" Spacing="2" Margin="0,0,0,14">
+                    <TextBlock x:Name="SearchLabel" Text="Search conversations" FontSize="10" Foreground="{DynamicResource MutedTextBrush}" Margin="4,0,0,0" />
+                    <TextBox x:Name="SearchTextBox" Classes="search" Watermark="⌕  Search" Text="{Binding SearchText, Mode=TwoWay}" AutomationProperties.LabeledBy="{Binding #SearchLabel}" />
+                </StackPanel>
                 <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="2">
                         <Button x:Name="PinnedConversationsToggleButton" AutomationProperties.AutomationId="PinnedConversationsToggleButton" Classes="nav" Content="{Binding PinnedConversationsSectionLabel}" Click="TogglePinnedConversations_Click" FontSize="10" FontWeight="SemiBold" Padding="9,4" />

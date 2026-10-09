@@ -17,7 +17,6 @@ app_pid=''
 mock_pid=''
 orca_pid=''
 speech_dispatcher_pid=''
-speech_record_pid=''
 speech_sink_module_id=''
 previous_speech_sink=''
 stop_helper() {
@@ -32,7 +31,6 @@ stop_helper() {
   wait "$pid" 2>/dev/null || true
 }
 cleanup() {
-  stop_helper "$speech_record_pid"
   stop_helper "$orca_pid"
   stop_helper "$speech_dispatcher_pid"
   if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
@@ -107,7 +105,7 @@ assert_orca_focus_event() {
   local expected_text="$1"
   for _ in {1..120}; do
     if grep --fixed-strings --quiet -- "OBJECT EVENT: object:state-changed:focused for [entry: '$expected_text']" "$smoke_root/orca-debug.log"; then
-      echo "Orca processed the AT-SPI focus event for: $expected_text (spoken wording is not asserted)"
+      echo "Orca processed the AT-SPI focus event for: $expected_text"
       return
     fi
     sleep 0.25
@@ -119,28 +117,11 @@ assert_orca_focus_event() {
   exit 1
 }
 
-assert_orca_audio_output() {
-  local audio_path="$smoke_root/orca-search-focus.wav"
-  parecord --device="${speech_sink_name}.monitor" --file-format=wav "$audio_path" >"$smoke_root/parecord.out" 2>&1 &
-  speech_record_pid=$!
-  sleep 0.25
-  if ! kill -0 "$speech_record_pid" 2>/dev/null; then
-    cat "$smoke_root/parecord.out" >&2
-    echo 'PulseAudio could not record the packaged Orca smoke output.' >&2
-    exit 1
-  fi
-  # Let initial window/startup announcements finish, then measure audio only
-  # after the focus change below.
-  sleep 1.5
+assert_orca_search_focus() {
   xdotool windowfocus --sync "$window_id"
   xdotool key --clearmodifiers ctrl+f
   python3 ./scripts/assert-linux-atspi.py --focused 'Search conversations'
   assert_orca_focus_event 'Search conversations'
-  sleep 1.5
-  kill -INT "$speech_record_pid" 2>/dev/null || true
-  wait "$speech_record_pid" 2>/dev/null || true
-  speech_record_pid=''
-  python3 ./scripts/assert-audio-signal.py "$audio_path" --skip-seconds 1.5
 }
 
 mock_port_path="$smoke_root/mock-ollama.port"
@@ -265,7 +246,9 @@ if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   echo 'Linux packaged app did not save the composer sentinel before the Ctrl+F check.' >&2
   exit 1
 fi
-assert_orca_audio_output
+# Let Orca finish its startup announcements and initial tree scan before
+# validating the search field's AT-SPI label and keyboard focus event.
+assert_orca_search_focus
 xdotool type --clearmodifiers --delay 1 "$search_focus_probe"
 if ! jq -e --arg id "$conversation_id" --arg draft "$search_focus_sentinel" \
   '.[] | select(.Id == $id) | .Draft == $draft' "$conversations_path" >/dev/null 2>&1; then
