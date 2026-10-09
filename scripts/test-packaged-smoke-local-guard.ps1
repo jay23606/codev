@@ -6,7 +6,10 @@ $scripts = @(
     'smoke-packaged-windows-recovered-queue.ps1',
     'smoke-packaged-windows-data-survival.ps1'
 ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$upgradeScript = Join-Path $PSScriptRoot 'smoke-windows-upgrade.ps1'
 $previousGitHubActions = $env:GITHUB_ACTIONS
+$previousRunnerEnvironment = $env:RUNNER_ENVIRONMENT
+$previousRunnerTemp = $env:RUNNER_TEMP
 
 try {
     foreach ($scriptPath in $scripts) {
@@ -33,6 +36,47 @@ try {
 }
 finally {
     $env:GITHUB_ACTIONS = $previousGitHubActions
+    $env:RUNNER_ENVIRONMENT = $previousRunnerEnvironment
+    $env:RUNNER_TEMP = $previousRunnerTemp
 }
 
-Write-Output 'Packaged-app smoke guards reject unset, false, and noncanonical GITHUB_ACTIONS values before touching the desktop.'
+try {
+    $env:GITHUB_ACTIONS = ''
+    $env:RUNNER_ENVIRONMENT = 'github-hosted'
+    $env:RUNNER_TEMP = $env:TEMP
+    try {
+        & $upgradeScript -CurrentAppPath $missingApp
+        throw 'The upgrade smoke did not reject a local invocation before touching the desktop.'
+    }
+    catch {
+        if ($_.Exception.Message -notlike '*disposable GitHub-hosted runner*') { throw }
+    }
+
+    $env:GITHUB_ACTIONS = 'true'
+    $env:RUNNER_ENVIRONMENT = ''
+    $env:RUNNER_TEMP = $env:TEMP
+    try {
+        & $upgradeScript -CurrentAppPath $missingApp
+        throw 'The upgrade smoke did not reject a local runner before touching the desktop.'
+    }
+    catch {
+        if ($_.Exception.Message -notlike '*disposable GitHub-hosted runner*') { throw }
+    }
+
+    $env:RUNNER_ENVIRONMENT = 'github-hosted'
+    $env:RUNNER_TEMP = ''
+    try {
+        & $upgradeScript -CurrentAppPath $missingApp
+        throw 'The upgrade smoke did not reject a missing hosted-runner temp folder before touching the desktop.'
+    }
+    catch {
+        if ($_.Exception.Message -notlike '*disposable GitHub-hosted runner*') { throw }
+    }
+}
+finally {
+    $env:GITHUB_ACTIONS = $previousGitHubActions
+    $env:RUNNER_ENVIRONMENT = $previousRunnerEnvironment
+    $env:RUNNER_TEMP = $previousRunnerTemp
+}
+
+Write-Output 'Packaged-app and upgrade smoke guards reject local or incomplete runner environments before launching the desktop.'
