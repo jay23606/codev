@@ -224,6 +224,102 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Imports_OpenCode_V2_ordered_permissions_steps_and_scoped_edit_rules()
+    {
+        Directory.CreateDirectory(_project);
+        var openCodeAgents = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(openCodeAgents);
+        await File.WriteAllTextAsync(Path.Combine(openCodeAgents, "reviewer.md"), """
+            ---
+            description: Review changes and report risks.
+            mode: subagent
+            steps: 8
+            permissions:
+              - action: "*"
+                resource: "*"
+                effect: deny
+              - action: "github_*"
+                resource: "*"
+                effect: allow
+              - action: read
+                resource: "*"
+                effect: allow
+              - action: edit
+                resource: "src/**"
+                effect: allow
+              - action: edit
+                resource: "src/private/**"
+                effect: deny
+              - action: shell
+                resource: "git status *"
+                effect: allow
+              - action: shell
+                resource: "git push *"
+                effect: deny
+            ---
+            Review the requested changes without exposing private files.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        var profile = Assert.Single(loaded.Profiles, item => item.Name == "reviewer");
+        Assert.Equal("subagent", profile.Mode);
+        Assert.Equal(8, profile.MaxSteps);
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "read_file"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "delegate_task"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "mcp_github_search_repos_abc"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "mcp_gitlab_search_repos_abc"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "run_command"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile, "run_command", "git status --short"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "git push origin main"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "npm test"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "git status --short; Remove-Item -Recurse secret"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "git status --short & Remove-Item -Recurse secret"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile, "run_command", "git status --short" + Environment.NewLine + "Remove-Item -Recurse secret"));
+        Assert.True(AgentProfilePolicy.CanEditPath(profile, "src/components/app.cs", _project));
+        Assert.False(AgentProfilePolicy.CanEditPath(profile, "src/private/credentials.cs", _project));
+        Assert.False(AgentProfilePolicy.CanEditPath(profile, "README.md", _project));
+        Assert.Empty(loaded.Warnings);
+    }
+
+    [Fact]
+    public async Task Imports_OpenCode_V2_profiles_as_primary_by_default_and_rejects_unmappable_scoped_reads()
+    {
+        var directory = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "writer.md"), """
+            ---
+            description: Write project documentation.
+            steps: 6
+            permissions:
+              - action: read
+                resource: "docs/**"
+                effect: allow
+            ---
+            Write concise, accurate documentation.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "writer");
+        Assert.Contains(loaded.Warnings, warning => warning.Contains("resource-scoped OpenCode V2 'read' rules are not supported", StringComparison.Ordinal));
+
+        await File.WriteAllTextAsync(Path.Combine(directory, "writer.md"), """
+            ---
+            description: Write project documentation.
+            steps: 6
+            ---
+            Write concise, accurate documentation.
+            """);
+        loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        var writer = Assert.Single(loaded.Profiles, profile => profile.Name == "writer");
+        Assert.Equal("primary", writer.Mode);
+        Assert.Equal(6, writer.MaxSteps);
+        Assert.Empty(loaded.Warnings);
+    }
+
+    [Fact]
     public async Task Imports_OpenCode_user_profiles_from_explicit_compatible_directory()
     {
         var openCodeAgents = Path.Combine(_root, "opencode", "agents");
