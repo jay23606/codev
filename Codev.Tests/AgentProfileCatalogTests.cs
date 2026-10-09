@@ -423,6 +423,43 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Imports_and_applies_resource_scoped_OpenCode_V2_skill_permissions()
+    {
+        var directory = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "skill-curator.md"), """
+            ---
+            description: Load only approved skills.
+            permissions:
+              - action: skill
+                resource: "*"
+                effect: deny
+              - action: skill
+                resource: "docs-*"
+                effect: allow
+              - action: skill
+                resource: "internal-*"
+                effect: ask
+            ---
+            Use skill guidance only when it supports the request.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        var profile = Assert.Single(loaded.Profiles, item => item.Name == "skill-curator");
+        var docsSkill = new SlashCommandDefinition("/skill-docs-api", "Docs", SlashCommandAction.UserPrompt, Scope: "skill-user");
+        var internalSkill = new SlashCommandDefinition("/skill-internal-review", "Internal", SlashCommandAction.UserPrompt, Scope: "skill-project");
+        var secretSkill = new SlashCommandDefinition("/skill-secrets", "Secrets", SlashCommandAction.UserPrompt, Scope: "skill-user");
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(profile,
+            AgentSkillTool.FunctionName(docsSkill), resource: AgentSkillTool.PermissionResource(docsSkill)));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(profile,
+            AgentSkillTool.FunctionName(internalSkill), resource: AgentSkillTool.PermissionResource(internalSkill)));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(profile,
+            AgentSkillTool.FunctionName(secretSkill), resource: AgentSkillTool.PermissionResource(secretSkill)));
+        Assert.Empty(loaded.Warnings);
+    }
+
+    [Fact]
     public async Task Rejects_invalid_resource_scoped_OpenCode_V2_grep_regex()
     {
         var directory = Path.Combine(_project, ".opencode", "agents");
