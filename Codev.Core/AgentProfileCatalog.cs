@@ -102,12 +102,16 @@ public static class AgentProfilePolicy
                          (toolName is "glob_files" or "grep_files") &&
                          AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
                     permission = rule.Permission;
-                else if (rule.Action.Equals("edit", StringComparison.OrdinalIgnoreCase) &&
-                         rule.Permission != AgentToolPermission.Deny && IsEditTool(toolName))
+                else if (rule.Action.Equals("edit", StringComparison.OrdinalIgnoreCase) && IsEditTool(toolName))
                 {
-                    // Keep edit tools in the model schema when a V2 profile allows only selected
-                    // paths. CanEditPath applies the same ordered rules to each proposed path.
-                    permission = rule.Permission;
+                    // Keep edit tools in the model schema when a V2 profile allows or asks for
+                    // selected paths. Once a tool call names its path, apply the ordered rule to
+                    // that path only; the host can then ask outside Auto mode.
+                    if (rule.Resource == "*") permission = rule.Permission;
+                    else if (resource is not null && AgentProfileCatalog.OpenCodePathPatternMatches(rule.Resource, resource))
+                        permission = rule.Permission;
+                    else if (resource is null && rule.Permission != AgentToolPermission.Deny)
+                        permission = rule.Permission;
                 }
             }
         }
@@ -163,6 +167,8 @@ public static class AgentProfilePolicy
                 !AgentProfileCatalog.OpenCodePathPatternMatches(rule.Resource, normalized)) continue;
             permission = rule.Permission;
         }
+        // Ask is allowed through this path gate so the host's one-call approval callback can
+        // enforce it. Deny remains a hard block before any proposal is reviewed.
         return permission != AgentToolPermission.Deny;
     }
 
@@ -860,8 +866,6 @@ public static class AgentProfileCatalog
         else if ((normalizedAction is "edit" or "read" or "glob") && resource != "*")
         {
             if (!IsValidPathPattern(resource)) return Fail($"OpenCode V2 {normalizedAction} resources must be safe project-relative path patterns", out error);
-            if (normalizedAction == "edit" && effect == AgentToolPermission.Ask)
-                return Fail("path-scoped OpenCode V2 edit ask rules are not supported; use allow or deny", out error);
         }
         else if (normalizedAction == "grep" && resource != "*")
         {

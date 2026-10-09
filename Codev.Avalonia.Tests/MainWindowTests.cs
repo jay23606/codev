@@ -259,6 +259,63 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task OpenCode_path_scoped_edit_ask_uses_the_matching_path_and_respects_auto_mode()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            viewModel.SetProjectFolder(project);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            var profile = new AgentProfile("Writer", "Write documentation.", null, null, null,
+                AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "Keep edits focused.", "test", "",
+                OpenCodePermissionRules:
+                [
+                    new("edit", "*", AgentToolPermission.Allow),
+                    new("edit", "docs/**", AgentToolPermission.Ask)
+                ]);
+            var approvals = 0;
+            string? approvedPath = null;
+            viewModel.ConfirmAgentProfileToolAsync = (_, name, arguments) =>
+            {
+                Assert.Equal("write_file", name);
+                approvals++;
+                approvedPath = arguments.GetProperty("relative_path").GetString();
+                return Task.FromResult(true);
+            };
+            var checkPermission = typeof(MainViewModel).GetMethod("CheckAgentProfileToolPermissionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var docsArguments = JsonSerializer.SerializeToElement(new { relative_path = "docs/guide.md", content = "draft" });
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            var autoDecision = await (Task<AgentToolProfileDecision>)checkPermission.Invoke(viewModel,
+                [conversation, profile, "write_file", docsArguments])!;
+            Assert.Equal(AgentToolProfileDecision.DeferToProjectPolicy, autoDecision);
+            Assert.Equal(0, approvals);
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.AskEveryTime);
+            var askDecision = await (Task<AgentToolProfileDecision>)checkPermission.Invoke(viewModel,
+                [conversation, profile, "write_file", docsArguments])!;
+            Assert.Equal(AgentToolProfileDecision.ApprovedOnce, askDecision);
+            Assert.Equal("docs/guide.md", approvedPath);
+            Assert.Equal(1, approvals);
+
+            var sourceArguments = JsonSerializer.SerializeToElement(new { relative_path = "src/app.cs", content = "draft" });
+            var sourceDecision = await (Task<AgentToolProfileDecision>)checkPermission.Invoke(viewModel,
+                [conversation, profile, "write_file", sourceArguments])!;
+            Assert.Equal(AgentToolProfileDecision.DeferToProjectPolicy, sourceDecision);
+            Assert.Equal(1, approvals);
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Sidebar_conversation_sections_toggle_and_persist_expanded_state()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

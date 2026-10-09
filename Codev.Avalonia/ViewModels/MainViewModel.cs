@@ -1232,6 +1232,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         var resource = toolName switch
         {
             "read_file" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("relative_path", out var pathValue) => pathValue.GetString(),
+            "create_file" or "write_file" or "apply_patch" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("relative_path", out var editPathValue) => editPathValue.GetString(),
             "glob_files" or "grep_files" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("pattern", out var patternValue) => patternValue.GetString(),
             _ => null
         };
