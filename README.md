@@ -2,6 +2,8 @@
 
 [![Windows CI](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml/badge.svg?branch=main)](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml)
 
+Codev is a free, local-first AI coding workspace: a chat-style desktop app that talks to models running on your own machine through Ollama, with optional OpenAI and Anthropic models when you want them. Ask questions about code, review proposed edits before they apply, and keep your work on your computer.
+
 ## Why
 
 Codev brings a chat-first desktop workflow for local and hosted coding models. OpenCode is the primary detailed coding-agent reference because its implementation and documentation are open; Codex and Claude are additional UX references. Codev keeps Ollama as the local default and does not depend on an editor.
