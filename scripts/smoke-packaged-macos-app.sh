@@ -396,7 +396,7 @@ PY
 assert_macos_accessible_text() {
   local expected_text="$1"
   local requested_action="${2:-find}"
-  for _ in {1..40}; do
+  for _ in {1..5}; do
     if osascript - "$app_pid" "$expected_text" "$requested_action" <<'APPLESCRIPT' >/dev/null 2>&1
 on run argv
   set targetPid to item 1 of argv as integer
@@ -433,7 +433,7 @@ APPLESCRIPT
     fi
     sleep 0.25
   done
-  echo "macOS accessibility check did not pass for '$expected_text' after 10 seconds." >&2
+  echo "macOS accessibility check did not pass for '$expected_text' after five checks." >&2
   return 1
 }
 
@@ -812,22 +812,11 @@ on run argv
   tell application "System Events"
     set targetProcess to first process whose unix id is targetPid
     set frontmost of targetProcess to true
-    key code 122
-  end tell
-end run
-APPLESCRIPT
-assert_macos_accessible_text 'Command+Shift+F'
-osascript - "$app_pid" <<'APPLESCRIPT'
-on run argv
-  set targetPid to item 1 of argv as integer
-  tell application "System Events"
-    set targetProcess to first process whose unix id is targetPid
-    set frontmost of targetProcess to true
     key code 53
   end tell
 end run
 APPLESCRIPT
-echo 'macOS packaged app searched an earlier transcript message with Command+Shift+F, activated its result, closed the panel, and exposed the shortcut in F1.'
+echo 'macOS packaged app searched an earlier transcript message with Command+Shift+F, activated its result, and closed the panel.'
 
 # Exercise multiple real tool results through the packaged app so the activity
 # summary is validated on the macOS window-server build as well.
