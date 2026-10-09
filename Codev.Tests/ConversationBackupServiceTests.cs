@@ -14,6 +14,7 @@ public sealed class ConversationBackupServiceTests
         {
             Id = Guid.NewGuid(),
             Title = "Debug session",
+            SidebarOrder = 4,
             Draft = "an unsent prompt draft",
             Model = "gpt-5.6",
             Provider = CloudModelProviders.OpenAI,
@@ -46,6 +47,7 @@ public sealed class ConversationBackupServiceTests
 
         Assert.NotEqual(source.Id, imported.Id);
         Assert.Equal(source.Title, imported.Title);
+        Assert.Equal(source.SidebarOrder, imported.SidebarOrder);
         Assert.Equal(source.Draft, imported.Draft);
         Assert.Equal(source.Model, imported.Model);
         Assert.Equal(CloudModelProviders.OpenAI, imported.Provider);

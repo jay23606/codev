@@ -15,6 +15,7 @@ namespace Codev.Avalonia.Views;
 
 public partial class MainWindow : Window
 {
+    private static readonly DataFormat<string> ConversationDragFormat = DataFormat.CreateStringApplicationFormat("Codev.ConversationId");
     private INotifyCollectionChanged? _observedMessages;
     private bool _followOutput = true;
     private bool _scrollPending;
@@ -147,6 +148,32 @@ public partial class MainWindow : Window
             return;
         }
         viewModel.AddContextFiles(paths);
+    }
+
+    private async void Conversation_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Button { DataContext: Codev.Conversation conversation } button ||
+            !e.GetCurrentPoint(button).Properties.IsLeftButtonPressed) return;
+
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(ConversationDragFormat, conversation.Id.ToString("D")));
+        await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
+    }
+
+    private void Conversation_DragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(ConversationDragFormat) && sender is Button { DataContext: Codev.Conversation }
+            ? DragDropEffects.Move : DragDropEffects.None;
+    }
+
+    private void Conversation_Drop(object? sender, DragEventArgs e)
+    {
+        if (sender is not Button { DataContext: Codev.Conversation target } button ||
+            e.DataTransfer.TryGetValue(ConversationDragFormat) is not { } rawId || !Guid.TryParse(rawId, out var draggedId)) return;
+        e.Handled = true;
+        var insertAfter = e.GetPosition(button).Y >= button.Bounds.Height / 2;
+        if (DataContext is ViewModels.MainViewModel viewModel)
+            viewModel.ReorderConversation(draggedId, target, insertAfter);
     }
 
     private async void AddTaskChecklistItem_Click(object? sender, RoutedEventArgs e)

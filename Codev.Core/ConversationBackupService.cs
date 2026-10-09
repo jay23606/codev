@@ -51,6 +51,7 @@ public static class ConversationBackupService
             CompactionThroughMessageCount = conversation.CompactionThroughMessageCount,
             TaskChecklist = TaskChecklistService.NormalizeImported(conversation.TaskChecklist).ToList(),
             IsPinned = conversation.IsPinned,
+            SidebarOrder = conversation.SidebarOrder,
             IsArchived = conversation.IsArchived,
             UpdatedAt = conversation.UpdatedAt,
             ProjectPath = conversation.ProjectPath,

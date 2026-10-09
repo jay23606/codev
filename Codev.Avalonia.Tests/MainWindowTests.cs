@@ -455,6 +455,11 @@ public sealed class MainWindowTests
             viewModel.NewConversationCommand.Execute(null);
             var recent = Assert.IsType<Conversation>(viewModel.ActiveConversation);
             recent.Title = "Recent sidebar fixture";
+            viewModel.NewConversationCommand.Execute(null);
+            var later = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            later.Title = "Second recent sidebar fixture";
+            Assert.True(viewModel.ReorderConversation(recent.Id, later, insertAfter: false));
+            Assert.Equal(new[] { recent.Id, later.Id }, viewModel.RecentConversations.Select(item => item.Id));
 
             var pinnedToggle = Assert.IsType<Button>(window.FindControl<Button>("PinnedConversationsToggleButton"));
             var pinnedList = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("PinnedConversationsList"));
@@ -462,6 +467,11 @@ public sealed class MainWindowTests
             var recentList = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("RecentConversationsList"));
             Assert.True(pinnedList.IsVisible);
             Assert.True(recentList.IsVisible);
+            Assert.All(window.GetVisualDescendants().OfType<Button>().Where(button => button.DataContext is Conversation), button =>
+            {
+                Assert.True(DragDrop.GetAllowDrop(button));
+                Assert.Equal("Drag to reorder within this section", ToolTip.GetTip(button));
+            });
 
             await Dispatcher.UIThread.InvokeAsync(() => pinnedToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
             await Dispatcher.UIThread.InvokeAsync(() => recentToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
@@ -487,6 +497,7 @@ public sealed class MainWindowTests
             var reloadedPinned = Assert.Single(reloadedViewModel.PinnedConversations);
             Assert.Equal(pinnedConversationId, reloadedPinned.Id);
             Assert.Equal("Pinned sidebar fixture", reloadedPinned.Title);
+            Assert.Equal(new[] { recent.Id, later.Id }, reloadedViewModel.RecentConversations.Select(item => item.Id));
             Assert.DoesNotContain(reloadedViewModel.RecentConversations, conversation => conversation.Id == pinnedConversationId);
         }
         finally

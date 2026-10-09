@@ -266,7 +266,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         LoadConversations();
         if (_conversations.Count == 0)
         {
-            _conversations.Add(new Codev.Conversation { Title = "New conversation", UpdatedAt = DateTimeOffset.Now });
+            _conversations.Add(new Codev.Conversation { Title = "New conversation", UpdatedAt = DateTimeOffset.Now, SidebarOrder = 0 });
             Persist();
         }
         RebuildLists();
@@ -1519,7 +1519,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             ThinkEnabled = ThinkEnabled,
             IncludeRepoMap = IncludeRepoMap,
             NumCtx = ContextSize,
-            UpdatedAt = DateTimeOffset.Now
+            UpdatedAt = DateTimeOffset.Now,
+            SidebarOrder = NextSidebarOrder(isPinned: false, isArchived: false)
         };
         _conversations.Insert(0, conversation);
         SelectConversation(conversation);
@@ -1552,6 +1553,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         try
         {
             var fork = await Codev.ConversationForkService.CreateForkAsync(conversation);
+            fork.SidebarOrder = NextSidebarOrder(fork.IsPinned, fork.IsArchived);
             _conversations.Insert(0, fork);
             SelectConversation(fork);
             RebuildLists();
@@ -1577,6 +1579,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
 
         conversation.IsArchived = !conversation.IsArchived;
+        if (!conversation.IsArchived) conversation.SidebarOrder = NextSidebarOrder(conversation.IsPinned, isArchived: false);
         conversation.UpdatedAt = DateTimeOffset.Now;
         if (ReferenceEquals(ActiveConversation, conversation))
         {
@@ -1590,6 +1593,22 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         }
         RebuildLists();
         Persist();
+        return true;
+    }
+
+    public bool ReorderConversation(Guid draggedId, Codev.Conversation target, bool insertAfter)
+    {
+        var dragged = _conversations.FirstOrDefault(item => item.Id == draggedId);
+        if (dragged is null || !_conversations.Contains(target) || dragged.IsPinned != target.IsPinned ||
+            dragged.IsArchived != target.IsArchived || dragged.ParentConversationId is not null || target.ParentConversationId is not null) return false;
+
+        var section = _conversations.Where(item => item.ParentConversationId is null &&
+            item.IsPinned == dragged.IsPinned && item.IsArchived == dragged.IsArchived)
+            .OrderBy(item => item.SidebarOrder ?? int.MaxValue)
+            .ThenByDescending(item => item.UpdatedAt).ToList();
+        if (!Codev.ConversationSidebarOrdering.TryMove(section, dragged.Id, target.Id, insertAfter)) return false;
+        Persist();
+        RebuildLists();
         return true;
     }
 
@@ -2404,6 +2423,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         foreach (var conversation in imported.OrderBy(item => item.UpdatedAt))
         {
             conversation.IsArchived = false;
+            if (conversation.ParentConversationId is null)
+                conversation.SidebarOrder = NextSidebarOrder(conversation.IsPinned, isArchived: false);
             if (!string.IsNullOrWhiteSpace(conversation.ProjectPath) && !Directory.Exists(conversation.ProjectPath))
                 conversation.ProjectPath = null;
             _conversations.Insert(0, conversation);
@@ -2782,6 +2803,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         if (ActiveConversation is not { } conversation) return;
         conversation.IsPinned = !conversation.IsPinned;
+        conversation.SidebarOrder = NextSidebarOrder(conversation.IsPinned, conversation.IsArchived);
         conversation.UpdatedAt = DateTimeOffset.Now;
         OnPropertyChanged(nameof(PinLabel));
         Persist();
@@ -4393,6 +4415,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         try
         {
             var sideChat = await Codev.ConversationForkService.CreateSideChatAsync(source, message.MessageIndex);
+            sideChat.SidebarOrder = NextSidebarOrder(sideChat.IsPinned, sideChat.IsArchived);
             _conversations.Insert(0, sideChat);
             SelectConversation(sideChat);
             RebuildLists();
@@ -5004,8 +5027,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 conversation.IsArchived == _showArchived &&
                 (matchedIds.Contains(conversation.Id) || conversation.ChildConversations.Any(child => matchedIds.Contains(child.Id))))
             .OrderByDescending(conversation => conversation.UpdatedAt).ToArray();
-        Reset(PinnedConversations, visible.Where(c => c.IsPinned));
-        Reset(RecentConversations, visible.Where(c => !c.IsPinned));
+        Reset(PinnedConversations, visible.Where(c => c.IsPinned).OrderBy(c => c.SidebarOrder ?? int.MaxValue).ThenByDescending(c => c.UpdatedAt));
+        Reset(RecentConversations, visible.Where(c => !c.IsPinned).OrderBy(c => c.SidebarOrder ?? int.MaxValue).ThenByDescending(c => c.UpdatedAt));
         OnPropertyChanged(nameof(PinnedConversationsSectionLabel));
         OnPropertyChanged(nameof(RecentConversationsSectionLabel));
         OnPropertyChanged(nameof(ConversationTitle));
@@ -5062,6 +5085,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         target.Clear();
         foreach (var item in source) target.Add(item);
     }
+
+    private int NextSidebarOrder(bool isPinned, bool isArchived) => _conversations
+        .Where(item => item.ParentConversationId is null && item.IsPinned == isPinned && item.IsArchived == isArchived)
+        .Select(item => item.SidebarOrder ?? int.MaxValue)
+        .DefaultIfEmpty(0)
+        .Min() - 1;
 
     private void LoadConversations()
     {
