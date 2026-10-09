@@ -4,16 +4,7 @@ on:
   push:
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - main
-    paths-ignore:
-      - '*.md'
-      - '**/*.md'
-      - 'Codev.Tests/**'
-      - 'Codev.Avalonia.Tests/**'
-      - 'Codev.Windows.Tests/**'
-      - '.github/workflows/release-desktop.yml'
+
   workflow_dispatch:
 
 permissions:
