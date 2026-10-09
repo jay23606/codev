@@ -3547,9 +3547,17 @@ public sealed class MainWindowTests
             await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
             Assert.Equal(ProjectCommandPermissionMode.Auto, viewModel.ProjectCommandPermissionMode);
             Assert.False(viewModel.CanPersistMcpToolPermissions);
+            Assert.Contains("MCP calls still require approval because saved MCP permission rules are unavailable", viewModel.ProjectCommandPermissionModeTooltip, StringComparison.Ordinal);
+            Assert.Contains(viewModel.McpToolPermissionLoadError!, viewModel.ProjectCommandPermissionModeTooltip, StringComparison.Ordinal);
+            Assert.NotNull(viewModel.ActiveConversation);
+            viewModel.ActiveConversation!.IsCodeTask = true;
+            Assert.Contains("MCP calls still require approval because saved MCP permission rules are unavailable", viewModel.CodeTaskTooltip, StringComparison.Ordinal);
 
             window = new MainWindow { DataContext = viewModel };
             window.Show();
+            var modeButton = Assert.IsType<Button>(window.FindControl<Button>("ProjectCommandModeButton"));
+            Assert.Equal("Auto ▾", modeButton.Content?.ToString());
+            Assert.Equal(viewModel.ProjectCommandPermissionModeTooltip, modeButton.GetValue(ToolTip.TipProperty)?.ToString());
             using var schema = JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}""");
             using var arguments = JsonDocument.Parse("""{"query":"codev"}""");
             var tool = new McpCodeTaskTool("mcp_github_search_0123456789abcdef", "github", "GitHub", "search",

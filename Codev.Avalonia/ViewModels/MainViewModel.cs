@@ -417,6 +417,19 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only ▾",
         _ => "Ask every time ▾"
     };
+    public string ProjectCommandPermissionModeTooltip
+    {
+        get
+        {
+            const string description = "With a project attached, this mode is saved for that project. Without one, it sets the default for new projects and Code task workspaces. Auto runs shell commands and calls configured MCP tools without approval unless an exact saved project deny rule blocks that command or MCP server/tool. Shell commands use your account permissions and are not sandboxed to the project folder; MCP tools may affect external services.";
+            return McpPermissionFallbackNotice is { Length: > 0 } notice
+                ? $"{description} {notice}."
+                : description;
+        }
+    }
+    private string McpPermissionFallbackNotice => _projectMcpPermissions.LoadError is { } loadError
+        ? $"MCP calls still require approval because saved MCP permission rules are unavailable: {loadError}"
+        : "";
     public IReadOnlyList<Codev.ProjectCommandPermissionRule> ProjectCommandPermissionRules => ActiveConversation?.ProjectPath is { Length: > 0 } path
         ? _projectCommandPermissions.GetRules(path) : [];
     public bool CanPersistProjectCommandPermissions => _projectCommandPermissions.CanPersist;
@@ -575,7 +588,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     public string CodeTaskTooltip => IsCodeTask
         ? $"Code task is on. {(IsOpenAIModel && ActiveConversation?.AllowHostedCodeTask != true ? "The first prompt asks permission to send prompts and tool results to OpenAI. " : "")}{(IsOpenAIModel ? Codev.OpenAiCodeTaskLimits.Description + " " : "")}{ProjectCommandPermissionMode switch
         {
-            Codev.ProjectCommandPermissionMode.Auto => "Auto applies ordinary file changes with checkpoints, runs shell commands, and calls configured MCP tools without approval unless an exact saved project deny rule blocks that command or MCP server/tool. Shell commands use your account permissions and are not sandboxed to the project folder; MCP tools may affect external services.",
+            Codev.ProjectCommandPermissionMode.Auto => $"Auto applies ordinary file changes with checkpoints, runs shell commands, and calls configured MCP tools without approval unless an exact saved project deny rule blocks that command or MCP server/tool.{(McpPermissionFallbackNotice.Length > 0 ? $" {McpPermissionFallbackNotice}." : "")} Shell commands use your account permissions and are not sandboxed to the project folder; MCP tools may affect external services.",
             Codev.ProjectCommandPermissionMode.Allowlist => "Exact saved allow rules can skip approval; unlisted commands still ask.",
             Codev.ProjectCommandPermissionMode.ReadOnly => "Only recognized read-only inspections can skip approval; other commands ask.",
             _ => "Commands ask every time."
