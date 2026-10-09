@@ -1,6 +1,6 @@
-# Codev Avalonia preview
+# Codev Avalonia preview — Release 2
 
-Codev is a desktop coding workspace for local and hosted language models. The Avalonia app is the cross-platform desktop build, with self-contained packages for Windows x64, Linux x64, Apple silicon macOS, and Intel macOS.
+Codev is a desktop coding workspace for local and hosted language models. This preview includes self-contained desktop and headless CLI packages for Windows x64, Linux x64, Apple silicon macOS, and Intel macOS.
 
 ## Downloads
 
@@ -20,7 +20,14 @@ Standalone headless CLI archives are also attached:
 
 On Windows, extract the complete ZIP and run `Codev.Avalonia.exe`. On macOS or Linux, extract the ZIP and run `Codev.Avalonia` from a desktop session. The packages include the .NET runtime. Ollama is optional when using hosted models and must be installed separately for local models. Linux hosted API-key storage requires Secret Service in the desktop session. These builds are not code-signed; Windows may show SmartScreen, and macOS may require a first-launch Gatekeeper override.
 
-## What’s included
+## What’s new since Release 1
+
+- OpenCode V2 agent profiles now support ordered permissions for shell commands and resource-scoped file reads and edits, glob/grep searches, delegated tasks, and skills. Codev applies read scopes to direct and automatic project context, hides denied skills and unauthorized delegation tools, and warns or skips permission patterns it cannot enforce.
+- MCP settings are easier to recover when the saved file is malformed, oversized, duplicated, or blocked by a directory at the settings path. MCP tool, prompt, resource, and resource-template activity is grouped into readable, expandable transcript details.
+- Linux accessibility support is improved through Avalonia 12 and an AT-SPI tree. The sidebar search has an associated accessible label, and the Markdown renderer has been updated.
+- Regression coverage now exercises Auto-mode file application and command execution, MCP activity, and scoped profile behavior across hosted Windows, Linux, and macOS checks.
+
+## Included capabilities
 
 - Local Ollama models and hosted OpenAI and Anthropic chat. Code tasks support Ollama and OpenAI; Anthropic is available for Chat and Plan.
 - Reusable built-in and Markdown agent profiles, with project-scoped profiles available only for trusted projects.
@@ -39,6 +46,6 @@ Hosted providers use their own API credentials, billing, and usage limits. Proje
 
 ## Preview limitations
 
-This is an early preview. Manual checks remain open for clean-machine installation, physical accessibility, native macOS/Linux use, and several long project-context, Git-review, and recovery workflows. GitHub-hosted packaged interaction tests pass on all supported targets, but they do not replace those manual checks. The Linux build does not currently expose an AT-SPI accessibility tree. The row-by-row checklist is in [the repository](https://github.com/jay23606/codev/blob/main/docs/release-1-q3-dispositions.md).
+This is an early preview. Manual checks remain open for clean-machine installation, physical accessibility, native macOS/Linux use, and several long project-context, Git-review, and recovery workflows. GitHub-hosted packaged interaction tests pass on all supported targets, but they do not replace those manual checks. Linux AT-SPI tree and focus-event checks pass in hosted sessions, but intelligible screen-reader announcements and physical-device behavior remain unverified. See the [row-by-row release checklist](https://github.com/jay23606/codev/blob/main/docs/release-1-q3-dispositions.md).
 
 For setup and feature details, see the [README](https://github.com/jay23606/codev/blob/main/README.md), [agent profiles guide](https://github.com/jay23606/codev/blob/main/docs/custom-agent-profiles.md), and [MCP server guide](https://github.com/jay23606/codev/blob/main/docs/mcp-servers.md).
