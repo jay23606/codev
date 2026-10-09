@@ -33,7 +33,11 @@ public sealed record AgentProfile(
     IReadOnlyList<string>? AllowedEditPaths = null,
     IReadOnlyList<string>? DeniedEditPaths = null,
     IReadOnlyDictionary<string, AgentToolPermission>? CommandPermissions = null,
-    string Mode = "all");
+    string Mode = "all",
+    IReadOnlyList<OpenCodeAgentPermissionRule>? OpenCodePermissionRules = null);
+
+/// <summary>An ordered permission rule imported from an OpenCode V2 Markdown agent.</summary>
+public sealed record OpenCodeAgentPermissionRule(string Action, string Resource, AgentToolPermission Permission);
 
 public sealed record AgentProfileLoadResult(IReadOnlyList<AgentProfile> Profiles, IReadOnlyList<string> Warnings);
 
@@ -58,6 +62,39 @@ public static class AgentProfilePolicy
             foreach (var (pattern, rule) in profile.CommandPermissions ?? new Dictionary<string, AgentToolPermission>())
                 if (AgentProfileCatalog.CommandPatternMatches(pattern, command)) permission = rule;
         }
+        foreach (var rule in profile.OpenCodePermissionRules ?? [])
+        {
+            if (rule.Action.Equals("shell", StringComparison.OrdinalIgnoreCase))
+            {
+                if (toolName is "run_command" or "verify_command" or "start_background_command")
+                {
+                    if (command is null)
+                    {
+                        // A command-scoped allow keeps the shell tool available; the same ordered
+                        // rules are evaluated again with the actual command before execution.
+                        if (rule.Resource == "*" || rule.Permission != AgentToolPermission.Deny) permission = rule.Permission;
+                    }
+                    else if (AgentProfileCatalog.OpenCodeShellRuleMatches(rule.Resource, command, rule.Permission))
+                    {
+                        permission = rule.Permission;
+                    }
+                }
+                continue;
+            }
+
+            if (AgentProfileCatalog.OpenCodeToolsForPermission(rule.Action).Any(pattern =>
+                    AgentProfileCatalog.OpenCodeToolPatternMatches(pattern, toolName)))
+            {
+                if (rule.Resource == "*") permission = rule.Permission;
+                else if (rule.Action.Equals("edit", StringComparison.OrdinalIgnoreCase) &&
+                         rule.Permission != AgentToolPermission.Deny && IsEditTool(toolName))
+                {
+                    // Keep edit tools in the model schema when a V2 profile allows only selected
+                    // paths. CanEditPath applies the same ordered rules to each proposed path.
+                    permission = rule.Permission;
+                }
+            }
+        }
         return permission;
     }
 
@@ -76,8 +113,19 @@ public static class AgentProfilePolicy
         var normalized = Path.GetRelativePath(projectRoot, fullPath).Replace('\\', '/');
         if ((profile.DeniedEditPaths ?? []).Any(pattern => AgentProfileCatalog.PathPatternMatches(pattern, normalized))) return false;
         var allowed = profile.AllowedEditPaths ?? [];
-        return allowed.Count == 0 || allowed.Any(pattern => AgentProfileCatalog.PathPatternMatches(pattern, normalized));
+        if (allowed.Count > 0 && !allowed.Any(pattern => AgentProfileCatalog.PathPatternMatches(pattern, normalized))) return false;
+
+        var permission = AgentToolPermission.Allow;
+        foreach (var rule in profile.OpenCodePermissionRules ?? [])
+        {
+            if (rule.Action is not ("*" or "edit") ||
+                !AgentProfileCatalog.PathPatternMatches(rule.Resource, normalized)) continue;
+            permission = rule.Permission;
+        }
+        return permission != AgentToolPermission.Deny;
     }
+
+    private static bool IsEditTool(string toolName) => toolName is "create_file" or "write_file" or "apply_patch";
 }
 
 /// <summary>Loads bounded Markdown agent profiles. Profile files are prompt and policy data only; they are never executed.</summary>
@@ -92,7 +140,7 @@ public static class AgentProfileCatalog
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly Regex SafeName = new("^[a-z][a-z0-9_-]{0,39}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex SafeTool = new("^(?:[a-z][a-z0-9_*-?]{0,63}|mcp:\\*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex CommandClauseSeparators = new("(?:&&|\\|\\||[;|])", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex CommandClauseSeparators = new("(?:&&|&|\\|\\||[;|\\r\\n])", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly string[] ProjectAgentPaths = [Path.Combine(".codev", "agents"), Path.Combine(".opencode", "agents")];
 
     public static IReadOnlyList<string> GetCompatibleUserAgentProfileDirectories()
@@ -333,6 +381,17 @@ public static class AgentProfileCatalog
             Regex.IsMatch(NormalizeCommandWhitespace(clause), regex, options, TimeSpan.FromMilliseconds(100)));
     }
 
+    internal static bool OpenCodeShellRuleMatches(string pattern, string command, AgentToolPermission permission)
+    {
+        var clauses = CommandClauseSeparators.Split(command).Where(clause => !string.IsNullOrWhiteSpace(clause)).ToArray();
+        if (clauses.Length == 0) return false;
+        // A narrow allow/ask rule must cover every part of a compound command; one matching
+        // clause cannot weaken a broader deny. A deny is conservative when any clause matches.
+        return permission == AgentToolPermission.Deny
+            ? clauses.Any(clause => CommandPatternMatches(pattern, clause))
+            : clauses.All(clause => CommandPatternMatches(pattern, clause));
+    }
+
     private static string NormalizeCommandWhitespace(string command) =>
         string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
@@ -462,12 +521,22 @@ public static class AgentProfileCatalog
         string? description = null;
         string? model = null;
         string mode = "all";
+        var modeWasSpecified = false;
+        var sawV2Field = false;
         double? temperature = null;
         int? maxSteps = null;
         string? section = null;
         var commandPatternSection = false;
+        string? v2Action = null;
+        string? v2Resource = null;
+        AgentToolPermission? v2Effect = null;
         var toolPermissions = new Dictionary<string, AgentToolPermission>(StringComparer.OrdinalIgnoreCase);
         var commandPermissions = new Dictionary<string, AgentToolPermission>(StringComparer.Ordinal);
+        var v2PermissionRules = new List<OpenCodeAgentPermissionRule>();
+        var sawV2Permissions = false;
+        var sawLegacyPermissions = false;
+        var disabled = false;
+        var hidden = false;
         foreach (var line in lines.Skip(1).Take(end - 1))
         {
             var indent = line.TakeWhile(char.IsWhiteSpace).Count();
@@ -475,17 +544,58 @@ public static class AgentProfileCatalog
             if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
             if (indent is not (0 or 2 or 4) || (indent > 0 && section is null))
                 return Fail("OpenCode agent mappings must use two-space indentation without implicit blocks", out error);
+
+            if (section == "permissions" && indent == 2 && trimmed.StartsWith("- ", StringComparison.Ordinal))
+            {
+                if (!TryAppendOpenCodeV2PermissionRule(v2PermissionRules, ref v2Action, ref v2Resource, ref v2Effect, out error)) return false;
+                var entry = trimmed[2..];
+                var entryColon = entry.IndexOf(':');
+                if (entryColon <= 0 || !Unquote(entry[..entryColon].Trim()).Equals("action", StringComparison.OrdinalIgnoreCase))
+                    return Fail("OpenCode V2 permission entries must begin with an action field", out error);
+                v2Action = Unquote(entry[(entryColon + 1)..].Trim());
+                if (v2Action.Length == 0) return Fail("OpenCode V2 permission actions cannot be empty", out error);
+                v2Resource = null;
+                v2Effect = null;
+                continue;
+            }
+
             var colon = trimmed.IndexOf(':');
             if (colon <= 0) return Fail("each supported agent field must use key: value syntax", out error);
             var key = Unquote(trimmed[..colon].Trim());
             var value = Unquote(trimmed[(colon + 1)..].Trim());
 
+            if (section == "permissions" && indent == 4)
+            {
+                if (v2Action is null) return Fail("OpenCode V2 permission fields must follow a list item", out error);
+                if (key.Equals("resource", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (v2Resource is not null) return Fail("OpenCode V2 permission entries may contain only one resource", out error);
+                    v2Resource = value;
+                }
+                else if (key.Equals("effect", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (v2Effect is not null) return Fail("OpenCode V2 permission entries may contain only one effect", out error);
+                    if (!TryParsePermission(value, out var effect)) return Fail("OpenCode V2 permission effects must be allow, ask, or deny", out error);
+                    v2Effect = effect;
+                }
+                else return Fail($"unsupported OpenCode V2 permission field '{key}'", out error);
+                continue;
+            }
+
             if (indent == 0)
             {
                 commandPatternSection = false;
-                if (key.Equals("permission", StringComparison.OrdinalIgnoreCase) || key.Equals("tools", StringComparison.OrdinalIgnoreCase))
+                if (key.Equals("permission", StringComparison.OrdinalIgnoreCase) || key.Equals("tools", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("permissions", StringComparison.OrdinalIgnoreCase))
                 {
                     section = key.ToLowerInvariant();
+                    if (section == "permissions")
+                    {
+                        if (sawV2Permissions) return Fail("OpenCode V2 agents may define permissions only once", out error);
+                        sawV2Permissions = true;
+                        sawV2Field = true;
+                    }
+                    else sawLegacyPermissions = true;
                     if (value.Length != 0) return Fail($"the OpenCode '{key}' field must use a YAML mapping", out error);
                     continue;
                 }
@@ -495,8 +605,16 @@ public static class AgentProfileCatalog
                 {
                     if (value is not ("primary" or "subagent" or "all")) return Fail("mode must be primary, subagent, or all", out error);
                     mode = value;
+                    modeWasSpecified = true;
                 }
                 else if (key.Equals("model", StringComparison.OrdinalIgnoreCase)) model = value;
+                else if (key.Equals("steps", StringComparison.OrdinalIgnoreCase) || key.Equals("maxSteps", StringComparison.OrdinalIgnoreCase) || key.Equals("max_steps", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (key.Equals("steps", StringComparison.OrdinalIgnoreCase)) sawV2Field = true;
+                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed is < 1 or > CodeTaskLimits.MaxModelStepsPerTurn)
+                        return Fail($"{key} must be from 1 through {CodeTaskLimits.MaxModelStepsPerTurn}", out error);
+                    maxSteps = parsed;
+                }
                 else if (key.Equals("temperature", StringComparison.OrdinalIgnoreCase))
                 {
                     if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || !double.IsFinite(parsed) || parsed is < 0 or > 2)
@@ -507,21 +625,24 @@ public static class AgentProfileCatalog
                 {
                     if (!value.Equals(name, StringComparison.OrdinalIgnoreCase)) return Fail("name must match the Markdown filename", out error);
                 }
-                else if (key.Equals("maxSteps", StringComparison.OrdinalIgnoreCase) || key.Equals("max_steps", StringComparison.OrdinalIgnoreCase))
+                else if (key.Equals("hidden", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed is < 1 or > CodeTaskLimits.MaxModelStepsPerTurn)
-                        return Fail($"{key} must be from 1 through {CodeTaskLimits.MaxModelStepsPerTurn}", out error);
-                    maxSteps = parsed;
+                    sawV2Field = true;
+                    if (!bool.TryParse(value, out hidden)) return Fail("hidden must be true or false", out error);
                 }
-                else if (key.Equals("hidden", StringComparison.OrdinalIgnoreCase) || key.Equals("color", StringComparison.OrdinalIgnoreCase))
+                else if (key.Equals("disabled", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Display-only fields do not change Codev's tool permissions.
+                    sawV2Field = true;
+                    if (!bool.TryParse(value, out disabled)) return Fail("disabled must be true or false", out error);
                 }
+                else if (key.Equals("color", StringComparison.OrdinalIgnoreCase)) { sawV2Field = true; /* Display-only in OpenCode. */ }
                 else if (key.Equals("permission", StringComparison.OrdinalIgnoreCase) || key.Equals("tools", StringComparison.OrdinalIgnoreCase))
                     return Fail($"the OpenCode '{key}' field must use an indented YAML mapping", out error);
                 else return Fail($"unsupported OpenCode agent field '{key}'", out error);
                 continue;
             }
+
+            if (section == "permissions") return Fail("OpenCode V2 permission entries must use action/resource/effect list items", out error);
 
             if (section == "permission" && indent == 2)
             {
@@ -553,6 +674,16 @@ public static class AgentProfileCatalog
             return Fail("nested OpenCode agent fields are not supported except permission.bash command patterns", out error);
         }
 
+        if (sawV2Permissions)
+        {
+            if (sawLegacyPermissions) return Fail("OpenCode V1 permission mappings cannot be mixed with V2 permissions", out error);
+            if (!TryAppendOpenCodeV2PermissionRule(v2PermissionRules, ref v2Action, ref v2Resource, ref v2Effect, out error)) return false;
+            if (v2PermissionRules.Count == 0) return Fail("OpenCode V2 permissions must contain at least one rule", out error);
+        }
+
+        if (hidden) return Fail("hidden OpenCode agents are not imported into Codev's visible agent picker", out error);
+        if (disabled) return Fail("disabled OpenCode agents are not imported into Codev's agent picker", out error);
+
         if (string.IsNullOrWhiteSpace(description) || description.Length > 180)
             return Fail("description must contain 1–180 characters", out error);
         var instructions = string.Join('\n', lines.Skip(end + 1)).Trim();
@@ -579,8 +710,10 @@ public static class AgentProfileCatalog
                 !rule.Key.Equals("verify_command", StringComparison.OrdinalIgnoreCase) &&
                 !rule.Key.Equals("start_background_command", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(rule => rule.Key, rule => rule.Value, StringComparer.OrdinalIgnoreCase),
-            CommandPermissions = commandPermissions.Count == 0 ? null : commandPermissions
+            CommandPermissions = commandPermissions.Count == 0 ? null : commandPermissions,
+            OpenCodePermissionRules = v2PermissionRules.Count == 0 ? null : v2PermissionRules
         };
+        if ((sawV2Permissions || sawV2Field) && !modeWasSpecified) profile = profile with { Mode = "primary" };
         modelWarning = string.IsNullOrWhiteSpace(model) ? null : "the OpenCode model preference was not applied; choose the provider/model in Codev.";
         return true;
     }
@@ -609,6 +742,69 @@ public static class AgentProfileCatalog
             return false;
         }
         foreach (var tool in tools) MergePermission(target, tool, permission);
+        return true;
+    }
+
+    internal static IReadOnlyList<string> OpenCodeToolsForPermission(string permissionName) => permissionName.ToLowerInvariant() switch
+    {
+        "*" => ["*"],
+        "edit" or "write" => ["create_file", "write_file", "apply_patch"],
+        "bash" or "shell" => ["run_command", "verify_command", "start_background_command"],
+        "read" => ["list_files", "read_file", "search_files"],
+        "list" or "glob" => ["list_files"],
+        "grep" => ["search_files"],
+        "task" or "subagent" => ["delegate_task"],
+        "skill" => ["load_skill_*"],
+        "webfetch" or "websearch" or "external_directory" or "lsp" or "question" or "doom_loop" => [],
+        _ when SafeTool.IsMatch(permissionName) => [permissionName],
+        _ => []
+    };
+
+    internal static bool OpenCodeToolPatternMatches(string pattern, string toolName)
+    {
+        if (pattern == "*") return true;
+        if (pattern == "mcp:*") return toolName.StartsWith("mcp_", StringComparison.OrdinalIgnoreCase);
+        if (pattern.Contains('*') || pattern.Contains('?'))
+            return GlobMatches(pattern, toolName) ||
+                (toolName.StartsWith("mcp_", StringComparison.OrdinalIgnoreCase) && GlobMatches(pattern, toolName[4..]));
+        return pattern.Equals(toolName, StringComparison.OrdinalIgnoreCase) ||
+            (toolName.StartsWith("mcp_", StringComparison.OrdinalIgnoreCase) && pattern.Equals(toolName[4..], StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryAppendOpenCodeV2PermissionRule(List<OpenCodeAgentPermissionRule> rules,
+        ref string? action, ref string? resource, ref AgentToolPermission? effect, out string error)
+    {
+        error = "";
+        if (action is null && resource is null && effect is null) return true;
+        if (string.IsNullOrWhiteSpace(action) || string.IsNullOrWhiteSpace(resource) || effect is null)
+            return Fail("each OpenCode V2 permission entry requires action, resource, and effect", out error);
+        if (rules.Count >= MaxToolPolicies) return Fail($"OpenCode V2 agents may define at most {MaxToolPolicies} permission rules", out error);
+
+        var normalizedAction = action.ToLowerInvariant();
+        var mappedTools = OpenCodeToolsForPermission(normalizedAction);
+        if (mappedTools.Count == 0 && normalizedAction is not ("webfetch" or "websearch" or "lsp" or "question" or "doom_loop"))
+            return Fail($"OpenCode V2 permission action '{action}' does not map to a supported Codev tool", out error);
+
+        if (normalizedAction == "shell")
+        {
+            if (!IsValidCommandPattern(resource) || CommandClauseSeparators.IsMatch(resource))
+                return Fail("OpenCode V2 shell resources must be single safe command patterns", out error);
+        }
+        else if (normalizedAction == "edit" && resource != "*")
+        {
+            if (!IsValidPathPattern(resource)) return Fail("OpenCode V2 edit resources must be safe project-relative path patterns", out error);
+            if (effect == AgentToolPermission.Ask)
+                return Fail("path-scoped OpenCode V2 edit ask rules are not supported; use allow or deny", out error);
+        }
+        else if (resource != "*")
+        {
+            return Fail($"resource-scoped OpenCode V2 '{action}' rules are not supported by Codev and were not imported", out error);
+        }
+
+        rules.Add(new OpenCodeAgentPermissionRule(normalizedAction, resource, effect.Value));
+        action = null;
+        resource = null;
+        effect = null;
         return true;
     }
 
