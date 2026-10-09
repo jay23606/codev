@@ -1,8 +1,13 @@
 param(
-    [string]$AppPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/publish/win-x64/Codev.Avalonia.exe')
+    [string]$AppPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/publish/win-x64/Codev.Avalonia.exe'),
+    [switch]$AllowLocalDesktop
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $env:GITHUB_ACTIONS -and -not $AllowLocalDesktop) {
+    throw 'This packaged UI smoke takes focus and interacts with the desktop. It is disabled on local desktops by default; use -AllowLocalDesktop only for an announced release-signoff check.'
+}
 
 if (-not (Test-Path -LiteralPath $appPath -PathType Leaf)) {
     throw "Packaged Avalonia app was not found at $appPath."

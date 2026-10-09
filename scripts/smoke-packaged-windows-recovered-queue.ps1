@@ -1,10 +1,15 @@
 param(
     [string]$AppPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/publish/win-x64/Codev.Avalonia.exe'),
     [string]$Model = 'qwen3.6:35b-a3b',
-    [int]$TimeoutSeconds = 360
+    [int]$TimeoutSeconds = 360,
+    [switch]$AllowLocalDesktop
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $env:GITHUB_ACTIONS -and -not $AllowLocalDesktop) {
+    throw 'This packaged queue smoke takes focus and interacts with the desktop. It is disabled on local desktops by default; use -AllowLocalDesktop only for an announced release-signoff check.'
+}
 
 if (-not (Test-Path -LiteralPath $AppPath -PathType Leaf)) {
     throw "Packaged Avalonia app was not found at $AppPath."
