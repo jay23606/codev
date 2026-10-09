@@ -393,6 +393,50 @@ PY
   return 1
 }
 
+assert_macos_accessible_text() {
+  local expected_text="$1"
+  local requested_action="${2:-find}"
+  for _ in {1..5}; do
+    if osascript - "$app_pid" "$expected_text" "$requested_action" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+  set targetPid to item 1 of argv as integer
+  set expectedText to item 2 of argv as text
+  set requestedAction to item 3 of argv as text
+  set foundText to false
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    tell targetProcess
+      repeat with windowIndex from 1 to count of windows
+        set windowContents to entire contents of window windowIndex
+        repeat with elementIndex from 1 to count of windowContents
+          set currentElement to item elementIndex of windowContents
+          try
+            set elementName to name of currentElement as text
+            set elementRole to value of attribute "AXRole" of currentElement as text
+            if elementName contains expectedText then
+              set foundText to true
+              if requestedAction is "click" and elementRole is "AXButton" then click currentElement
+            end if
+          end try
+        end repeat
+      end repeat
+    end tell
+  end tell
+  if requestedAction is "absent" and not foundText then return "absent"
+  if requestedAction is not "absent" and foundText then return "found"
+  error "Could not find an accessible name containing " & expectedText
+end run
+APPLESCRIPT
+    then
+      echo "macOS accessibility check passed for: $expected_text"
+      return
+    fi
+    sleep 0.25
+  done
+  echo "macOS accessibility check did not pass for '$expected_text' after five checks." >&2
+  return 1
+}
+
 # Prove Command+F transfers typing away from the composer in the packaged
 # window. The cross-platform Avalonia regression separately asserts that the
 # destination is SearchTextBox.
@@ -826,6 +870,11 @@ messages = conversation.get("Messages", []) if conversation else []
 turns = [message for message in messages if message.get("Role") == "assistant" and
          "Packaged multi-action activity summary passed." in message.get("Content", "")]
 if len(turns) != 1:
+    print({"last_messages": [(message.get("Role"), message.get("Content", "")[-300:]) for message in messages[-8:]]}, file=sys.stderr)
+    with open(sys.argv[3], encoding="utf-8") as source:
+        requests = [json.loads(line) for line in source if line.strip()]
+    turn_requests = [request for request in requests if request.get("last_user_message") == "Run the packaged multi-action activity-summary smoke."]
+    print({"activity_requests": [(request.get("last_role"), request.get("last_tool_name"), request.get("last_user_message")) for request in turn_requests]}, file=sys.stderr)
     raise SystemExit(f"Expected one completed multi-action transcript: {turns!r}")
 content = turns[0]["Content"]
 if not all(value in content for value in ("activity-source.txt", "ACTIVITY_SOURCE_MARKER", "activity-result.txt", "node --version")):
@@ -844,6 +893,37 @@ if any(request.get("keep_alive") != "30m" for request in turn):
 PY
 
 echo 'macOS packaged Code task read, searched, created a file, and verified a command in one Auto turn.'
+
+# Exercise Command+Shift+F with a long transcript, choose the earlier
+# Auto-command prompt, and close the search panel with Escape.
+find_query='Run the packaged Auto mode command smoke.'
+osascript - "$app_pid" "$find_query" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set queryText to item 2 of argv as text
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 3 using {command down, shift down}
+    delay 0.25
+    keystroke queryText
+  end tell
+end run
+APPLESCRIPT
+assert_macos_accessible_text "You · $find_query"
+assert_macos_accessible_text "You · $find_query" click
+assert_macos_accessible_text 'Find in this conversation' absent
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 53
+  end tell
+end run
+APPLESCRIPT
+echo 'macOS packaged app searched an earlier transcript message with Command+Shift+F, activated its result, and closed the panel.'
 
 # Verify the macOS primary-modifier shortcut creates and activates a fresh chat.
 previous_conversation_id="$(python3 - "$active_path" <<'PY'
