@@ -202,7 +202,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public async Task Local_git_review_sends_the_bounded_working_tree_diff_only_to_loopback_ollama()
     {
-        var root = Path.Combine(Path.GetTempPath(), "Codev-local-review", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", "local-review-" + Guid.NewGuid().ToString("N"));
         var project = Path.Combine(root, "project");
         Directory.CreateDirectory(project);
         MainViewModel? viewModel = null;
