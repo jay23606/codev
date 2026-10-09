@@ -6,7 +6,7 @@ Status checked 2026-10-09. Release 1 was published on October 8 as [`v2026.10.08
 
 ## Release 1: early preview (published)
 
-Release 1 is public at `v2026.10.08-89bd54e`. Its eight app/CLI archives were verified on the release page. The Q3 ledger records release-specific deferrals for manual workflows; they remain open follow-up work and are not represented as passed. Release notes disclose the preview's clean-install, native interaction, and accessibility limitations. The README latest-download links now resolve to this release.
+Release 1 is public at `v2026.10.08-89bd54e`. Its eight app/CLI archives were verified on the release page. The Q3 ledger records release-specific deferrals for manual workflows; they remain open follow-up work and are not represented as passed. Release notes disclose the preview's clean-install, native interaction, and accessibility limitations. The four README latest desktop-download URLs returned HTTP 200 after redirecting to this release on 2026-10-09; recheck after the Release 2 tag.
 
 The following entries are historical candidate checks collected before publication. Their statements that PR #1 was open, no release had been created, or Release 1 remained conditional describe the state at the time of each check and are not current status.
 
