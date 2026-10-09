@@ -3,6 +3,7 @@ using System.IO.Enumeration;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Codev;
 
@@ -330,6 +331,45 @@ public sealed class WorkspaceFileService
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
         var candidates = allowedPaths ?? ListFiles(maxEntries: 500);
         return SearchFilesCoreAsync(query, candidates, 50, maxMatchesPerFile: 3, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>Searches bounded project text with a regular expression for OpenCode-compatible grep calls.</summary>
+    public async Task<IReadOnlyList<FileSearchMatch>> SearchFileRegexMatchesAsync(string pattern,
+        IReadOnlyList<string>? allowedPaths = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) throw new ArgumentException("A regular expression is required.", nameof(pattern));
+        var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        var candidates = allowedPaths ?? ListFiles(maxEntries: 500);
+        var matches = new List<FileSearchMatch>();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        foreach (var relative in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (matches.Count >= 50 || System.Diagnostics.Stopwatch.GetElapsedTime(started) > TimeSpan.FromSeconds(3)) break;
+            if (!SourceExtensions.Contains(Path.GetExtension(relative))) continue;
+            try
+            {
+                var full = ResolvePath(relative);
+                using var stream = FileHardLinkInspector.OpenSingleLinkReadStream(full, relative, _boundaryRoot);
+                if (stream.Length > 500_000) continue;
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                var lineNumber = 0;
+                while (await reader.ReadLineAsync(cancellationToken) is { } line)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    lineNumber++;
+                    if (!regex.IsMatch(line)) continue;
+                    var display = line.Trim();
+                    if (display.Length > 320) display = display[..320] + "…";
+                    matches.Add(new FileSearchMatch(relative, lineNumber, display));
+                    if (matches.Count >= 50 || System.Diagnostics.Stopwatch.GetElapsedTime(started) > TimeSpan.FromSeconds(3)) break;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (RegexMatchTimeoutException) { /* Skip the file after a pathological regex match. */ }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException) { }
+        }
+        return matches;
     }
 
     public Task<IReadOnlyList<FileSearchMatch>> SearchContextFilesAsync(string query, CancellationToken cancellationToken = default)

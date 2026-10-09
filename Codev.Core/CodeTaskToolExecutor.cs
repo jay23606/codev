@@ -44,6 +44,8 @@ public sealed class CodeTaskToolExecutor(
             ["list_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_directory"] = 240 },
             ["read_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240 },
             ["search_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["query"] = 1_000 },
+            ["glob_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["pattern"] = 240 },
+            ["grep_files"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["pattern"] = 240 },
             ["create_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
             ["write_file"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["content"] = 500_000 },
             ["apply_patch"] = new Dictionary<string, int>(StringComparer.Ordinal) { ["relative_path"] = 240, ["patch"] = 500_000 },
@@ -96,6 +98,8 @@ public sealed class CodeTaskToolExecutor(
                 "list_files" => ListFiles(Arg("relative_directory")),
                 "read_file" => await ReadFileAsync(Arg("relative_path"), cancellationToken),
                 "search_files" => await SearchFilesAsync(Arg("query"), cancellationToken),
+                "glob_files" => GlobFiles(Arg("pattern")),
+                "grep_files" => await GrepFilesAsync(Arg("pattern"), cancellationToken),
                 "create_file" => await CreateFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "write_file" => await WriteFileAsync(Arg("relative_path"), Arg("content"), cancellationToken),
                 "apply_patch" => await ApplyPatchAsync(Arg("relative_path"), Arg("patch"), cancellationToken),
@@ -266,6 +270,32 @@ public sealed class CodeTaskToolExecutor(
         AddContextSource(source);
         TrackUntrustedContent(source, listing);
         return UntrustedToolOutput.Format("project file listing", listing, path: relativeDirectory, activity: "list_files");
+    }
+
+    private string GlobFiles(string pattern)
+    {
+        var results = files.ListFiles(maxEntries: 500)
+            .Where(path => AgentProfilePolicy.CanExposeReadPath(agentProfile, path) &&
+                AgentProfileCatalog.OpenCodePathPatternMatches(pattern, path))
+            .Take(100).ToArray();
+        var output = string.Join('\n', results);
+        AddContextSource("Project glob: " + pattern);
+        TrackUntrustedContent("Project glob: " + pattern, output);
+        return UntrustedToolOutput.Format("project glob results", output.Length == 0 ? "No matching project files found." : output,
+            path: pattern, activity: "glob_files");
+    }
+
+    private async Task<string> GrepFilesAsync(string pattern, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string>? allowedPaths = AgentProfilePolicy.HasScopedReadRules(agentProfile)
+            ? files.ListFiles(maxEntries: 500).Where(path => AgentProfilePolicy.CanExposeReadPath(agentProfile, path)).ToArray()
+            : null;
+        var matches = await files.SearchFileRegexMatchesAsync(pattern, allowedPaths, cancellationToken).ConfigureAwait(false);
+        var output = string.Join('\n', matches);
+        AddContextSource("Project regex search: " + pattern);
+        TrackUntrustedContent("Project regex search: " + pattern, output);
+        return UntrustedToolOutput.Format("project regex search results", output.Length == 0 ? "No matching lines found." : output,
+            path: pattern, activity: "grep_files");
     }
 
     private async Task<string> SearchFilesAsync(string query, CancellationToken cancellationToken)

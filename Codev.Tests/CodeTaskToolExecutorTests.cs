@@ -117,6 +117,49 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenCode_scoped_glob_and_grep_tools_match_resources_and_respect_read_paths()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "docs", "sub"));
+        Directory.CreateDirectory(Path.Combine(_root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "sub", "guide.md"), "TODO: publish docs\nKeep this line.");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "secret.md"), "TODO: SECRET_TOKEN=abc");
+        var profile = new AgentProfile("Explore", "Explore docs", null, null, null,
+            AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "", "test", "",
+            OpenCodePermissionRules:
+            [
+                new("glob", "docs/**/*.md", AgentToolPermission.Allow),
+                new("grep", @"\bTODO\b.*", AgentToolPermission.Allow),
+                new("grep", "SECRET.*", AgentToolPermission.Deny),
+                new("read", "docs/**", AgentToolPermission.Allow),
+                new("read", "src/**", AgentToolPermission.Deny)
+            ]);
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => Task.FromResult(false), _ => Task.FromResult(false), agentProfile: profile,
+            agentProfilePermission: (name, arguments) =>
+            {
+                var resource = arguments.TryGetProperty("pattern", out var pattern) ? pattern.GetString() : null;
+                return Task.FromResult(AgentProfilePolicy.PermissionFor(profile, name, resource: resource) switch
+                {
+                    AgentToolPermission.Deny => AgentToolProfileDecision.Denied,
+                    AgentToolPermission.Ask => AgentToolProfileDecision.Rejected,
+                    _ => AgentToolProfileDecision.DeferToProjectPolicy
+                });
+            });
+
+        var glob = GetUntrustedContent(await ExecuteAsync(executor, "glob_files", """{"pattern":"docs/**/*.md"}"""));
+        var deniedGlob = await ExecuteAsync(executor, "glob_files", """{"pattern":"src/**/*.md"}""");
+        var grep = GetUntrustedContent(await ExecuteAsync(executor, "grep_files", JsonSerializer.Serialize(new { pattern = @"\bTODO\b.*" })));
+        var deniedGrep = await ExecuteAsync(executor, "grep_files", """{"pattern":"SECRET.*"}""");
+
+        Assert.Contains("docs", glob, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret.md", glob, StringComparison.Ordinal);
+        Assert.Contains("docs/sub/guide.md:1: TODO: publish docs", grep, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET_TOKEN", grep, StringComparison.Ordinal);
+        Assert.Contains("Rejected by the selected agent profile", deniedGlob, StringComparison.Ordinal);
+        Assert.Contains("Denied by the selected agent profile", deniedGrep, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Built_in_plan_agent_blocks_direct_edit_and_command_requests()
     {
         var reviewCalled = false;
