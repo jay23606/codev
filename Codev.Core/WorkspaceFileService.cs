@@ -316,7 +316,7 @@ public sealed class WorkspaceFileService
     }
 
     public async Task<IReadOnlyList<string>> SearchFilesAsync(string query, CancellationToken cancellationToken = default,
-        IReadOnlyCollection<string>? allowedPaths = null)
+        IReadOnlyList<string>? allowedPaths = null)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
         var candidates = allowedPaths ?? ListFiles(maxEntries: 500);
@@ -325,7 +325,7 @@ public sealed class WorkspaceFileService
     }
 
     public Task<IReadOnlyList<FileSearchMatch>> SearchFileMatchesAsync(string query, CancellationToken cancellationToken = default,
-        IReadOnlyCollection<string>? allowedPaths = null)
+        IReadOnlyList<string>? allowedPaths = null)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Search text is required.", nameof(query));
         var candidates = allowedPaths ?? ListFiles(maxEntries: 500);
