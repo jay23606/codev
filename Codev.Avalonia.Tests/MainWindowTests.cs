@@ -200,6 +200,65 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Local_git_review_sends_the_bounded_working_tree_diff_only_to_loopback_ollama()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        string? postedBody = null;
+        string? postedUri = null;
+        try
+        {
+            await RunGitForChildUiAsync(project, "init", "--initial-branch=main");
+            await RunGitForChildUiAsync(project, "config", "user.name", "Codev review fixture");
+            await RunGitForChildUiAsync(project, "config", "user.email", "codev-review-fixture@example.invalid");
+            await File.WriteAllTextAsync(Path.Combine(project, "review-fixture.txt"), "original fixture content\n");
+            await RunGitForChildUiAsync(project, "add", "--", "review-fixture.txt");
+            await RunGitForChildUiAsync(project, "commit", "-m", "review fixture baseline");
+            await File.WriteAllTextAsync(Path.Combine(project, "review-fixture.txt"), "updated marker for local review\n");
+
+            var handler = new TestHttpMessageHandler(async (request, cancellationToken) =>
+            {
+                if (request.RequestUri?.AbsolutePath.EndsWith("/api/chat", StringComparison.Ordinal) != true)
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"models\":[]}", Encoding.UTF8, "application/json")
+                    };
+                postedUri = request.RequestUri!.ToString();
+                postedBody = await request.Content!.ReadAsStringAsync(cancellationToken);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"message\":{\"role\":\"assistant\",\"content\":\"No actionable findings.\"}}", Encoding.UTF8, "application/json")
+                };
+            });
+            viewModel = new MainViewModel(root, handler);
+            viewModel.SetProjectFolder(project);
+            await viewModel.TrustProjectFolderAsync(project);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            conversation.Provider = "ollama";
+            conversation.Model = "qwen-review-fixture";
+            viewModel.Models.Add(new ModelChoice(conversation.Model, conversation.Model, "ollama"));
+
+            var result = await viewModel.ReviewUncommittedChangesAsync();
+
+            Assert.Contains("No actionable findings.", result, StringComparison.Ordinal);
+            Assert.Equal("http://127.0.0.1:11434/api/chat", postedUri);
+            using var requestJson = JsonDocument.Parse(Assert.IsType<string>(postedBody));
+            Assert.Equal("qwen-review-fixture", requestJson.RootElement.GetProperty("model").GetString());
+            Assert.Equal("30m", requestJson.RootElement.GetProperty("keep_alive").GetString());
+            var messages = requestJson.RootElement.GetProperty("messages").EnumerateArray()
+                .Select(message => message.GetProperty("content").GetString());
+            Assert.Contains(messages, message => message?.Contains("updated marker for local review", StringComparison.Ordinal) == true);
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Sidebar_conversation_sections_toggle_and_persist_expanded_state()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

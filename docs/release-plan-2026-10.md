@@ -48,6 +48,6 @@ If testing finds a data-loss, unauthorized-action, startup-crash, or false-succe
 
 1. Collect Release 1 installation reports and triage verified blockers; an empty GitHub issue list alone does not establish user feedback.
 2. Keep Release 2 scope to verified regressions and high-impact stability/usability fixes.
-3. Freeze one exact candidate, run CI and four-target package validation, and do at most one local packaged smoke at the checkpoint if the changes require it.
+3. Freeze one exact candidate and run CI plus four-target package validation. Do not run a local packaged smoke by default; use one only if a release-critical behavior remains unverified by automated or hosted checks, and tell the user before starting it.
 4. Publish the follow-up `v*` tag only when its hard gates pass; verify all eight archives and the README latest-download redirects.
 5. Carry forward non-blocking manual Q3 gaps with clear user-facing limitations and named owners.
