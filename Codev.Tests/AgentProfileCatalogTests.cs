@@ -310,13 +310,23 @@ public sealed class AgentProfileCatalogTests : IDisposable
         Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "docs/guide.md"));
         Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "docs/private/key.md"));
         Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "README.md"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "docs/../README.md"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "../docs/guide.md"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "/docs/guide.md"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "C:/docs/guide.md"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "read_file", resource: "docs/../docs/guide.md"));
         Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "list_files"));
         Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "search_files"));
         Assert.True(AgentProfilePolicy.CanExposeReadPath(writer, "docs/guide.md"));
         Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "docs/private/key.md"));
         Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "README.md"));
+        Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "docs/../README.md"));
+        Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "../docs/guide.md"));
+        Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "/docs/guide.md"));
+        Assert.False(AgentProfilePolicy.CanExposeReadPath(writer, "C:/docs/guide.md"));
+        Assert.True(AgentProfilePolicy.CanExposeReadPath(writer, "docs/../docs/guide.md"));
         Assert.Equal(["docs/guide.md"], AgentProfilePolicy.FilterReadablePaths(writer,
-            ["docs/guide.md", "docs/private/key.md", "README.md"]));
+            ["docs/guide.md", "docs/private/key.md", "README.md", "docs/../README.md", "../docs/guide.md"]));
         Assert.Empty(loaded.Warnings);
     }
 
