@@ -43,6 +43,16 @@ public sealed record AgentProfileLoadResult(IReadOnlyList<AgentProfile> Profiles
 
 public static class AgentProfilePolicy
 {
+    public static bool CanExposeDelegationTool(AgentProfile? profile)
+    {
+        if (profile is null || !IsAvailable(profile, "delegate_task")) return false;
+        if (profile.Name.Equals("Orchestrator", StringComparison.OrdinalIgnoreCase)) return true;
+        var hasExplicitTaskPermission = profile.OpenCodePermissionRules?.Any(rule =>
+                (rule.Action is "task" or "subagent") && rule.Permission != AgentToolPermission.Deny) == true ||
+            profile.ToolPermissions.TryGetValue("delegate_task", out var permission) && permission != AgentToolPermission.Deny;
+        return hasExplicitTaskPermission && (profile.Mode is "primary" or "all");
+    }
+
     /// <summary>Profile Allow defers to Codev's project mode; Ask adds a one-call confirmation outside Auto; the last matching rule determines the permission.</summary>
     public static AgentToolPermission PermissionFor(AgentProfile? profile, string toolName, string? command = null, string? resource = null)
     {
