@@ -454,9 +454,36 @@ public static class AgentProfileCatalog
 
     internal static bool OpenCodePathPatternMatches(string pattern, string relativePath)
     {
+        if (!TryNormalizePermissionPath(relativePath, out var normalizedPath)) return false;
         var normalizedPattern = pattern.Replace('\\', '/');
-        var normalizedPath = relativePath.Replace('\\', '/');
         return OpenCodeResourcePatternMatches(normalizedPattern, normalizedPath);
+    }
+
+    private static bool TryNormalizePermissionPath(string path, out string normalizedPath)
+    {
+        normalizedPath = "";
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var portablePath = path.Replace('\\', '/');
+        if (portablePath[0] == '/' ||
+            Regex.IsMatch(portablePath, "^[A-Za-z]:", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)))
+            return false;
+
+        var segments = new List<string>();
+        foreach (var segment in portablePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment == ".") continue;
+            if (segment == "..")
+            {
+                if (segments.Count == 0) return false;
+                segments.RemoveAt(segments.Count - 1);
+                continue;
+            }
+            segments.Add(segment);
+        }
+
+        if (segments.Count == 0) return false;
+        normalizedPath = string.Join('/', segments);
+        return true;
     }
 
     internal static bool OpenCodeResourcePatternMatches(string pattern, string resource)
