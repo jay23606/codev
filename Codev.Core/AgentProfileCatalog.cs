@@ -118,6 +118,10 @@ public static class AgentProfilePolicy
                     else if (resource is null && rule.Permission != AgentToolPermission.Deny)
                         permission = rule.Permission;
                 }
+                else if (rule.Action.Equals("skill", StringComparison.OrdinalIgnoreCase) &&
+                         toolName.StartsWith("load_skill_", StringComparison.Ordinal) && resource is not null &&
+                         AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
+                    permission = rule.Permission;
                 else if (rule.Action == "*" && resource is not null &&
                          (toolName is "glob_files" or "grep_files") &&
                          AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
@@ -499,7 +503,7 @@ public static class AgentProfileCatalog
         catch (ArgumentException) { return false; }
     }
 
-    private static bool IsValidAgentNamePattern(string pattern) =>
+    private static bool IsValidIdentifierPattern(string pattern) =>
         pattern.Length is > 0 and <= 80 && !pattern.Any(char.IsControl) &&
         !pattern.Contains('/') && !pattern.Contains('\\') && !pattern.Contains(':');
 
@@ -898,8 +902,13 @@ public static class AgentProfileCatalog
         }
         else if ((normalizedAction is "task" or "subagent") && resource != "*")
         {
-            if (!IsValidAgentNamePattern(resource))
+            if (!IsValidIdentifierPattern(resource))
                 return Fail($"OpenCode V2 {normalizedAction} resources must be bounded agent-name patterns", out error);
+        }
+        else if (normalizedAction == "skill" && resource != "*")
+        {
+            if (!IsValidIdentifierPattern(resource))
+                return Fail("OpenCode V2 skill resources must be bounded skill-ID patterns", out error);
         }
         else if (resource != "*")
         {

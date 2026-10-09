@@ -1224,19 +1224,28 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
         return Codev.CommandApprovalOutcome.Rejected;
     }
 
-    private async Task<Codev.AgentToolProfileDecision> CheckAgentProfileToolPermissionAsync(Codev.Conversation conversation,
+    private Task<Codev.AgentToolProfileDecision> CheckAgentProfileToolPermissionAsync(Codev.Conversation conversation,
         Codev.AgentProfile? profile, string toolName, JsonElement arguments)
+        => CheckAgentProfileToolPermissionCoreAsync(conversation, profile, toolName, arguments, resourceOverride: null);
+
+    private Task<Codev.AgentToolProfileDecision> CheckAgentProfileSkillPermissionAsync(Codev.Conversation conversation,
+        Codev.AgentProfile? profile, string toolName, Codev.SlashCommandDefinition skill, JsonElement arguments) =>
+        CheckAgentProfileToolPermissionCoreAsync(conversation, profile, toolName, arguments,
+            Codev.AgentSkillTool.PermissionResource(skill));
+
+    private async Task<Codev.AgentToolProfileDecision> CheckAgentProfileToolPermissionCoreAsync(Codev.Conversation conversation,
+        Codev.AgentProfile? profile, string toolName, JsonElement arguments, string? resourceOverride)
     {
         var command = arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("command", out var commandValue)
             ? commandValue.GetString() : null;
-        var resource = toolName switch
+        var resource = resourceOverride ?? (toolName switch
         {
             "read_file" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("relative_path", out var pathValue) => pathValue.GetString(),
             "create_file" or "write_file" or "apply_patch" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("relative_path", out var editPathValue) => editPathValue.GetString(),
             "delegate_task" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("agent", out var agentValue) => agentValue.GetString(),
             "glob_files" or "grep_files" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("pattern", out var patternValue) => patternValue.GetString(),
             _ => null
-        };
+        });
         var permission = Codev.AgentProfilePolicy.PermissionFor(profile, toolName, command, resource);
         if (permission == Codev.AgentToolPermission.Deny) return Codev.AgentToolProfileDecision.Denied;
         var projectMode = conversation.ProjectPath is { Length: > 0 } path
@@ -3246,7 +3255,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             mcpTools: mcpSession.Tools,
             mcpPermissionApproval: (tool, args, profileApproved) => ApproveMcpToolWithProjectPolicyAsync(progressConversation ?? conversation, tool, args, profileApproved),
             mcpCall: (tool, args, token) => mcpSession.CallAsync(tool.FunctionName, args, token),
-            agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(progressConversation ?? conversation, agentProfile, name, args),
+            agentProfilePermission: (name, args) => agentSkillTools.TryGetValue(name, out var skill)
+                ? CheckAgentProfileSkillPermissionAsync(progressConversation ?? conversation, agentProfile, name, skill, args)
+                : CheckAgentProfileToolPermissionAsync(progressConversation ?? conversation, agentProfile, name, args),
             agentProfile: agentProfile,
             agentSkills: agentSkillTools,
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(progressConversation ?? conversation, skill, arguments, token),
@@ -3542,7 +3553,9 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             mcpTools: mcpSession.Tools,
             mcpPermissionApproval: (tool, args, profileApproved) => ApproveMcpToolWithProjectPolicyAsync(conversation, tool, args, profileApproved),
             mcpCall: (tool, args, token) => mcpSession.CallAsync(tool.FunctionName, args, token),
-            agentProfilePermission: (name, args) => CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
+            agentProfilePermission: (name, args) => agentSkillTools.TryGetValue(name, out var skill)
+                ? CheckAgentProfileSkillPermissionAsync(conversation, agentProfile, name, skill, args)
+                : CheckAgentProfileToolPermissionAsync(conversation, agentProfile, name, args),
             agentProfile: agentProfile,
             agentSkills: agentSkillTools,
             agentSkillInvocation: (skill, arguments, token) => LoadAgentSkillPromptAsync(conversation, skill, arguments, token),

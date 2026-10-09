@@ -376,6 +376,57 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task OpenCode_scoped_skill_rules_hide_denied_skills_and_ask_for_matching_skill_loads()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(project);
+        MainViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            viewModel.SetProjectFolder(project);
+            var conversation = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            var profile = new AgentProfile("Skill curator", "Load selected skills.", null, null, null,
+                AgentToolPermission.Deny, new Dictionary<string, AgentToolPermission>(), "Use approved guidance.", "test", "",
+                OpenCodePermissionRules:
+                [
+                    new("skill", "*", AgentToolPermission.Deny),
+                    new("skill", "docs-*", AgentToolPermission.Allow),
+                    new("skill", "internal-*", AgentToolPermission.Ask)
+                ]);
+            var allow = new SlashCommandDefinition("/skill-docs-api", "API docs", SlashCommandAction.UserPrompt, Scope: "skill-user");
+            var ask = new SlashCommandDefinition("/skill-internal-review", "Internal review", SlashCommandAction.UserPrompt, Scope: "skill-project");
+            var deny = new SlashCommandDefinition("/skill-secrets", "Secrets", SlashCommandAction.UserPrompt, Scope: "skill-user");
+            string? approvedTool = null;
+            viewModel.ConfirmAgentProfileToolAsync = (_, name, _) =>
+            {
+                approvedTool = name;
+                return Task.FromResult(true);
+            };
+            var permission = typeof(MainViewModel).GetMethod("CheckAgentProfileSkillPermissionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            async Task<AgentToolProfileDecision> Check(SlashCommandDefinition skill) =>
+                await (Task<AgentToolProfileDecision>)permission.Invoke(viewModel,
+                    [conversation, profile, AgentSkillTool.FunctionName(skill), skill, JsonSerializer.SerializeToElement(new { arguments = "" })])!;
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.Auto);
+            Assert.Equal(AgentToolProfileDecision.DeferToProjectPolicy, await Check(allow));
+            Assert.Equal(AgentToolProfileDecision.DeferToProjectPolicy, await Check(ask));
+            Assert.Equal(AgentToolProfileDecision.Denied, await Check(deny));
+            Assert.Null(approvedTool);
+
+            await viewModel.SetProjectCommandPermissionModeAsync(ProjectCommandPermissionMode.AskEveryTime);
+            Assert.Equal(AgentToolProfileDecision.ApprovedOnce, await Check(ask));
+            Assert.Equal(AgentSkillTool.FunctionName(ask), approvedTool);
+        }
+        finally
+        {
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Sidebar_conversation_sections_toggle_and_persist_expanded_state()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));

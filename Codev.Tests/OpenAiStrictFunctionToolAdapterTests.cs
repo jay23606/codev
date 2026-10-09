@@ -132,6 +132,43 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
     }
 
     [Fact]
+    public void Scoped_skill_permissions_filter_both_provider_schemas_by_skill_id()
+    {
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var profile = new AgentProfile("Skill curator", "Load selected skills.", null, null, null,
+            AgentToolPermission.Deny, new Dictionary<string, AgentToolPermission>(), "Use approved guidance.", "test", "",
+            OpenCodePermissionRules:
+            [
+                new("skill", "*", AgentToolPermission.Deny),
+                new("skill", "docs-*", AgentToolPermission.Allow),
+                new("skill", "internal-*", AgentToolPermission.Ask)
+            ]);
+        var skills = new[]
+        {
+            new SlashCommandDefinition("/skill-docs-api", "API docs", SlashCommandAction.UserPrompt, Scope: "skill-user"),
+            new SlashCommandDefinition("/skill-internal-review", "Internal review", SlashCommandAction.UserPrompt, Scope: "skill-project"),
+            new SlashCommandDefinition("/skill-secrets", "Secrets", SlashCommandAction.UserPrompt, Scope: "skill-user")
+        };
+
+        var ollamaNames = CodeTaskToolSchemaFactory.CreateOllamaTools(shell, profile: profile, agentSkills: skills)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("function").GetProperty("name").GetString())
+            .ToArray();
+        var openAiNames = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: profile, agentSkills: skills)
+            .Select(tool => JsonSerializer.SerializeToElement(tool).GetProperty("name").GetString())
+            .ToArray();
+
+        foreach (var skill in skills.Take(2))
+        {
+            var name = AgentSkillTool.FunctionName(skill);
+            Assert.Contains(name, ollamaNames);
+            Assert.Contains(name, openAiNames);
+        }
+        var deniedName = AgentSkillTool.FunctionName(skills[2]);
+        Assert.DoesNotContain(deniedName, ollamaNames);
+        Assert.DoesNotContain(deniedName, openAiNames);
+    }
+
+    [Fact]
     public void Converts_nested_function_schema_to_strict_form_and_leaves_size_checks_to_runtime()
     {
         using var source = JsonDocument.Parse("""

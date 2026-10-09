@@ -7,6 +7,15 @@ namespace Codev;
 /// <summary>Names and transcript-wraps the on-demand, read-only agent skill tool.</summary>
 public static class AgentSkillTool
 {
+    public static string PermissionResource(SlashCommandDefinition skill)
+    {
+        ArgumentNullException.ThrowIfNull(skill);
+        if (skill.Scope is not ("skill-user" or "skill-project") ||
+            !skill.Name.StartsWith("/skill-", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Only discovered user or trusted-project skills have a permission resource.", nameof(skill));
+        return skill.Name["/skill-".Length..];
+    }
+
     public static string FunctionName(SlashCommandDefinition skill)
     {
         ArgumentNullException.ThrowIfNull(skill);
