@@ -62,6 +62,41 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenCode_path_scoped_edit_ask_reaches_profile_approval_before_file_review()
+    {
+        var docs = Path.Combine(_root, "docs");
+        Directory.CreateDirectory(docs);
+        var file = Path.Combine(docs, "guide.md");
+        await File.WriteAllTextAsync(file, "original");
+        var profile = new AgentProfile("Writer", "Write documentation.", null, null, null,
+            AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "Keep edits focused.", "test", "",
+            OpenCodePermissionRules:
+            [
+                new("edit", "*", AgentToolPermission.Allow),
+                new("edit", "docs/**", AgentToolPermission.Ask)
+            ]);
+        string? approvedPath = null;
+        var reviewCalled = false;
+        var executor = new CodeTaskToolExecutor(new WorkspaceFileService(_root), _conversation,
+            _ => { reviewCalled = true; return Task.FromResult(true); }, _ => Task.FromResult(false), agentProfile: profile,
+            agentProfilePermission: (name, arguments) =>
+            {
+                Assert.Equal("write_file", name);
+                approvedPath = arguments.GetProperty("relative_path").GetString();
+                return Task.FromResult(AgentProfilePolicy.PermissionFor(profile, name, resource: approvedPath) == AgentToolPermission.Ask
+                    ? AgentToolProfileDecision.Rejected
+                    : AgentToolProfileDecision.DeferToProjectPolicy);
+            });
+
+        var result = await ExecuteAsync(executor, "write_file", """{"relative_path":"docs/guide.md","content":"changed"}""");
+
+        Assert.Equal("docs/guide.md", approvedPath);
+        Assert.Contains("Rejected by the selected agent profile", result, StringComparison.Ordinal);
+        Assert.False(reviewCalled);
+        Assert.Equal("original", await File.ReadAllTextAsync(file));
+    }
+
+    [Fact]
     public async Task OpenCode_scoped_read_rules_filter_list_search_and_direct_file_reads()
     {
         Directory.CreateDirectory(Path.Combine(_root, "docs", "private"));

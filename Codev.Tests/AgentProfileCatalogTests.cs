@@ -354,6 +354,40 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Imports_and_applies_path_scoped_OpenCode_V2_edit_ask_rules()
+    {
+        var directory = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "writer.md"), """
+            ---
+            description: Write documentation with approval.
+            permissions:
+              - action: edit
+                resource: "*"
+                effect: allow
+              - action: edit
+                resource: "docs/**"
+                effect: ask
+              - action: edit
+                resource: "private/**"
+                effect: deny
+            ---
+            Keep edits focused.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        var writer = Assert.Single(loaded.Profiles, profile => profile.Name == "writer");
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(writer, "write_file", resource: "docs/guide.md"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(writer, "write_file", resource: "src/app.cs"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(writer, "write_file", resource: "private/token.txt"));
+        Assert.True(AgentProfilePolicy.CanEditPath(writer, "docs/guide.md", _project));
+        Assert.True(AgentProfilePolicy.CanEditPath(writer, "src/app.cs", _project));
+        Assert.False(AgentProfilePolicy.CanEditPath(writer, "private/token.txt", _project));
+        Assert.Empty(loaded.Warnings);
+    }
+
+    [Fact]
     public async Task Rejects_invalid_resource_scoped_OpenCode_V2_grep_regex()
     {
         var directory = Path.Combine(_project, ".opencode", "agents");
