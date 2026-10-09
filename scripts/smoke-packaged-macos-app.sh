@@ -393,6 +393,50 @@ PY
   return 1
 }
 
+assert_macos_accessible_text() {
+  local expected_text="$1"
+  local requested_action="${2:-find}"
+  for _ in {1..40}; do
+    if osascript - "$app_pid" "$expected_text" "$requested_action" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+  set targetPid to item 1 of argv as integer
+  set expectedText to item 2 of argv as text
+  set requestedAction to item 3 of argv as text
+  set foundText to false
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    tell targetProcess
+      repeat with windowIndex from 1 to count of windows
+        set windowContents to entire contents of window windowIndex
+        repeat with elementIndex from 1 to count of windowContents
+          set currentElement to item elementIndex of windowContents
+          try
+            set elementName to name of currentElement as text
+            set elementRole to value of attribute "AXRole" of currentElement as text
+            if elementName contains expectedText then
+              set foundText to true
+              if requestedAction is "click" and elementRole is "AXButton" then click currentElement
+            end if
+          end try
+        end repeat
+      end repeat
+    end tell
+  end tell
+  if requestedAction is "absent" and not foundText then return "absent"
+  if requestedAction is not "absent" and foundText then return "found"
+  error "Could not find an accessible name containing " & expectedText
+end run
+APPLESCRIPT
+    then
+      echo "macOS accessibility check passed for: $expected_text"
+      return
+    fi
+    sleep 0.25
+  done
+  echo "macOS accessibility check did not pass for '$expected_text' after 10 seconds." >&2
+  return 1
+}
+
 # Prove Command+F transfers typing away from the composer in the packaged
 # window. The cross-platform Avalonia regression separately asserts that the
 # destination is SearchTextBox.
@@ -742,6 +786,48 @@ if any(request.get("keep_alive") != "30m" for request in requests):
 PY
 
 echo 'macOS packaged Auto mode ran node --version without command approval and persisted the successful tool result.'
+
+# Exercise Command+Shift+F with a populated transcript, choose the earlier
+# Auto-command prompt, and verify the shortcut remains listed in the F1 help.
+find_query='Run the packaged Auto mode command smoke.'
+osascript - "$app_pid" "$find_query" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set queryText to item 2 of argv as text
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 3 using {command down, shift down}
+    delay 0.25
+    keystroke queryText
+  end tell
+end run
+APPLESCRIPT
+assert_macos_accessible_text "You · $find_query"
+assert_macos_accessible_text "You · $find_query" click
+assert_macos_accessible_text 'Find in this conversation' absent
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 122
+  end tell
+end run
+APPLESCRIPT
+assert_macos_accessible_text 'Command+Shift+F'
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 53
+  end tell
+end run
+APPLESCRIPT
+echo 'macOS packaged app searched an earlier transcript message with Command+Shift+F, activated its result, closed the panel, and exposed the shortcut in F1.'
 
 # Exercise multiple real tool results through the packaged app so the activity
 # summary is validated on the macOS window-server build as well.

@@ -438,6 +438,21 @@ PY
 
 echo 'Linux packaged Auto mode ran node --version without command approval and persisted the successful tool result.'
 
+# Exercise Ctrl+Shift+F with the now-populated transcript, choose the earlier
+# Auto-command prompt from the accessible result list, and close the panel.
+find_query='Run the packaged Auto mode command smoke.'
+find_result="You · $find_query"
+xdotool windowfocus --sync "$window_id"
+xdotool key --clearmodifiers ctrl+shift+f
+xdotool type --clearmodifiers --delay 1 "$find_query"
+python3 ./scripts/assert-linux-atspi.py --contains "$find_result"
+python3 ./scripts/assert-linux-atspi.py --activate-contains "$find_result"
+python3 ./scripts/assert-linux-atspi.py --absent 'Find in this conversation'
+xdotool key --clearmodifiers F1
+python3 ./scripts/assert-linux-atspi.py --contains 'Ctrl+Shift+F'
+xdotool key --clearmodifiers Escape
+echo 'Linux packaged app searched an earlier transcript message with Ctrl+Shift+F, activated its result, closed the panel, and exposed the shortcut in F1.'
+
 # Exercise a deterministic read/search/create/verify Code task through the
 # packaged app so the persisted transcript contains several real tool results
 # for the collapsed-activity view.

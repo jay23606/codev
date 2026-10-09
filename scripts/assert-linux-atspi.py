@@ -61,7 +61,31 @@ def snapshot():
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--focused", help="Require this accessible control to report focused state.")
+parser.add_argument("--contains", action="append", default=[], help="Require an accessible name containing this text.")
+parser.add_argument("--absent", action="append", default=[], help="Require that no accessible name contains this text.")
+parser.add_argument("--activate-contains", help="Invoke the first accessible action on a named node containing this text.")
 arguments = parser.parse_args()
+
+if arguments.activate_contains:
+    desktop = pyatspi.Registry.getDesktop(0)
+    deadline = time.monotonic() + DEADLINE_SECONDS
+    while time.monotonic() < deadline:
+        for node in accessible_nodes(desktop):
+            try:
+                if arguments.activate_contains not in (node.name or ""):
+                    continue
+                actions = node.queryAction()
+                for action_index in range(actions.nActions):
+                    if actions.getName(action_index).lower() in {"click", "press", "activate"}:
+                        actions.doAction(action_index)
+                        print(f"AT-SPI activated {node.getRoleName()}: {node.name}")
+                        raise SystemExit(0)
+            except SystemExit:
+                raise
+            except Exception:
+                continue
+        time.sleep(0.25)
+    raise SystemExit(f"AT-SPI could not activate a node containing {arguments.activate_contains!r}.")
 
 deadline = time.monotonic() + DEADLINE_SECONDS
 last_names = set()
@@ -74,11 +98,17 @@ while time.monotonic() < deadline:
         last_error = None
         if REQUIRED_NAMES.issubset(last_names) and (
             arguments.focused is None or arguments.focused in last_focused_names
+        ) and all(any(expected in name for name in last_names) for expected in arguments.contains) and all(
+            not any(unwanted in name for name in last_names) for unwanted in arguments.absent
         ):
             for role, name in last_matches:
                 print(f"AT-SPI exposed {role}: {name}")
             if arguments.focused:
                 print(f"AT-SPI reports focused: {arguments.focused}")
+            for expected in arguments.contains:
+                print(f"AT-SPI exposes text containing: {expected}")
+            for unwanted in arguments.absent:
+                print(f"AT-SPI no longer exposes text containing: {unwanted}")
             raise SystemExit(0)
     except SystemExit:
         raise
@@ -89,6 +119,10 @@ while time.monotonic() < deadline:
 missing = sorted(REQUIRED_NAMES - last_names)
 if arguments.focused and arguments.focused not in last_focused_names:
     missing.append(f"focused state on {arguments.focused!r}")
+missing.extend(f"accessible name containing {expected!r}" for expected in arguments.contains
+               if not any(expected in name for name in last_names))
+missing.extend(f"absence of accessible name containing {unwanted!r}" for unwanted in arguments.absent
+               if any(unwanted in name for name in last_names))
 print(f"AT-SPI did not expose required Codev controls; missing: {missing}", file=sys.stderr)
 print(f"Last accessible names: {sorted(last_names)[:80]}", file=sys.stderr)
 print(f"Last focused names: {sorted(last_focused_names)}", file=sys.stderr)
