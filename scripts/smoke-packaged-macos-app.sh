@@ -787,37 +787,6 @@ PY
 
 echo 'macOS packaged Auto mode ran node --version without command approval and persisted the successful tool result.'
 
-# Exercise Command+Shift+F with a populated transcript, choose the earlier
-# Auto-command prompt, and verify the shortcut remains listed in the F1 help.
-find_query='Run the packaged Auto mode command smoke.'
-osascript - "$app_pid" "$find_query" <<'APPLESCRIPT'
-on run argv
-  set targetPid to item 1 of argv as integer
-  set queryText to item 2 of argv as text
-  tell application "System Events"
-    set targetProcess to first process whose unix id is targetPid
-    set frontmost of targetProcess to true
-    key code 3 using {command down, shift down}
-    delay 0.25
-    keystroke queryText
-  end tell
-end run
-APPLESCRIPT
-assert_macos_accessible_text "You · $find_query"
-assert_macos_accessible_text "You · $find_query" click
-assert_macos_accessible_text 'Find in this conversation' absent
-osascript - "$app_pid" <<'APPLESCRIPT'
-on run argv
-  set targetPid to item 1 of argv as integer
-  tell application "System Events"
-    set targetProcess to first process whose unix id is targetPid
-    set frontmost of targetProcess to true
-    key code 53
-  end tell
-end run
-APPLESCRIPT
-echo 'macOS packaged app searched an earlier transcript message with Command+Shift+F, activated its result, and closed the panel.'
-
 # Exercise multiple real tool results through the packaged app so the activity
 # summary is validated on the macOS window-server build as well.
 activity_prompt='Run the packaged multi-action activity-summary smoke.'
@@ -919,6 +888,37 @@ if any(request.get("keep_alive") != "30m" for request in turn):
 PY
 
 echo 'macOS packaged Code task read, searched, created a file, and verified a command in one Auto turn.'
+
+# Exercise Command+Shift+F with a long transcript, choose the earlier
+# Auto-command prompt, and close the search panel with Escape.
+find_query='Run the packaged Auto mode command smoke.'
+osascript - "$app_pid" "$find_query" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set queryText to item 2 of argv as text
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 3 using {command down, shift down}
+    delay 0.25
+    keystroke queryText
+  end tell
+end run
+APPLESCRIPT
+assert_macos_accessible_text "You · $find_query"
+assert_macos_accessible_text "You · $find_query" click
+assert_macos_accessible_text 'Find in this conversation' absent
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 53
+  end tell
+end run
+APPLESCRIPT
+echo 'macOS packaged app searched an earlier transcript message with Command+Shift+F, activated its result, and closed the panel.'
 
 # Verify the macOS primary-modifier shortcut creates and activates a fresh chat.
 previous_conversation_id="$(python3 - "$active_path" <<'PY'

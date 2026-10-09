@@ -176,10 +176,11 @@ jobs:
             -o Acquire::Retries=2 \
             -o Acquire::http::Timeout=15 \
             -o Acquire::https::Timeout=15 \
-            install --yes --no-install-recommends xdotool dbus-daemon at-spi2-core python3-pyatspi orca speech-dispatcher speech-dispatcher-espeak-ng pulseaudio pulseaudio-utils
+            install --yes --no-install-recommends xdotool dbus-daemon at-spi2-core python3-pyatspi
 
       - name: Smoke-test packaged Linux modes, Auto command, and local chat under Xvfb
         if: runner.os == 'Linux'
+        timeout-minutes: 8
         run: dbus-run-session -- xvfb-run -a bash ./scripts/smoke-packaged-linux-app.sh ./artifacts/publish/linux-x64/Codev.Avalonia
 
       - name: Smoke-test packaged Linux headless CLI with loopback Ollama
