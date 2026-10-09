@@ -71,7 +71,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private long _persistenceRevision;
     private long _activeConversationRevision;
     private readonly HttpClient _http;
-    private readonly Codev.ICloudApiKeyVault _cloudApiKeyVault;
+    private readonly Codev.ICloudCredentialVault _cloudApiKeyVault;
     private Task _savedCloudApiKeysRestoreTask = Task.CompletedTask;
     private Task _autoConnectProviderStartupTask = Task.CompletedTask;
     private Task _managedWorkspacePermissionDefaultsTask = Task.CompletedTask;
@@ -189,7 +189,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     internal Codev.GitChildWorktreeManager ChildWorktreeManager => _childWorktrees;
 
     public MainViewModel(string? localDataRoot = null, HttpMessageHandler? httpMessageHandler = null,
-        Codev.ICloudApiKeyVault? cloudApiKeyVault = null)
+        Codev.ICloudCredentialVault? cloudApiKeyVault = null)
     {
         _cloudApiKeyVault = cloudApiKeyVault ?? new Codev.CloudApiKeyVault();
         Messages.CollectionChanged += (_, _) => RefreshConversationFindResults();

@@ -16,6 +16,8 @@ public interface IMcpOAuthTokenVault
     Task<bool> RemoveTokensAsync(string account);
 }
 
+public interface ICloudCredentialVault : ICloudApiKeyVault, IMcpOAuthTokenVault { }
+
 public interface ICloudApiKeyStoreBackend
 {
     IReadOnlyList<string> GetAccounts(string target);
@@ -25,7 +27,7 @@ public interface ICloudApiKeyStoreBackend
 }
 
 /// <summary>Stores hosted-provider keys in the operating system's native credential store.</summary>
-public sealed class CloudApiKeyVault : ICloudApiKeyVault, IMcpOAuthTokenVault
+public sealed class CloudApiKeyVault : ICloudCredentialVault
 {
     private const string ApplicationName = "Codev";
     private const string CredentialTarget = "https://codev.local/hosted-model-api";

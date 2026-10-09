@@ -4236,7 +4236,7 @@ public sealed class MainWindowTests
             sendAsync(request, cancellationToken);
     }
 
-    private sealed class TestCloudApiKeyVault(string? openAiKey) : Codev.ICloudApiKeyVault
+    private sealed class TestCloudApiKeyVault(string? openAiKey) : Codev.ICloudCredentialVault
     {
         public Task<string?> GetAsync(string provider) => Task.FromResult(
             provider == CloudModelProviders.OpenAI ? openAiKey : null);
@@ -4244,6 +4244,12 @@ public sealed class MainWindowTests
         public Task SaveAsync(string provider, string apiKey) => Task.CompletedTask;
 
         public Task<bool> RemoveAsync(string provider) => Task.FromResult(false);
+
+        public Task<string?> GetTokensAsync(string account) => Task.FromResult<string?>(null);
+
+        public Task SaveTokensAsync(string account, string tokens) => Task.CompletedTask;
+
+        public Task<bool> RemoveTokensAsync(string account) => Task.FromResult(false);
     }
 
     private sealed class TestAgentProfileEditorService(UserAgentProfileStore store) : Codev.Avalonia.ViewModels.IUserAgentProfileEditorService
