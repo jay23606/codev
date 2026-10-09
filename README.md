@@ -2,6 +2,8 @@
 
 [![Windows CI](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml/badge.svg?branch=main)](https://github.com/jay23606/codev/actions/workflows/windows-ci.yml)
 
+Codev is a free, local-first AI coding workspace: a chat-style desktop app that talks to models running on your own machine through Ollama, with optional OpenAI and Anthropic models when you want them. Ask questions about code, review proposed edits before they apply, and keep your work on your computer.
+
 ## Why
 
 Claude Desktop and the Codex app are the closest things to what Codev wants to be: a standalone, chat-first desktop app for coding with an AI assistant, not a terminal tool or an editor extension. Both require a paid hosted model. The tools that *do* run fully local and free (Aider, OpenCode, Cline, Gemini CLI, and others) are terminal-first or editor-extension-first; none of them is a dedicated desktop app built around that same chat-and-review experience. Codev exists to fill that specific gap: the Claude/Codex-style desktop UX, pointed at a local Ollama model instead of a subscription, with no editor dependency.
