@@ -285,10 +285,70 @@ jobs:
             artifacts/Codev-CLI-preview-*.zip
           if-no-files-found: error
 
+  verify-release-archives:
+    name: Verify all eight release archives
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download packaged archives
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Check archive set, ZIP integrity, and executables
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected=(
+            Codev-Avalonia-preview-win-x64.zip
+            Codev-Avalonia-preview-linux-x64.zip
+            Codev-Avalonia-preview-osx-arm64.zip
+            Codev-Avalonia-preview-osx-x64.zip
+            Codev-CLI-preview-win-x64.zip
+            Codev-CLI-preview-linux-x64.zip
+            Codev-CLI-preview-osx-arm64.zip
+            Codev-CLI-preview-osx-x64.zip
+          )
+          expected_set="$(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)"
+          actual_set="$(find artifacts -maxdepth 1 -type f -name '*.zip' -printf '%f\n' | LC_ALL=C sort)"
+          if [[ "$actual_set" != "$expected_set" ]]; then
+            echo "Downloaded release archives do not match the expected eight-file set." >&2
+            echo "Expected:" >&2
+            printf '%s\n' "$expected_set" >&2
+            echo "Found:" >&2
+            printf '%s\n' "$actual_set" >&2
+            exit 1
+          fi
+
+          for archive in "${expected[@]}"; do
+            path="artifacts/$archive"
+            test -s "$path"
+            unzip -tq "$path"
+            case "$archive" in
+              *-win-x64.zip) executable_suffix='.exe' ;;
+              *) executable_suffix='' ;;
+            esac
+            case "$archive" in
+              Codev-Avalonia-*) executable="Codev.Avalonia${executable_suffix}" ;;
+              Codev-CLI-*) executable="Codev.Cli${executable_suffix}" ;;
+              *) echo "Unexpected archive name: $archive" >&2; exit 1 ;;
+            esac
+            entries="$(unzip -Z1 "$path")"
+            if ! grep -Fxq "$executable" <<< "$entries"; then
+              echo "$archive does not contain its expected executable: $executable" >&2
+              exit 1
+            fi
+            echo "Verified $archive ($executable)."
+          done
+
   release:
     name: Publish GitHub release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: publish
+    needs: [publish, verify-release-archives]
     runs-on: ubuntu-latest
     permissions:
       contents: write
