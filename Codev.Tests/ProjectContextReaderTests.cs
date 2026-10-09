@@ -38,6 +38,38 @@ public sealed class ProjectContextReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Empty_explicit_file_selection_does_not_fall_back_to_automatic_context()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "readme.md"), "must stay out of context");
+
+        var context = await ProjectContextReader.ReadAsync(_root, []);
+
+        Assert.DoesNotContain("must stay out of context", context);
+    }
+
+    [Fact]
+    public async Task Scoped_agent_read_rules_filter_project_source_context()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "docs"));
+        Directory.CreateDirectory(Path.Combine(_root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "docs", "guide.md"), "allowed documentation");
+        await File.WriteAllTextAsync(Path.Combine(_root, "src", "secret.cs"), "class HiddenSecret {}");
+        var profile = new AgentProfile("docs", "Documentation only", null, null, null,
+            AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "", "user", "docs.md",
+            OpenCodePermissionRules:
+            [
+                new("read", "docs/**", AgentToolPermission.Allow),
+                new("read", "src/**", AgentToolPermission.Deny)
+            ]);
+        var selected = AgentProfilePolicy.FilterReadablePaths(profile, ["docs/guide.md", "src/secret.cs"]);
+
+        var context = await ProjectContextReader.ReadAsync(_root, selected);
+
+        Assert.Contains("allowed documentation", context);
+        Assert.DoesNotContain("HiddenSecret", context);
+    }
+
+    [Fact]
     public async Task Loads_root_and_only_path_applicable_nested_agents_instructions_for_trusted_projects()
     {
         Directory.CreateDirectory(Path.Combine(_root, "src"));

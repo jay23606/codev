@@ -3784,7 +3784,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     private static string TruncateToolOutput(string value, int max = 6000) => Codev.UntrustedToolOutput.Truncate(value, max);
 
     private async Task<IReadOnlyList<string>> SelectModelRelevantProjectRulesAsync(
-        Codev.PersistedQueuedTurn turn, string task, CancellationToken cancellationToken)
+        Codev.PersistedQueuedTurn turn, string task, IReadOnlyList<string> readableContextFiles, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(turn.ProjectPath) || !Directory.Exists(turn.ProjectPath)) return [];
         if (Codev.CloudModelProviders.IsCloud(turn.Provider) &&
@@ -3799,11 +3799,8 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
             if (candidates.Length == 0) return [];
 
             await SetConnectionStatusAsync("Checking project rules with the selected model…");
-            var fileCandidates = turn.ContextFiles is { Count: > 0 }
-                ? turn.ContextFiles
-                : service.ListContextFiles(maxEntries: Codev.WorkspaceFileService.MaxContextFiles);
             var includedFiles = new List<string>();
-            foreach (var candidate in fileCandidates)
+            foreach (var candidate in readableContextFiles)
             {
                 if (includedFiles.Count >= Codev.WorkspaceFileService.MaxContextFiles) break;
                 try
@@ -3966,11 +3963,15 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 Directory.Exists(savedTurn.ProjectPath))
             {
                 var currentTask = conversation.Messages.Take(assistantIndex).LastOrDefault(message => message.IsUser)?.Content ?? "";
+                var contextCandidates = savedTurn.ContextFiles is { Count: > 0 }
+                    ? savedTurn.ContextFiles
+                    : new Codev.WorkspaceFileService(savedTurn.ProjectPath, savedTurn.ContextExclusions).ListContextFiles(maxEntries: 300);
+                var readableContextFiles = Codev.AgentProfilePolicy.FilterReadablePaths(selectedAgentProfile, contextCandidates);
                 var relevantRuleNames = projectStillTrusted
-                    ? await SelectModelRelevantProjectRulesAsync(savedTurn, currentTask, token.Token)
+                    ? await SelectModelRelevantProjectRulesAsync(savedTurn, currentTask, readableContextFiles, token.Token)
                     : [];
                 projectContextBreakdown = await Codev.ProjectContextReader.ReadDetailedAsync(savedTurn.ProjectPath,
-                    savedTurn.ContextFiles, savedTurn.ContextExclusions, includeProjectInstructions: projectStillTrusted,
+                    readableContextFiles, savedTurn.ContextExclusions, includeProjectInstructions: projectStillTrusted,
                     cancellationToken: token.Token,
                     manualRuleNames: Codev.ProjectPathInstructionRuleParser.FindManualMentions(
                         currentTask),
@@ -3983,7 +3984,7 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
                 if (savedTurn.IncludeRepoMap)
                 {
                     repoMap = await Codev.RepoMapBuilder.BuildAsync(savedTurn.ProjectPath,
-                        savedTurn.ContextFiles, savedTurn.ContextExclusions, token.Token);
+                        readableContextFiles, savedTurn.ContextExclusions, token.Token);
                     if (!string.IsNullOrWhiteSpace(repoMap))
                         capturedCodeTaskSections.Add(new("Repository map", repoMap));
                 }

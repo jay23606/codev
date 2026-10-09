@@ -123,6 +123,10 @@ public static class AgentProfilePolicy
         return permission == AgentToolPermission.Allow;
     }
 
+    /// <summary>Filters project context paths through the selected profile's ordered read rules.</summary>
+    public static IReadOnlyList<string> FilterReadablePaths(AgentProfile? profile, IEnumerable<string> paths) =>
+        paths.Where(path => CanExposeReadPath(profile, path)).ToArray();
+
     public static bool IsAvailable(AgentProfile? profile, string toolName) =>
         PermissionFor(profile, toolName) != AgentToolPermission.Deny;
 

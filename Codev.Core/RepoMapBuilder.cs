@@ -30,7 +30,7 @@ public static partial class RepoMapBuilder
         IReadOnlyList<string>? contextExclusions = null, CancellationToken cancellationToken = default)
     {
         var service = new WorkspaceFileService(projectPath, contextExclusions);
-        var candidates = selectedFiles is { Count: > 0 } ? selectedFiles : service.ListContextFiles(maxEntries: 300);
+        var candidates = selectedFiles ?? service.ListContextFiles(maxEntries: 300);
         var files = candidates.Where(path => !service.IsContextExcluded(path))
             .Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxFiles).ToArray();
         var output = new StringBuilder("Project map (bounded file outline; ask before assuming omitted files do not exist):\n");
