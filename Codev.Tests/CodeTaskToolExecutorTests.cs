@@ -153,7 +153,7 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
 
         Assert.Contains("docs", glob, StringComparison.Ordinal);
         Assert.DoesNotContain("secret.md", glob, StringComparison.Ordinal);
-        Assert.Contains("docs/sub/guide.md:1: TODO: publish docs", grep, StringComparison.Ordinal);
+        Assert.Contains($"{Path.Combine("docs", "sub", "guide.md")}:1: TODO: publish docs", grep, StringComparison.Ordinal);
         Assert.DoesNotContain("SECRET_TOKEN", grep, StringComparison.Ordinal);
         Assert.Contains("Rejected by the selected agent profile", deniedGlob, StringComparison.Ordinal);
         Assert.Contains("Denied by the selected agent profile", deniedGrep, StringComparison.Ordinal);
