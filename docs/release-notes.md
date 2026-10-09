@@ -34,7 +34,7 @@ On Windows, extract the complete ZIP and run `Codev.Avalonia.exe`. On macOS or L
 - Local Ollama models and hosted OpenAI and Anthropic chat. Code tasks support Ollama and OpenAI; Anthropic is available for Chat and Plan.
 - Reusable built-in and Markdown agent profiles, with project-scoped profiles available only for trusted projects.
 - Code task tools for bounded project-file operations, reviewable changes, rollback checkpoints, and Git status/review workflows.
-- Auto, Ask, and Allowlist command permission modes. Auto runs commands without per-command approval unless an exact saved Deny rule blocks them.
+- Auto, Ask, Allowlist, and Read-only command permission modes. Auto runs commands without per-command approval unless an exact saved Deny rule blocks them; Read-only mode runs recognized inspections and asks before other commands.
 - MCP tools, prompts, and resources over stdio or HTTP, with project-scoped permissions and optional OAuth.
 - Up to three parallel child tasks in separate Codev-managed Git worktrees, with results reviewed and merged explicitly.
 - Conversation queues and restart recovery, search, compaction, rewind, file-change history, and Markdown/HTML export.
