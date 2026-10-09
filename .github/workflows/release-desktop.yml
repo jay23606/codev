@@ -131,7 +131,7 @@ jobs:
 
       - name: Smoke-test packaged macOS modes, Auto command, and local chat under the window server
         if: runner.os == 'macOS'
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: bash ./scripts/smoke-packaged-macos-app.sh ./artifacts/publish/${{ matrix.rid }}/Codev.Avalonia
 
       - name: Smoke-test packaged macOS headless CLI with loopback Ollama

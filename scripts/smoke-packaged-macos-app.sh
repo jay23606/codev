@@ -870,6 +870,11 @@ messages = conversation.get("Messages", []) if conversation else []
 turns = [message for message in messages if message.get("Role") == "assistant" and
          "Packaged multi-action activity summary passed." in message.get("Content", "")]
 if len(turns) != 1:
+    print({"last_messages": [(message.get("Role"), message.get("Content", "")[-300:]) for message in messages[-8:]]}, file=sys.stderr)
+    with open(sys.argv[3], encoding="utf-8") as source:
+        requests = [json.loads(line) for line in source if line.strip()]
+    turn_requests = [request for request in requests if request.get("last_user_message") == "Run the packaged multi-action activity-summary smoke."]
+    print({"activity_requests": [(request.get("last_role"), request.get("last_tool_name"), request.get("last_user_message")) for request in turn_requests]}, file=sys.stderr)
     raise SystemExit(f"Expected one completed multi-action transcript: {turns!r}")
 content = turns[0]["Content"]
 if not all(value in content for value in ("activity-source.txt", "ACTIVITY_SOURCE_MARKER", "activity-result.txt", "node --version")):
