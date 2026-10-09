@@ -293,8 +293,9 @@ public sealed class CodeTaskToolExecutor(
                 semantic = await semanticSearch(query, cancellationToken).ConfigureAwait(false);
                 if (allowedPaths is not null)
                 {
-                    var allowed = allowedPaths.ToHashSet(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-                    semantic = semantic.Where(result => allowed.Contains(result.RelativePath)).ToArray();
+                    var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+                    var allowed = allowedPaths.Select(path => path.Replace('\\', '/')).ToHashSet(comparer);
+                    semantic = semantic.Where(result => allowed.Contains(result.RelativePath.Replace('\\', '/'))).ToArray();
                 }
             }
             catch (OperationCanceledException) { throw; }

@@ -88,8 +88,8 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
                 });
             });
 
-        var listing = await ExecuteAsync(executor, "list_files", """{"relative_directory":""}""");
-        var search = await ExecuteAsync(executor, "search_files", """{"query":"needle"}""");
+        var listing = GetUntrustedContent(await ExecuteAsync(executor, "list_files", """{"relative_directory":""}"""));
+        var search = GetUntrustedContent(await ExecuteAsync(executor, "search_files", """{"query":"needle"}"""));
         var allowedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/guide.md"}""");
         var deniedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"docs/private/secret.md"}""");
         var unmatchedRead = await ExecuteAsync(executor, "read_file", """{"relative_path":"README.md"}""");
@@ -106,11 +106,11 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
             _ => Task.FromResult(false), _ => Task.FromResult(false), agentProfile: profile,
             semanticSearch: (_, _) => Task.FromResult<IReadOnlyList<SemanticSearchResult>>
             ([
-                new SemanticSearchResult("docs/guide.md", 0, 0.9, "public semantic needle"),
-                new SemanticSearchResult("docs/private/secret.md", 0, 0.9, "private semantic needle")
+                new SemanticSearchResult(Path.Combine("docs", "guide.md"), 0, 0.9, "public semantic needle"),
+                new SemanticSearchResult(Path.Combine("docs", "private", "secret.md"), 0, 0.9, "private semantic needle")
             ]));
 
-        var semanticResults = await ExecuteAsync(semanticExecutor, "search_files", """{"query":"needle"}""");
+        var semanticResults = GetUntrustedContent(await ExecuteAsync(semanticExecutor, "search_files", """{"query":"needle"}"""));
 
         Assert.Contains("public semantic needle", semanticResults, StringComparison.Ordinal);
         Assert.DoesNotContain("private semantic needle", semanticResults, StringComparison.Ordinal);
@@ -982,6 +982,12 @@ public sealed class CodeTaskToolExecutorTests : IDisposable
     {
         using var document = JsonDocument.Parse(json);
         return await executor.ExecuteAsync(name, document.RootElement);
+    }
+
+    private static string GetUntrustedContent(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.GetProperty("content").GetString() ?? "";
     }
 
     public void Dispose()
