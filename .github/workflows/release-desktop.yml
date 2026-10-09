@@ -10,6 +10,10 @@ on:
     paths-ignore:
       - '*.md'
       - '**/*.md'
+      - 'Codev.Tests/**'
+      - 'Codev.Avalonia.Tests/**'
+      - 'Codev.Windows.Tests/**'
+      - '.github/workflows/release-desktop.yml'
   workflow_dispatch:
 
 permissions:
