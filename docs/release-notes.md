@@ -26,6 +26,7 @@ On Windows, extract the complete ZIP and run `Codev.Avalonia.exe`. On macOS or L
 - MCP settings are easier to recover when the saved file is malformed, oversized, duplicated, or blocked by a directory at the settings path. MCP tool, prompt, resource, and resource-template activity is grouped into readable, expandable transcript details.
 - Linux accessibility support is improved through Avalonia 12 and an AT-SPI tree. The sidebar search has an associated accessible label, and the Markdown renderer has been updated.
 - Regression coverage now exercises Auto-mode file application and command execution, MCP activity, and scoped profile behavior across hosted Windows, Linux, and macOS checks.
+- Auto falls back to Ask when saved project permission data cannot be read or safely written, and the review explains why. Conversations can be dragged to reorder within Pinned or Recents, with order remembered after restart.
 
 ## Included capabilities
 
