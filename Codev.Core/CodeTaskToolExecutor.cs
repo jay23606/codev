@@ -261,7 +261,8 @@ public sealed class CodeTaskToolExecutor(
         var source = string.IsNullOrWhiteSpace(relativeDirectory)
             ? "Project file listing"
             : "Project file listing: " + relativeDirectory;
-        var listing = string.Join("\n", files.ListFiles(relativeDirectory, 160));
+        var listing = string.Join("\n", files.ListFiles(relativeDirectory, 160)
+            .Where(path => AgentProfilePolicy.CanExposeReadPath(agentProfile, path)));
         AddContextSource(source);
         TrackUntrustedContent(source, listing);
         return UntrustedToolOutput.Format("project file listing", listing, path: relativeDirectory, activity: "list_files");
@@ -269,22 +270,33 @@ public sealed class CodeTaskToolExecutor(
 
     private async Task<string> SearchFilesAsync(string query, CancellationToken cancellationToken)
     {
+        IReadOnlyList<string>? allowedPaths = AgentProfilePolicy.HasScopedReadRules(agentProfile)
+            ? files.ListFiles(maxEntries: 500)
+                .Where(path => AgentProfilePolicy.CanExposeReadPath(agentProfile, path))
+                .ToArray()
+            : null;
         var source = semanticSearch is null
             ? "Search results for: " + query
             : "Hybrid literal and semantic search results for: " + query;
         string body;
         if (semanticSearch is null)
         {
-            body = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken).ConfigureAwait(false));
+            body = string.Join("\n", await files.SearchFilesAsync(query, cancellationToken, allowedPaths).ConfigureAwait(false));
         }
         else
         {
-            var literal = await files.SearchFileMatchesAsync(query, cancellationToken).ConfigureAwait(false);
+            var literal = await files.SearchFileMatchesAsync(query, cancellationToken, allowedPaths).ConfigureAwait(false);
             IReadOnlyList<SemanticSearchResult> semantic = [];
             string? semanticFailure = null;
             try
             {
                 semantic = await semanticSearch(query, cancellationToken).ConfigureAwait(false);
+                if (allowedPaths is not null)
+                {
+                    var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+                    var allowed = allowedPaths.Select(path => path.Replace('\\', '/')).ToHashSet(comparer);
+                    semantic = semantic.Where(result => allowed.Contains(result.RelativePath.Replace('\\', '/'))).ToArray();
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
