@@ -1229,8 +1229,12 @@ public sealed class MainViewModel : ViewModelBase, IUserAgentProfileEditorServic
     {
         var command = arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("command", out var commandValue)
             ? commandValue.GetString() : null;
-        var resource = toolName == "read_file" && arguments.ValueKind == JsonValueKind.Object &&
-            arguments.TryGetProperty("relative_path", out var pathValue) ? pathValue.GetString() : null;
+        var resource = toolName switch
+        {
+            "read_file" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("relative_path", out var pathValue) => pathValue.GetString(),
+            "glob_files" or "grep_files" when arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("pattern", out var patternValue) => patternValue.GetString(),
+            _ => null
+        };
         var permission = Codev.AgentProfilePolicy.PermissionFor(profile, toolName, command, resource);
         if (permission == Codev.AgentToolPermission.Deny) return Codev.AgentToolProfileDecision.Denied;
         var projectMode = conversation.ProjectPath is { Length: > 0 } path

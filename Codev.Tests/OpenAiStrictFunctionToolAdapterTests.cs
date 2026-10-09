@@ -75,6 +75,30 @@ public sealed class OpenAiStrictFunctionToolAdapterTests
     }
 
     [Fact]
+    public void Imported_v2_glob_and_grep_rules_expose_strict_scoped_discovery_tools()
+    {
+        var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);
+        var profile = new AgentProfile("Explore", "Explore source", null, null, null,
+            AgentToolPermission.Ask, new Dictionary<string, AgentToolPermission>(), "", "user", "explore.md",
+            OpenCodePermissionRules:
+            [
+                new("glob", "src/**/*.cs", AgentToolPermission.Allow),
+                new("grep", "TODO.*", AgentToolPermission.Allow)
+            ]);
+
+        var tools = CodeTaskToolSchemaFactory.CreateOpenAiStrictTools(shell, profile: profile)
+            .Select(tool => JsonSerializer.SerializeToElement(tool)).ToArray();
+
+        foreach (var name in new[] { "glob_files", "grep_files" })
+        {
+            var tool = Assert.Single(tools, candidate => candidate.GetProperty("name").GetString() == name);
+            Assert.True(tool.GetProperty("strict").GetBoolean());
+            Assert.Equal("pattern", tool.GetProperty("parameters").GetProperty("required")[0].GetString());
+            AssertStrictSchema(tool.GetProperty("parameters"));
+        }
+    }
+
+    [Fact]
     public void Delegation_schema_is_exposed_only_to_an_explicit_orchestrator_profile()
     {
         var shell = new ShellCommandSpec("powershell.exe", "PowerShell", []);

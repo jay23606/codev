@@ -321,7 +321,7 @@ public sealed class AgentProfileCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task Skips_OpenCode_V2_glob_rules_with_resource_semantics_Codev_cannot_represent()
+    public async Task Imports_OpenCode_V2_resource_scoped_glob_and_grep_rules()
     {
         var directory = Path.Combine(_project, ".opencode", "agents");
         Directory.CreateDirectory(directory);
@@ -332,14 +332,47 @@ public sealed class AgentProfileCatalogTests : IDisposable
               - action: glob
                 resource: "docs/**/*.md"
                 effect: allow
+              - action: grep
+                resource: "TODO.*"
+                effect: allow
+              - action: grep
+                resource: "SECRET.*"
+                effect: deny
             ---
             Inspect documentation.
             """);
 
         var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
 
-        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "explorer");
-        Assert.Contains(loaded.Warnings, warning => warning.Contains("resource-scoped OpenCode V2 'glob' rules are not supported", StringComparison.Ordinal));
+        var explorer = Assert.Single(loaded.Profiles, profile => profile.Name == "explorer");
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(explorer, "glob_files", resource: "docs/**/*.md"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(explorer, "glob_files", resource: "src/**/*.cs"));
+        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(explorer, "grep_files", resource: "TODO.*"));
+        Assert.Equal(AgentToolPermission.Deny, AgentProfilePolicy.PermissionFor(explorer, "grep_files", resource: "SECRET.*"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(explorer, "grep_files", resource: "password"));
+        Assert.Empty(loaded.Warnings);
+    }
+
+    [Fact]
+    public async Task Rejects_invalid_resource_scoped_OpenCode_V2_grep_regex()
+    {
+        var directory = Path.Combine(_project, ".opencode", "agents");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "invalid-grep.md"), """
+            ---
+            description: Invalid grep rule.
+            permissions:
+              - action: grep
+                resource: "["
+                effect: allow
+            ---
+            Search safely.
+            """);
+
+        var loaded = await AgentProfileCatalog.LoadAsync(Path.Combine(_root, "user"), _project, includeProjectProfiles: true);
+
+        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "invalid-grep");
+        Assert.Contains(loaded.Warnings, warning => warning.Contains("valid, bounded regular expressions", StringComparison.Ordinal));
     }
 
     [Fact]

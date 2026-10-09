@@ -90,6 +90,18 @@ public static class AgentProfilePolicy
                          toolName == "read_file" && resource is not null &&
                          AgentProfileCatalog.OpenCodePathPatternMatches(rule.Resource, resource))
                     permission = rule.Permission;
+                else if (rule.Action.Equals("glob", StringComparison.OrdinalIgnoreCase) &&
+                         toolName == "glob_files" && resource is not null &&
+                         AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
+                    permission = rule.Permission;
+                else if (rule.Action.Equals("grep", StringComparison.OrdinalIgnoreCase) &&
+                         toolName == "grep_files" && resource is not null &&
+                         AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
+                    permission = rule.Permission;
+                else if (rule.Action == "*" && resource is not null &&
+                         (toolName is "glob_files" or "grep_files") &&
+                         AgentProfileCatalog.OpenCodeResourcePatternMatches(rule.Resource, resource))
+                    permission = rule.Permission;
                 else if (rule.Action.Equals("edit", StringComparison.OrdinalIgnoreCase) &&
                          rule.Permission != AgentToolPermission.Deny && IsEditTool(toolName))
                 {
@@ -414,9 +426,14 @@ public static class AgentProfileCatalog
     {
         var normalizedPattern = pattern.Replace('\\', '/');
         var normalizedPath = relativePath.Replace('\\', '/');
-        var regex = "^" + Regex.Escape(normalizedPattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+        return OpenCodeResourcePatternMatches(normalizedPattern, normalizedPath);
+    }
+
+    internal static bool OpenCodeResourcePatternMatches(string pattern, string resource)
+    {
+        var regex = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
         var options = RegexOptions.CultureInvariant | (OperatingSystem.IsWindows() ? RegexOptions.IgnoreCase : RegexOptions.None);
-        return Regex.IsMatch(normalizedPath, regex, options, TimeSpan.FromMilliseconds(100));
+        return Regex.IsMatch(resource, regex, options, TimeSpan.FromMilliseconds(100));
     }
 
     internal static bool OpenCodeShellRuleMatches(string pattern, string command, AgentToolPermission permission)
@@ -443,6 +460,17 @@ public static class AgentProfileCatalog
         var segments = pattern.Split('/');
         return segments.All(segment => segment.Length > 0 && segment is not ("." or "..") &&
             !segment.Contains('[') && !segment.Contains(']'));
+    }
+
+    private static bool IsValidRegexPattern(string pattern)
+    {
+        if (pattern.Length is 0 or > 240 || pattern.Any(char.IsControl)) return false;
+        try
+        {
+            _ = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+            return true;
+        }
+        catch (ArgumentException) { return false; }
     }
 
     private static async Task<List<AgentProfile>> LoadScopeAsync(string directory, string scope, List<string> warnings,
@@ -789,8 +817,9 @@ public static class AgentProfileCatalog
         "edit" or "write" => ["create_file", "write_file", "apply_patch"],
         "bash" or "shell" => ["run_command", "verify_command", "start_background_command"],
         "read" => ["list_files", "read_file", "search_files"],
-        "list" or "glob" => ["list_files"],
-        "grep" => ["search_files"],
+        "list" => ["list_files"],
+        "glob" => ["glob_files"],
+        "grep" => ["grep_files"],
         "task" or "subagent" => ["delegate_task"],
         "skill" => ["load_skill_*"],
         "webfetch" or "websearch" or "external_directory" or "lsp" or "question" or "doom_loop" => [],
@@ -828,11 +857,16 @@ public static class AgentProfileCatalog
             if (!IsValidCommandPattern(resource) || CommandClauseSeparators.IsMatch(resource))
                 return Fail("OpenCode V2 shell resources must be single safe command patterns", out error);
         }
-        else if (normalizedAction is "edit" or "read" && resource != "*")
+        else if ((normalizedAction is "edit" or "read" or "glob") && resource != "*")
         {
             if (!IsValidPathPattern(resource)) return Fail($"OpenCode V2 {normalizedAction} resources must be safe project-relative path patterns", out error);
             if (normalizedAction == "edit" && effect == AgentToolPermission.Ask)
                 return Fail("path-scoped OpenCode V2 edit ask rules are not supported; use allow or deny", out error);
+        }
+        else if (normalizedAction == "grep" && resource != "*")
+        {
+            if (!IsValidRegexPattern(resource))
+                return Fail("OpenCode V2 grep resources must be valid, bounded regular expressions", out error);
         }
         else if (resource != "*")
         {
