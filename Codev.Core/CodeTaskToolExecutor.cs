@@ -270,7 +270,7 @@ public sealed class CodeTaskToolExecutor(
 
     private async Task<string> SearchFilesAsync(string query, CancellationToken cancellationToken)
     {
-        IReadOnlyCollection<string>? allowedPaths = AgentProfilePolicy.HasScopedReadRules(agentProfile)
+        IReadOnlyList<string>? allowedPaths = AgentProfilePolicy.HasScopedReadRules(agentProfile)
             ? files.ListFiles(maxEntries: 500)
                 .Where(path => AgentProfilePolicy.CanExposeReadPath(agentProfile, path))
                 .ToArray()
