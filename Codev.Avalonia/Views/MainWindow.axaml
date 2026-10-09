@@ -104,7 +104,7 @@
                         <ItemsControl x:Name="PinnedConversationsList" ItemsSource="{Binding PinnedConversations}" IsVisible="{Binding PinnedConversationsExpanded}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
                                 <StackPanel>
-                                    <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                    <Button Classes="nav" Content="{Binding Title}" ToolTip.Tip="Drag to reorder within this section" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" PointerPressed="Conversation_PointerPressed" DragDrop.AllowDrop="True" DragDrop.DragOver="Conversation_DragOver" DragDrop.Drop="Conversation_Drop">
                                         <Button.ContextMenu>
                                             <ContextMenu>
                                                 <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />
@@ -137,7 +137,7 @@
                         <ItemsControl x:Name="RecentConversationsList" ItemsSource="{Binding RecentConversations}" IsVisible="{Binding RecentConversationsExpanded}">
                             <ItemsControl.ItemTemplate><DataTemplate x:DataType="core:Conversation">
                                 <StackPanel>
-                                    <Button Classes="nav" Content="{Binding Title}" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}">
+                                    <Button Classes="nav" Content="{Binding Title}" ToolTip.Tip="Drag to reorder within this section" Command="{Binding $parent[Window].DataContext.SelectConversationCommand}" CommandParameter="{Binding}" PointerPressed="Conversation_PointerPressed" DragDrop.AllowDrop="True" DragDrop.DragOver="Conversation_DragOver" DragDrop.Drop="Conversation_Drop">
                                         <Button.ContextMenu>
                                             <ContextMenu>
                                                 <MenuItem Header="Fork conversation" Tag="{Binding}" Click="ForkConversation_Click" />

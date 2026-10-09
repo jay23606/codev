@@ -69,6 +69,7 @@ public sealed class Conversation
     private List<TaskChecklistItem> _taskChecklist = [];
     public List<TaskChecklistItem> TaskChecklist { get => _taskChecklist; set => _taskChecklist = TaskChecklistService.NormalizeImported(value).ToList(); }
     public bool IsPinned { get; set; }
+    public int? SidebarOrder { get; set; }
     public bool IsArchived { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public string? ProjectPath { get; set; }

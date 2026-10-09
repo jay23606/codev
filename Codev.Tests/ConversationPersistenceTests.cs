@@ -84,6 +84,7 @@ public sealed class ConversationPersistenceTests
             IncludeRepoMap = true,
             EnableSemanticSearch = true,
             BestOfNAttempts = 3,
+            SidebarOrder = 7,
             LastPromptTokens = 321,
             LastPromptOutputTokens = 123,
             LastPromptContext = 4096,
@@ -121,6 +122,7 @@ public sealed class ConversationPersistenceTests
         Assert.Empty(snapshot.ChildConversations);
         Assert.Equal(CloudModelProviders.OpenAI, snapshot.Provider);
         Assert.False(snapshot.IsPlanMode);
+        Assert.Equal(7, snapshot.SidebarOrder);
         Assert.True(snapshot.IsCodeTask);
         Assert.Equal("Code Reviewer", snapshot.AgentProfileName);
         Assert.False(snapshot.QueueEnabled);
