@@ -276,7 +276,7 @@ public sealed class MainWindowTests
         void Drop(Conversation source, Conversation target)
         {
             var targetRow = Assert.Single(window!.GetVisualDescendants().OfType<Button>(), button =>
-                button.DataContext is Conversation item && item.Id == target.Id);
+                button.DataContext is Conversation item && item.Id == target.Id && DragDrop.GetAllowDrop(button));
             var targetPoint = targetRow.TranslatePoint(new Point(targetRow.Bounds.Width / 2, targetRow.Bounds.Height / 2), window);
             Assert.NotNull(targetPoint);
 
