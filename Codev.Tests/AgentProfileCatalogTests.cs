@@ -414,7 +414,7 @@ public sealed class AgentProfileCatalogTests : IDisposable
 
         var coordinator = Assert.Single(loaded.Profiles, profile => profile.Name == "coordinator");
         Assert.Equal("primary", coordinator.Mode);
-        Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task"));
+        Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task"));
         Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task", resource: "Explorer"));
         Assert.Equal(AgentToolPermission.Allow, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task", resource: "Explore Docs"));
         Assert.Equal(AgentToolPermission.Ask, AgentProfilePolicy.PermissionFor(coordinator, "delegate_task", resource: "Audit"));
