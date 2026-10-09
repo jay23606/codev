@@ -426,7 +426,7 @@
                                 <DataTemplate x:DataType="core:ConversationMessageMatch">
                                     <Button Classes="nav" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,5"
                                             Click="ConversationFindResult_Click" AutomationProperties.Name="{Binding DisplayText}">
-                                        <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" MaxWidth="370" />
+                                        <TextBlock Text="{Binding DisplayText}" AutomationProperties.Name="{Binding DisplayText}" TextWrapping="Wrap" MaxWidth="370" />
                                     </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

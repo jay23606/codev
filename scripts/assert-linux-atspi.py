@@ -29,7 +29,7 @@ def accessible_nodes(root):
         node, depth = stack.pop()
         visited += 1
         yield node
-        if depth >= 12:
+        if depth >= 20:
             continue
         try:
             children = [node.getChildAtIndex(i) for i in range(node.childCount)]

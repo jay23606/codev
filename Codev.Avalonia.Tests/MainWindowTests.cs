@@ -1138,6 +1138,8 @@ public sealed class MainWindowTests
             Assert.True(scrollViewer.Offset.Y > 0, "The transcript should initially follow its latest messages.");
             var results = Assert.IsType<ItemsControl>(window.FindControl<ItemsControl>("ConversationFindResults"));
             var resultButton = Assert.Single(results.GetVisualDescendants().OfType<Button>());
+            var resultText = Assert.Single(resultButton.GetVisualDescendants().OfType<TextBlock>());
+            Assert.Equal(AutomationProperties.GetName(resultButton), AutomationProperties.GetName(resultText));
             await Dispatcher.UIThread.InvokeAsync(() => resultButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
             await Dispatcher.UIThread.InvokeAsync(window.UpdateLayout, DispatcherPriority.Background);
 
