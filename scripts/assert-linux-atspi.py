@@ -69,23 +69,44 @@ arguments = parser.parse_args()
 if arguments.activate_contains:
     desktop = pyatspi.Registry.getDesktop(0)
     deadline = time.monotonic() + DEADLINE_SECONDS
+    last_match = None
     while time.monotonic() < deadline:
         for node in accessible_nodes(desktop):
             try:
                 if arguments.activate_contains not in (node.name or ""):
                     continue
-                actions = node.queryAction()
-                for action_index in range(actions.nActions):
-                    if actions.getName(action_index).lower() in {"click", "press", "activate"}:
-                        actions.doAction(action_index)
-                        print(f"AT-SPI activated {node.getRoleName()}: {node.name}")
-                        raise SystemExit(0)
+                last_match = node
+                candidate = node
+                for _ in range(5):
+                    if candidate is None:
+                        break
+                    try:
+                        role = candidate.getRoleName().lower()
+                        actions = candidate.queryAction()
+                        if "button" in role:
+                            for action_index in range(actions.nActions):
+                                if actions.getName(action_index).lower() in {"click", "press", "activate"}:
+                                    actions.doAction(action_index)
+                                    print(f"AT-SPI activated {role}: {node.name}")
+                                    raise SystemExit(0)
+                    except SystemExit:
+                        raise
+                    except Exception:
+                        pass
+                    try:
+                        candidate = candidate.parent
+                    except Exception:
+                        break
             except SystemExit:
                 raise
             except Exception:
                 continue
         time.sleep(0.25)
-    raise SystemExit(f"AT-SPI could not activate a node containing {arguments.activate_contains!r}.")
+    matched_role = last_match.getRoleName() if last_match is not None else "not found"
+    raise SystemExit(
+        f"AT-SPI could not activate a button containing {arguments.activate_contains!r}; "
+        f"matching node role: {matched_role}."
+    )
 
 deadline = time.monotonic() + DEADLINE_SECONDS
 last_names = set()
