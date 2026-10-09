@@ -26,7 +26,7 @@ namespace Codev.Avalonia.Tests;
 public sealed class MainWindowTests
 {
     [AvaloniaFact]
-    public async Task Child_session_rows_show_running_state_collapse_and_reopen_the_child()
+    public async Task Child_session_rows_show_running_state_can_be_reordered_and_collapse()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
         MainViewModel? viewModel = null;
@@ -40,12 +40,22 @@ public sealed class MainWindowTests
             {
                 Title = "Parallel child fixture",
                 ParentConversationId = parent.Id,
+                SidebarOrder = 0,
                 IsChildTaskRunning = true
+            };
+            var secondChild = new Conversation
+            {
+                Title = "Second child fixture",
+                ParentConversationId = parent.Id,
+                SidebarOrder = 1
             };
             var conversations = Assert.IsType<System.Collections.ObjectModel.ObservableCollection<Conversation>>(
                 typeof(MainViewModel).GetField("_conversations", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel));
             conversations.Add(child);
+            conversations.Add(secondChild);
             typeof(MainViewModel).GetMethod("RebuildLists", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(viewModel, null);
+            Assert.True(viewModel.ReorderConversation(secondChild.Id, child, insertAfter: false));
+            Assert.Equal(new[] { secondChild.Id, child.Id }, parent.ChildConversations.Select(item => item.Id));
 
             window = new MainWindow { DataContext = viewModel };
             window.Show();
@@ -55,11 +65,13 @@ public sealed class MainWindowTests
                 item.DataContext is Conversation conversation && conversation.Id == parent.Id);
             Assert.True(expander.IsVisible);
             Assert.True(expander.IsExpanded);
-            Assert.Equal("Child sessions · 1 · 1 running", expander.Header?.ToString());
+            Assert.Equal("Child sessions · 2 · 1 running", expander.Header?.ToString());
 
             var childRow = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
                 button.Content?.ToString() == "Parallel child fixture · running");
             Assert.True(childRow.IsVisible);
+            Assert.True(DragDrop.GetAllowDrop(childRow));
+            Assert.Equal("Drag to reorder within this conversation", ToolTip.GetTip(childRow));
             await Dispatcher.UIThread.InvokeAsync(() => expander.IsExpanded = false);
             window.UpdateLayout();
             Assert.False(childRow.IsEffectivelyVisible);
@@ -1856,7 +1868,7 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public async Task Auto_stops_repeated_tool_loop_without_opening_confirmation_modal()
+    public async Task Auto_approves_repeated_tool_loop_without_opening_confirmation_modal()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
         var project = Path.Combine(root, "project");
@@ -1876,7 +1888,7 @@ public sealed class MainWindowTests
             var confirm = typeof(MainViewModel).GetMethod("ConfirmRepeatedToolCallForProjectAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var pending = Assert.IsAssignableFrom<Task<bool>>(confirm.Invoke(viewModel, [project, "read_file"]));
 
-            Assert.False(await pending);
+            Assert.True(await pending);
             Assert.Equal(0, confirmationRequests);
         }
         finally

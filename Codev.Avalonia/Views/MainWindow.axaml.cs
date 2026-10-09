@@ -16,6 +16,11 @@ namespace Codev.Avalonia.Views;
 public partial class MainWindow : Window
 {
     private static readonly DataFormat<string> ConversationDragFormat = DataFormat.CreateStringApplicationFormat("Codev.ConversationId");
+    private Button? _conversationDragSource;
+    private Codev.Conversation? _conversationDragCandidate;
+    private IPointer? _conversationDragPointer;
+    private PointerPressedEventArgs? _conversationDragTrigger;
+    private Point _conversationDragStart;
     private INotifyCollectionChanged? _observedMessages;
     private bool _followOutput = true;
     private bool _scrollPending;
@@ -150,20 +155,53 @@ public partial class MainWindow : Window
         viewModel.AddContextFiles(paths);
     }
 
-    private async void Conversation_PointerPressed(object? sender, PointerPressedEventArgs e)
+    private void Conversation_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is not Button { DataContext: Codev.Conversation conversation } button ||
             !e.GetCurrentPoint(button).Properties.IsLeftButtonPressed) return;
 
+        _conversationDragSource = button;
+        _conversationDragCandidate = conversation;
+        _conversationDragPointer = e.Pointer;
+        _conversationDragTrigger = e;
+        _conversationDragStart = e.GetPosition(button);
+    }
+
+    private async void Conversation_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_conversationDragSource is not { } button || _conversationDragCandidate is not { } conversation ||
+            _conversationDragTrigger is not { } trigger ||
+            !ReferenceEquals(_conversationDragPointer, e.Pointer) || !e.GetCurrentPoint(button).Properties.IsLeftButtonPressed) return;
+
+        var position = e.GetPosition(button);
+        var delta = position - _conversationDragStart;
+        if (delta.X * delta.X + delta.Y * delta.Y < 36) return;
+
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(ConversationDragFormat, conversation.Id.ToString("D")));
-        await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
+        ClearConversationDragCandidate();
+        await DragDrop.DoDragDropAsync(trigger, transfer, DragDropEffects.Move);
+    }
+
+    private void Conversation_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (ReferenceEquals(_conversationDragPointer, e.Pointer)) ClearConversationDragCandidate();
+    }
+
+    private void ClearConversationDragCandidate()
+    {
+        _conversationDragSource = null;
+        _conversationDragCandidate = null;
+        _conversationDragPointer = null;
+        _conversationDragTrigger = null;
     }
 
     private void Conversation_DragOver(object? sender, DragEventArgs e)
     {
-        e.DragEffects = e.DataTransfer.Contains(ConversationDragFormat) && sender is Button { DataContext: Codev.Conversation }
-            ? DragDropEffects.Move : DragDropEffects.None;
+        e.DragEffects = e.DataTransfer.TryGetValue(ConversationDragFormat) is { } rawId && Guid.TryParse(rawId, out var draggedId) &&
+            sender is Button { DataContext: Codev.Conversation target } &&
+            DataContext is ViewModels.MainViewModel viewModel && viewModel.CanReorderConversation(draggedId, target)
+                ? DragDropEffects.Move : DragDropEffects.None;
     }
 
     private void Conversation_Drop(object? sender, DragEventArgs e)

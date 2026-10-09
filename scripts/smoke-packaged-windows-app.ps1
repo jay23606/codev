@@ -1050,9 +1050,33 @@ function Invoke-MoreSubmenuItem($Window, [string]$SectionName, [string]$ItemName
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($null -eq $item) { throw "The '$SectionName' submenu did not expose '$ItemName'." }
-    $itemBounds = $item.Current.BoundingRectangle
-    if ($itemBounds.IsEmpty -or $itemBounds.Width -le 0 -or $itemBounds.Height -le 0) {
-        throw "The '$SectionName' submenu item '$ItemName' has no clickable screen bounds."
+    # Native menu flyouts can still be moving when UI Automation first reports
+    # the submenu item. Reacquire it until its screen bounds are stable so the
+    # pointer does not click where the item was before the flyout settled.
+    $itemBounds = $null
+    $previousBounds = $null
+    $stableBoundsDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        Start-Sleep -Milliseconds 100
+        $freshItems = Find-AppElementsWithRetry -ProcessId $Window.Current.ProcessId -Condition $menuCondition -TimeoutMilliseconds 500
+        foreach ($freshItem in $freshItems) {
+            try {
+                if ($freshItem.Current.Name -ne $ItemName -or $freshItem.Current.IsOffscreen) { continue }
+                $freshBounds = $freshItem.Current.BoundingRectangle
+                if ($freshBounds.IsEmpty -or $freshBounds.Width -le 0 -or $freshBounds.Height -le 0) { continue }
+                if ($null -ne $previousBounds -and $freshBounds.Equals($previousBounds)) {
+                    $item = $freshItem
+                    $itemBounds = $freshBounds
+                    break
+                }
+                $previousBounds = $freshBounds
+            }
+            catch { }
+        }
+        if ($null -ne $itemBounds) { break }
+    } while ([DateTime]::UtcNow -lt $stableBoundsDeadline)
+    if ($null -eq $itemBounds) {
+        throw "The '$SectionName' submenu item '$ItemName' did not settle at a clickable screen position."
     }
     # Avalonia's native MenuFlyout items have intermittently accepted focus plus
     # Enter without raising Click (the persisted setting then remains unchanged).

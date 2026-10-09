@@ -217,6 +217,33 @@ public sealed class OllamaCodeTaskRunnerTests
     }
 
     [Fact]
+    public async Task Auto_approves_repeated_identical_tool_calls_until_the_shared_step_limit()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new ResponseHandler(_ =>
+        {
+            requests++;
+            return Json("""{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"list_files","arguments":{}}}]}}""");
+        }));
+        var executed = 0;
+        var autoApprovals = 0;
+        var runner = new OllamaCodeTaskRunner(http);
+
+        var result = await runner.RunAsync(new Uri("http://127.0.0.1:11434/"), "qwen-test",
+            [new OllamaCodeTaskMessage("user", "list files")], [],
+            think: false, numCtx: 0, temperature: null, topP: null, topK: null,
+            presencePenalty: null, repeatPenalty: null, numPredict: null,
+            executeTool: (_, _, _) => { executed++; return Task.FromResult("entries"); },
+            confirmRepeatedToolCall: (_, _, _) => { autoApprovals++; return Task.FromResult(true); });
+
+        Assert.Equal(CodeTaskLimits.MaxModelStepsPerTurn, requests);
+        Assert.Equal(requests, executed);
+        Assert.Equal(2, autoApprovals);
+        Assert.True(result.ReachedStepLimit);
+        Assert.Contains($"{CodeTaskLimits.MaxModelStepsPerTurn}-step limit", result.Transcript);
+    }
+
+    [Fact]
     public async Task Cancellation_after_tool_execution_prevents_another_request()
     {
         var requests = 0;
