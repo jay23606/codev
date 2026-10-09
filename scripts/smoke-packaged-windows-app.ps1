@@ -2113,9 +2113,35 @@ public static class CodevCommonDialog
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $autoModeDeadline)
     if ($matches.Count -ne 1 -or -not $matches[0].IsPlanMode) { throw 'The fresh conversation did not enter Plan before Code task mode.' }
+
+    $codeTaskButtonCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.OrCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty,
+                'Code task unavailable'),
+            [System.Windows.Automation.OrCondition]::new(
+                [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::NameProperty,
+                    'Enable Code task'),
+                [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::NameProperty,
+                    'Code task on'))))
+    $codeTaskButtonDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    $codeTaskButton = $null
+    do {
+        $codeTaskButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $codeTaskButtonCondition)
+        if ($null -ne $codeTaskButton -and $codeTaskButton.Current.Name -ne 'Code task unavailable') { break }
+        Start-Sleep -Milliseconds 150
+    } while ([DateTime]::UtcNow -lt $codeTaskButtonDeadline)
+    if ($null -eq $codeTaskButton -or $codeTaskButton.Current.Name -eq 'Code task unavailable') {
+        throw 'The fresh local-model conversation never exposed an available Code task control for the Auto smoke.'
+    }
     $autoComposer.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('^+m')
-    $autoModeDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    $autoModeDeadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
         $savedConversations = @(Get-Content -LiteralPath $conversationPath -Raw | ConvertFrom-Json)
         $matches = @($savedConversations | Where-Object { [string]$_.Id -eq $autoConversationId })
