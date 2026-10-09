@@ -28,6 +28,7 @@ On Windows, extract the complete ZIP and run `Codev.Avalonia.exe`. On macOS or L
 - Regression coverage now exercises Auto-mode file application and command execution, MCP activity, and scoped profile behavior across hosted Windows, Linux, and macOS checks.
 - Auto falls back to Ask when saved project permission data cannot be read or safely written, and the review explains why. Repeated identical tool calls no longer trigger an extra prompt in Auto; the shared per-turn step limit and exact project Deny rules still apply.
 - Conversations and child sessions can be dragged to reorder within their sidebar group, with order remembered after restart.
+- Hosted-provider reconnect is enabled by default when first connecting with a saved key, and the explicit opt-out is remembered across restarts. Keys remain in the operating system credential store.
 
 ## Included capabilities
 
