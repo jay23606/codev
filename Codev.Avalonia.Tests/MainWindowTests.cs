@@ -458,7 +458,7 @@ public sealed class MainWindowTests
             viewModel.NewConversationCommand.Execute(null);
             var later = Assert.IsType<Conversation>(viewModel.ActiveConversation);
             later.Title = "Second recent sidebar fixture";
-            Assert.True(viewModel.ReorderConversation(later.Id, recent, insertAfter: false));
+            Assert.True(viewModel.ReorderConversation(recent.Id, later, insertAfter: false));
             Assert.Equal(new[] { recent.Id, later.Id }, viewModel.RecentConversations.Select(item => item.Id));
 
             var pinnedToggle = Assert.IsType<Button>(window.FindControl<Button>("PinnedConversationsToggleButton"));

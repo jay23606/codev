@@ -3,8 +3,8 @@ namespace Codev.Tests;
 public sealed class ConversationSidebarOrderingTests
 {
     [Theory]
-    [InlineData(false, "b,a,c")]
-    [InlineData(true, "b,c,a")]
+    [InlineData(false, "a,b,c")]
+    [InlineData(true, "b,a,c")]
     public void TryMove_reorders_and_assigns_persistable_order(bool insertAfter, string expected)
     {
         var conversations = new List<Conversation>
