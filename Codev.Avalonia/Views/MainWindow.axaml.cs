@@ -605,21 +605,36 @@ public partial class MainWindow : Window
         panel.Children.Add(command);
         if (proposal.IsBackground)
             panel.Children.Add(new TextBlock { Text = "This process can keep running after the response and may open a network port. Stop it from the Background commands list or close Codev. Output is captured with a size limit.", TextWrapping = global::Avalonia.Media.TextWrapping.Wrap, FontWeight = global::Avalonia.Media.FontWeight.SemiBold, Foreground = secondaryForeground });
-        panel.Children.Add(new TextBlock
+        var viewModel = DataContext as ViewModels.MainViewModel;
+        if (viewModel is { CanPersistProjectCommandPermissions: false })
         {
-            Text = permissionMode == Codev.ProjectCommandPermissionMode.Auto
-                ? "Auto normally runs commands without approval unless an exact saved deny rule blocks them."
-                : !Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(proposal.Command)
-                    ? $"This workspace is in {permissionMode switch { Codev.ProjectCommandPermissionMode.Allowlist => "Allowlist", Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only", _ => "Ask-every-time" }} mode. An exact allow rule cannot be saved for Git or Codev app-data commands."
-                    : permissionMode == Codev.ProjectCommandPermissionMode.Allowlist
-                        ? "This workspace is in Allowlist mode. This command is not on the allowlist; allowing it adds this exact command to the project."
-                        : permissionMode == Codev.ProjectCommandPermissionMode.ReadOnly
-                            ? "This workspace is in Read-only mode. This command is not a recognized read-only inspection, so it needs approval."
-                            : "This workspace is in Ask-every-time mode. Allowing it saves an exact project rule without changing the selected mode.",
-            FontSize = 10,
-            TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
-            Foreground = secondaryForeground
-        });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Saved command permissions are unavailable, so Codev is using Ask every time rather than risk bypassing a saved deny rule. Open More → Saved exact command rules for details. " + viewModel.ProjectCommandPermissionStoreNotice,
+                FontSize = 10,
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                FontWeight = global::Avalonia.Media.FontWeight.SemiBold,
+                Foreground = secondaryForeground
+            });
+        }
+        else
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = permissionMode == Codev.ProjectCommandPermissionMode.Auto
+                    ? "Auto normally runs commands without approval unless an exact saved deny rule blocks them."
+                    : !Codev.ProjectCommandPermissionRegistry.CanCreateAllowRule(proposal.Command)
+                        ? $"This workspace is in {permissionMode switch { Codev.ProjectCommandPermissionMode.Allowlist => "Allowlist", Codev.ProjectCommandPermissionMode.ReadOnly => "Read-only", _ => "Ask-every-time" }} mode. An exact allow rule cannot be saved for Git or Codev app-data commands."
+                        : permissionMode == Codev.ProjectCommandPermissionMode.Allowlist
+                            ? "This workspace is in Allowlist mode. This command is not on the allowlist; allowing it adds this exact command to the project."
+                            : permissionMode == Codev.ProjectCommandPermissionMode.ReadOnly
+                                ? "This workspace is in Read-only mode. This command is not a recognized read-only inspection, so it needs approval."
+                                : "This workspace is in Ask-every-time mode. Allowing it saves an exact project rule without changing the selected mode.",
+                FontSize = 10,
+                TextWrapping = global::Avalonia.Media.TextWrapping.Wrap,
+                Foreground = secondaryForeground
+            });
+        }
         var buttons = new StackPanel { Orientation = global::Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = global::Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8 };
         void Add(string label, Codev.ProjectCommandApprovalChoice choice, bool enabled = true)
         {
