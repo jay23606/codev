@@ -3052,7 +3052,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public async Task Command_review_explains_unreadable_permission_store_and_temporary_ask_mode()
     {
-        var root = Path.Combine(Path.GetTempPath(), "Codev-command-permission-error-ui", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
         var appData = Path.Combine(root, "Codev");
         var project = Path.Combine(root, "project");
         Directory.CreateDirectory(appData);
