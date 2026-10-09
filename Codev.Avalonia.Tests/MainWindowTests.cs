@@ -157,6 +157,63 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Dragging_a_recent_conversation_row_reorders_the_sidebar()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
+        MainViewModel? viewModel = null;
+        MainWindow? window = null;
+        try
+        {
+            viewModel = new MainViewModel(root);
+            var first = Assert.IsType<Conversation>(viewModel.ActiveConversation);
+            first.Title = "First top-level fixture";
+            first.SidebarOrder = 0;
+            var second = new Conversation
+            {
+                Title = "Second top-level fixture",
+                SidebarOrder = 1
+            };
+            var conversations = Assert.IsType<System.Collections.ObjectModel.ObservableCollection<Conversation>>(
+                typeof(MainViewModel).GetField("_conversations", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel));
+            conversations.Add(second);
+            typeof(MainViewModel).GetMethod("RebuildLists", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(viewModel, null);
+
+            window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            window.UpdateLayout();
+
+            var targetRow = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "Second top-level fixture");
+            var targetPoint = targetRow.TranslatePoint(new Point(targetRow.Bounds.Width / 2, targetRow.Bounds.Height / 2), window);
+            Assert.NotNull(targetPoint);
+
+            var sourceRow = Assert.Single(window.GetVisualDescendants().OfType<Button>(), button =>
+                button.Content?.ToString() == "First top-level fixture");
+            var sourcePoint = sourceRow.TranslatePoint(new Point(sourceRow.Bounds.Width / 2, sourceRow.Bounds.Height / 2), window);
+            Assert.NotNull(sourcePoint);
+            window.MouseDown(sourcePoint!.Value, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseMove(sourcePoint.Value + new Vector(8, 0), RawInputModifiers.LeftMouseButton);
+            window.MouseUp(sourcePoint.Value + new Vector(8, 0), MouseButton.Left);
+            Assert.Null(typeof(MainWindow).GetField("_conversationDragCandidate", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(window));
+
+            var transfer = new DataTransfer();
+            transfer.Add(DataTransferItem.Create(
+                DataFormat.CreateStringApplicationFormat("Codev.ConversationId"), first.Id.ToString("D")));
+            window.DragDrop(targetPoint!.Value, global::Avalonia.Input.Raw.RawDragEventType.DragEnter, transfer, DragDropEffects.Move);
+            window.DragDrop(targetPoint.Value, global::Avalonia.Input.Raw.RawDragEventType.DragOver, transfer, DragDropEffects.Move);
+            window.DragDrop(targetPoint.Value, global::Avalonia.Input.Raw.RawDragEventType.Drop, transfer, DragDropEffects.Move);
+
+            Assert.Equal(new[] { second.Id, first.Id }, viewModel.RecentConversations.Select(item => item.Id));
+        }
+        finally
+        {
+            window?.Close();
+            if (viewModel is not null) await StopAndFlushAsync(viewModel);
+            await DeleteAutoModeTestDirectoryAsync(root);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Git_status_reviews_child_changes_blocks_dirty_merge_and_recovers_missing_checkout()
     {
         var root = Path.Combine(Path.GetTempPath(), "Codev-auto-mode-ui", Guid.NewGuid().ToString("N"));
