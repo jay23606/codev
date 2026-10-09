@@ -863,8 +863,11 @@ public static class AgentProfileCatalog
             if (normalizedAction == "edit" && effect == AgentToolPermission.Ask)
                 return Fail("path-scoped OpenCode V2 edit ask rules are not supported; use allow or deny", out error);
         }
-        else if (normalizedAction == "grep" && resource != "*" && !IsValidRegexPattern(resource))
-            return Fail("OpenCode V2 grep resources must be valid, bounded regular expressions", out error);
+        else if (normalizedAction == "grep" && resource != "*")
+        {
+            if (!IsValidRegexPattern(resource))
+                return Fail("OpenCode V2 grep resources must be valid, bounded regular expressions", out error);
+        }
         else if (resource != "*")
         {
             return Fail($"resource-scoped OpenCode V2 '{action}' rules are not supported by Codev and were not imported", out error);
