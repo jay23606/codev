@@ -15,6 +15,7 @@ export CODEV_DATA_ROOT="$smoke_root/data"
 log_path="$smoke_root/app.log"
 app_pid=''
 mock_pid=''
+mcp_http_pid=''
 cleanup() {
   if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
     kill "$app_pid" 2>/dev/null || true
@@ -26,6 +27,7 @@ cleanup() {
   fi
   if [[ -n "$app_pid" ]]; then wait "$app_pid" 2>/dev/null || true; fi
   if [[ -n "$mock_pid" ]]; then kill "$mock_pid" 2>/dev/null || true; wait "$mock_pid" 2>/dev/null || true; fi
+  if [[ -n "$mcp_http_pid" ]]; then kill "$mcp_http_pid" 2>/dev/null || true; wait "$mcp_http_pid" 2>/dev/null || true; fi
   rm -rf -- "$smoke_root"
 }
 trap cleanup EXIT
@@ -34,7 +36,7 @@ mock_port_path="$smoke_root/mock-ollama.port"
 mock_request_log="$smoke_root/mock-ollama-requests.jsonl"
 model_enabled_path="$smoke_root/mock-ollama-model.enabled"
 printf '0' >"$model_enabled_path"
-node ./scripts/mock-ollama-server.js --activity-summary --port-file "$mock_port_path" --request-log "$mock_request_log" --model-enabled-file "$model_enabled_path" >"$smoke_root/mock-ollama.log" 2>&1 &
+node ./scripts/mock-ollama-server.js --activity-summary --mcp-http --port-file "$mock_port_path" --request-log "$mock_request_log" --model-enabled-file "$model_enabled_path" >"$smoke_root/mock-ollama.log" 2>&1 &
 mock_pid=$!
 for _ in {1..200}; do
   if [[ -s "$mock_port_path" ]]; then break; fi
@@ -50,8 +52,40 @@ for _ in {1..200}; do
 done
 if [[ ! -s "$mock_port_path" ]]; then cat "$smoke_root/mock-ollama.log" >&2; echo 'Mock Ollama did not report its loopback port within 20 seconds.' >&2; exit 1; fi
 mock_port="$(cat "$mock_port_path")"
+mcp_http_port_path="$smoke_root/mock-mcp-http.port"
+mcp_http_call_log="$smoke_root/mock-mcp-http-calls.jsonl"
+node ./scripts/mock-mcp-http-server.js --port-file "$mcp_http_port_path" --call-log "$mcp_http_call_log" >"$smoke_root/mock-mcp-http.log" 2>&1 &
+mcp_http_pid=$!
+for _ in {1..200}; do
+  if [[ -s "$mcp_http_port_path" ]]; then break; fi
+  mcp_http_state="$(ps -p "$mcp_http_pid" -o stat= 2>/dev/null || true)"
+  if [[ -z "$mcp_http_state" || "$mcp_http_state" == Z* ]]; then
+    if wait "$mcp_http_pid"; then mcp_http_status=0; else mcp_http_status=$?; fi
+    mcp_http_pid=''
+    cat "$smoke_root/mock-mcp-http.log" >&2
+    echo "Mock MCP HTTP server exited before startup completed (exit $mcp_http_status)." >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+if [[ ! -s "$mcp_http_port_path" ]]; then cat "$smoke_root/mock-mcp-http.log" >&2; echo 'Mock MCP HTTP server did not report its loopback port within 20 seconds.' >&2; exit 1; fi
+mcp_http_port="$(cat "$mcp_http_port_path")"
 mkdir -p "$CODEV_DATA_ROOT/Codev"
 printf '{"Theme":"dark","OllamaEndpoint":"http://127.0.0.1:%s/","DefaultProjectCommandPermissionMode":"Auto"}\n' "$mock_port" >"$CODEV_DATA_ROOT/Codev/avalonia-settings.json"
+python3 - "$CODEV_DATA_ROOT/Codev/mcp-servers.json" "$mcp_http_port" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as target:
+    json.dump([{
+        "id": "smoke-http",
+        "name": "Packaged smoke HTTP MCP",
+        "transport": "Http",
+        "enabled": True,
+        "url": f"http://127.0.0.1:{sys.argv[2]}/mcp",
+        "oauthEnabled": False,
+    }], target)
+PY
 "$app_path" >"$log_path" 2>&1 &
 app_pid=$!
 
@@ -893,6 +927,93 @@ if any(request.get("keep_alive") != "30m" for request in turn):
 PY
 
 echo 'macOS packaged Code task read, searched, created a file, and verified a command in one Auto turn.'
+
+# Exercise configured Streamable HTTP MCP discovery and execution in Auto.
+mcp_prompt='Run the packaged MCP Streamable HTTP smoke.'
+before_mcp_count="$(python3 - "$conversations_path" "$conversation_id" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next(item for item in conversations if item.get("Id") == sys.argv[2])
+print(len(conversation.get("Messages", [])))
+PY
+)"
+osascript - "$app_pid" "$mcp_prompt" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  set promptText to item 2 of argv as text
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    delay 0.25
+    key code 37 using {command down}
+    delay 0.5
+    keystroke promptText
+  end tell
+end run
+APPLESCRIPT
+await_saved_draft "$mcp_prompt" "the MCP Streamable HTTP prompt"
+osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcess to first process whose unix id is targetPid
+    set frontmost of targetProcess to true
+    key code 36
+  end tell
+end run
+APPLESCRIPT
+
+for _ in {1..300}; do
+  if python3 - "$conversations_path" "$conversation_id" "$before_mcp_count" "$mcp_prompt" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+before = int(sys.argv[3])
+success = (len(messages) >= before + 2 and messages[-2].get("Content") == sys.argv[4] and
+          messages[-1].get("Role") == "assistant" and
+          messages[-1].get("Content") == "Packaged MCP Streamable HTTP call passed.")
+raise SystemExit(0 if success else 1)
+PY
+  then break; fi
+  if ! kill -0 "$app_pid" 2>/dev/null; then cat "$log_path" >&2; echo 'Packaged Avalonia app exited during the macOS MCP HTTP smoke.' >&2; exit 1; fi
+  sleep 0.1
+done
+
+python3 - "$conversations_path" "$conversation_id" "$mock_request_log" "$mcp_http_call_log" <<'PY'
+import json
+import sys
+
+prompt = "Run the packaged MCP Streamable HTTP smoke."
+with open(sys.argv[1], encoding="utf-8") as source:
+    conversations = json.load(source)
+conversation = next((item for item in conversations if item.get("Id") == sys.argv[2]), None)
+messages = conversation.get("Messages", []) if conversation else []
+if not any(message.get("Role") == "user" and message.get("Content") == prompt for message in messages):
+    raise SystemExit("The packaged macOS MCP prompt was not persisted.")
+if not messages or messages[-1].get("Role") != "assistant" or messages[-1].get("Content") != "Packaged MCP Streamable HTTP call passed.":
+    raise SystemExit(f"The packaged macOS MCP call did not finish: {messages[-4:]!r}")
+with open(sys.argv[3], encoding="utf-8") as source:
+    requests = [json.loads(line) for line in source if line.strip()]
+turn = [request for request in requests if request.get("last_user_message") == prompt]
+if len(turn) != 2 or turn[0].get("last_role") != "user" or \
+        len([name for name in turn[0].get("tool_names", []) if name.startswith("mcp_smoke-http_echo_")]) != 1 or \
+        turn[1].get("last_role") != "tool" or not turn[1].get("last_tool_name", "").startswith("mcp_smoke-http_echo_") or \
+        turn[1].get("keep_alive") != "30m":
+    raise SystemExit(f"The packaged macOS MCP discovery/result sequence was unexpected: {turn!r}")
+with open(sys.argv[4], encoding="utf-8") as source:
+    calls = [json.loads(line) for line in source if line.strip()]
+if calls != [{"name": "echo", "message": "packaged HTTP marker"}]:
+    raise SystemExit(f"The packaged macOS HTTP MCP fixture received an unexpected call: {calls!r}")
+PY
+
+echo 'macOS packaged Code task discovered and called the Streamable HTTP MCP echo tool in Auto without approval.'
 
 # Exercise Command+Shift+F with a long transcript, choose the earlier
 # Auto-command prompt, and close the search panel with Escape.
